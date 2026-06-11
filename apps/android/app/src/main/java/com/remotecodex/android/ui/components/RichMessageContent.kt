@@ -59,9 +59,11 @@ import com.remotecodex.android.ui.presentation.TableColumn
 import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
 import com.remotecodex.android.ui.presentation.GraphChatToolCallTone
+import com.remotecodex.android.ui.presentation.GraphChatToolEntryDisplayKind
+import com.remotecodex.android.ui.presentation.GraphChatToolEntryValueTone
 import com.remotecodex.android.ui.presentation.buildGraphChatToolCallState
+import com.remotecodex.android.ui.presentation.buildGraphChatToolEntryDisplayState
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
-import com.remotecodex.android.ui.presentation.prettyGraphChatToolJsonValue
 import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -353,28 +355,20 @@ private fun ToolEntryRow(
     trailingComma: Boolean,
     renderObjectAsBlock: Boolean,
 ) {
-    val shouldUseOutputBlock = (
-        entry.kind == GraphChatToolValueKind.Raw &&
-            (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
-        ) ||
-        (renderObjectAsBlock && entry.kind == GraphChatToolValueKind.Object)
-    if (shouldUseOutputBlock) {
+    val displayState = remember(entry, renderObjectAsBlock) {
+        buildGraphChatToolEntryDisplayState(entry, renderObjectAsBlock)
+    }
+    if (displayState.displayKind == GraphChatToolEntryDisplayKind.OutputBlock) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                 ToolPunctuation(text = "  ")
-                ToolEntryKey(key = entry.key)
+                ToolEntryKey(key = displayState.key)
                 ToolPunctuation(text = ":")
             }
-            ToolRawValue(
-                body = if (entry.kind == GraphChatToolValueKind.Object) {
-                    prettyGraphChatToolJsonValue(entry.value)
-                } else {
-                    entry.value.ifBlank { "(empty)" }
-                },
-            )
+            ToolRawValue(body = displayState.displayValue)
             if (trailingComma) {
                 ToolPunctuation(text = ",")
             }
@@ -388,15 +382,15 @@ private fun ToolEntryRow(
     ) {
         ToolPunctuation(text = "  ")
         ToolEntryKey(
-            key = entry.key,
+            key = displayState.key,
         )
         ToolPunctuation(text = ": ")
         Text(
-            text = toolEntryDisplayValue(entry),
+            text = displayState.displayValue,
             modifier = Modifier
                 .weight(1f)
                 .horizontalScroll(rememberScrollState()),
-            color = toolEntryValueColor(entry.kind),
+            color = toolEntryValueColor(displayState.tone),
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace,
         )
@@ -432,26 +426,15 @@ private fun ToolEntryKey(
     )
 }
 
-private fun toolEntryDisplayValue(entry: GraphChatToolEntry): String {
-    return when (entry.kind) {
-        GraphChatToolValueKind.String -> {
-            val value = entry.value.trim()
-            if (value.startsWith("\"") && value.endsWith("\"")) value else "\"$value\""
-        }
-        GraphChatToolValueKind.Null -> "null"
-        else -> entry.value.ifBlank { "(empty)" }
-    }
-}
-
 @Composable
-private fun toolEntryValueColor(kind: GraphChatToolValueKind): Color {
-    return when (kind) {
-        GraphChatToolValueKind.String -> ThreadColors.Success
-        GraphChatToolValueKind.Number -> ThreadColors.Warning
-        GraphChatToolValueKind.Boolean -> ThreadColors.Info
-        GraphChatToolValueKind.Null -> ThreadColors.ForegroundMuted
-        GraphChatToolValueKind.Object,
-        GraphChatToolValueKind.Raw,
+private fun toolEntryValueColor(tone: GraphChatToolEntryValueTone): Color {
+    return when (tone) {
+        GraphChatToolEntryValueTone.String -> ThreadColors.Success
+        GraphChatToolEntryValueTone.Number -> ThreadColors.Warning
+        GraphChatToolEntryValueTone.Boolean -> ThreadColors.Info
+        GraphChatToolEntryValueTone.Null -> ThreadColors.ForegroundMuted
+        GraphChatToolEntryValueTone.Object,
+        GraphChatToolEntryValueTone.Raw,
         -> ThreadColors.CodeForeground
     }
 }

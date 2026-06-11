@@ -52,6 +52,29 @@ data class GraphChatToolEntry(
     val kind: GraphChatToolValueKind,
 )
 
+enum class GraphChatToolEntryDisplayKind {
+    Inline,
+    OutputBlock,
+}
+
+enum class GraphChatToolEntryValueTone {
+    String,
+    Number,
+    Boolean,
+    Null,
+    Object,
+    Raw,
+}
+
+data class GraphChatToolEntryDisplayState(
+    val key: String,
+    val value: String,
+    val displayValue: String,
+    val kind: GraphChatToolValueKind,
+    val displayKind: GraphChatToolEntryDisplayKind,
+    val tone: GraphChatToolEntryValueTone,
+)
+
 fun formatGraphChatToolParameterObject(entries: List<Pair<String, String>>): String {
     if (entries.isEmpty()) return "{}"
     return buildString {
@@ -250,6 +273,67 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     return body.takeIf { it.isNotBlank() }?.let {
         listOf(GraphChatToolEntry(key = "value", value = it.trim(), kind = GraphChatToolValueKind.Raw))
     }.orEmpty()
+}
+
+fun buildGraphChatToolEntryDisplayState(
+    entry: GraphChatToolEntry,
+    renderObjectAsBlock: Boolean,
+): GraphChatToolEntryDisplayState {
+    val displayKind = if (shouldRenderGraphChatToolEntryAsBlock(entry, renderObjectAsBlock)) {
+        GraphChatToolEntryDisplayKind.OutputBlock
+    } else {
+        GraphChatToolEntryDisplayKind.Inline
+    }
+    return GraphChatToolEntryDisplayState(
+        key = entry.key,
+        value = entry.value,
+        displayValue = when (displayKind) {
+            GraphChatToolEntryDisplayKind.OutputBlock -> {
+                if (entry.kind == GraphChatToolValueKind.Object) {
+                    prettyGraphChatToolJsonValue(entry.value)
+                } else {
+                    entry.value.ifBlank { "(empty)" }
+                }
+            }
+            GraphChatToolEntryDisplayKind.Inline -> graphChatToolEntryInlineDisplayValue(entry)
+        },
+        kind = entry.kind,
+        displayKind = displayKind,
+        tone = entry.kind.toDisplayTone(),
+    )
+}
+
+fun shouldRenderGraphChatToolEntryAsBlock(
+    entry: GraphChatToolEntry,
+    renderObjectAsBlock: Boolean,
+): Boolean {
+    return (
+        entry.kind == GraphChatToolValueKind.Raw &&
+            (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
+        ) ||
+        (renderObjectAsBlock && entry.kind == GraphChatToolValueKind.Object)
+}
+
+fun graphChatToolEntryInlineDisplayValue(entry: GraphChatToolEntry): String {
+    return when (entry.kind) {
+        GraphChatToolValueKind.String -> {
+            val value = entry.value.trim()
+            if (value.startsWith("\"") && value.endsWith("\"")) value else "\"$value\""
+        }
+        GraphChatToolValueKind.Null -> "null"
+        else -> entry.value.ifBlank { "(empty)" }
+    }
+}
+
+private fun GraphChatToolValueKind.toDisplayTone(): GraphChatToolEntryValueTone {
+    return when (this) {
+        GraphChatToolValueKind.String -> GraphChatToolEntryValueTone.String
+        GraphChatToolValueKind.Number -> GraphChatToolEntryValueTone.Number
+        GraphChatToolValueKind.Boolean -> GraphChatToolEntryValueTone.Boolean
+        GraphChatToolValueKind.Null -> GraphChatToolEntryValueTone.Null
+        GraphChatToolValueKind.Object -> GraphChatToolEntryValueTone.Object
+        GraphChatToolValueKind.Raw -> GraphChatToolEntryValueTone.Raw
+    }
 }
 
 fun prettyGraphChatToolJsonValue(value: String): String {

@@ -189,6 +189,75 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun buildsInlineToolEntryDisplayState() {
+        assertEquals(
+            GraphChatToolEntryDisplayState(
+                key = "cmd",
+                value = "gradlew test",
+                displayValue = "\"gradlew test\"",
+                kind = GraphChatToolValueKind.String,
+                displayKind = GraphChatToolEntryDisplayKind.Inline,
+                tone = GraphChatToolEntryValueTone.String,
+            ),
+            buildGraphChatToolEntryDisplayState(
+                entry = GraphChatToolEntry("cmd", "gradlew test", GraphChatToolValueKind.String),
+                renderObjectAsBlock = false,
+            ),
+        )
+        assertEquals(
+            GraphChatToolEntryDisplayState(
+                key = "missing",
+                value = "",
+                displayValue = "null",
+                kind = GraphChatToolValueKind.Null,
+                displayKind = GraphChatToolEntryDisplayKind.Inline,
+                tone = GraphChatToolEntryValueTone.Null,
+            ),
+            buildGraphChatToolEntryDisplayState(
+                entry = GraphChatToolEntry("missing", "", GraphChatToolValueKind.Null),
+                renderObjectAsBlock = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsOutputBlockToolEntryDisplayState() {
+        assertEquals(
+            GraphChatToolEntryDisplayState(
+                key = "stdout",
+                value = "",
+                displayValue = "(empty)",
+                kind = GraphChatToolValueKind.Raw,
+                displayKind = GraphChatToolEntryDisplayKind.OutputBlock,
+                tone = GraphChatToolEntryValueTone.Raw,
+            ),
+            buildGraphChatToolEntryDisplayState(
+                entry = GraphChatToolEntry("stdout", "", GraphChatToolValueKind.Raw),
+                renderObjectAsBlock = false,
+            ),
+        )
+        assertEquals(
+            GraphChatToolEntryDisplayState(
+                key = "items",
+                value = """["a",2]""",
+                displayValue = """
+                [
+                  "a",
+                  2
+                ]
+                """.trimIndent(),
+                kind = GraphChatToolValueKind.Object,
+                displayKind = GraphChatToolEntryDisplayKind.OutputBlock,
+                tone = GraphChatToolEntryValueTone.Object,
+            ),
+            buildGraphChatToolEntryDisplayState(
+                entry = GraphChatToolEntry("items", """["a",2]""", GraphChatToolValueKind.Object),
+                renderObjectAsBlock = true,
+            ),
+        )
+    }
+
+    @Test
     fun readsJsonPrimitiveToolEntryKinds() {
         assertEquals(
             listOf(
