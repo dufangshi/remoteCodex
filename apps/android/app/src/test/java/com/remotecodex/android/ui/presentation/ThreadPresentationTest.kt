@@ -104,4 +104,45 @@ class ThreadPresentationTest {
             ),
         )
     }
+
+    @Test
+    fun formatsProjectRelativePathLabels() {
+        assertEquals(
+            "apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt",
+            projectRelativePathLabel("/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt"),
+        )
+        assertEquals(
+            "packages/thread-ui/src/components/ThreadComposer.tsx, +2 more",
+            projectRelativePathLabel("./packages\\thread-ui\\src\\components\\ThreadComposer.tsx, +2 more"),
+        )
+    }
+
+    @Test
+    fun keepsTrailingPathSegmentsWithinCompactLabels() {
+        assertEquals(
+            ".../ui/components/ThreadTimelineComponents.kt",
+            formatTrailingPathLabel(
+                "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt",
+                maxLength = 48,
+            ),
+        )
+        assertEquals(
+            ".../ThreadTimelineComponents.kt",
+            formatTrailingPathLabel(
+                "apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt",
+                maxLength = 34,
+            ),
+        )
+    }
+
+    @Test
+    fun keepsPathSuffixWhenCompactingLabels() {
+        assertEquals(
+            ".../ThreadComposer.tsx, +2 more",
+            formatTrailingPathLabel(
+                "packages/thread-ui/src/components/ThreadComposer.tsx, +2 more",
+                maxLength = 34,
+            ),
+        )
+    }
 }

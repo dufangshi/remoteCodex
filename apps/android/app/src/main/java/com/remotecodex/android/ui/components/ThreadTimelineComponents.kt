@@ -67,6 +67,7 @@ import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
+import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
@@ -947,7 +948,7 @@ private fun HistoryGroupRow(
             }
         }
         Text(
-            text = item.summary,
+            text = historyGroupRowSummary(item),
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelMedium,
             maxLines = 2,
@@ -1018,7 +1019,7 @@ private fun HistoryItemCard(
             }
         }
         Text(
-            text = item.summary,
+            text = historyItemSummary(item),
             color = ThreadColors.ForegroundSoft,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 3,
@@ -1114,6 +1115,22 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
             appendLine(it)
         }
     }.trim()
+}
+
+private fun historyItemSummary(item: HistoryItemPreview): String {
+    return if (item.kind == HistoryItemKind.FileChange) {
+        formatTrailingPathLabel(item.summary, maxLength = 48)
+    } else {
+        item.summary
+    }
+}
+
+private fun historyGroupRowSummary(item: HistoryItemPreview): String {
+    return if (item.kind == HistoryItemKind.FileChange) {
+        formatTrailingPathLabel(item.summary, maxLength = 34)
+    } else {
+        item.summary
+    }
 }
 
 private fun isRunningStatusLabel(statusLabel: String?): Boolean {

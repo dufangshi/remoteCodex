@@ -169,3 +169,77 @@ fun fileChangeSummarySegments(
             }
         }
 }
+
+fun projectRelativePathLabel(label: String): String {
+    val normalized = label.trim()
+    if (normalized.isEmpty()) {
+        return ""
+    }
+
+    val suffixMatch = Regex("(, \\+\\d+ more.*)$").find(normalized)
+    val suffix = suffixMatch?.value.orEmpty()
+    val base = if (suffix.isNotEmpty()) normalized.dropLast(suffix.length) else normalized
+    val slashNormalized = base.replace('\\', '/')
+    if (!slashNormalized.startsWith('/')) {
+        return slashNormalized.removePrefix("./") + suffix
+    }
+
+    val markers = listOf(
+        "/apps/",
+        "/packages/",
+        "/src/",
+        "/test/",
+        "/tests/",
+        "/docs/",
+        "/config/",
+        "/scripts/",
+        "/e2e/",
+        "/.agents/",
+        "/.codex/",
+    )
+    markers.forEach { marker ->
+        val index = slashNormalized.indexOf(marker)
+        if (index >= 0) {
+            return slashNormalized.substring(index + 1) + suffix
+        }
+    }
+
+    return normalized
+}
+
+fun formatTrailingPathLabel(label: String, maxLength: Int = 42): String {
+    val normalized = projectRelativePathLabel(label)
+    if (normalized.isEmpty()) {
+        return ""
+    }
+
+    val safeMaxLength = maxLength.coerceAtLeast(8)
+    val suffixMatch = Regex("(, \\+\\d+ more.*)$").find(normalized)
+    val suffix = suffixMatch?.value.orEmpty()
+    val base = if (suffix.isNotEmpty()) normalized.dropLast(suffix.length) else normalized
+    if (base.length <= safeMaxLength) {
+        return base + suffix
+    }
+
+    val segments = base.replace('\\', '/').split('/').filter { it.isNotBlank() }
+    if (segments.size > 1) {
+        val keptSegments = ArrayDeque<String>()
+        var currentLength = suffix.length + 4
+        for (index in segments.indices.reversed()) {
+            val candidate = segments[index]
+            val nextLength = currentLength + candidate.length + if (keptSegments.isNotEmpty()) 1 else 0
+            if (keptSegments.isNotEmpty() && nextLength > safeMaxLength) {
+                break
+            }
+            keptSegments.addFirst(candidate)
+            currentLength = nextLength
+        }
+
+        if (keptSegments.isNotEmpty()) {
+            return ".../${keptSegments.joinToString("/")}$suffix"
+        }
+    }
+
+    val tailLength = (safeMaxLength - suffix.length - 3).coerceAtLeast(1)
+    return "..." + base.takeLast(tailLength) + suffix
+}
