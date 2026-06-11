@@ -8,6 +8,9 @@ import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
+import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
+import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
+import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -456,6 +459,168 @@ class ThreadPresentationTest {
 
         assertEquals(false, tools.getValue(ComposerShellToolKind.CtrlC).enabled)
         assertEquals(true, tools.getValue(ComposerShellToolKind.CtrlD).enabled)
+    }
+
+    @Test
+    fun buildsComposerToolboxItemsFromBackendActions() {
+        assertEquals(
+            listOf(
+                ComposerToolboxItemState(
+                    command = "/fast",
+                    label = "Fast",
+                    status = "On",
+                    description = "Toggle fast mode",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Active,
+                ),
+                ComposerToolboxItemState(
+                    command = "/compact",
+                    label = "Compact",
+                    status = "Busy",
+                    description = "Compact thread",
+                    enabled = false,
+                    tone = ComposerToolboxItemTone.Disabled,
+                ),
+                ComposerToolboxItemState(
+                    command = "/goal",
+                    label = "Goal",
+                    status = "Composing",
+                    description = "Goal",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Active,
+                ),
+                ComposerToolboxItemState(
+                    command = "/fork",
+                    label = "Fork",
+                    status = "Idle only",
+                    description = "Fork thread",
+                    enabled = false,
+                    tone = ComposerToolboxItemTone.Disabled,
+                ),
+                ComposerToolboxItemState(
+                    command = "/skills",
+                    label = "Skills",
+                    status = "View",
+                    description = "Skills",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Neutral,
+                ),
+            ),
+            buildComposerToolboxItems(
+                items = listOf(
+                    ComposerToolboxItemPreview(
+                        action = ComposerToolboxActionPreview.Fast,
+                        command = "/fast",
+                        label = "Fast",
+                        description = "Toggle fast mode",
+                    ),
+                    ComposerToolboxItemPreview(
+                        action = ComposerToolboxActionPreview.Compact,
+                        command = "/compact",
+                        label = "Compact",
+                        description = "Compact thread",
+                    ),
+                    ComposerToolboxItemPreview(
+                        action = ComposerToolboxActionPreview.Goal,
+                        command = "/goal",
+                        label = "Goal",
+                        description = null,
+                    ),
+                    ComposerToolboxItemPreview(
+                        action = ComposerToolboxActionPreview.Fork,
+                        command = "/fork",
+                        label = "Fork",
+                        description = "Fork thread",
+                    ),
+                    ComposerToolboxItemPreview(
+                        action = ComposerToolboxActionPreview.Skills,
+                        command = "/skills",
+                        label = "Skills",
+                        description = "",
+                    ),
+                ),
+                fastMode = true,
+                compactBusy = true,
+                goalComposeMode = true,
+                goalStatus = ThreadGoalStatusPreview.Active,
+                busy = true,
+                settingsBusy = false,
+                forkBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsIdleComposerToolboxItems() {
+        assertEquals(
+            listOf(
+                ComposerToolboxItemState(
+                    command = "/fast",
+                    label = "Fast",
+                    status = "Off",
+                    description = "Fast",
+                    enabled = false,
+                    tone = ComposerToolboxItemTone.Disabled,
+                ),
+                ComposerToolboxItemState(
+                    command = "/compact",
+                    label = "Compact",
+                    status = "Run",
+                    description = "Compact",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Neutral,
+                ),
+                ComposerToolboxItemState(
+                    command = "/goal",
+                    label = "Goal",
+                    status = "Complete",
+                    description = "Goal",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Neutral,
+                ),
+                ComposerToolboxItemState(
+                    command = "/fork",
+                    label = "Fork",
+                    status = "Open",
+                    description = "Fork",
+                    enabled = false,
+                    tone = ComposerToolboxItemTone.Disabled,
+                ),
+                ComposerToolboxItemState(
+                    command = "/mcp",
+                    label = "MCP",
+                    status = "View",
+                    description = "MCP",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Neutral,
+                ),
+                ComposerToolboxItemState(
+                    command = "/hooks",
+                    label = "Hooks",
+                    status = "View",
+                    description = "Hooks",
+                    enabled = true,
+                    tone = ComposerToolboxItemTone.Neutral,
+                ),
+            ),
+            buildComposerToolboxItems(
+                items = listOf(
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Fast, "/fast", "Fast", null),
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Compact, "/compact", "Compact", null),
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Goal, "/goal", "Goal", null),
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Fork, "/fork", "Fork", null),
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Mcp, "/mcp", "MCP", null),
+                    ComposerToolboxItemPreview(ComposerToolboxActionPreview.Hooks, "/hooks", "Hooks", null),
+                ),
+                fastMode = false,
+                compactBusy = false,
+                goalComposeMode = false,
+                goalStatus = ThreadGoalStatusPreview.Completed,
+                busy = false,
+                settingsBusy = true,
+                forkBusy = true,
+            ),
+        )
     }
 
     @Test

@@ -173,11 +173,85 @@ data class ComposerPreview(
     val modelOptions: List<ComposerModelOptionPreview> = defaultComposerModelOptions,
     val reasoningEffortOptions: List<ComposerReasoningEffortOptionPreview> = defaultComposerReasoningEffortOptions,
     val shellControl: ComposerShellControlPreview = ComposerShellControlPreview(),
+    val compactBusy: Boolean = false,
+    val forkBusy: Boolean = false,
+    val goalComposeMode: Boolean = false,
+    val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
+    val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
 )
 
 data class ComposerShellControlPreview(
     val shellInputEnabled: Boolean = true,
     val commandRunning: Boolean = true,
+)
+
+enum class ThreadGoalStatusPreview {
+    Active,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+enum class ComposerToolboxActionPreview {
+    Fast,
+    Compact,
+    Goal,
+    Fork,
+    Skills,
+    Mcp,
+    Hooks,
+}
+
+data class ComposerToolboxItemPreview(
+    val action: ComposerToolboxActionPreview,
+    val command: String,
+    val label: String,
+    val description: String?,
+)
+
+val defaultComposerToolboxItems = listOf(
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Fast,
+        command = "/fast",
+        label = "Fast mode",
+        description = "Toggle fast execution defaults for this thread.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Compact,
+        command = "/compact",
+        label = "Compact thread",
+        description = "Run backend context compaction when the thread is idle.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Goal,
+        command = "/goal",
+        label = "Goal",
+        description = "Create or update the active thread goal.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Fork,
+        command = "/fork",
+        label = "Fork",
+        description = "Start a new thread from the latest or selected turn.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Skills,
+        command = "/skills",
+        label = "Skills",
+        description = "Inspect skills and copy invocation names.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Mcp,
+        command = "/mcp",
+        label = "MCP",
+        description = "Inspect and add MCP server configuration.",
+    ),
+    ComposerToolboxItemPreview(
+        action = ComposerToolboxActionPreview.Hooks,
+        command = "/hooks",
+        label = "Hooks",
+        description = "Inspect, edit, and trust agent hooks.",
+    ),
 )
 
 data class ComposerModelOptionPreview(

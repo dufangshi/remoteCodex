@@ -10,6 +10,9 @@ import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
+import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
+import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
+import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 
 enum class MessageStatusTone {
     Neutral,
@@ -149,6 +152,127 @@ data class ComposerShellToolState(
     val tone: ComposerShellToolTone,
     val enabled: Boolean,
 )
+
+enum class ComposerToolboxItemTone {
+    Neutral,
+    Active,
+    Disabled,
+}
+
+data class ComposerToolboxItemState(
+    val command: String,
+    val label: String,
+    val status: String,
+    val description: String,
+    val enabled: Boolean,
+    val tone: ComposerToolboxItemTone,
+)
+
+fun buildComposerToolboxItems(
+    items: List<ComposerToolboxItemPreview>,
+    fastMode: Boolean,
+    compactBusy: Boolean,
+    goalComposeMode: Boolean,
+    goalStatus: ThreadGoalStatusPreview?,
+    busy: Boolean,
+    settingsBusy: Boolean,
+    forkBusy: Boolean,
+): List<ComposerToolboxItemState> {
+    return items.map { item ->
+        val enabled = !composerToolboxItemDisabled(
+            action = item.action,
+            settingsBusy = settingsBusy,
+            compactBusy = compactBusy,
+            busy = busy,
+            forkBusy = forkBusy,
+        )
+        ComposerToolboxItemState(
+            command = item.command,
+            label = item.label,
+            status = composerToolboxItemStatus(
+                action = item.action,
+                fastMode = fastMode,
+                compactBusy = compactBusy,
+                goalComposeMode = goalComposeMode,
+                goalStatus = goalStatus,
+                busy = busy,
+            ),
+            description = item.description?.takeIf { it.isNotBlank() } ?: item.label,
+            enabled = enabled,
+            tone = composerToolboxItemTone(
+                action = item.action,
+                enabled = enabled,
+                fastMode = fastMode,
+                goalComposeMode = goalComposeMode,
+                goalStatus = goalStatus,
+            ),
+        )
+    }
+}
+
+private fun composerToolboxItemStatus(
+    action: ComposerToolboxActionPreview,
+    fastMode: Boolean,
+    compactBusy: Boolean,
+    goalComposeMode: Boolean,
+    goalStatus: ThreadGoalStatusPreview?,
+    busy: Boolean,
+): String {
+    return when (action) {
+        ComposerToolboxActionPreview.Fast -> if (fastMode) "On" else "Off"
+        ComposerToolboxActionPreview.Compact -> if (compactBusy) "Busy" else "Run"
+        ComposerToolboxActionPreview.Goal -> when {
+            goalComposeMode -> "Composing"
+            goalStatus != null -> goalStatusLabel(goalStatus)
+            else -> "Open"
+        }
+        ComposerToolboxActionPreview.Fork -> if (busy) "Idle only" else "Open"
+        ComposerToolboxActionPreview.Skills,
+        ComposerToolboxActionPreview.Mcp,
+        ComposerToolboxActionPreview.Hooks,
+        -> "View"
+    }
+}
+
+private fun composerToolboxItemDisabled(
+    action: ComposerToolboxActionPreview,
+    settingsBusy: Boolean,
+    compactBusy: Boolean,
+    busy: Boolean,
+    forkBusy: Boolean,
+): Boolean {
+    return when (action) {
+        ComposerToolboxActionPreview.Fast -> settingsBusy
+        ComposerToolboxActionPreview.Compact -> compactBusy || busy
+        ComposerToolboxActionPreview.Fork -> busy || forkBusy
+        else -> false
+    }
+}
+
+private fun composerToolboxItemTone(
+    action: ComposerToolboxActionPreview,
+    enabled: Boolean,
+    fastMode: Boolean,
+    goalComposeMode: Boolean,
+    goalStatus: ThreadGoalStatusPreview?,
+): ComposerToolboxItemTone {
+    if (!enabled) {
+        return ComposerToolboxItemTone.Disabled
+    }
+    val active = (action == ComposerToolboxActionPreview.Fast && fastMode) ||
+        (action == ComposerToolboxActionPreview.Goal &&
+            (goalComposeMode || goalStatus == ThreadGoalStatusPreview.Active))
+    return if (active) ComposerToolboxItemTone.Active else ComposerToolboxItemTone.Neutral
+}
+
+fun goalStatusLabel(status: ThreadGoalStatusPreview): String {
+    return when (status) {
+        ThreadGoalStatusPreview.Active -> "Active"
+        ThreadGoalStatusPreview.Completed -> "Complete"
+        ThreadGoalStatusPreview.Cancelled -> "Cancelled"
+        ThreadGoalStatusPreview.Failed -> "Failed"
+    }
+}
 
 fun buildComposerShellTools(
     busy: Boolean,

@@ -44,6 +44,8 @@ import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.ComposerToolboxItemState
+import com.remotecodex.android.ui.presentation.ComposerToolboxItemTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
@@ -53,6 +55,7 @@ import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptio
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
+import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -101,6 +104,16 @@ fun ThreadComposer(
         busy = composer.busy,
         shellControl = composer.shellControl,
     )
+    val toolboxItems = buildComposerToolboxItems(
+        items = composer.toolboxItems,
+        fastMode = composer.fastMode,
+        compactBusy = composer.compactBusy,
+        goalComposeMode = composer.goalComposeMode,
+        goalStatus = composer.goalStatus,
+        busy = composer.busy,
+        settingsBusy = composer.settingsBusy,
+        forkBusy = composer.forkBusy,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -112,7 +125,7 @@ fun ThreadComposer(
     ) {
         if (openMenu != null) {
             when (openMenu) {
-                ComposerMenu.Slash -> SlashToolboxPanel()
+                ComposerMenu.Slash -> SlashToolboxPanel(toolboxItems = toolboxItems)
                 ComposerMenu.Attachments -> AttachmentPanel()
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
                 ComposerMenu.Effort -> EffortPickerPanel(
@@ -717,8 +730,15 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 }
 
 @Composable
-private fun SlashToolboxPanel() {
+private fun SlashToolboxPanel(toolboxItems: List<ComposerToolboxItemState>) {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
+        if (toolboxItems.isEmpty()) {
+            EmptyToolboxState()
+        } else {
+            toolboxItems.forEach { item ->
+                ToolboxRow(item = item)
+            }
+        }
         GoalPreviewGroup()
         ForkPreviewGroup()
         SkillsPreviewGroup()
@@ -1549,13 +1569,43 @@ private fun ComposerMenuSurface(
 }
 
 @Composable
-private fun ToolboxRow(command: String, status: String, description: String) {
-    Column(
+private fun EmptyToolboxState() {
+    Text(
+        text = "No backend tools are available for this thread.",
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelSmall,
+    )
+}
+
+@Composable
+private fun ToolboxRow(item: ComposerToolboxItemState) {
+    val foreground = when (item.tone) {
+        ComposerToolboxItemTone.Active -> ThreadColors.Warning
+        ComposerToolboxItemTone.Disabled -> ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+        ComposerToolboxItemTone.Neutral -> ThreadColors.Foreground
+    }
+    val background = when (item.tone) {
+        ComposerToolboxItemTone.Active -> ThreadColors.WarningSoft.copy(alpha = 0.52f)
+        ComposerToolboxItemTone.Disabled -> ThreadColors.Surface.copy(alpha = 0.58f)
+        ComposerToolboxItemTone.Neutral -> ThreadColors.Surface
+    }
+    val border = when (item.tone) {
+        ComposerToolboxItemTone.Active -> ThreadColors.Warning.copy(alpha = 0.34f)
+        ComposerToolboxItemTone.Disabled -> ThreadColors.Border.copy(alpha = 0.62f)
+        ComposerToolboxItemTone.Neutral -> ThreadColors.Border
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(12.dp))
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -1565,21 +1615,25 @@ private fun ToolboxRow(command: String, status: String, description: String) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = command,
+                text = item.command,
                 modifier = Modifier.weight(1f),
-                color = ThreadColors.Foreground,
+                color = foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             GraphBadge(
-                label = status,
+                label = item.status,
                 variant = GraphBadgeVariant.Outline,
             )
         }
         Text(
-            text = description,
-            color = ThreadColors.ForegroundMuted,
+            text = item.description,
+            color = if (item.enabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundMuted.copy(alpha = 0.58f),
             style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
