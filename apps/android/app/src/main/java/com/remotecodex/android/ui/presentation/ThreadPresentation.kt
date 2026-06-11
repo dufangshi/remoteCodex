@@ -19,7 +19,9 @@ import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
 import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
+import com.remotecodex.android.ui.model.ComposerHookFormPreview
 import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
+import com.remotecodex.android.ui.model.ComposerHookPreview
 import com.remotecodex.android.ui.model.ComposerHookScopePreview
 import com.remotecodex.android.ui.model.ComposerHookSourcePreview
 import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
@@ -952,6 +954,7 @@ data class ComposerHookRowState(
     val statusMessage: String?,
     val editAction: ComposerHookActionState?,
     val trustAction: ComposerHookActionState?,
+    val editForm: ComposerHookFormPreview?,
     val trustLabel: String,
     val sourceLabel: String,
     val enabledLabel: String,
@@ -1199,6 +1202,7 @@ fun buildComposerHooksPanelState(
                     )
                     else -> null
                 },
+                editForm = if (editable) hook.toComposerHookFormPreview() else null,
                 trustLabel = hookTrustLabel(hook.trustStatus),
                 sourceLabel = hookSourceLabel(hook.source),
                 enabledLabel = if (hook.enabled) "Enabled" else "Disabled",
@@ -1223,6 +1227,23 @@ fun buildComposerHooksPanelState(
         hooks = hooks,
         emptyMessage = if (empty) "No hooks configured for this workspace." else null,
         lifecycle = buildComposerHooksPanelLifecycleState(panel),
+    )
+}
+
+private fun ComposerHookPreview.toComposerHookFormPreview(): ComposerHookFormPreview {
+    val scope = when (source) {
+        ComposerHookSourcePreview.User -> ComposerHookScopePreview.Global
+        else -> ComposerHookScopePreview.Project
+    }
+    return ComposerHookFormPreview(
+        scope = scope,
+        eventName = eventName,
+        matcher = matcher.orEmpty(),
+        command = command.orEmpty(),
+        timeoutSec = timeoutSec.toString(),
+        statusMessage = statusMessage.orEmpty(),
+        editingScope = scope,
+        editingEventName = eventName,
     )
 }
 

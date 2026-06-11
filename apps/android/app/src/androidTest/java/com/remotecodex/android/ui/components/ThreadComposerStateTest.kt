@@ -86,6 +86,34 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun hooksPanelNavigatesThroughEditPreviewMode() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Hooks").performClick()
+
+        composeRule.onNodeWithText("PreToolUse · Bash").assertExists()
+
+        composeRule.onNodeWithContentDescription("Edit PreToolUse · Bash").performClick()
+
+        composeRule.onNodeWithText("Editing").assertExists()
+        composeRule.onNodeWithText("Editing PreToolUse in project hooks.json").assertExists()
+        composeRule.onNodeWithText("Scope").assertExists()
+        composeRule.onNodeWithText("Project").assertExists()
+        composeRule.onNodeWithText("Event").assertExists()
+        composeRule.onNodeWithText("PreToolUse").assertExists()
+        composeRule.onNodeWithText("Matcher").assertExists()
+        composeRule.onNodeWithText("Bash").assertExists()
+        composeRule.onNodeWithText("Command").assertExists()
+        composeRule.onNodeWithText("scripts/check-command.sh").assertExists()
+        composeRule.onNodeWithText("Update Hook").assertExists()
+
+        composeRule.onNodeWithContentDescription("Back").performClick()
+
+        composeRule.onNodeWithText("PreToolUse · Bash").assertExists()
+    }
+
+    @Test
     fun forkPanelNavigatesToTurnPickerWhenThreadIsIdle() {
         setComposerContent(composer = ComposerPreview(busy = false))
 

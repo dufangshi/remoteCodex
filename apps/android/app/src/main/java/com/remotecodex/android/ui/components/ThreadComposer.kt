@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
+import com.remotecodex.android.ui.model.ComposerHookFormPreview
 import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
@@ -133,6 +134,7 @@ fun ThreadComposer(
     var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
     var hooksPanelMode by remember(composer.hooksPanel.mode) { mutableStateOf(composer.hooksPanel.mode) }
+    var hooksPanelForm by remember(composer.hooksPanel.form) { mutableStateOf(composer.hooksPanel.form) }
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -245,7 +247,12 @@ fun ThreadComposer(
     )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
     val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel.copy(mode = mcpPanelMode))
-    val hooksPanelState = buildComposerHooksPanelState(composer.hooksPanel.copy(mode = hooksPanelMode))
+    val hooksPanelState = buildComposerHooksPanelState(
+        composer.hooksPanel.copy(
+            mode = hooksPanelMode,
+            form = hooksPanelForm,
+        ),
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -273,6 +280,10 @@ fun ThreadComposer(
                     },
                     onHooksPanelModeChange = { mode ->
                         hooksPanelMode = mode
+                    },
+                    onHookEdit = { form ->
+                        hooksPanelForm = form
+                        hooksPanelMode = ComposerHooksPanelModePreview.Edit
                     },
                     onToolboxAction = { actionDecision ->
                         when (actionDecision.kind) {
@@ -319,6 +330,7 @@ fun ThreadComposer(
                     slashPanelView = ComposerSlashPanelViewState.Root
                     mcpPanelMode = composer.mcpPanel.mode
                     hooksPanelMode = composer.hooksPanel.mode
+                    hooksPanelForm = composer.hooksPanel.form
                 }
                 openMenu = nextMenu
             },
@@ -1437,6 +1449,7 @@ private fun SlashToolboxPanel(
     onSlashPanelViewChange: (ComposerSlashPanelViewState) -> Unit,
     onMcpPanelModeChange: (ComposerMcpPanelModePreview) -> Unit,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
+    onHookEdit: (ComposerHookFormPreview) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
@@ -1476,6 +1489,7 @@ private fun SlashToolboxPanel(
             ComposerSlashPanelViewState.Hooks -> HooksPreviewGroup(
                 hooksPanelState = hooksPanelState,
                 onHooksPanelModeChange = onHooksPanelModeChange,
+                onHookEdit = onHookEdit,
             )
         }
     }
@@ -2104,6 +2118,7 @@ private fun McpPanelMessageRow(message: String) {
 @Composable
 private fun ComposerPanelActionBadge(
     label: String,
+    accessibilityLabel: String = label,
     onClick: () -> Unit,
 ) {
     OutlinedButton(
@@ -2111,7 +2126,7 @@ private fun ComposerPanelActionBadge(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .semantics {
-                contentDescription = label
+                contentDescription = accessibilityLabel
                 role = Role.Button
             },
         shape = RoundedCornerShape(999.dp),
@@ -2281,6 +2296,7 @@ private fun McpServerRow(item: ComposerMcpServerRowState) {
 private fun HooksPreviewGroup(
     hooksPanelState: ComposerHooksPanelState,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
+    onHookEdit: (ComposerHookFormPreview) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2331,7 +2347,10 @@ private fun HooksPreviewGroup(
             )
         }
         hooksPanelState.hooks.forEach { item ->
-            HookPreviewRow(item = item)
+            HookPreviewRow(
+                item = item,
+                onEdit = onHookEdit,
+            )
         }
         hooksPanelState.emptyMessage?.let { message ->
             HookPanelMessageRow(message = message)
@@ -2451,7 +2470,10 @@ private fun HookFieldPreview(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HookPreviewRow(item: ComposerHookRowState) {
+private fun HookPreviewRow(
+    item: ComposerHookRowState,
+    onEdit: (ComposerHookFormPreview) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2491,7 +2513,13 @@ private fun HookPreviewRow(item: ComposerHookRowState) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             item.editAction?.let { action ->
-                GraphBadge(label = action.label, variant = GraphBadgeVariant.Outline)
+                item.editForm?.let { form ->
+                    ComposerPanelActionBadge(
+                        label = action.label,
+                        accessibilityLabel = "${action.label} ${item.title}",
+                        onClick = { onEdit(form) },
+                    )
+                }
             }
             item.trustAction?.let { action ->
                 GraphBadge(label = action.label, variant = if (action.enabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline)
