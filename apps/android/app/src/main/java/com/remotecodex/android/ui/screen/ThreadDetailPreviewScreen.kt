@@ -72,6 +72,11 @@ fun ThreadDetailPreviewScreen(
                         onOpenRooms = { roomsOpen = true },
                         onOpenSettings = { settingsOpen = true },
                         onOpenThreadAction = { threadActionDialog = it },
+                        onReturnToWorkspace = { selectedView = ThreadSurfaceView.Workspace },
+                        onCreateThreadShortcut = {
+                            threadActionRoom = null
+                            threadActionDialog = ThreadActionDialog.Create
+                        },
                         themeMode = themeMode,
                         darkThemeActive = darkThemeActive,
                     )

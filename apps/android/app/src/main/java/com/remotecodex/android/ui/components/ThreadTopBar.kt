@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,6 +40,7 @@ import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun ThreadTopBar(
     detail: ThreadDetailPreview,
     selectedView: ThreadSurfaceView,
@@ -46,6 +49,8 @@ fun ThreadTopBar(
     onOpenRooms: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenThreadAction: (ThreadActionDialog) -> Unit,
+    onReturnToWorkspace: () -> Unit,
+    onCreateThreadShortcut: () -> Unit,
     themeMode: ThemeMode,
     darkThemeActive: Boolean,
     modifier: Modifier = Modifier,
@@ -145,12 +150,24 @@ fun ThreadTopBar(
                 modifier = Modifier.weight(1f),
             )
         }
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             MetadataPill(label = detail.usage)
+            TopBarActionPill(
+                label = "Workspace",
+                icon = TopBarIcon.ArrowLeft,
+                contentDescription = "Back to workspace",
+                onClick = onReturnToWorkspace,
+            )
+            TopBarActionPill(
+                label = "New",
+                icon = TopBarIcon.Plus,
+                contentDescription = "Create new chat",
+                onClick = onCreateThreadShortcut,
+            )
             TopBarActionPill(
                 label = "Actions",
                 icon = TopBarIcon.Actions,
@@ -372,6 +389,15 @@ private fun TopBarGlyph(
                 line(0.42f, 0.68f, 0.20f, 0.68f)
                 line(0.20f, 0.68f, 0.20f, 0.25f)
             }
+            TopBarIcon.ArrowLeft -> {
+                line(0.72f, 0.50f, 0.24f, 0.50f)
+                line(0.24f, 0.50f, 0.44f, 0.30f)
+                line(0.24f, 0.50f, 0.44f, 0.70f)
+            }
+            TopBarIcon.Plus -> {
+                line(0.50f, 0.22f, 0.50f, 0.78f)
+                line(0.22f, 0.50f, 0.78f, 0.50f)
+            }
             TopBarIcon.ChevronDown -> {
                 line(0.24f, 0.38f, 0.50f, 0.64f)
                 line(0.50f, 0.64f, 0.76f, 0.38f)
@@ -413,6 +439,8 @@ private enum class TopBarIcon {
     Settings,
     Actions,
     Threads,
+    ArrowLeft,
+    Plus,
     ChevronDown,
     ChevronUp,
     Rename,
