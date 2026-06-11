@@ -13,7 +13,7 @@ This skeleton is the first step for a Kotlin Android client targeting Android 10
 - UI framework: Jetpack Compose and Material 3.
 - Initial module: `:app`.
 
-The first APK is a launchable native preview of the thread detail surface. It does not connect to the supervisor API yet.
+The first APK is still primarily a launchable native preview of the thread detail surface, but it now has a first-run supervisor connection setup path. The setup path supports local, server, and relay connection modes, persists the selected endpoint, can log in to server and relay auth endpoints, can import a pasted pairing payload, and exposes a QR scanner for the same payload format. After a connection is saved, the app reads a minimal backend home snapshot from `/api/workspaces` and `/api/threads` using direct or relay-forwarded paths. The thread detail timeline itself remains sample-driven until the next API integration stage replaces preview models with server DTOs and event projection state.
 
 ## Directory Layout
 
@@ -27,6 +27,7 @@ apps/android
     src/main
       AndroidManifest.xml
       java/com/remotecodex/android
+        api
         settings
         ui/components
         ui/model
@@ -36,11 +37,11 @@ apps/android
         ui/theme
 ```
 
-Future code should keep clear package boundaries:
+Code should keep clear package boundaries:
 
-- `api`: REST and WebSocket transport for the supervisor API.
-- `auth`: device pairing, token storage, and revocation flows.
-- `settings`: persistent local app settings such as theme mode, future base URL, and pairing preferences.
+- `api`: REST transport, connection modes, auth/session DTOs, websocket URL derivation, and pairing payload parsing.
+- `auth`: future Android Keystore token storage, backend-minted device pairing, and revocation flows.
+- `settings`: persistent local app settings such as theme mode, base URL, auth token, relay device id, and pairing preferences.
 - `thread`: thread projection state, event reducers, optimistic sends, and reconnect reconciliation.
 - `workspace`: workspace list and file-preview models.
 - `voice`: native audio session orchestration.
@@ -108,7 +109,9 @@ Android equivalents are intentionally native Compose components:
 - `RemoteCodexTheme.kt`
 - `RichMessageContent.kt`
 
-The current screen is sample-data driven through `ThreadPreviewSample.kt`. This keeps visual iteration independent from the API client while the protocol layer is still being shaped.
+The current thread detail screen is sample-data driven through `ThreadPreviewSample.kt`. The app shell now gates that preview behind a real connection setup screen, but the connected state only proves the selected supervisor or relay endpoint can authenticate and answer health/session requests.
+
+The settings surface now also shows a live backend snapshot summary after connection. This is intentionally small: it verifies authenticated REST access to workspace and thread lists without prematurely coupling the native timeline to the Web client state machine.
 
 The visual direction is close to the web mobile thread view, but not a literal DOM port. Native screens should preserve the information architecture and state vocabulary while using Android touch targets, safe areas, and Compose layout primitives.
 
@@ -206,7 +209,8 @@ Still open:
 - Real resizable workspace panel behavior on tablet/desktop form factors; current Android coverage keeps stable panel boundaries and handle visuals without drag resizing.
 - Real garbage folder mutation behind the current empty-garbage confirmation skeleton.
 - Real shell adapter actions behind the current native shell controls: create, attach, terminate, rename, split pane, copy visible output, PTY input, and control sequences.
-- Real API, WebSocket, reducer, pairing, and shell integration.
+- Real thread/workspace detail binding, WebSocket event reducer, backend-minted device pairing, device revocation, and shell integration.
+- A true supervisor-side mobile pairing challenge is still open. Android currently supports scanning or pasting a payload such as `remote-codex://connect?mode=server&baseUrl=...&token=...` or equivalent JSON. The backend still needs dedicated `pair/start` and `pair/confirm` endpoints if QR pairing should mint tokens instead of transporting an already-created token.
 - Real plugin management behind the current native settings skeleton: refresh, import, enable/disable, uninstall, and trusted renderer policy.
 - Screenshot-based E2E after emulator access is available.
 
@@ -305,10 +309,11 @@ ANDROID_SDK_ROOT=/home/u/Android/Sdk \
 
 ## Near-Term Roadmap
 
-1. Expand UIAutomator and screenshot E2E coverage across the remaining high-risk thread components.
-2. Add a typed Kotlin supervisor API client with configurable base URL.
-3. Add pairing/token storage before enabling remote network access.
-4. Add a minimal home screen: active threads, workspaces, and pending confirmations.
-5. Replace sample data with thread detail fetch plus WebSocket updates.
-6. Add voice mode as a native feature instead of mirroring the web composer.
-7. Replace artifact fallbacks with richer native renderers where they are worth maintaining.
+1. Bind the connected mode to a minimal home screen: active threads, workspaces, and pending confirmations.
+2. Replace sample thread detail data with `GET /api/threads/:id` or relay-forwarded equivalents.
+3. Add websocket connect/reconnect and event projection for live thread updates.
+4. Move stored auth tokens from SharedPreferences to Android Keystore before broader remote usage.
+5. Add backend pairing endpoints that mint scoped mobile tokens from a QR challenge instead of requiring QR payloads to carry a token.
+6. Add device revocation and relay device management.
+7. Add voice mode as a native feature instead of mirroring the web composer.
+8. Replace artifact fallbacks with richer native renderers where they are worth maintaining.

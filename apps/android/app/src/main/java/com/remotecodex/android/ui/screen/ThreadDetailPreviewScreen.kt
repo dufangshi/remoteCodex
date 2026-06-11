@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.settings.ThemeMode
+import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -55,7 +57,12 @@ import com.remotecodex.android.ui.theme.ThreadColors
 fun ThreadDetailPreviewScreen(
     themeMode: ThemeMode,
     darkThemeActive: Boolean,
+    supervisorConnection: SupervisorConnectionConfig,
+    homeSnapshot: SupervisorHomeSnapshot?,
+    homeSnapshotLoading: Boolean,
+    homeSnapshotError: String?,
     onThemeModeSelected: (ThemeMode) -> Unit,
+    onChangeConnection: () -> Unit,
 ) {
     val appShell = ThreadPreviewSample.appShell
     val detail = ThreadPreviewSample.detail
@@ -176,7 +183,12 @@ fun ThreadDetailPreviewScreen(
                 appShell = appShell,
                 themeMode = themeMode,
                 darkThemeActive = darkThemeActive,
+                supervisorConnection = supervisorConnection,
+                homeSnapshot = homeSnapshot,
+                homeSnapshotLoading = homeSnapshotLoading,
+                homeSnapshotError = homeSnapshotError,
                 onThemeModeSelected = onThemeModeSelected,
+                onChangeConnection = onChangeConnection,
                 onClose = { settingsOpen = false },
                 modifier = Modifier
                     .fillMaxSize()

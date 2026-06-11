@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.model.AppShellNavigationItemPreview
 import com.remotecodex.android.ui.model.AppShellPreview
@@ -133,7 +135,12 @@ fun AppShellSettingsPanel(
     appShell: AppShellPreview,
     themeMode: ThemeMode,
     darkThemeActive: Boolean,
+    supervisorConnection: SupervisorConnectionConfig,
+    homeSnapshot: SupervisorHomeSnapshot?,
+    homeSnapshotLoading: Boolean,
+    homeSnapshotError: String?,
     onThemeModeSelected: (ThemeMode) -> Unit,
+    onChangeConnection: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -250,6 +257,36 @@ fun AppShellSettingsPanel(
                     }
                 }
 
+                SettingsSection(title = "Connection", detail = supervisorConnection.mode.label) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ThreadColors.SurfaceStrong)
+                            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ConnectionSettingLine(label = "URL", value = supervisorConnection.normalizedBaseUrl)
+                        supervisorConnection.relayDeviceId?.let { deviceId ->
+                            ConnectionSettingLine(label = "Device", value = deviceId)
+                        }
+                        ConnectionSettingLine(label = "WebSocket", value = supervisorConnection.websocketUrl())
+                        BackendSnapshotSummary(
+                            snapshot = homeSnapshot,
+                            loading = homeSnapshotLoading,
+                            error = homeSnapshotError,
+                        )
+                        GraphButton(
+                            label = "Change connection",
+                            variant = GraphButtonVariant.Secondary,
+                            size = GraphButtonSize.Default,
+                            contentDescription = "Change supervisor connection",
+                            onClick = onChangeConnection,
+                        )
+                    }
+                }
+
                 SettingsSection(title = "Plugins", detail = "Thread UI capabilities") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         appShell.plugins.forEach { plugin ->
@@ -291,6 +328,73 @@ fun AppShellSettingsPanel(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BackendSnapshotSummary(
+    snapshot: SupervisorHomeSnapshot?,
+    loading: Boolean,
+    error: String?,
+) {
+    val label = when {
+        loading -> "Loading backend snapshot..."
+        error != null -> "Backend snapshot failed"
+        snapshot != null -> "${snapshot.workspaces.size} workspaces / ${snapshot.threads.size} threads / ${snapshot.activeThreadCount} running"
+        else -> "Backend snapshot not loaded"
+    }
+    val detail = error ?: snapshot?.threads?.firstOrNull()?.title ?: "Workspace and thread lists are read from the supervisor API."
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (error == null) ThreadColors.Surface else ThreadColors.DangerSoft)
+            .border(1.dp, if (error == null) ThreadColors.Border else ThreadColors.Danger, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (error == null) ThreadColors.Foreground else ThreadColors.Danger,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = detail,
+            color = if (error == null) ThreadColors.ForegroundMuted else ThreadColors.Danger,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ConnectionSettingLine(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.widthIn(min = 76.dp),
+        )
+        Text(
+            text = value,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
