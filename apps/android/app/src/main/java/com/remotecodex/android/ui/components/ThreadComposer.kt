@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
@@ -3144,9 +3146,22 @@ private fun ShellToolsPanel(
     panelState: ComposerShellToolsPanelState,
     onToolClick: (ComposerShellToolState) -> Unit,
 ) {
-    ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentWidth(Alignment.End),
+    ) {
         FlowRow(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .width(184.dp)
+                .semantics {
+                    contentDescription = panelState.title
+                    stateDescription = panelState.subtitle
+                }
+                .clip(RoundedCornerShape(16.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             maxItemsInEachRow = panelState.columnCount,

@@ -351,7 +351,7 @@ class ThreadComposerStateTest {
         )
 
         composeRule.onNodeWithContentDescription("Open shell tools").performClick()
-        composeRule.onNodeWithText("Shell tools").assertExists()
+        composeRule.onNodeWithContentDescription("Shell tools").assertExists()
 
         composeRule.onNodeWithContentDescription("PASTE").performClick()
         composeRule.onNodeWithText("Shell paste preview").assertExists()
