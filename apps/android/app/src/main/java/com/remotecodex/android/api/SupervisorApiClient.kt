@@ -207,6 +207,22 @@ class SupervisorApiClient(
         return requestJson(config.restPath("/api/threads/${urlEncodePathSegment(threadId)}$query")).toThreadDetail()
     }
 
+    fun fetchThreadHistoryItemDetail(threadId: String, itemId: String): SupervisorThreadHistoryItemDetail {
+        return requestJson(
+            config.restPath(
+                "/api/threads/${urlEncodePathSegment(threadId)}/items/${urlEncodePathSegment(itemId)}/detail",
+            ),
+        ).toThreadHistoryItemDetail()
+    }
+
+    fun fetchThreadImageAsset(threadId: String, path: String): SupervisorFileDownload {
+        val query = buildQuery("path" to path)
+        return requestDownload(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/assets/image$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "thread-image" },
+        )
+    }
+
     fun fetchThreadShellState(threadId: String): SupervisorThreadShellState {
         return requestJson(
             config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/shell"),
@@ -1041,15 +1057,54 @@ private fun JSONObject.toTokenBreakdown(): SupervisorTokenBreakdown {
 }
 
 private fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
+    val artifact = optJSONObject("artifact")
     return SupervisorThreadTurnItem(
         id = optString("id"),
         kind = optString("kind"),
+        text = optString("text"),
+        previewText = optNullableString("previewText"),
+        detailText = optNullableString("detailText"),
+        hasDeferredDetail = optBoolean("hasDeferredDetail", false),
+        status = optNullableString("status"),
+        assetPath = optNullableString("assetPath"),
+        changedFiles = optNullableInt("changedFiles"),
+        addedLines = optNullableInt("addedLines"),
+        removedLines = optNullableInt("removedLines"),
+        hookEventLabel = optNullableString("hookEventLabel"),
+        hookStatusMessage = optNullableString("hookStatusMessage"),
+        hookOutput = optJSONArray("hookOutputEntries")?.joinTextEntries(),
+        artifactType = artifact?.optNullableString("type"),
+        artifactTitle = artifact?.optNullableString("title"),
+        artifactSummary = artifact?.optNullableString("summaryText"),
+        artifactHasRenderer = artifact?.optJSONArray("assets")?.length()?.let { it > 0 } ?: true,
+    )
+}
+
+private fun JSONObject.toThreadHistoryItemDetail(): SupervisorThreadHistoryItemDetail {
+    return SupervisorThreadHistoryItemDetail(
+        id = optString("id"),
+        kind = optString("kind"),
+        title = optString("title"),
         text = optString("text"),
     )
 }
 
 private fun JSONObject.optNullableString(name: String): String? {
     return if (has(name) && !isNull(name)) optString(name) else null
+}
+
+private fun JSONObject.optNullableInt(name: String): Int? {
+    return if (has(name) && !isNull(name)) optInt(name) else null
+}
+
+private fun org.json.JSONArray.joinTextEntries(): String {
+    return List(length()) { index ->
+        optJSONObject(index)?.optNullableString("text").orEmpty()
+    }
+        .filter { it.isNotBlank() }
+        .joinToString("\n")
+        .takeIf { it.isNotBlank() }
+        .orEmpty()
 }
 
 private fun buildQuery(vararg pairs: Pair<String, String?>): String {

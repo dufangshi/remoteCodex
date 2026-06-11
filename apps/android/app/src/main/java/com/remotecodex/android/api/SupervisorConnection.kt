@@ -225,6 +225,28 @@ data class SupervisorThreadTurnItem(
     val id: String,
     val kind: String,
     val text: String,
+    val previewText: String? = null,
+    val detailText: String? = null,
+    val hasDeferredDetail: Boolean = false,
+    val status: String? = null,
+    val assetPath: String? = null,
+    val changedFiles: Int? = null,
+    val addedLines: Int? = null,
+    val removedLines: Int? = null,
+    val hookEventLabel: String? = null,
+    val hookStatusMessage: String? = null,
+    val hookOutput: String? = null,
+    val artifactType: String? = null,
+    val artifactTitle: String? = null,
+    val artifactSummary: String? = null,
+    val artifactHasRenderer: Boolean = true,
+)
+
+data class SupervisorThreadHistoryItemDetail(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val text: String,
 )
 
 data class SupervisorTokenBreakdown(

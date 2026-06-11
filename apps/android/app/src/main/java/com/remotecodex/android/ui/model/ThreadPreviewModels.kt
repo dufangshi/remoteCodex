@@ -72,6 +72,7 @@ enum class HistoryItemKind {
 }
 
 data class HistoryItemPreview(
+    val id: String? = null,
     val kind: HistoryItemKind,
     val title: String,
     val status: ToolStatus?,
@@ -109,7 +110,33 @@ data class HistoryGroupPreview(
 data class DetailPreview(
     val title: String,
     val text: String,
+    val image: DetailImagePreview? = null,
 )
+
+data class DetailImagePreview(
+    val path: String,
+    val contentType: String?,
+    val bytes: ByteArray,
+    val filename: String? = null,
+)
+
+sealed interface DetailRequest {
+    val fallback: DetailPreview
+
+    data class Local(
+        override val fallback: DetailPreview,
+    ) : DetailRequest
+
+    data class HistoryItem(
+        val itemId: String,
+        override val fallback: DetailPreview,
+    ) : DetailRequest
+
+    data class ImageAsset(
+        val path: String,
+        override val fallback: DetailPreview,
+    ) : DetailRequest
+}
 
 data class TurnPreview(
     val index: Int,

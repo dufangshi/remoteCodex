@@ -34,6 +34,7 @@ import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.model.DetailRequest
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -114,6 +115,7 @@ fun ThreadDetailSurface(
     onExportThread: ((ExportThreadRequest) -> Unit)? = null,
     onTrustHook: ((String, String) -> Unit)? = null,
     onUntrustHook: ((String) -> Unit)? = null,
+    onOpenDetail: ((DetailRequest) -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
@@ -204,7 +206,13 @@ fun ThreadDetailSurface(
                         when (selectedView) {
                             ThreadSurfaceView.Chat -> ChatPreviewSurface(
                                 detail = displayedDetail,
-                                onOpenDetail = { openDetail = it },
+                                onOpenDetail = { request ->
+                                    if (onOpenDetail != null) {
+                                        onOpenDetail(request)
+                                    } else {
+                                        openDetail = request.fallback
+                                    }
+                                },
                                 onDenyPendingRequest = onDenyPendingRequest,
                                 onSubmitPendingRequest = onSubmitPendingRequest,
                                 modifier = Modifier.fillMaxSize(),
@@ -371,7 +379,7 @@ fun ThreadDetailSurface(
 @Composable
 private fun ChatPreviewSurface(
     detail: ThreadDetailPreview,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit,
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit,
     modifier: Modifier = Modifier,

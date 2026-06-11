@@ -22,8 +22,10 @@ import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
 import com.remotecodex.android.api.SupervisorTokenBreakdown
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
+import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.ThreadStatus
+import com.remotecodex.android.ui.model.ToolStatus
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -78,8 +80,24 @@ class ThreadDetailMapperTest {
                         ),
                         items = listOf(
                             SupervisorThreadTurnItem("item-1", "userMessage", "Continue"),
+                            SupervisorThreadTurnItem(
+                                id = "item-3",
+                                kind = "commandExecution",
+                                text = "pnpm test",
+                                previewText = "pnpm test",
+                                detailText = null,
+                                hasDeferredDetail = true,
+                                status = "completed",
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "item-4",
+                                kind = "image",
+                                text = "Screenshot",
+                                previewText = "Android screen",
+                                status = "completed",
+                                assetPath = "apps/android/output/screen.png",
+                            ),
                             SupervisorThreadTurnItem("item-2", "agentMessage", "Done"),
-                            SupervisorThreadTurnItem("item-3", "command", "ignored"),
                         ),
                     ),
                 ),
@@ -199,7 +217,7 @@ class ThreadDetailMapperTest {
         assertEquals("remoteCodex-main", preview.workspace)
         assertEquals("codex / gpt-5", preview.runtime)
         assertEquals("in 1.5k / out 500", preview.usage)
-        assertEquals("5 transcript items", preview.items)
+        assertEquals("6 transcript items", preview.items)
         assertEquals(ThreadStatus.Running, preview.rooms.single().status)
         assertEquals("1m", preview.rooms.single().updatedLabel)
         assertEquals("Goal", preview.timelineAuxiliary.activityNotes.single().title)
@@ -236,6 +254,14 @@ class ThreadDetailMapperTest {
         assertEquals("Continue", turn.messages[0].text)
         assertEquals(MessageAuthor.Assistant, turn.messages[1].author)
         assertEquals("Done", turn.messages[1].richText)
+        assertEquals(2, turn.messages[1].historyItems.size)
+        assertEquals("item-3", turn.messages[1].historyItems[0].id)
+        assertEquals(HistoryItemKind.Command, turn.messages[1].historyItems[0].kind)
+        assertEquals(ToolStatus.Completed, turn.messages[1].historyItems[0].status)
+        assertTrue(turn.messages[1].historyItems[0].hasDeferredDetail)
+        assertEquals("item-4", turn.messages[1].historyItems[1].id)
+        assertEquals(HistoryItemKind.Image, turn.messages[1].historyItems[1].kind)
+        assertEquals("apps/android/output/screen.png", turn.messages[1].historyItems[1].assetPath)
         assertTrue(preview.workspacePreview.nodes.single().selected)
     }
 }

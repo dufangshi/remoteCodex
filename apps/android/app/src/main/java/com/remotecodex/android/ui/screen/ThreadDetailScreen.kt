@@ -52,8 +52,12 @@ import com.remotecodex.android.storage.shareSavedExport
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
+import com.remotecodex.android.ui.components.LongTextDialog
 import com.remotecodex.android.ui.components.PendingPromptAttachmentKind
 import com.remotecodex.android.ui.components.PendingPromptAttachmentUpload
+import com.remotecodex.android.ui.model.DetailImagePreview
+import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.model.DetailRequest
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -108,6 +112,8 @@ fun ThreadDetailScreen(
     var pendingWorkspaceUploadFile by remember(threadId) { mutableStateOf<UploadWorkspaceFileRequest?>(null) }
     var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
+    var openDetail by remember(threadId) { mutableStateOf<DetailPreview?>(null) }
+    var pendingDetailRequest by remember(threadId) { mutableStateOf<DetailRequest?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
     var threadActionBusy by remember(threadId) { mutableStateOf(false) }
@@ -238,6 +244,68 @@ fun ThreadDetailScreen(
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
+    }
+
+    LaunchedEffect(pendingDetailRequest) {
+        val request = pendingDetailRequest ?: return@LaunchedEffect
+        openDetail = request.fallback
+        when (request) {
+            is DetailRequest.Local -> {
+                pendingDetailRequest = null
+            }
+            is DetailRequest.HistoryItem -> {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        client.fetchThreadHistoryItemDetail(
+                            threadId = threadId,
+                            itemId = request.itemId,
+                        )
+                    }
+                }
+                pendingDetailRequest = null
+                result
+                    .onSuccess { item ->
+                        openDetail = DetailPreview(
+                            title = item.title.ifBlank { request.fallback.title },
+                            text = item.text.ifBlank { request.fallback.text },
+                        )
+                    }
+                    .onFailure { throwable ->
+                        openDetail = request.fallback.copy(
+                            text = request.fallback.text + "\n\nDetail load failed: " + (throwable.message ?: "Unknown error."),
+                        )
+                    }
+            }
+            is DetailRequest.ImageAsset -> {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        client.fetchThreadImageAsset(
+                            threadId = threadId,
+                            path = request.path,
+                        )
+                    }
+                }
+                pendingDetailRequest = null
+                result
+                    .onSuccess { image ->
+                        openDetail = DetailPreview(
+                            title = image.filename.ifBlank { request.fallback.title },
+                            text = request.path,
+                            image = DetailImagePreview(
+                                path = request.path,
+                                contentType = image.contentType,
+                                bytes = image.bytes,
+                                filename = image.filename,
+                            ),
+                        )
+                    }
+                    .onFailure { throwable ->
+                        openDetail = request.fallback.copy(
+                            text = request.fallback.text + "\n\nImage load failed: " + (throwable.message ?: "Unknown error."),
+                        )
+                    }
+            }
+        }
     }
 
     LaunchedEffect(pendingInterrupt) {
@@ -779,6 +847,9 @@ fun ThreadDetailScreen(
             onUntrustHook = { key ->
                 pendingUntrustHook = UntrustThreadHookRequest(key = key)
             },
+            onOpenDetail = { request ->
+                pendingDetailRequest = request
+            },
             onCreateShell = if (AndroidFeatureFlags.ShellEnabled) {
                 { pendingCreateShell = true }
             } else {
@@ -835,6 +906,15 @@ fun ThreadDetailScreen(
             threadActionBusy = threadActionBusy,
             threadActionError = threadActionError,
         )
+        openDetail?.let { detailPreview ->
+            LongTextDialog(
+                detail = detailPreview,
+                onClose = {
+                    openDetail = null
+                    pendingDetailRequest = null
+                },
+            )
+        }
         return
     }
 

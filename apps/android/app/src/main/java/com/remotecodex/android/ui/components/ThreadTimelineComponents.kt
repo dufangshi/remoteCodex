@@ -57,6 +57,7 @@ import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.HistoryGroupPreview
 import com.remotecodex.android.ui.model.HistoryItemPreview
 import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.model.DetailRequest
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
@@ -126,7 +127,7 @@ fun ThreadTimeline(
     modifier: Modifier = Modifier,
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
     pendingRequests: List<PendingRequestPreview> = emptyList(),
-    onOpenDetail: (DetailPreview) -> Unit = {},
+    onOpenDetail: (DetailRequest) -> Unit = {},
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
 ) {
@@ -190,7 +191,7 @@ fun ThreadTimeline(
 @Composable
 private fun TurnFrame(
     turn: TurnPreview,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     var collapsed by remember(turn.index, turn.optimistic) { mutableStateOf(false) }
     val frameState = buildGraphChatTurnFrameState(turn = turn, collapsed = collapsed)
@@ -640,7 +641,7 @@ private fun PlanStepStatusIcon(status: PlanStepStatus, color: Color) {
 @Composable
 private fun MessageBubble(
     message: MessagePreview,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     val frameState = buildGraphChatMessageFrameState(
         author = message.author,
@@ -1211,7 +1212,7 @@ private enum class TimelineCopyFeedbackState {
 @Composable
 private fun HistoryGroupCard(
     group: HistoryGroupPreview,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     val colors = historyItemColors(group.kind)
     val frameState = buildGraphChatHistoryGroupFrameState(
@@ -1338,7 +1339,7 @@ private fun HistoryGroupRow(
     index: Int,
     item: HistoryItemPreview,
     colors: HistoryItemColors,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1416,7 +1417,7 @@ private fun HistoryGroupRow(
 @Composable
 private fun HistoryItemCard(
     item: HistoryItemPreview,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     val colors = historyItemColors(item.kind)
     val frameState = buildGraphChatHistoryItemFrameState(
@@ -1669,7 +1670,7 @@ private fun FileChangeInlineSummary(
 private fun ArtifactHistorySummaryBlock(
     item: HistoryItemPreview,
     colors: HistoryItemColors,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     var expanded by remember(item.summary, item.detail, item.artifactTitle, item.artifactSummary) { mutableStateOf(false) }
     val summary = artifactHistorySummary(
@@ -1913,7 +1914,7 @@ private fun HistoryGroupRowSummary(item: HistoryItemPreview) {
 private fun openHistoryItemDetail(
     item: HistoryItemPreview,
     index: Int?,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
     titleOverride: String? = null,
 ) {
     val title = titleOverride
@@ -1936,7 +1937,15 @@ private fun openHistoryItemDetail(
         detail = item.detail,
         hasDeferredDetail = item.hasDeferredDetail,
     )
-    onOpenDetail(DetailPreview(title = title, text = body))
+    val fallback = DetailPreview(title = title, text = body)
+    val itemId = item.id?.takeIf { it.isNotBlank() }
+    onOpenDetail(
+        if (itemId != null && item.hasDeferredDetail) {
+            DetailRequest.HistoryItem(itemId = itemId, fallback = fallback)
+        } else {
+            DetailRequest.Local(fallback)
+        },
+    )
 }
 
 @Composable
@@ -2199,7 +2208,7 @@ private fun historyItemColors(kind: HistoryItemKind): HistoryItemColors {
 private fun ImageHistoryPreview(
     item: HistoryItemPreview,
     colors: HistoryItemColors,
-    onOpenDetail: (DetailPreview) -> Unit,
+    onOpenDetail: (DetailRequest) -> Unit,
 ) {
     val state = buildGraphChatImageHistoryState(
         text = item.summary,
@@ -2214,11 +2223,14 @@ private fun ImageHistoryPreview(
             .background(ThreadColors.CodeBackground)
             .border(1.dp, colors.border, RoundedCornerShape(10.dp))
             .clickable {
+                val fallback = DetailPreview(
+                    title = state.openTitle,
+                    text = state.openText,
+                )
                 onOpenDetail(
-                    DetailPreview(
-                        title = state.openTitle,
-                        text = state.openText,
-                    ),
+                    state.assetPath
+                        ?.let { path -> DetailRequest.ImageAsset(path = path, fallback = fallback) }
+                        ?: DetailRequest.Local(fallback),
                 )
             },
         verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -2244,7 +2256,12 @@ private fun ImageHistoryPreview(
                     .background(ThreadColors.Panel.copy(alpha = 0.72f))
                     .border(1.dp, colors.border.copy(alpha = 0.42f))
                     .clickable {
-                        onOpenDetail(DetailPreview(title = state.openTitle, text = path))
+                        onOpenDetail(
+                            DetailRequest.ImageAsset(
+                                path = path,
+                                fallback = DetailPreview(title = state.openTitle, text = path),
+                            ),
+                        )
                     }
                     .semantics {
                         contentDescription = state.pathAccessibilityLabel ?: "Open image path"

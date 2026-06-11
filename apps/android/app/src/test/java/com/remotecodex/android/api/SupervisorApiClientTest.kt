@@ -966,6 +966,70 @@ class SupervisorApiClientTest {
         assertEquals("relay-token", transport.requests.single().bearerToken)
     }
 
+    @Test
+    fun fetchThreadHistoryItemDetailUsesRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"id":"item-1","kind":"fileChange","title":"File Change Details","text":"diff --git a/App.kt b/App.kt"}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val detail = client.fetchThreadHistoryItemDetail("thread-1", "item 1")
+
+        assertEquals("item-1", detail.id)
+        assertEquals("File Change Details", detail.title)
+        assertEquals("diff --git a/App.kt b/App.kt", detail.text)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/items/item%201/detail",
+            transport.requests.single().url,
+        )
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
+    fun fetchThreadImageAssetUsesRelayDevicePathAndDownloadHeaders() {
+        val bytes = byteArrayOf(1, 2, 3, 4)
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                statusCode = 200,
+                body = null,
+                headers = mapOf("content-type" to "image/png"),
+                bytes = bytes,
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val image = client.fetchThreadImageAsset("thread-1", "output/screen shot.png")
+
+        assertEquals("screen shot.png", image.filename)
+        assertEquals("image/png", image.contentType)
+        assertEquals(4, image.bytes.size)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/assets/image?path=output%2Fscreen+shot.png",
+            transport.requests.single().url,
+        )
+        assertEquals("*/*", transport.requests.single().accept)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

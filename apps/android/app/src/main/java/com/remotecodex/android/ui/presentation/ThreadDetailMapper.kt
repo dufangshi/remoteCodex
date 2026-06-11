@@ -39,6 +39,8 @@ import com.remotecodex.android.ui.model.ComposerSkillPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ExportTurnPreview
+import com.remotecodex.android.ui.model.HistoryItemKind
+import com.remotecodex.android.ui.model.HistoryItemPreview
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestKindPreview
@@ -54,6 +56,7 @@ import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.TimelineAuxiliaryPreview
 import com.remotecodex.android.ui.model.TimelineNotePreview
+import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.WorkspaceFilePreview
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
@@ -398,8 +401,56 @@ private fun SupervisorThreadTurn.toTurnPreview(index: Int): TurnPreview {
         timeLabel = startedAt?.let(::shortTimeLabel) ?: "queued",
         statusLabel = status.toTurnStatusLabel(error),
         tokenSummary = tokenUsage?.toTokenSummary().orEmpty(),
-        messages = items.mapNotNull { item -> item.toMessagePreview(startedAt) },
+        messages = items.toMessagePreviews(startedAt),
     )
+}
+
+private fun List<SupervisorThreadTurnItem>.toMessagePreviews(startedAt: String?): List<MessagePreview> {
+    val messages = mutableListOf<MessagePreview>()
+    val pendingHistory = mutableListOf<HistoryItemPreview>()
+    forEach { item ->
+        val message = item.toMessagePreview(startedAt)
+        if (message != null) {
+            val messageWithPendingHistory = if (pendingHistory.isNotEmpty()) {
+                message.copy(historyItems = pendingHistory.toList() + message.historyItems).also {
+                    pendingHistory.clear()
+                }
+            } else {
+                message
+            }
+            messages += messageWithPendingHistory
+        } else {
+            item.toHistoryItemPreview()?.let { historyItem ->
+                if (messages.lastOrNull()?.author == MessageAuthor.Assistant) {
+                    val last = messages.last()
+                    messages[messages.lastIndex] = last.copy(
+                        historyItems = last.historyItems + historyItem,
+                    )
+                } else {
+                    pendingHistory += historyItem
+                }
+            }
+        }
+    }
+    if (pendingHistory.isNotEmpty()) {
+        val lastAssistantIndex = messages.indexOfLast { it.author == MessageAuthor.Assistant }
+        if (lastAssistantIndex >= 0) {
+            val lastAssistant = messages[lastAssistantIndex]
+            messages[lastAssistantIndex] = lastAssistant.copy(
+                historyItems = lastAssistant.historyItems + pendingHistory,
+            )
+        } else {
+            messages += MessagePreview(
+                author = MessageAuthor.Assistant,
+                status = null,
+                timeLabel = startedAt?.let(::shortTimeLabel).orEmpty(),
+                text = "",
+                richText = "",
+                historyItems = pendingHistory.toList(),
+            )
+        }
+    }
+    return messages
 }
 
 private fun SupervisorThreadTurnItem.toMessagePreview(startedAt: String?): MessagePreview? {
@@ -415,6 +466,116 @@ private fun SupervisorThreadTurnItem.toMessagePreview(startedAt: String?): Messa
         text = text,
         richText = text,
     )
+}
+
+private fun SupervisorThreadTurnItem.toHistoryItemPreview(): HistoryItemPreview? {
+    val itemKind = kind.toHistoryItemKind() ?: return null
+    val summaryText = previewText?.takeIf { it.isNotBlank() }
+        ?: text.takeIf { it.isNotBlank() }
+        ?: detailText?.lineSequence()?.firstOrNull { it.isNotBlank() }
+        ?: itemKind.defaultHistorySummary()
+    return HistoryItemPreview(
+        id = id.takeIf { it.isNotBlank() },
+        kind = itemKind,
+        title = historyItemTitle(itemKind, this),
+        status = status.toToolStatus(),
+        summary = summaryText,
+        detail = detailText,
+        actionLabel = itemKind.defaultHistoryActionLabel(),
+        meta = historyItemMeta(itemKind, this),
+        changedFiles = changedFiles,
+        addedLines = addedLines,
+        removedLines = removedLines,
+        assetPath = assetPath,
+        imageLabel = previewText?.takeIf { it.isNotBlank() },
+        hookEventLabel = hookEventLabel,
+        hookStatusMessage = hookStatusMessage,
+        hookOutput = hookOutput,
+        artifactType = artifactType,
+        artifactTitle = artifactTitle,
+        artifactSummary = artifactSummary,
+        artifactHasRenderer = artifactHasRenderer,
+        hasDeferredDetail = hasDeferredDetail,
+    )
+}
+
+private fun String.toHistoryItemKind(): HistoryItemKind? {
+    return when (this) {
+        "artifact" -> HistoryItemKind.Artifact
+        "image" -> HistoryItemKind.Image
+        "plan" -> HistoryItemKind.Plan
+        "contextCompaction" -> HistoryItemKind.Context
+        "commandExecution" -> HistoryItemKind.Command
+        "webSearch" -> HistoryItemKind.WebSearch
+        "fileRead" -> HistoryItemKind.FileRead
+        "fileChange" -> HistoryItemKind.FileChange
+        "hook" -> HistoryItemKind.Hook
+        "agentToolCall" -> HistoryItemKind.AgentTool
+        "skillToolCall" -> HistoryItemKind.SkillTool
+        "toolCall" -> HistoryItemKind.ToolCall
+        "reasoning",
+        "other",
+        -> HistoryItemKind.Generic
+        else -> null
+    }
+}
+
+private fun String?.toToolStatus(): ToolStatus? {
+    return when (this?.lowercase(Locale.US)) {
+        "running", "started", "in_progress" -> ToolStatus.Running
+        "completed", "complete", "done", "success", "succeeded" -> ToolStatus.Completed
+        "failed", "error", "errored" -> ToolStatus.Failed
+        else -> null
+    }
+}
+
+private fun HistoryItemKind.defaultHistorySummary(): String {
+    return when (this) {
+        HistoryItemKind.Image -> "Image generated"
+        HistoryItemKind.FileChange -> "File changes"
+        HistoryItemKind.FileRead -> "File read"
+        HistoryItemKind.Command -> "Command execution"
+        HistoryItemKind.WebSearch -> "Web search"
+        HistoryItemKind.Artifact -> "Artifact"
+        HistoryItemKind.Hook -> "Hook"
+        else -> "Thread event"
+    }
+}
+
+private fun HistoryItemKind.defaultHistoryActionLabel(): String? {
+    return when (this) {
+        HistoryItemKind.Command -> "Command Output"
+        HistoryItemKind.WebSearch -> "Web Search Details"
+        HistoryItemKind.FileRead -> "File Read Details"
+        HistoryItemKind.FileChange -> "File Change Details"
+        HistoryItemKind.ToolCall -> "Tool Call Details"
+        HistoryItemKind.AgentTool -> "Agent Details"
+        HistoryItemKind.SkillTool -> "Skill Details"
+        else -> null
+    }
+}
+
+private fun historyItemTitle(kind: HistoryItemKind, item: SupervisorThreadTurnItem): String {
+    return when (kind) {
+        HistoryItemKind.Image -> item.assetPath?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Image"
+        HistoryItemKind.Artifact -> item.artifactTitle?.takeIf { it.isNotBlank() } ?: "Artifact"
+        HistoryItemKind.Hook -> item.hookEventLabel?.takeIf { it.isNotBlank() } ?: "Hook"
+        HistoryItemKind.FileChange,
+        HistoryItemKind.FileRead,
+        -> item.previewText?.takeIf { it.isNotBlank() } ?: item.text.takeIf { it.isNotBlank() } ?: kind.defaultHistorySummary()
+        else -> item.text.lineSequence().firstOrNull { it.isNotBlank() }
+            ?: item.previewText?.takeIf { it.isNotBlank() }
+            ?: kind.defaultHistorySummary()
+    }
+}
+
+private fun historyItemMeta(kind: HistoryItemKind, item: SupervisorThreadTurnItem): String? {
+    return when (kind) {
+        HistoryItemKind.Image -> item.assetPath
+        HistoryItemKind.Artifact -> item.artifactType
+        HistoryItemKind.Hook -> item.hookStatusMessage
+        else -> item.status
+    }?.takeIf { it.isNotBlank() }
 }
 
 private fun SupervisorThreadTurnTokenUsage.toTokenSummary(): String {
