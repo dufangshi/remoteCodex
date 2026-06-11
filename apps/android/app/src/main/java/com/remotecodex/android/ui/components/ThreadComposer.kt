@@ -159,12 +159,14 @@ fun ThreadComposer(
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
     var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
+    var fastModeSelected by remember(composer.fastMode) { mutableStateOf(composer.fastMode) }
     var goalComposeMode by remember(composer.goalComposeMode, composer.goalPanel.composeMode) {
         mutableStateOf(composer.goalComposeMode || composer.goalPanel.composeMode)
     }
     var goalLocalError by remember(composer.goalPanel.localError) { mutableStateOf(composer.goalPanel.localError) }
     var goalPreviewStatus by remember { mutableStateOf<String?>(null) }
     var currentGoalPreview by remember(composer.goalPanel.currentGoal) { mutableStateOf(composer.goalPanel.currentGoal) }
+    var fastModePreviewStatus by remember { mutableStateOf<String?>(null) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -204,7 +206,7 @@ fun ThreadComposer(
         supportedReasoningEffortCount = composer.supportedReasoningEffortCount,
         modelOptionCount = composer.modelOptions.size,
         settingsBusy = composer.settingsBusy,
-        fastMode = composer.fastMode,
+        fastMode = fastModeSelected,
         planModeAvailable = composer.planModeAvailable,
         planModeActive = planModeSelected,
     )
@@ -242,7 +244,7 @@ fun ThreadComposer(
     )
     val toolboxItems = buildComposerToolboxItems(
         items = composer.toolboxItems,
-        fastMode = composer.fastMode,
+        fastMode = fastModeSelected,
         compactBusy = composer.compactBusy,
         goalComposeMode = goalComposeMode,
         goalStatus = composer.goalStatus,
@@ -270,7 +272,7 @@ fun ThreadComposer(
             composeMode = goalComposeMode,
             localError = goalLocalError,
             currentGoal = currentGoalPreview,
-            fastMode = composer.fastMode || composer.goalPanel.fastMode,
+            fastMode = fastModeSelected || composer.goalPanel.fastMode,
         ),
     )
     val frameState = buildComposerFrameState(
@@ -414,7 +416,15 @@ fun ThreadComposer(
                                 slashPanelView = ComposerSlashPanelViewState.Root
                                 openMenu = null
                             }
-                            ComposerToolboxActionDecisionKind.ToggleFast,
+                            ComposerToolboxActionDecisionKind.ToggleFast -> {
+                                val nextFastMode = actionDecision.targetFastMode ?: !fastModeSelected
+                                fastModeSelected = nextFastMode
+                                fastModePreviewStatus = if (nextFastMode) {
+                                    "Fast mode preview on"
+                                } else {
+                                    "Fast mode preview off"
+                                }
+                            }
                             ComposerToolboxActionDecisionKind.Noop,
                             -> Unit
                         }
@@ -474,6 +484,9 @@ fun ThreadComposer(
             ComposerPreviewFeedback(message = status)
         }
         goalPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
+        fastModePreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
         ComposerToolbarRow(

@@ -1,11 +1,13 @@
 package com.remotecodex.android.ui.components
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
@@ -255,6 +257,30 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Plan pressed").assertExists()
         composeRule.onNodeWithContentDescription("Plan pressed").performClick()
         composeRule.onNodeWithContentDescription("Plan not pressed").assertExists()
+    }
+
+    @Test
+    fun fastToolboxActionTogglesPreviewStateAndSettingsLock() {
+        setComposerContent(composer = ComposerPreview(fastMode = false))
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithText("Off").assertExists()
+
+        composeRule.onNodeWithContentDescription("Fast mode").performClick()
+
+        composeRule.onNodeWithText("Fast mode preview on").assertExists()
+        composeRule.onNodeWithText("On").assertExists()
+        composeRule.onNode(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription,
+                "Fast mode is on. Turn it off from the slash toolbox to edit model.",
+            ),
+        ).assertExists()
+
+        composeRule.onNodeWithContentDescription("Fast mode").performClick()
+
+        composeRule.onNodeWithText("Fast mode preview off").assertExists()
+        composeRule.onNodeWithText("Off").assertExists()
     }
 
     @Test
