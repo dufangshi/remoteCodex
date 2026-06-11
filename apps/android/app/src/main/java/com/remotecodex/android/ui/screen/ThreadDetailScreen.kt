@@ -115,9 +115,14 @@ fun ThreadDetailScreen(
     var pendingWorkspaceUploadNote by remember(threadId) { mutableStateOf(false) }
     var pendingWorkspaceUploadFile by remember(threadId) { mutableStateOf<UploadWorkspaceFileRequest?>(null) }
     var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingLoadEarlier by remember(threadId) { mutableStateOf(false) }
+    var loadingEarlier by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var openDetail by remember(threadId) { mutableStateOf<DetailPreview?>(null) }
     var pendingDetailRequest by remember(threadId) { mutableStateOf<DetailRequest?>(null) }
+    var detailCache by remember(threadId) {
+        mutableStateOf<Map<String, DetailPreview>>(emptyMap())
+    }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
     var threadActionBusy by remember(threadId) { mutableStateOf(false) }
@@ -273,27 +278,35 @@ fun ThreadDetailScreen(
                 pendingDetailRequest = null
             }
             is DetailRequest.HistoryItem -> {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching {
-                        client.fetchThreadHistoryItemDetail(
-                            threadId = threadId,
-                            itemId = request.itemId,
-                        )
+                val cached = detailCache[request.itemId]
+                if (cached != null) {
+                    pendingDetailRequest = null
+                    openDetail = cached
+                } else {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            client.fetchThreadHistoryItemDetail(
+                                threadId = threadId,
+                                itemId = request.itemId,
+                            )
+                        }
                     }
+                    pendingDetailRequest = null
+                    result
+                        .onSuccess { item ->
+                            val detailPreview = DetailPreview(
+                                title = item.title.ifBlank { request.fallback.title },
+                                text = item.text.ifBlank { request.fallback.text },
+                            )
+                            detailCache = detailCache + (request.itemId to detailPreview)
+                            openDetail = detailPreview
+                        }
+                        .onFailure { throwable ->
+                            openDetail = request.fallback.copy(
+                                text = request.fallback.text + "\n\nDetail load failed: " + (throwable.message ?: "Unknown error."),
+                            )
+                        }
                 }
-                pendingDetailRequest = null
-                result
-                    .onSuccess { item ->
-                        openDetail = DetailPreview(
-                            title = item.title.ifBlank { request.fallback.title },
-                            text = item.text.ifBlank { request.fallback.text },
-                        )
-                    }
-                    .onFailure { throwable ->
-                        openDetail = request.fallback.copy(
-                            text = request.fallback.text + "\n\nDetail load failed: " + (throwable.message ?: "Unknown error."),
-                        )
-                    }
             }
             is DetailRequest.ImageAsset -> {
                 val result = withContext(Dispatchers.IO) {
@@ -721,6 +734,37 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Workspace upload failed." }
     }
 
+    LaunchedEffect(pendingLoadEarlier) {
+        if (!pendingLoadEarlier) return@LaunchedEffect
+        val currentState = threadProjectionState
+        val beforeTurnId = currentState?.detail?.turns?.firstOrNull()?.id
+        if (currentState == null || beforeTurnId.isNullOrBlank()) {
+            pendingLoadEarlier = false
+            return@LaunchedEffect
+        }
+        loadingEarlier = true
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.fetchThreadDetail(threadId, limit = 10, beforeTurnId = beforeTurnId)
+            }
+        }
+        pendingLoadEarlier = false
+        loadingEarlier = false
+        result
+            .onSuccess { page ->
+                val merged = mergeEarlierThreadDetail(currentState.detail, page)
+                threadProjectionState = ThreadProjectionState(detail = merged)
+                detail = detail?.let { currentPreview ->
+                    mergeThreadEventPreview(
+                        current = currentPreview,
+                        next = buildThreadDetailPreviewFromSupervisor(merged),
+                    )
+                } ?: buildThreadDetailPreviewFromSupervisor(merged)
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Earlier history failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -811,9 +855,14 @@ fun ThreadDetailScreen(
     }
 
     val currentDetail = detail?.let { preview ->
-        workspaceActionMessage?.let { message ->
+        val withWorkspaceMessage = workspaceActionMessage?.let { message ->
             preview.copy(workspacePreview = preview.workspacePreview.copy(statusMessage = message))
         } ?: preview
+        withWorkspaceMessage.copy(
+            timelineAuxiliary = withWorkspaceMessage.timelineAuxiliary.copy(
+                loadingEarlier = loadingEarlier,
+            ),
+        )
     }
     if (currentDetail != null) {
         ThreadDetailSurface(
@@ -912,6 +961,11 @@ fun ThreadDetailScreen(
             },
             onSubmitPendingRequest = { request, answers ->
                 pendingRequestResponse = PendingRequestResponse(request = request, answers = answers)
+            },
+            onLoadEarlier = {
+                if (!loadingEarlier) {
+                    pendingLoadEarlier = true
+                }
             },
             onRenameThread = { title ->
                 if (!threadActionBusy) {
@@ -1057,6 +1111,19 @@ private fun mergeThreadEventPreview(
             mcpPanel = current.composer.mcpPanel,
             hooksPanel = current.composer.hooksPanel,
         ),
+    )
+}
+
+private fun mergeEarlierThreadDetail(
+    current: SupervisorThreadDetail,
+    earlier: SupervisorThreadDetail,
+): SupervisorThreadDetail {
+    val existingIds = current.turns.map { it.id }.toSet()
+    val mergedTurns = earlier.turns.filterNot { it.id in existingIds } + current.turns
+    return current.copy(
+        turns = mergedTurns,
+        turnCount = mergedTurns.size,
+        totalTurnCount = maxOf(current.totalTurnCount, earlier.totalTurnCount, mergedTurns.size),
     )
 }
 

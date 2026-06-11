@@ -666,6 +666,7 @@ class SupervisorApiClientTest {
         assertEquals("thread-1", thread.id)
         assertEquals("Android API", detail.thread.title)
         assertEquals(1, detail.turnCount)
+        assertEquals(1, detail.totalTurnCount)
         assertEquals(1, detail.liveItemCount)
         assertEquals(1, detail.pendingRequests.size)
         assertEquals("question-1", detail.pendingRequests.single().questions.single().id)
@@ -702,6 +703,33 @@ class SupervisorApiClientTest {
         )
         assertEquals("POST", transport.requests[4].method)
         assertTrue(transport.requests[4].body!!.contains("\"question-1\":{\"answers\":[\"Implement\"]}"))
+    }
+
+    @Test
+    fun fetchThreadDetailUsesBeforeTurnIdAndParsesTotalTurnCount() {
+        val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
+        val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
+        val detailJson = """{"thread":$threadJson,"workspace":$workspaceJson,"workspacePathStatus":"present","turns":[{"id":"turn-older","startedAt":null,"status":"completed","error":null,"items":[{"id":"item-older","kind":"agentMessage","text":"Older reply"}]}],"totalTurnCount":12,"pendingRequests":[],"answeredRequestNotes":[],"pendingSteers":[],"liveItems":{"items":[]}}"""
+        val transport = RecordingTransport(SupervisorHttpResponse(200, detailJson))
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val detail = client.fetchThreadDetail("thread-1", limit = 10, beforeTurnId = "turn-current")
+
+        assertEquals(1, detail.turnCount)
+        assertEquals(12, detail.totalTurnCount)
+        assertEquals("turn-older", detail.turns.single().id)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1?limit=10&beforeTurnId=turn-current",
+            transport.requests.single().url,
+        )
     }
 
     @Test

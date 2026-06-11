@@ -102,6 +102,7 @@ class ThreadDetailMapperTest {
                     ),
                 ),
                 turnCount = 1,
+                totalTurnCount = 3,
                 pendingRequests = listOf(
                     SupervisorThreadActionRequest(
                         id = "request-1",
@@ -220,6 +221,7 @@ class ThreadDetailMapperTest {
         assertEquals("6 transcript items", preview.items)
         assertEquals(ThreadStatus.Running, preview.rooms.single().status)
         assertEquals("1m", preview.rooms.single().updatedLabel)
+        assertTrue(preview.timelineAuxiliary.canLoadEarlier)
         assertEquals("Goal", preview.timelineAuxiliary.activityNotes.single().title)
         assertEquals("Pick a branch", preview.pendingRequests.single().title)
         assertEquals("question-1", preview.pendingRequests.single().questions.single().id)

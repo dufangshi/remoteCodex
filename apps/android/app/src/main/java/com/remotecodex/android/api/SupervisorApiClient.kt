@@ -942,6 +942,7 @@ private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
         workspace = workspaceJson.toWorkspaceSummary(),
         turns = parsedTurns,
         turnCount = optJSONArray("turns")?.length() ?: 0,
+        totalTurnCount = optInt("totalTurnCount", parsedTurns.size),
         pendingRequests = (optJSONArray("pendingRequests") ?: org.json.JSONArray()).let { array ->
             List(array.length()) { index -> array.getJSONObject(index).toThreadActionRequest() }
         },

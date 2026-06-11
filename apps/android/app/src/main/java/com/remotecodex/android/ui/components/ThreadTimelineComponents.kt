@@ -131,6 +131,7 @@ fun ThreadTimeline(
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
     pendingRequests: List<PendingRequestPreview> = emptyList(),
     onOpenDetail: (DetailRequest) -> Unit = {},
+    onLoadEarlier: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
 ) {
@@ -173,7 +174,10 @@ fun ThreadTimeline(
         }
         if (auxiliary.canLoadEarlier) {
             item(key = "load-earlier") {
-                LoadEarlierRow(loading = auxiliary.loadingEarlier)
+                LoadEarlierRow(
+                    loading = auxiliary.loadingEarlier,
+                    onClick = onLoadEarlier,
+                )
             }
         }
         items(turns, key = { it.index }) { turn ->
@@ -321,13 +325,19 @@ private fun TurnCollapseButton(
 }
 
 @Composable
-private fun LoadEarlierRow(loading: Boolean) {
+private fun LoadEarlierRow(
+    loading: Boolean,
+    onClick: (() -> Unit)?,
+) {
+    val enabled = !loading && onClick != null
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(999.dp))
             .background(ThreadColors.Panel)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .then(if (enabled) Modifier.clickable { onClick?.invoke() } else Modifier)
+            .semantics { contentDescription = if (loading) "Loading earlier history" else "Load earlier history" }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

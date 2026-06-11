@@ -128,6 +128,7 @@ private fun reduceTurnStarted(
         state = state.withDetail(detail.copy(
             turns = detail.turns + turn,
             turnCount = maxOf(detail.turnCount, detail.turns.size + 1),
+            totalTurnCount = maxOf(detail.totalTurnCount, detail.turns.size + 1),
             thread = detail.thread.copy(status = "running", updatedAt = event.timestamp ?: detail.thread.updatedAt),
         )),
     )

@@ -371,6 +371,7 @@ data class SupervisorThreadDetail(
     val workspace: SupervisorWorkspaceSummary,
     val turns: List<SupervisorThreadTurn>,
     val turnCount: Int,
+    val totalTurnCount: Int,
     val pendingRequests: List<SupervisorThreadActionRequest>,
     val answeredRequestNotes: List<SupervisorThreadAnsweredRequestNote>,
     val liveItemCount: Int,

@@ -120,6 +120,7 @@ fun buildThreadDetailPreviewFromSupervisor(
         ),
         turns = turns,
         timelineAuxiliary = TimelineAuxiliaryPreview(
+            canLoadEarlier = detail.totalTurnCount > detail.turns.size,
             activityNotes = listOfNotNull(goalNote),
             answeredRequestNotes = detail.answeredRequestNotes.map { note ->
                 TimelineNotePreview(

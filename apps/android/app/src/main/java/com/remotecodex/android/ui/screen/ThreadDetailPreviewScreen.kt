@@ -134,6 +134,7 @@ fun ThreadDetailSurface(
     onUploadWorkspaceNote: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
+    onLoadEarlier: (() -> Unit)? = null,
     onRenameThread: ((String) -> Unit)? = null,
     onDeleteThread: (() -> Unit)? = null,
     submittingPrompt: Boolean = false,
@@ -232,6 +233,7 @@ fun ThreadDetailSurface(
                                 },
                                 onDenyPendingRequest = onDenyPendingRequest,
                                 onSubmitPendingRequest = onSubmitPendingRequest,
+                                onLoadEarlier = onLoadEarlier,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Workspace -> WorkspacePanel(
@@ -404,6 +406,7 @@ private fun ChatPreviewSurface(
     detail: ThreadDetailPreview,
     timelineListState: androidx.compose.foundation.lazy.LazyListState,
     onOpenDetail: (DetailRequest) -> Unit,
+    onLoadEarlier: (() -> Unit)?,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit,
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit,
     modifier: Modifier = Modifier,
@@ -417,6 +420,7 @@ private fun ChatPreviewSurface(
             auxiliary = detail.timelineAuxiliary,
             pendingRequests = detail.pendingRequests,
             onOpenDetail = onOpenDetail,
+            onLoadEarlier = onLoadEarlier,
             onDenyPendingRequest = onDenyPendingRequest,
             onSubmitPendingRequest = onSubmitPendingRequest,
             modifier = Modifier.weight(1f),

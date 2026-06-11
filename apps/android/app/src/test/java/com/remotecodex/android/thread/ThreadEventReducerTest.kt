@@ -325,6 +325,7 @@ class ThreadEventReducerTest {
             ),
             turns = turns,
             turnCount = turns.size,
+            totalTurnCount = turns.size,
             pendingRequests = pendingRequests,
             answeredRequestNotes = emptyList(),
             liveItemCount = 0,
