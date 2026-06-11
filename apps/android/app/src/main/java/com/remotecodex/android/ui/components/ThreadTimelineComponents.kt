@@ -1233,7 +1233,11 @@ private fun HistoryItemCard(
         }
         when (item.kind) {
             HistoryItemKind.Hook -> HookHistorySummaryRow(item = item, colors = colors)
-            HistoryItemKind.Artifact -> ArtifactHistorySummaryBlock(item = item, colors = colors)
+            HistoryItemKind.Artifact -> ArtifactHistorySummaryBlock(
+                item = item,
+                colors = colors,
+                onOpenDetail = onOpenDetail,
+            )
             else -> {
                 Text(
                     text = historyItemSummary(item),
@@ -1278,7 +1282,7 @@ private fun HistoryItemCard(
         if (item.kind == HistoryItemKind.Image) {
             ImageHistoryPreview(item = item, colors = colors, onOpenDetail = onOpenDetail)
         }
-        item.detail?.let { detail ->
+        item.detail?.takeIf { item.kind != HistoryItemKind.Artifact }?.let { detail ->
             Text(
                 text = detail,
                 modifier = Modifier
@@ -1299,7 +1303,7 @@ private fun HistoryItemCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            item.actionLabel?.let { label ->
+            item.actionLabel?.takeIf { item.kind != HistoryItemKind.Artifact }?.let { label ->
                 GraphButton(
                     label = label,
                     variant = GraphButtonVariant.Ghost,
@@ -1336,6 +1340,7 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
 private fun ArtifactHistorySummaryBlock(
     item: HistoryItemPreview,
     colors: HistoryItemColors,
+    onOpenDetail: (DetailPreview) -> Unit,
 ) {
     var expanded by remember(item.summary, item.detail, item.artifactTitle, item.artifactSummary) { mutableStateOf(false) }
     val summary = artifactHistorySummary(
@@ -1383,6 +1388,30 @@ private fun ArtifactHistorySummaryBlock(
                 maxLines = 1,
             )
         }
+        if (summary.rendererLabel != null || item.actionLabel != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                summary.rendererLabel?.let { label ->
+                    GraphBadge(
+                        label = label,
+                        variant = GraphBadgeVariant.Outline,
+                    )
+                }
+                item.actionLabel?.let { label ->
+                    GraphButton(
+                        label = label,
+                        variant = GraphButtonVariant.Ghost,
+                        icon = GraphActionIcon.Package,
+                        contentDescription = "Open artifact inspector for ${summary.title}",
+                        onClick = { openHistoryItemDetail(item, null, onOpenDetail) },
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1396,14 +1425,6 @@ private fun ArtifactHistorySummaryBlock(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            summary.rendererLabel?.let { label ->
-                Text(
-                    text = label,
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                )
-            }
             Text(
                 text = if (expanded) "Hide" else "Open",
                 modifier = Modifier
@@ -1624,15 +1645,15 @@ private fun HistoryKindGlyph(kind: HistoryItemKind, color: Color) {
                     line(0.58f, 0.66f, 0.70f, 0.54f)
                 }
                 HistoryItemKind.Artifact -> {
-                    line(0.26f, 0.34f, 0.50f, 0.20f)
-                    line(0.50f, 0.20f, 0.74f, 0.34f)
-                    line(0.74f, 0.34f, 0.74f, 0.64f)
-                    line(0.74f, 0.64f, 0.50f, 0.80f)
-                    line(0.50f, 0.80f, 0.26f, 0.64f)
-                    line(0.26f, 0.64f, 0.26f, 0.34f)
-                    line(0.26f, 0.34f, 0.50f, 0.50f)
-                    line(0.74f, 0.34f, 0.50f, 0.50f)
-                    line(0.50f, 0.50f, 0.50f, 0.80f)
+                    line(0.22f, 0.36f, 0.50f, 0.20f)
+                    line(0.50f, 0.20f, 0.78f, 0.36f)
+                    line(0.78f, 0.36f, 0.50f, 0.52f)
+                    line(0.50f, 0.52f, 0.22f, 0.36f)
+                    line(0.22f, 0.36f, 0.22f, 0.66f)
+                    line(0.22f, 0.66f, 0.50f, 0.82f)
+                    line(0.50f, 0.82f, 0.78f, 0.66f)
+                    line(0.78f, 0.66f, 0.78f, 0.36f)
+                    line(0.50f, 0.52f, 0.50f, 0.82f)
                 }
                 HistoryItemKind.AgentTool -> {
                     drawCircle(color, radius = w * 0.25f, center = Offset(w * 0.50f, h * 0.52f), style = stroke)

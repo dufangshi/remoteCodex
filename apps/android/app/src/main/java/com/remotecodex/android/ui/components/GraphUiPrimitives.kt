@@ -91,6 +91,7 @@ enum class GraphActionIcon {
     Export,
     Delete,
     Open,
+    Package,
 }
 
 enum class GraphSelectionTone {
@@ -560,6 +561,17 @@ private fun GraphActionGlyph(
                 line(0.50f, 0.22f, 0.82f, 0.22f)
                 line(0.82f, 0.22f, 0.82f, 0.54f)
                 line(0.48f, 0.56f, 0.82f, 0.22f)
+            }
+            GraphActionIcon.Package -> {
+                line(0.22f, 0.36f, 0.50f, 0.20f)
+                line(0.50f, 0.20f, 0.78f, 0.36f)
+                line(0.78f, 0.36f, 0.50f, 0.52f)
+                line(0.50f, 0.52f, 0.22f, 0.36f)
+                line(0.22f, 0.36f, 0.22f, 0.66f)
+                line(0.22f, 0.66f, 0.50f, 0.82f)
+                line(0.50f, 0.82f, 0.78f, 0.66f)
+                line(0.78f, 0.66f, 0.78f, 0.36f)
+                line(0.50f, 0.52f, 0.50f, 0.82f)
             }
         }
     }

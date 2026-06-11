@@ -338,6 +338,18 @@ object ThreadPreviewSample {
                                 artifactSummary = "XYZ, 9 atoms, 1 frame",
                             ),
                             HistoryItemPreview(
+                                kind = HistoryItemKind.Artifact,
+                                title = "custom.timeline.snapshot",
+                                status = ToolStatus.Completed,
+                                summary = "Custom timeline artifact captured for plugin inspection.",
+                                detail = """{"type":"custom.timeline.snapshot","items":12,"renderer":null}""",
+                                actionLabel = "Inspect",
+                                artifactType = "custom.timeline.snapshot",
+                                artifactTitle = "Timeline snapshot",
+                                artifactSummary = "12 items, plugin renderer unavailable",
+                                artifactHasRenderer = false,
+                            ),
+                            HistoryItemPreview(
                                 kind = HistoryItemKind.Image,
                                 title = "image",
                                 status = ToolStatus.Completed,
