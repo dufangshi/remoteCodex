@@ -176,6 +176,7 @@ fun ThreadComposer(
     var goalLocalError by remember(composer.goalPanel.localError) { mutableStateOf(composer.goalPanel.localError) }
     var goalPreviewStatus by remember { mutableStateOf<String?>(null) }
     var currentGoalPreview by remember(composer.goalPanel.currentGoal) { mutableStateOf(composer.goalPanel.currentGoal) }
+    var promptPreviewStatus by remember { mutableStateOf<String?>(null) }
     var fastModePreviewStatus by remember { mutableStateOf<String?>(null) }
     var compactBusyPreview by remember(composer.compactBusy) { mutableStateOf(composer.compactBusy) }
     var compactPreviewStatus by remember { mutableStateOf<String?>(null) }
@@ -234,6 +235,19 @@ fun ThreadComposer(
         goalComposeMode = goalComposeMode,
         goalBusy = composer.goalPanel.busy,
     )
+    val sendButtonState = if (
+        activeViewPreview == ComposerActiveView.Chat &&
+        !goalComposeMode &&
+        settingsToolbarState.sendButton.primaryKind == ComposerPrimaryActionKind.Send &&
+        submitInputState == null
+    ) {
+        settingsToolbarState.sendButton.copy(
+            enabled = false,
+            title = "Nothing to send",
+        )
+    } else {
+        settingsToolbarState.sendButton
+    }
     val toolbarState = buildComposerToolbarState(
         activeView = activeViewPreview,
         openMenu = openMenu.toToolbarMenuState(),
@@ -533,6 +547,9 @@ fun ThreadComposer(
         goalPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
+        promptPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         fastModePreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
@@ -578,6 +595,14 @@ fun ThreadComposer(
             shellDraft = shellDraft,
             goalPanelState = goalPanelState,
             onRemoveAttachment = removeAttachmentPreview,
+            onPromptChange = { value ->
+                draftPrompt = draftPrompt.copy(
+                    text = value,
+                    attachments = draftPrompt.attachments.filter { attachment ->
+                        value.contains(attachment.placeholder)
+                    },
+                )
+            },
             onShellDraftChange = { value ->
                 shellDraft = value
             },
@@ -651,7 +676,29 @@ fun ThreadComposer(
             }
             ComposerActionControls(
                 actionState = actionState,
-                sendButtonState = settingsToolbarState.sendButton,
+                sendButtonState = sendButtonState,
+                onInterrupt = {
+                    promptPreviewStatus = "Stop current turn preview"
+                },
+                onPrimaryAction = {
+                    when (sendButtonState.primaryKind) {
+                        ComposerPrimaryActionKind.Stop -> {
+                            promptPreviewStatus = "Stop current turn preview"
+                        }
+                        ComposerPrimaryActionKind.Connecting -> Unit
+                        ComposerPrimaryActionKind.Send -> {
+                            if (sendButtonState.enabled) {
+                                val promptText = draftPrompt.text.trim()
+                                promptPreviewStatus = if (promptText.isEmpty()) {
+                                    "Prompt preview sent"
+                                } else {
+                                    "Prompt preview sent: $promptText"
+                                }
+                                draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                            }
+                        }
+                    }
+                },
             )
         }
     }
@@ -886,6 +933,7 @@ private fun ComposerFrameSlotsPreview(
     shellDraft: String,
     goalPanelState: ComposerGoalPanelState,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
+    onPromptChange: (String) -> Unit,
     onShellDraftChange: (String) -> Unit,
     onShellInterrupt: () -> Unit,
     onShellSend: () -> Unit,
@@ -903,6 +951,7 @@ private fun ComposerFrameSlotsPreview(
                 promptSlotState = promptSlotState,
                 submitReady = submitReady,
                 onRemoveAttachment = onRemoveAttachment,
+                onPromptChange = onPromptChange,
             )
         }
         if (frameState.showGoalSlot) {
@@ -1134,6 +1183,7 @@ private fun ComposerInputGroupPreview(
     promptSlotState: ComposerPromptSlotState,
     submitReady: Boolean,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
+    onPromptChange: (String) -> Unit,
 ) {
     GraphInputGroup(
         blockStart = {
@@ -1153,7 +1203,10 @@ private fun ComposerInputGroupPreview(
             }
         },
         control = {
-            ComposerPromptControl(state = promptSlotState)
+            ComposerPromptControl(
+                state = promptSlotState,
+                onValueChange = onPromptChange,
+            )
             ContextProgressPreview(contextState = contextState)
         },
         blockEnd = {
@@ -1172,7 +1225,10 @@ private fun ComposerInputGroupPreview(
 }
 
 @Composable
-private fun ComposerPromptControl(state: ComposerPromptSlotState) {
+private fun ComposerPromptControl(
+    state: ComposerPromptSlotState,
+    onValueChange: (String) -> Unit,
+) {
     val foreground = if (state.disabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundSoft
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(
@@ -1180,13 +1236,55 @@ private fun ComposerPromptControl(state: ComposerPromptSlotState) {
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (state.showPlaceholder || state.promptSegments.isEmpty()) {
+            if (state.chatVisible) {
+                OutlinedTextField(
+                    value = state.text,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            contentDescription = "Prompt"
+                            if (state.disabled) {
+                                disabled()
+                            }
+                        },
+                    enabled = !state.disabled,
+                    minLines = 3,
+                    maxLines = 6,
+                    placeholder = {
+                        Text(
+                            text = state.placeholder,
+                            color = ThreadColors.ForegroundMuted,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = foreground),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = foreground,
+                        unfocusedTextColor = foreground,
+                        disabledTextColor = ThreadColors.ForegroundMuted,
+                        focusedContainerColor = ThreadColors.Surface,
+                        unfocusedContainerColor = ThreadColors.Surface,
+                        disabledContainerColor = ThreadColors.Surface.copy(alpha = 0.68f),
+                        cursorColor = ThreadColors.Primary,
+                        focusedBorderColor = ThreadColors.Info.copy(alpha = 0.54f),
+                        unfocusedBorderColor = ThreadColors.Border.copy(alpha = 0.68f),
+                        disabledBorderColor = ThreadColors.Border.copy(alpha = 0.46f),
+                        focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                        unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                        disabledPlaceholderColor = ThreadColors.ForegroundMuted.copy(alpha = 0.74f),
+                    ),
+                )
+            } else if (state.showPlaceholder || state.promptSegments.isEmpty()) {
                 Text(
                     text = if (state.showPlaceholder) state.placeholder else state.text,
                     modifier = Modifier.weight(1f),
                     color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else foreground,
-                    style = if (state.shellVisible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
-                    maxLines = if (state.shellVisible) 3 else 4,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             } else {
@@ -1651,23 +1749,39 @@ private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
 private fun ComposerActionControls(
     actionState: ComposerActionState,
     sendButtonState: ComposerSendButtonState,
+    onInterrupt: () -> Unit,
+    onPrimaryAction: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         if (actionState.showInterrupt) {
-            ComposerInterruptButton(label = actionState.interruptLabel)
+            ComposerInterruptButton(
+                label = actionState.interruptLabel,
+                onClick = onInterrupt,
+            )
         }
-        ComposerPrimaryActionButton(sendButtonState = sendButtonState)
+        ComposerPrimaryActionButton(
+            sendButtonState = sendButtonState,
+            onClick = onPrimaryAction,
+        )
     }
 }
 
 @Composable
-private fun ComposerInterruptButton(label: String) {
+private fun ComposerInterruptButton(
+    label: String,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+            }
             .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
             .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
             .border(1.dp, ThreadColors.Danger.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
             .padding(horizontal = 9.dp, vertical = 7.dp),
@@ -1692,7 +1806,10 @@ private fun ComposerInterruptButton(label: String) {
 }
 
 @Composable
-private fun ComposerPrimaryActionButton(sendButtonState: ComposerSendButtonState) {
+private fun ComposerPrimaryActionButton(
+    sendButtonState: ComposerSendButtonState,
+    onClick: () -> Unit,
+) {
     val enabled = sendButtonState.enabled
     val isStop = sendButtonState.primaryKind == ComposerPrimaryActionKind.Stop
     val isConnecting = sendButtonState.primaryKind == ComposerPrimaryActionKind.Connecting
@@ -1727,8 +1844,13 @@ private fun ComposerPrimaryActionButton(sendButtonState: ComposerSendButtonState
             .semantics {
                 contentDescription = sendButtonState.accessibilityLabel
                 stateDescription = sendButtonState.title
+                role = Role.Button
+                if (!enabled) {
+                    disabled()
+                }
             }
             .clip(RoundedCornerShape(999.dp))
+            .then(if (enabled || isStop) Modifier.clickable(onClick = onClick) else Modifier)
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = horizontalPadding, vertical = 8.dp),

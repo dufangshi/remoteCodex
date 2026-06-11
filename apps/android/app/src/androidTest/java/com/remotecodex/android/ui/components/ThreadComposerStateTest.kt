@@ -324,6 +324,44 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun chatPromptInputSendsLocalDraftPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Chat,
+                busy = false,
+                canInterrupt = false,
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithText("Nothing to send").assertExists()
+        composeRule.onNodeWithContentDescription("Send Prompt").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Prompt").performTextInput("Review the Android composer")
+        composeRule.onNodeWithContentDescription("Send Prompt").assertIsEnabled()
+        composeRule.onNodeWithContentDescription("Send Prompt").performClick()
+
+        composeRule.onNodeWithText("Prompt preview sent: Review the Android composer").assertExists()
+        composeRule.onNodeWithText("Nothing to send").assertExists()
+        composeRule.onNodeWithText("Review the Android composer").assertDoesNotExist()
+    }
+
+    @Test
+    fun chatPromptInputKeepsEmptyDraftSendDisabled() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Chat,
+                busy = false,
+                canInterrupt = false,
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Prompt").assertExists()
+        composeRule.onNodeWithContentDescription("Send Prompt").assertIsNotEnabled()
+        composeRule.onNodeWithText("Nothing to send").assertExists()
+    }
+
+    @Test
     fun viewToggleSwitchesBetweenChatAndShellPreviewSurfaces() {
         setComposerContent(composer = ComposerPreview(activeView = ComposerActiveView.Chat))
 
