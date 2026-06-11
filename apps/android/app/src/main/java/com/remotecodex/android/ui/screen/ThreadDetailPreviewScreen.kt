@@ -98,7 +98,11 @@ fun ThreadDetailSurface(
     onSubmitPrompt: ((String) -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
+    onRenameThread: ((String) -> Unit)? = null,
+    onDeleteThread: (() -> Unit)? = null,
     submittingPrompt: Boolean = false,
+    threadActionBusy: Boolean = false,
+    threadActionError: String? = null,
 ) {
     val detail = initialDetail
     var activeRoomId by remember {
@@ -275,6 +279,10 @@ fun ThreadDetailSurface(
                         threadActionDialog = null
                         threadActionRoom = null
                     },
+                    busy = threadActionBusy,
+                    error = threadActionError,
+                    onRenameThread = onRenameThread,
+                    onDeleteThread = onDeleteThread,
                     modifier = Modifier
                         .fillMaxSize()
                         .navigationBarsPadding(),

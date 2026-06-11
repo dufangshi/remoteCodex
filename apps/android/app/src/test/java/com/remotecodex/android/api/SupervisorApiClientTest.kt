@@ -256,6 +256,44 @@ class SupervisorApiClientTest {
         assertTrue(transport.requests[4].body!!.contains("\"question-1\":{\"answers\":[\"Implement\"]}"))
     }
 
+    @Test
+    fun threadRenameAndDeleteUseRelayDevicePath() {
+        val renamedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
+        val deletedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, renamedThreadJson),
+            SupervisorHttpResponse(200, deletedThreadJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val renamed = client.updateThread("thread-1", UpdateThreadRequest(title = "Renamed Android API"))
+        val deleted = client.deleteThread("thread-1")
+
+        assertEquals("Renamed Android API", renamed.title)
+        assertEquals("thread-1", deleted.id)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1",
+            transport.requests[0].url,
+        )
+        assertEquals("PATCH", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertTrue(transport.requests[0].body!!.contains("\"title\":\"Renamed Android API\""))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1",
+            transport.requests[1].url,
+        )
+        assertEquals("DELETE", transport.requests[1].method)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

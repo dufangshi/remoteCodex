@@ -121,6 +121,24 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun updateThread(threadId: String, request: UpdateThreadRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+            .put("title", request.title)
+            .toString()
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}"),
+            method = "PATCH",
+            body = body,
+        ).toThreadSummary()
+    }
+
+    fun deleteThread(threadId: String): SupervisorThreadSummary {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}"),
+            method = "DELETE",
+        ).toThreadSummary()
+    }
+
     fun respondToThreadRequest(
         threadId: String,
         requestId: String,

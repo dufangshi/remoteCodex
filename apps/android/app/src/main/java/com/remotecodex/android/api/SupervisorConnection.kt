@@ -248,6 +248,10 @@ data class SendThreadPromptRequest(
     val model: String? = null,
 )
 
+data class UpdateThreadRequest(
+    val title: String,
+)
+
 data class RespondThreadRequestAnswer(
     val answers: List<String>,
 )

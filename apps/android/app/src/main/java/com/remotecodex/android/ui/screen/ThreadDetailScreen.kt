@@ -27,6 +27,7 @@ import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
@@ -60,6 +61,10 @@ fun ThreadDetailScreen(
     var submittingPrompt by remember(threadId) { mutableStateOf(false) }
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingDelete by remember(threadId) { mutableStateOf(false) }
+    var threadActionBusy by remember(threadId) { mutableStateOf(false) }
+    var threadActionError by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRequestResponse by remember(threadId) {
         mutableStateOf<PendingRequestResponse?>(null)
     }
@@ -135,6 +140,44 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Request response failed." }
     }
 
+    LaunchedEffect(pendingRenameTitle) {
+        val title = pendingRenameTitle ?: return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.updateThread(threadId, UpdateThreadRequest(title = title))
+                client.fetchThreadDetail(threadId, limit = 30)
+            }
+        }
+        threadActionBusy = false
+        pendingRenameTitle = null
+        result
+            .onSuccess { dto ->
+                detail = buildThreadDetailPreviewFromSupervisor(dto)
+                refreshNonce += 1
+            }
+            .onFailure { throwable ->
+                threadActionError = throwable.message ?: "Rename failed."
+            }
+    }
+
+    LaunchedEffect(pendingDelete) {
+        if (!pendingDelete) return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { client.deleteThread(threadId) }
+        }
+        threadActionBusy = false
+        pendingDelete = false
+        result
+            .onSuccess { onBackToHome() }
+            .onFailure { throwable ->
+                threadActionError = throwable.message ?: "Delete failed."
+            }
+    }
+
     val currentDetail = detail
     if (currentDetail != null) {
         ThreadDetailSurface(
@@ -160,7 +203,19 @@ fun ThreadDetailScreen(
             onSubmitPendingRequest = { request, answers ->
                 pendingRequestResponse = PendingRequestResponse(request = request, answers = answers)
             },
+            onRenameThread = { title ->
+                if (!threadActionBusy) {
+                    pendingRenameTitle = title
+                }
+            },
+            onDeleteThread = {
+                if (!threadActionBusy) {
+                    pendingDelete = true
+                }
+            },
             submittingPrompt = submittingPrompt,
+            threadActionBusy = threadActionBusy,
+            threadActionError = threadActionError,
         )
         return
     }

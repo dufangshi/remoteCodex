@@ -53,6 +53,10 @@ fun ThreadActionDialogOverlay(
     exportTurns: List<ExportTurnPreview>,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    busy: Boolean = false,
+    error: String? = null,
+    onRenameThread: ((String) -> Unit)? = null,
+    onDeleteThread: (() -> Unit)? = null,
 ) {
     GraphDialogOverlay(
         onDismiss = onClose,
@@ -65,6 +69,9 @@ fun ThreadActionDialogOverlay(
             ThreadActionDialog.Rename -> RenameThreadDialogPreview(
                 threadTitle = threadTitle,
                 onClose = onClose,
+                busy = busy,
+                error = error,
+                onRenameThread = onRenameThread,
             )
             ThreadActionDialog.Export -> ExportTranscriptDialogPreview(
                 exportTurns = exportTurns,
@@ -73,6 +80,9 @@ fun ThreadActionDialogOverlay(
             ThreadActionDialog.Delete -> DeleteThreadDialogPreview(
                 threadTitle = threadTitle,
                 onClose = onClose,
+                busy = busy,
+                error = error,
+                onDeleteThread = onDeleteThread,
             )
         }
     }
@@ -127,18 +137,32 @@ private fun CreateThreadDialogPreview(
 private fun RenameThreadDialogPreview(
     threadTitle: String,
     onClose: () -> Unit,
+    busy: Boolean,
+    error: String?,
+    onRenameThread: ((String) -> Unit)?,
 ) {
     var titleDraft by rememberSaveable(threadTitle) { mutableStateOf(threadTitle) }
+    var previewBusy by rememberSaveable(threadTitle) { mutableStateOf(false) }
     val normalizedTitle = titleDraft.trim()
+    val saving = busy || previewBusy
+    val canSave = normalizedTitle.isNotEmpty() && !saving
     GraphDialogFrame(
         title = "Rename thread",
         subtitle = "Changes are saved only after confirmation.",
         onClose = onClose,
         footer = {
             GraphDialogFooter(
-                primaryLabel = "Save",
+                primaryLabel = if (saving) "Saving..." else "Save",
                 primaryTone = GraphDialogActionTone.Success,
                 onCancel = onClose,
+                primaryEnabled = canSave,
+                onPrimary = {
+                    if (onRenameThread != null) {
+                        onRenameThread(normalizedTitle)
+                    } else {
+                        previewBusy = true
+                    }
+                },
             )
         },
     ) {
@@ -165,6 +189,15 @@ private fun RenameThreadDialogPreview(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            error?.let { message ->
+                Text(
+                    text = message,
+                    color = ThreadColors.Danger,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -405,9 +438,13 @@ private fun ExportTranscriptDialogPreview(
 private fun DeleteThreadDialogPreview(
     threadTitle: String,
     onClose: () -> Unit,
+    busy: Boolean,
+    error: String?,
+    onDeleteThread: (() -> Unit)?,
 ) {
     var confirmed by rememberSaveable(threadTitle) { mutableStateOf(false) }
-    var deleteBusy by rememberSaveable(threadTitle) { mutableStateOf(false) }
+    var previewBusy by rememberSaveable(threadTitle) { mutableStateOf(false) }
+    val deleteBusy = busy || previewBusy
     val canDelete = confirmed && !deleteBusy
     GraphDialogFrame(
         title = "Delete thread",
@@ -419,7 +456,13 @@ private fun DeleteThreadDialogPreview(
                 primaryTone = GraphDialogActionTone.Danger,
                 onCancel = onClose,
                 primaryEnabled = canDelete,
-                onPrimary = { deleteBusy = true },
+                onPrimary = {
+                    if (onDeleteThread != null) {
+                        onDeleteThread()
+                    } else {
+                        previewBusy = true
+                    }
+                },
             )
         },
     ) {
@@ -487,6 +530,15 @@ private fun DeleteThreadDialogPreview(
                     color = if (confirmed) ThreadColors.Danger else ThreadColors.ForegroundSoft,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            error?.let { message ->
+                Text(
+                    text = message,
+                    color = ThreadColors.Danger,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
