@@ -102,4 +102,45 @@ class ThreadComposerMenuTest {
         assertNotNull(device.findObject(By.text("OpenAI Docs")))
         assertNotNull(device.findObject(By.text("Skill metadata incomplete")))
     }
+
+    @Test
+    fun slashToolboxRoutesToMcpPanel() {
+        val slashButton = device.wait(Until.findObject(By.desc("Open slash toolbox")), 5_000)
+            ?: error("Slash toolbox button was not visible")
+        slashButton.click()
+        assertNotNull(device.wait(Until.findObject(By.text("/mcp")), 2_000))
+
+        device.findObject(By.desc("MCP")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("/mcp")), 2_000))
+        assertNotNull(device.findObject(By.text("Add MCP")))
+        assertNotNull(device.findObject(By.text("MCP config source · ~/.codex/config.toml")))
+        assertNotNull(device.findObject(By.text("openaiDeveloperDocs")))
+        assertNotNull(device.findObject(By.text("4 tools · 0 resources · 0 templates")))
+        assertNotNull(device.findObject(By.text("Search docs · Fetch doc · OpenAPI spec · Endpoint list")))
+
+        assertNotNull(device.findObject(By.desc("Add MCP")))
+    }
+
+    @Test
+    fun slashToolboxRoutesToHooksPanel() {
+        val slashButton = device.wait(Until.findObject(By.desc("Open slash toolbox")), 5_000)
+            ?: error("Slash toolbox button was not visible")
+        slashButton.click()
+        assertNotNull(device.wait(Until.findObject(By.text("/hooks")), 2_000))
+
+        device.findObject(By.desc("Hooks")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("/hooks")), 2_000))
+        assertNotNull(device.findObject(By.text("Add Hook")))
+        assertNotNull(device.findObject(By.text("Hook config sources · .codex/hooks.json")))
+        assertNotNull(device.findObject(By.text("Project hook changed since last trust.")))
+        assertNotNull(device.findObject(By.text("PreToolUse · Bash")))
+        assertNotNull(device.findObject(By.text("Checking shell command")))
+        assertNotNull(device.findObject(By.text("Trust")))
+        assertNotNull(device.findObject(By.text("UserPromptSubmit")))
+        assertNotNull(device.findObject(By.text("Trusted")))
+
+        assertNotNull(device.findObject(By.desc("Add Hook")))
+    }
 }
