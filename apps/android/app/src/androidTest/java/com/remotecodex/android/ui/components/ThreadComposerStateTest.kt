@@ -268,6 +268,22 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun planModeChipStaysDisabledWhileSettingsAreBusy() {
+        setComposerContent(
+            composer = ComposerPreview(
+                planModeActive = false,
+                settingsBusy = true,
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Plan not pressed").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Plan not pressed").performClick()
+
+        composeRule.onNodeWithContentDescription("Plan not pressed").assertExists()
+        composeRule.onNodeWithContentDescription("Plan pressed").assertDoesNotExist()
+    }
+
+    @Test
     fun fastToolboxActionTogglesPreviewStateAndSettingsLock() {
         setComposerContent(composer = ComposerPreview(fastMode = false))
 

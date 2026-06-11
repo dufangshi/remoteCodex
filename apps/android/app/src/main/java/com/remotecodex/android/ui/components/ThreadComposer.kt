@@ -686,7 +686,12 @@ fun ThreadComposer(
                     label = settingsToolbarState.planButton.label,
                     selected = settingsToolbarState.planButton.selected,
                     pressed = settingsToolbarState.planPressed,
-                    onClick = { planModeSelected = !planModeSelected },
+                    enabled = settingsToolbarState.planButton.enabled,
+                    onClick = {
+                        if (settingsToolbarState.planButton.enabled) {
+                            planModeSelected = !planModeSelected
+                        }
+                    },
                 )
             }
             ComposerModeChip(label = queuedAttachmentCount.attachmentCountLabel(), selected = queuedAttachmentCount > 0)
@@ -2016,10 +2021,19 @@ private fun ComposerModeChip(
     label: String,
     selected: Boolean,
     pressed: Boolean = selected,
+    enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
 ) {
-    val background = if (selected) ThreadColors.WarningSoft else ThreadColors.SurfaceStrong
-    val foreground = if (selected) ThreadColors.Warning else ThreadColors.ForegroundMuted
+    val background = when {
+        !enabled -> ThreadColors.Surface.copy(alpha = 0.56f)
+        selected -> ThreadColors.WarningSoft
+        else -> ThreadColors.SurfaceStrong
+    }
+    val foreground = when {
+        !enabled -> ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+        selected -> ThreadColors.Warning
+        else -> ThreadColors.ForegroundMuted
+    }
     val stateLabel = if (pressed) "pressed" else "not pressed"
     Text(
         text = label,
@@ -2028,11 +2042,14 @@ private fun ComposerModeChip(
                 contentDescription = "$label $stateLabel"
                 stateDescription = if (pressed) "Pressed" else "Not pressed"
                 this.selected = selected
+                if (!enabled) {
+                    disabled()
+                }
             }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-            .then(onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier)
+            .then(if (enabled) onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         color = foreground,
         style = MaterialTheme.typography.labelSmall,
