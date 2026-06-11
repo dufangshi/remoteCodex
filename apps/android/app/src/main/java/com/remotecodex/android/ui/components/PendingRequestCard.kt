@@ -87,7 +87,7 @@ fun PendingRequestCard(
             Text(
                 text = state.command,
                 modifier = Modifier.fillMaxWidth(),
-                color = ThreadColors.CodeForeground,
+                color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
             )

@@ -93,17 +93,11 @@ fun ThreadTopBar(
                     onClick = { detailsOpen = !detailsOpen },
                 )
             }
-            Text(
-                text = if (themeMode == ThemeMode.System && darkThemeActive) "System dark" else themeMode.label,
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Surface)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
+            ThemeModeStatusButton(
+                themeMode = themeMode,
+                darkThemeActive = darkThemeActive,
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(top = 7.dp),
             )
             TopBarIconButton(
                 icon = TopBarIcon.Settings,
@@ -328,6 +322,35 @@ private fun TopBarIconButton(
 }
 
 @Composable
+private fun ThemeModeStatusButton(
+    themeMode: ThemeMode,
+    darkThemeActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val icon = when (themeMode) {
+        ThemeMode.System -> TopBarIcon.SystemTheme
+        ThemeMode.Light -> TopBarIcon.LightTheme
+        ThemeMode.Dark -> TopBarIcon.DarkTheme
+    }
+    val effectiveTheme = if (darkThemeActive) "dark" else "light"
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .semantics {
+                contentDescription = "Current theme: ${themeMode.label}, effective $effectiveTheme. Open settings"
+            }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        TopBarGlyph(icon = icon, color = ThreadColors.ForegroundSoft, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
 private fun TopBarGlyph(
     icon: TopBarIcon,
     color: Color,
@@ -430,6 +453,37 @@ private fun TopBarGlyph(
                 line(0.45f, 0.44f, 0.45f, 0.72f)
                 line(0.55f, 0.44f, 0.55f, 0.72f)
             }
+            TopBarIcon.SystemTheme -> {
+                rect(0.18f, 0.24f, 0.82f, 0.66f)
+                line(0.38f, 0.82f, 0.62f, 0.82f)
+                line(0.50f, 0.66f, 0.50f, 0.82f)
+            }
+            TopBarIcon.LightTheme -> {
+                drawCircle(
+                    color = color,
+                    radius = w * 0.18f,
+                    center = Offset(w * 0.50f, h * 0.50f),
+                    style = Stroke(width = strokeWidth),
+                )
+                line(0.50f, 0.12f, 0.50f, 0.24f)
+                line(0.50f, 0.76f, 0.50f, 0.88f)
+                line(0.12f, 0.50f, 0.24f, 0.50f)
+                line(0.76f, 0.50f, 0.88f, 0.50f)
+                line(0.23f, 0.23f, 0.31f, 0.31f)
+                line(0.69f, 0.69f, 0.77f, 0.77f)
+                line(0.77f, 0.23f, 0.69f, 0.31f)
+                line(0.31f, 0.69f, 0.23f, 0.77f)
+            }
+            TopBarIcon.DarkTheme -> {
+                val moon = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * 0.68f, h * 0.18f)
+                    cubicTo(w * 0.50f, h * 0.22f, w * 0.36f, h * 0.38f, w * 0.36f, h * 0.58f)
+                    cubicTo(w * 0.36f, h * 0.76f, w * 0.50f, h * 0.88f, w * 0.68f, h * 0.86f)
+                    cubicTo(w * 0.54f, h * 0.94f, w * 0.24f, h * 0.82f, w * 0.22f, h * 0.54f)
+                    cubicTo(w * 0.20f, h * 0.30f, w * 0.42f, h * 0.12f, w * 0.68f, h * 0.18f)
+                }
+                drawPath(path = moon, color = color, style = Stroke(width = strokeWidth, cap = StrokeCap.Round))
+            }
         }
     }
 }
@@ -446,6 +500,9 @@ private enum class TopBarIcon {
     Rename,
     Export,
     Delete,
+    SystemTheme,
+    LightTheme,
+    DarkTheme,
 }
 
 @Composable
