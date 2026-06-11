@@ -4,6 +4,7 @@ import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.LivePlanPreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -189,6 +190,18 @@ data class GraphChatImageHistoryState(
     val openText: String,
     val pathAccessibilityLabel: String?,
     val copyAccessibilityLabel: String?,
+)
+
+data class PendingRequestCardState(
+    val title: String,
+    val description: String,
+    val riskLabel: String,
+    val commandLabel: String,
+    val command: String,
+    val denyLabel: String,
+    val approveLabel: String,
+    val approveAccessibilityLabel: String,
+    val denyAccessibilityLabel: String,
 )
 
 data class ContextCompactionHistoryState(
@@ -3416,6 +3429,25 @@ fun buildGraphChatImageHistoryState(
         openText = openText,
         pathAccessibilityLabel = normalizedAssetPath?.let { "Open image path" },
         copyAccessibilityLabel = normalizedAssetPath?.let { "Copy image path" },
+    )
+}
+
+fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequestCardState {
+    val title = request.title.trim().ifEmpty { "Answer Required" }
+    val description = request.description.trim()
+    val riskLabel = request.riskLabel.trim().ifEmpty { "Permission required" }
+    val command = request.command.trim()
+
+    return PendingRequestCardState(
+        title = title,
+        description = description,
+        riskLabel = riskLabel,
+        commandLabel = "Requested action",
+        command = command,
+        denyLabel = "Deny",
+        approveLabel = "Approve",
+        denyAccessibilityLabel = "Deny $title",
+        approveAccessibilityLabel = "Approve $title",
     )
 }
 

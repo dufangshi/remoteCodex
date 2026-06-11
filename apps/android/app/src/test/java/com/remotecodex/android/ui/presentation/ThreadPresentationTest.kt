@@ -47,6 +47,7 @@ import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.LivePlanStepPreview
 import com.remotecodex.android.ui.model.MessagePreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -710,6 +711,31 @@ class ThreadPresentationTest {
         assertEquals("1k", formatContextTokenKilocount(1_000))
         assertEquals("42.8k", formatContextTokenKilocount(42_850))
         assertEquals("0", formatContextTokenKilocount(-3))
+    }
+
+    @Test
+    fun buildsPendingRequestCardState() {
+        assertEquals(
+            PendingRequestCardState(
+                title = "Answer Required",
+                description = "Run the build from the Android workspace.",
+                riskLabel = "Permission required",
+                commandLabel = "Requested action",
+                command = "./gradlew :app:assembleDebug",
+                denyLabel = "Deny",
+                approveLabel = "Approve",
+                approveAccessibilityLabel = "Approve Answer Required",
+                denyAccessibilityLabel = "Deny Answer Required",
+            ),
+            buildPendingRequestCardState(
+                PendingRequestPreview(
+                    title = " ",
+                    description = " Run the build from the Android workspace. ",
+                    command = " ./gradlew :app:assembleDebug ",
+                    riskLabel = " ",
+                ),
+            ),
+        )
     }
 
     @Test

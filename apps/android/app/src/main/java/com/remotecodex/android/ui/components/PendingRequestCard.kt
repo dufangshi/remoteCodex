@@ -15,10 +15,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.presentation.buildPendingRequestCardState
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
@@ -26,12 +29,13 @@ fun PendingRequestCard(
     request: PendingRequestPreview,
     modifier: Modifier = Modifier,
 ) {
+    val state = buildPendingRequestCardState(request)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(ThreadColors.WarningSoft)
-            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -41,59 +45,75 @@ fun PendingRequestCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = request.title,
-                color = ThreadColors.Warning,
+                text = state.title,
+                color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = request.riskLabel,
+                text = state.riskLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Panel.copy(alpha = 0.72f))
+                    .background(ThreadColors.WarningSoft)
                     .border(1.dp, ThreadColors.Warning.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
                     .padding(horizontal = 9.dp, vertical = 4.dp),
                 color = ThreadColors.Warning,
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        Text(
-            text = request.description,
-            color = ThreadColors.ForegroundSoft,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = request.command,
+        if (state.description.isNotEmpty()) {
+            Text(
+                text = state.description,
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(ThreadColors.CodeBackground)
+                .clip(RoundedCornerShape(12.dp))
+                .background(ThreadColors.Panel)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
                 .padding(10.dp),
-            color = ThreadColors.CodeForeground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = state.commandLabel,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = state.command,
+                modifier = Modifier.fillMaxWidth(),
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             Text(
-                text = "Deny",
+                text = state.denyLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(999.dp))
+                    .semantics { contentDescription = state.denyAccessibilityLabel }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Approve",
+                text = state.approveLabel,
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .clip(RoundedCornerShape(999.dp))
                     .background(ThreadColors.Primary)
+                    .semantics { contentDescription = state.approveAccessibilityLabel }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 color = ThreadColors.PrimaryForeground,
                 style = MaterialTheme.typography.labelMedium,
