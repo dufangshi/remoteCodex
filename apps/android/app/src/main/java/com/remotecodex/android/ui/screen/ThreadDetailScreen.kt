@@ -119,6 +119,7 @@ fun ThreadDetailScreen(
     var pendingLoadEarlier by remember(threadId) { mutableStateOf(false) }
     var loadingEarlier by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
+    var resolvingRequestOptionLabel by remember(threadId) { mutableStateOf<String?>(null) }
     var openDetail by remember(threadId) { mutableStateOf<DetailPreview?>(null) }
     var pendingDetailRequest by remember(threadId) { mutableStateOf<DetailRequest?>(null) }
     var detailCache by remember(threadId) {
@@ -775,6 +776,7 @@ fun ThreadDetailScreen(
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
+        resolvingRequestOptionLabel = response.selectedOptionLabel
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -790,6 +792,7 @@ fun ThreadDetailScreen(
             }
         }
         resolvingRequestId = null
+        resolvingRequestOptionLabel = null
         pendingRequestResponse = null
         result
             .onSuccess { dto ->
@@ -797,7 +800,9 @@ fun ThreadDetailScreen(
                     ?: ThreadProjectionState(detail = dto)
                 detail = buildThreadDetailPreviewFromSupervisor(dto)
             }
-            .onFailure { throwable -> error = throwable.message ?: "Request response failed." }
+            .onFailure { throwable ->
+                error = "${response.request.title.ifBlank { "Request" }} failed: ${throwable.message ?: "Could not send response."}"
+            }
     }
 
     LaunchedEffect(pendingRenameTitle) {
@@ -867,8 +872,12 @@ fun ThreadDetailScreen(
         val withWorkspaceMessage = workspaceActionMessage?.let { message ->
             preview.copy(workspacePreview = preview.workspacePreview.copy(statusMessage = message))
         } ?: preview
-        withWorkspaceMessage.copy(
-            timelineAuxiliary = withWorkspaceMessage.timelineAuxiliary.copy(
+        val withPendingRequestBusy = withWorkspaceMessage.withPendingRequestBusy(
+            requestId = resolvingRequestId,
+            selectedOptionLabel = resolvingRequestOptionLabel,
+        )
+        withPendingRequestBusy.copy(
+            timelineAuxiliary = withPendingRequestBusy.timelineAuxiliary.copy(
                 loadingEarlier = loadingEarlier,
             ),
         )
@@ -961,15 +970,23 @@ fun ThreadDetailScreen(
                 workspaceUploadPicker.launch(arrayOf("*/*"))
             },
             onDenyPendingRequest = { request ->
-                pendingRequestResponse = PendingRequestResponse(
-                    request = request,
-                    answers = request.questions.associate { question ->
-                        (question.id ?: question.header) to emptyList()
-                    },
-                )
+                if (resolvingRequestId == null) {
+                    pendingRequestResponse = PendingRequestResponse(
+                        request = request,
+                        answers = request.questions.associate { question ->
+                            (question.id ?: question.header) to emptyList()
+                        },
+                    )
+                }
             },
             onSubmitPendingRequest = { request, answers ->
-                pendingRequestResponse = PendingRequestResponse(request = request, answers = answers)
+                if (resolvingRequestId == null) {
+                    pendingRequestResponse = PendingRequestResponse(
+                        request = request,
+                        answers = answers,
+                        selectedOptionLabel = answers.values.firstOrNull()?.firstOrNull(),
+                    )
+                }
             },
             onLoadEarlier = {
                 if (!loadingEarlier) {
@@ -1014,7 +1031,29 @@ fun ThreadDetailScreen(
 private data class PendingRequestResponse(
     val request: PendingRequestPreview,
     val answers: Map<String, List<String>>,
+    val selectedOptionLabel: String? = null,
 )
+
+private fun ThreadDetailPreview.withPendingRequestBusy(
+    requestId: String?,
+    selectedOptionLabel: String?,
+): ThreadDetailPreview {
+    if (requestId.isNullOrBlank()) {
+        return this
+    }
+    return copy(
+        pendingRequests = pendingRequests.map { request ->
+            if (request.id == requestId) {
+                request.copy(
+                    busy = true,
+                    busySelectedOptionLabel = selectedOptionLabel,
+                )
+            } else {
+                request
+            }
+        },
+    )
+}
 
 private data class ThreadDetailBundle(
     val dto: SupervisorThreadDetail,

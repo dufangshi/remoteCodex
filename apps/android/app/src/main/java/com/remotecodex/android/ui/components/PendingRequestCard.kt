@@ -128,6 +128,12 @@ fun PendingRequestCard(
                         } else {
                             setOf(option.rawLabel)
                         }
+                        if (state.planDecisionMode) {
+                            onSubmit?.invoke(
+                                request,
+                                mapOf(question.id to listOf(option.rawLabel)),
+                            )
+                        }
                     },
                     onToggleOther = {
                         val currentLabels = selectedAnswers[question.id].orEmpty()

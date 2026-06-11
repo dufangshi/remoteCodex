@@ -114,6 +114,75 @@ class PendingRequestCardTest {
         assertEquals("request-3", deniedRequestId)
     }
 
+    @Test
+    fun planDecisionOptionSubmitsImmediately() {
+        var submitted: Map<String, List<String>>? = null
+        val request = PendingRequestPreview(
+            id = "request-plan",
+            title = "Choose plan",
+            description = "Pick next step",
+            command = "",
+            riskLabel = "Decision required",
+            kind = PendingRequestKindPreview.PlanDecision,
+            questions = listOf(
+                PendingRequestQuestionPreview(
+                    id = "decision",
+                    header = "Plan",
+                    question = "How should Codex proceed?",
+                    options = listOf(
+                        PendingRequestOptionPreview("Implement (recommended)", "Start changing files"),
+                        PendingRequestOptionPreview("Discuss", "Ask for more detail"),
+                    ),
+                ),
+            ),
+        )
+
+        setPendingRequestContent(
+            request = request,
+            onSubmit = { _, answers -> submitted = answers },
+        )
+
+        composeRule.onNodeWithContentDescription("Discuss").performClick()
+
+        assertEquals(mapOf("decision" to listOf("Discuss")), submitted)
+    }
+
+    @Test
+    fun busyPlanDecisionOptionIsDisabled() {
+        var submitCount = 0
+        val request = PendingRequestPreview(
+            id = "request-plan-busy",
+            title = "Choose plan",
+            description = "",
+            command = "",
+            riskLabel = "Decision required",
+            kind = PendingRequestKindPreview.PlanDecision,
+            busy = true,
+            busySelectedOptionLabel = "Implement (recommended)",
+            questions = listOf(
+                PendingRequestQuestionPreview(
+                    id = "decision",
+                    header = "Plan",
+                    question = "How should Codex proceed?",
+                    options = listOf(
+                        PendingRequestOptionPreview("Implement (recommended)", "Start changing files"),
+                        PendingRequestOptionPreview("Discuss", "Ask for more detail"),
+                    ),
+                ),
+            ),
+        )
+
+        setPendingRequestContent(
+            request = request,
+            onSubmit = { _, _ -> submitCount += 1 },
+        )
+
+        composeRule.onNodeWithText("Starting...").assertExists()
+        composeRule.onNodeWithContentDescription("Discuss").performClick()
+
+        assertEquals(0, submitCount)
+    }
+
     private fun setPendingRequestContent(
         request: PendingRequestPreview,
         onDeny: (PendingRequestPreview) -> Unit = {},
