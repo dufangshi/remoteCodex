@@ -4317,6 +4317,60 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsWebAlignedGroupedHistoryDetailTitles() {
+        assertEquals(
+            "Command Output 1",
+            graphChatHistoryGroupRowDetailTitle(
+                kind = HistoryItemKind.Command,
+                index = 0,
+                meta = null,
+                actionLabel = "Open",
+                title = "command",
+            ),
+        )
+        assertEquals(
+            "Web Search 2",
+            graphChatHistoryGroupRowDetailTitle(
+                kind = HistoryItemKind.WebSearch,
+                index = 1,
+                meta = null,
+                actionLabel = "Web Search Details",
+                title = "web_search",
+            ),
+        )
+        assertEquals(
+            "File Read 3",
+            graphChatHistoryGroupRowDetailTitle(
+                kind = HistoryItemKind.FileRead,
+                index = 2,
+                meta = "workspace",
+                actionLabel = "File Read Details",
+                title = "file_read",
+            ),
+        )
+        assertEquals(
+            "File Change 4",
+            graphChatHistoryGroupRowDetailTitle(
+                kind = HistoryItemKind.FileChange,
+                index = 3,
+                meta = "workspace",
+                actionLabel = "File Change Details",
+                title = "file_change",
+            ),
+        )
+        assertEquals(
+            "Artifact Inspector 5",
+            graphChatHistoryGroupRowDetailTitle(
+                kind = HistoryItemKind.Artifact,
+                index = 4,
+                meta = "Artifact Inspector",
+                actionLabel = "Open",
+                title = "Artifact",
+            ),
+        )
+    }
+
+    @Test
     fun hidesNoisyTitlesForTypedHistoryGroupRows() {
         assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.Command))
         assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.WebSearch))

@@ -106,6 +106,7 @@ import com.remotecodex.android.ui.presentation.UserMessageSegment
 import com.remotecodex.android.ui.presentation.graphChatPlainTextSegments
 import com.remotecodex.android.ui.presentation.graphChatHistoryItemCopyText
 import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowSummary
+import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowDetailTitle
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
 
@@ -1879,13 +1880,21 @@ private fun openHistoryItemDetail(
     titleOverride: String? = null,
 ) {
     val title = titleOverride
+        ?: index?.let {
+            graphChatHistoryGroupRowDetailTitle(
+                kind = item.kind,
+                index = it - 1,
+                meta = item.meta,
+                actionLabel = item.actionLabel,
+                title = item.title,
+            )
+        }
         ?: item.meta
         ?: item.actionLabel
         ?: item.title
-    val indexedTitle = index?.let { "$title $it" } ?: title
     val body = item.detail
         ?: item.summary
-    onOpenDetail(DetailPreview(title = indexedTitle, text = body))
+    onOpenDetail(DetailPreview(title = title, text = body))
 }
 
 @Composable

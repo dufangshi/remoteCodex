@@ -3322,6 +3322,26 @@ fun graphChatHistoryGroupRowSummary(kind: HistoryItemKind, summary: String): Str
     }
 }
 
+fun graphChatHistoryGroupRowDetailTitle(
+    kind: HistoryItemKind,
+    index: Int,
+    meta: String?,
+    actionLabel: String?,
+    title: String,
+): String {
+    val number = index + 1
+    val baseTitle = when (kind) {
+        HistoryItemKind.Command -> "Command Output"
+        HistoryItemKind.WebSearch -> "Web Search"
+        HistoryItemKind.FileRead -> "File Read"
+        HistoryItemKind.FileChange -> "File Change"
+        else -> meta?.trim()?.takeIf { it.isNotEmpty() }
+            ?: actionLabel?.trim()?.takeIf { it.isNotEmpty() }
+            ?: title
+    }
+    return "$baseTitle $number"
+}
+
 fun graphChatHistoryItemCopyText(
     title: String,
     meta: String?,
