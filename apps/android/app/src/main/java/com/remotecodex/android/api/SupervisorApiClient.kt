@@ -90,6 +90,29 @@ class SupervisorApiClient(
         )
     }
 
+    fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
+        val query = buildQuery("path" to path)
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/tree$query"),
+        ).toWorkspaceTreeNode()
+    }
+
+    fun fetchWorkspaceFilePreview(
+        workspaceId: String,
+        path: String,
+        offset: Long? = null,
+        limit: Int? = null,
+    ): SupervisorWorkspaceFilePreview {
+        val query = buildQuery(
+            "path" to path,
+            "offset" to offset?.toString(),
+            "limit" to limit?.toString(),
+        )
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/preview$query"),
+        ).toWorkspaceFilePreview()
+    }
+
     fun fetchRelayPortal(): RelayPortalSummary {
         return requestJson("/relay/portal").toRelayPortalSummary()
     }
@@ -388,6 +411,31 @@ private fun JSONObject.toWorkspaceSummary(): SupervisorWorkspaceSummary {
         absPath = optString("absPath"),
         isFavorite = optBoolean("isFavorite", false),
         lastOpenedAt = optNullableString("lastOpenedAt"),
+    )
+}
+
+private fun JSONObject.toWorkspaceTreeNode(): SupervisorWorkspaceTreeNode {
+    val childrenJson = optJSONArray("children") ?: org.json.JSONArray()
+    return SupervisorWorkspaceTreeNode(
+        name = optString("name"),
+        path = optString("path"),
+        kind = optString("kind"),
+        size = if (has("size") && !isNull("size")) optLong("size") else null,
+        children = List(childrenJson.length()) { index ->
+            childrenJson.getJSONObject(index).toWorkspaceTreeNode()
+        },
+    )
+}
+
+private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview {
+    return SupervisorWorkspaceFilePreview(
+        path = optString("path"),
+        name = optString("name"),
+        content = optString("content"),
+        language = optString("language", "text"),
+        size = optLong("size", 0L),
+        truncated = optBoolean("truncated", false),
+        nextOffset = optLong("nextOffset", 0L),
     )
 }
 

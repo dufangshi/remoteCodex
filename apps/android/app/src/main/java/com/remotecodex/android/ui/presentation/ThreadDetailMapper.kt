@@ -6,7 +6,9 @@ import com.remotecodex.android.api.SupervisorThreadActionRequest
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
+import com.remotecodex.android.api.SupervisorWorkspaceFilePreview
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
+import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.ui.model.ArtifactPreview
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
@@ -40,6 +42,8 @@ import java.util.Locale
 
 fun buildThreadDetailPreviewFromSupervisor(
     detail: SupervisorThreadDetail,
+    workspaceTree: SupervisorWorkspaceTreeNode? = null,
+    workspaceFilePreview: SupervisorWorkspaceFilePreview? = null,
     now: Instant = Instant.now(),
 ): ThreadDetailPreview {
     val workspaceLabel = detail.workspace.label.ifBlank { basename(detail.workspace.absPath) }
@@ -89,7 +93,10 @@ fun buildThreadDetailPreviewFromSupervisor(
             },
         ),
         pendingRequests = detail.pendingRequests.map { request -> request.toPendingRequestPreview() },
-        workspacePreview = detail.workspace.toWorkspacePreview(),
+        workspacePreview = detail.workspace.toWorkspacePreview(
+            tree = workspaceTree,
+            filePreview = workspaceFilePreview,
+        ),
         shellPreview = buildShellPlaceholder(detail.workspace),
         composer = ComposerPreview(
             busy = status == ThreadStatus.Running,
@@ -185,12 +192,13 @@ private fun SupervisorThreadTurnTokenUsage.toTokenSummary(): String {
     return "in ${input.compactNumber()} / out ${output.compactNumber()}"
 }
 
-private fun SupervisorWorkspaceSummary.toWorkspacePreview(): WorkspacePreview {
+private fun SupervisorWorkspaceSummary.toWorkspacePreview(
+    tree: SupervisorWorkspaceTreeNode? = null,
+    filePreview: SupervisorWorkspaceFilePreview? = null,
+): WorkspacePreview {
     val rootName = label.ifBlank { basename(absPath) }
-    return WorkspacePreview(
-        title = "Workspace",
-        rootLabel = rootName,
-        nodes = listOf(
+    val nodes = tree?.flattenWorkspaceTree(selectedPath = filePreview?.path)
+        ?: listOf(
             WorkspaceNodePreview(
                 name = rootName,
                 path = absPath,
@@ -199,25 +207,62 @@ private fun SupervisorWorkspaceSummary.toWorkspacePreview(): WorkspacePreview {
                 selected = true,
                 expanded = true,
             ),
-        ),
-        selectedFile = WorkspaceFilePreview(
+        )
+    val selectedFile = filePreview?.toWorkspaceFilePreview()
+        ?: WorkspaceFilePreview(
             title = rootName,
             language = "text",
             sizeLabel = "remote workspace",
             truncatedLabel = null,
             content = absPath,
-        ),
+        )
+    return WorkspacePreview(
+        title = "Workspace",
+        rootLabel = rootName,
+        nodes = nodes,
+        selectedFile = selectedFile,
         toolEvents = emptyList(),
         artifact = ArtifactPreview(
             id = "workspace-placeholder",
             title = "No artifact selected",
             type = "workspace",
-            summary = "Open file preview and artifact APIs are not loaded for this thread yet.",
+            summary = if (filePreview == null) {
+                "Open file preview and artifact APIs are not loaded for this thread yet."
+            } else {
+                "Showing ${filePreview.path.ifBlank { filePreview.name }} from the supervisor workspace preview API."
+            },
             format = "text",
-            sourcePreview = absPath,
+            sourcePreview = filePreview?.content?.take(1200) ?: absPath,
             atomCount = null,
             frameCount = null,
         ),
+    )
+}
+
+private fun SupervisorWorkspaceTreeNode.flattenWorkspaceTree(
+    selectedPath: String?,
+    depth: Int = 0,
+): List<WorkspaceNodePreview> {
+    val node = WorkspaceNodePreview(
+        name = name.ifBlank { path.ifBlank { "Workspace" } },
+        path = path,
+        kind = if (kind == "directory") WorkspaceNodeKind.Directory else WorkspaceNodeKind.File,
+        depth = depth,
+        selected = selectedPath != null && path == selectedPath,
+        expanded = kind == "directory" && children.isNotEmpty(),
+    )
+    return listOf(node) + children.flatMap { child ->
+        child.flattenWorkspaceTree(selectedPath = selectedPath, depth = depth + 1)
+    }
+}
+
+private fun SupervisorWorkspaceFilePreview.toWorkspaceFilePreview(): WorkspaceFilePreview {
+    return WorkspaceFilePreview(
+        title = path.ifBlank { name },
+        language = language.ifBlank { "text" },
+        sizeLabel = size.formatBytes(),
+        truncatedLabel = if (truncated) "truncated at ${nextOffset.formatBytes()}" else null,
+        content = content,
     )
 }
 
@@ -314,5 +359,13 @@ private fun Int.compactNumber(): String {
         this >= 1_000_000 -> "${this / 1_000_000}.${(this % 1_000_000) / 100_000}m"
         this >= 1_000 -> "${this / 1_000}.${(this % 1_000) / 100}k"
         else -> toString()
+    }
+}
+
+private fun Long.formatBytes(): String {
+    return when {
+        this >= 1024L * 1024L -> "${this / (1024L * 1024L)} MB"
+        this >= 1024L -> "${this / 1024L} KB"
+        else -> "$this B"
     }
 }

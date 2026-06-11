@@ -155,6 +155,24 @@ data class SupervisorHomeSnapshot(
     val activeThreadCount: Int = threads.count { it.status == "running" }
 }
 
+data class SupervisorWorkspaceTreeNode(
+    val name: String,
+    val path: String,
+    val kind: String,
+    val size: Long?,
+    val children: List<SupervisorWorkspaceTreeNode> = emptyList(),
+)
+
+data class SupervisorWorkspaceFilePreview(
+    val path: String,
+    val name: String,
+    val content: String,
+    val language: String,
+    val size: Long,
+    val truncated: Boolean,
+    val nextOffset: Long,
+)
+
 data class CreateSupervisorWorkspaceRequest(
     val absPath: String,
     val label: String? = null,

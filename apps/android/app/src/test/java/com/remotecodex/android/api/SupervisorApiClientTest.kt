@@ -115,6 +115,55 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun workspaceTreeAndPreviewUseRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"name":"repo","path":"","kind":"directory","children":[{"name":"src","path":"src","kind":"directory","children":[{"name":"Main.kt","path":"src/Main.kt","kind":"file","size":42}]}]}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"path":"src/Main.kt","name":"Main.kt","content":"fun main() = println(\"ok\")","language":"kotlin","size":42,"truncated":true,"nextOffset":24}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val tree = client.fetchWorkspaceTree("workspace-1")
+        val preview = client.fetchWorkspaceFilePreview(
+            workspaceId = "workspace-1",
+            path = "src/Main.kt",
+            limit = 50000,
+        )
+
+        assertEquals("repo", tree.name)
+        assertEquals("src", tree.children.single().path)
+        assertEquals("Main.kt", tree.children.single().children.single().name)
+        assertEquals("src/Main.kt", preview.path)
+        assertEquals("kotlin", preview.language)
+        assertTrue(preview.truncated)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/files/tree",
+            transport.requests[0].url,
+        )
+        assertEquals("GET", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/files/preview?path=src%2FMain.kt&limit=50000",
+            transport.requests[1].url,
+        )
+        assertEquals("GET", transport.requests[1].method)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+    }
+
+    @Test
     fun relayPortalListsDeviceConnectionStatus() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

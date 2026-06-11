@@ -27,6 +27,7 @@ import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
@@ -83,11 +84,11 @@ fun ThreadDetailScreen(
         loading = detail == null
         error = null
         val result = withContext(Dispatchers.IO) {
-            runCatching { client.fetchThreadDetail(threadId, limit = 30) }
+            runCatching { client.fetchThreadDetailPreview(threadId) }
         }
         loading = false
         result
-            .onSuccess { dto -> detail = buildThreadDetailPreviewFromSupervisor(dto) }
+            .onSuccess { preview -> detail = preview }
             .onFailure { throwable -> error = throwable.message ?: "Thread detail failed." }
     }
 
@@ -129,14 +130,14 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.interruptThread(threadId)
-                client.fetchThreadDetail(threadId, limit = 30)
+                client.fetchThreadDetailPreview(threadId)
             }
         }
         submittingPrompt = false
         pendingInterrupt = false
         result
-            .onSuccess { dto ->
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            .onSuccess { preview ->
+                detail = preview
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Interrupt failed." }
@@ -148,13 +149,13 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThreadSettings(threadId, settings)
-                client.fetchThreadDetail(threadId, limit = 30)
+                client.fetchThreadDetailPreview(threadId)
             }
         }
         pendingSettingsUpdate = null
         result
-            .onSuccess { dto ->
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            .onSuccess { preview ->
+                detail = preview
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Settings update failed." }
@@ -166,13 +167,13 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThreadGoal(threadId, goal)
-                client.fetchThreadDetail(threadId, limit = 30)
+                client.fetchThreadDetailPreview(threadId)
             }
         }
         pendingGoalUpdate = null
         result
-            .onSuccess { dto ->
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            .onSuccess { preview ->
+                detail = preview
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Goal update failed." }
@@ -184,13 +185,13 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.compactThread(threadId)
-                client.fetchThreadDetail(threadId, limit = 30)
+                client.fetchThreadDetailPreview(threadId)
             }
         }
         pendingCompact = false
         result
-            .onSuccess { dto ->
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            .onSuccess { preview ->
+                detail = preview
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Compact failed." }
@@ -216,7 +217,9 @@ fun ThreadDetailScreen(
         resolvingRequestId = null
         pendingRequestResponse = null
         result
-            .onSuccess { dto -> detail = buildThreadDetailPreviewFromSupervisor(dto) }
+            .onSuccess { dto ->
+                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            }
             .onFailure { throwable -> error = throwable.message ?: "Request response failed." }
     }
 
@@ -227,14 +230,14 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThread(threadId, UpdateThreadRequest(title = title))
-                client.fetchThreadDetail(threadId, limit = 30)
+                client.fetchThreadDetailPreview(threadId)
             }
         }
         threadActionBusy = false
         pendingRenameTitle = null
         result
-            .onSuccess { dto ->
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+            .onSuccess { preview ->
+                detail = preview
                 refreshNonce += 1
             }
             .onFailure { throwable ->
@@ -327,6 +330,33 @@ private data class PendingRequestResponse(
     val request: PendingRequestPreview,
     val answers: Map<String, List<String>>,
 )
+
+private fun SupervisorApiClient.fetchThreadDetailPreview(threadId: String): ThreadDetailPreview {
+    val detail = fetchThreadDetail(threadId, limit = 30)
+    val tree = runCatching { fetchWorkspaceTree(detail.workspace.id) }.getOrNull()
+    val firstFilePath = tree?.firstFilePath()
+    val filePreview = firstFilePath?.let { path ->
+        runCatching {
+            fetchWorkspaceFilePreview(
+                workspaceId = detail.workspace.id,
+                path = path,
+                limit = 50_000,
+            )
+        }.getOrNull()
+    }
+    return buildThreadDetailPreviewFromSupervisor(
+        detail = detail,
+        workspaceTree = tree,
+        workspaceFilePreview = filePreview,
+    )
+}
+
+private fun SupervisorWorkspaceTreeNode.firstFilePath(): String? {
+    if (kind == "file") {
+        return path
+    }
+    return children.firstNotNullOfOrNull { child -> child.firstFilePath() }
+}
 
 @Composable
 private fun ThreadDetailLoadingState(
