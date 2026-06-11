@@ -137,6 +137,7 @@ private fun TurnFrame(
     turn: TurnPreview,
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
+    var collapsed by remember(turn.index, turn.optimistic) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -183,14 +184,88 @@ private fun TurnFrame(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            TurnCollapseButton(
+                collapsed = collapsed,
+                turnIndex = turn.index,
+                onClick = { collapsed = !collapsed },
+            )
         }
-        turn.messages.forEach { message ->
-            MessageBubble(message = message, onOpenDetail = onOpenDetail)
-        }
-        turn.livePlan?.let { livePlan ->
-            LivePlanCard(livePlan = livePlan)
+        if (collapsed) {
+            Text(
+                text = collapsedTurnSummary(turn),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ThreadColors.Surface.copy(alpha = 0.72f))
+                    .border(1.dp, ThreadColors.Border.copy(alpha = 0.68f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            turn.messages.forEach { message ->
+                MessageBubble(message = message, onOpenDetail = onOpenDetail)
+            }
+            turn.livePlan?.let { livePlan ->
+                LivePlanCard(livePlan = livePlan)
+            }
         }
     }
+}
+
+@Composable
+private fun TurnCollapseButton(
+    collapsed: Boolean,
+    turnIndex: Int,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(ThreadColors.Surface.copy(alpha = 0.78f))
+            .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = if (collapsed) {
+                    "Expand turn $turnIndex"
+                } else {
+                    "Collapse turn $turnIndex"
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val chevronColor = ThreadColors.ForegroundMuted
+        Canvas(modifier = Modifier.size(14.dp)) {
+            val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
+            val top = if (collapsed) 0.38f else 0.62f
+            val center = if (collapsed) 0.62f else 0.38f
+            val bottom = if (collapsed) 0.38f else 0.62f
+            drawLine(
+                color = chevronColor,
+                start = Offset(size.width * 0.25f, size.height * top),
+                end = Offset(size.width * 0.50f, size.height * center),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = chevronColor,
+                start = Offset(size.width * 0.50f, size.height * center),
+                end = Offset(size.width * 0.75f, size.height * bottom),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+private fun collapsedTurnSummary(turn: TurnPreview): String {
+    val messageCount = turn.messages.size
+    val messageLabel = if (messageCount == 1) "1 message" else "$messageCount messages"
+    val livePlanLabel = if (turn.livePlan != null) " · live plan" else ""
+    return "Turn collapsed · $messageLabel$livePlanLabel"
 }
 
 @Composable
