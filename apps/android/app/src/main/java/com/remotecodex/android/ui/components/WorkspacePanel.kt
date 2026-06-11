@@ -274,8 +274,23 @@ private fun WorkspaceExplorerCard(
             ActionChip(label = "Garbage", icon = WorkspaceActionIcon.Trash, onClick = onOpenGarbage)
             ActionChip(label = "Refresh", icon = WorkspaceActionIcon.Refresh)
         }
-        workspace.nodes.take(10).forEach { node ->
-            WorkspaceRow(node = node)
+        Text(
+            text = "Workspace",
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        if (workspace.nodes.isEmpty()) {
+            WorkspaceEmptyState(
+                rootLabel = workspace.rootLabel,
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+            )
+        } else {
+            workspace.nodes.take(10).forEach { node ->
+                WorkspaceRow(node = node)
+            }
         }
     }
 }
@@ -498,6 +513,58 @@ private fun WorkspaceRow(node: WorkspaceNodePreview) {
 }
 
 @Composable
+private fun WorkspaceEmptyState(
+    rootLabel: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            WorkspaceNodeGlyph(
+                kind = WorkspaceNodeKind.Directory,
+                expanded = true,
+                color = ThreadColors.ForegroundMuted,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = "Workspace is empty",
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                text = "Agent tool runs execute inside $rootLabel, so files should appear here as the session works.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
 private fun WorkspaceRowActionButton(
     icon: WorkspaceActionIcon,
     selected: Boolean,
@@ -557,8 +624,9 @@ private fun WorkspaceNodeGlyph(
     kind: WorkspaceNodeKind,
     expanded: Boolean,
     color: Color,
+    modifier: Modifier = Modifier.size(16.dp),
 ) {
-    Canvas(modifier = Modifier.size(16.dp)) {
+    Canvas(modifier = modifier) {
         val strokeWidth = 1.35.dp.toPx()
         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         when (kind) {

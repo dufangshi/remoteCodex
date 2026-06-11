@@ -157,7 +157,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `Dialog.tsx` | `GraphUiPrimitives.kt` + `ThreadActionDialogs.kt` | Native dialog overlay, frame, header, scrollable content body, icon-only close action, and icon-labeled footer actions now back rename/export/delete thread dialogs. |
 | `ConfirmDialog.tsx` and pending request flows | `PendingRequestCard.kt` | Inline mobile permission card with risk label, command preview, deny, and approve actions. |
 | `ThreadGraphWorkspacePanel.tsx` | `WorkspacePanel.kt` | Native Workspace/Tool Usage/Guide/Graph/Extensions tabs inside the mobile Workspace surface. |
-| `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, row-level download glyph action, refresh/garbage action glyph chips, workspace summary strip, and Web-like native folder/file/artifact/event glyphs. |
+| `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, row-level download glyph action, refresh/garbage action glyph chips, workspace summary strip, empty workspace state, and Web-like native folder/file/artifact/event glyphs. |
 | `workspaceTree.ts` | `WorkspaceTree.kt` + `WorkspacePanel.kt` | Native path helpers for extension/name extraction, ancestor expansion, directory-first sorting, and flat preview nodes used by the workspace explorer. |
 | `GraphWorkspacePreviewPane.tsx` | `WorkspacePanel.kt` | Code preview pane with metadata bar, native copy/open action glyph chips, and scrollable monospaced content. |
 | `GraphWorkspacePreviewPane.tsx` artifact branch | `ArtifactPreviewCard.kt` | Native fallback card with artifact metadata, source preview, and molecule-specific summary. |
