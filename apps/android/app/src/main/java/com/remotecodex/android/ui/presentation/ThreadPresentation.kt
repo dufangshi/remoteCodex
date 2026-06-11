@@ -301,8 +301,12 @@ data class ComposerAttachmentActionState(
 data class ComposerAttachmentPanelState(
     val open: Boolean,
     val triggerLabel: String,
+    val triggerAccessibilityLabel: String,
+    val menuVisible: Boolean,
     val actions: List<ComposerAttachmentActionState>,
+    val actionCountLabel: String,
     val queuedAttachments: List<ComposerPromptAttachmentState>,
+    val queuedCountLabel: String,
     val emptyMessage: String?,
 )
 
@@ -1050,8 +1054,16 @@ fun buildComposerAttachmentPanelState(
     return ComposerAttachmentPanelState(
         open = open,
         triggerLabel = "Add attachment",
+        triggerAccessibilityLabel = "Add attachment",
+        menuVisible = open,
         actions = buildComposerAttachmentActions(),
+        actionCountLabel = "2 actions",
         queuedAttachments = queuedAttachments,
+        queuedCountLabel = when (queuedAttachments.size) {
+            0 -> "No queued attachments"
+            1 -> "1 queued attachment"
+            else -> "${queuedAttachments.size} queued attachments"
+        },
         emptyMessage = if (queuedAttachments.isEmpty()) "No queued attachments." else null,
     )
 }

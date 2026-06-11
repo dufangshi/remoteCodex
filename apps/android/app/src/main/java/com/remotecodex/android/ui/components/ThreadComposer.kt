@@ -237,6 +237,7 @@ fun ThreadComposer(
         ComposerToolbarRow(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
+            attachmentPanelState = attachmentPanelState,
             onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
         )
         ComposerFrameSlotsPreview(
@@ -314,6 +315,7 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
 private fun ComposerToolbarRow(
     toolbarState: ComposerToolbarState,
     settingsToolbarState: ComposerSettingsToolbarState,
+    attachmentPanelState: ComposerAttachmentPanelState,
     onToggleMenu: (ComposerMenu) -> Unit,
 ) {
     Row(
@@ -327,7 +329,9 @@ private fun ComposerToolbarRow(
             onClick = { onToggleMenu(ComposerMenu.Slash) },
         )
         ToolbarIconButton(
-            state = toolbarState.attachmentButton,
+            state = toolbarState.attachmentButton.copy(
+                label = attachmentPanelState.triggerAccessibilityLabel,
+            ),
             icon = ComposerToolIcon.Plus,
             onClick = { onToggleMenu(ComposerMenu.Attachments) },
         )
@@ -372,6 +376,7 @@ private fun ToolbarIconButton(
         icon = icon,
         selected = state.selected,
         enabled = state.enabled,
+        label = state.label,
         onClick = onClick,
     )
 }
@@ -888,6 +893,7 @@ private fun ComposerIcon(
     icon: ComposerToolIcon,
     selected: Boolean,
     enabled: Boolean = true,
+    label: String,
     onClick: () -> Unit,
 ) {
     val background = when {
@@ -903,6 +909,7 @@ private fun ComposerIcon(
     Box(
         modifier = Modifier
             .size(34.dp)
+            .semantics { contentDescription = label }
             .clip(CircleShape)
             .background(background)
             .border(1.dp, if (selected) ThreadColors.Primary else ThreadColors.Border, CircleShape)
@@ -2107,7 +2114,10 @@ private fun HookStatusRow(
 
 @Composable
 private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
-    ComposerMenuSurface(title = panelState.triggerLabel, subtitle = "Prompt context") {
+    ComposerMenuSurface(
+        title = panelState.triggerLabel,
+        subtitle = "${panelState.actionCountLabel} · ${panelState.queuedCountLabel}",
+    ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             panelState.actions.forEach { action ->
                 AttachmentButton(

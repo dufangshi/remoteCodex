@@ -630,6 +630,8 @@ class ThreadPresentationTest {
             ComposerAttachmentPanelState(
                 open = true,
                 triggerLabel = "Add attachment",
+                triggerAccessibilityLabel = "Add attachment",
+                menuVisible = true,
                 actions = listOf(
                     ComposerAttachmentActionState(
                         label = "Photo",
@@ -642,6 +644,7 @@ class ThreadPresentationTest {
                         kind = ComposerAttachmentActionKind.File,
                     ),
                 ),
+                actionCountLabel = "2 actions",
                 queuedAttachments = listOf(
                     ComposerPromptAttachmentState(
                         label = "capture.png",
@@ -652,6 +655,7 @@ class ThreadPresentationTest {
                         kind = ComposerAttachmentActionKind.File,
                     ),
                 ),
+                queuedCountLabel = "2 queued attachments",
                 emptyMessage = null,
             ),
             buildComposerAttachmentPanelState(
@@ -682,6 +686,8 @@ class ThreadPresentationTest {
             ComposerAttachmentPanelState(
                 open = false,
                 triggerLabel = "Add attachment",
+                triggerAccessibilityLabel = "Add attachment",
+                menuVisible = false,
                 actions = listOf(
                     ComposerAttachmentActionState(
                         label = "Photo",
@@ -694,7 +700,9 @@ class ThreadPresentationTest {
                         kind = ComposerAttachmentActionKind.File,
                     ),
                 ),
+                actionCountLabel = "2 actions",
                 queuedAttachments = emptyList(),
+                queuedCountLabel = "No queued attachments",
                 emptyMessage = "No queued attachments.",
             ),
             buildComposerAttachmentPanelState(
@@ -702,6 +710,29 @@ class ThreadPresentationTest {
                 prompt = ComposerPromptPreview(attachments = emptyList()),
             ),
         )
+    }
+
+    @Test
+    fun buildsClosedComposerAttachmentMenuSemantics() {
+        val state = buildComposerAttachmentPanelState(
+            open = false,
+            prompt = ComposerPromptPreview(
+                attachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "queued",
+                        kind = ComposerAttachmentKindPreview.File,
+                        name = "notes.md",
+                        placeholder = "[FILE notes.md]",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Add attachment", state.triggerAccessibilityLabel)
+        assertEquals(false, state.menuVisible)
+        assertEquals(listOf("Photo", "File"), state.actions.map { it.label })
+        assertEquals("1 queued attachment", state.queuedCountLabel)
+        assertEquals(null, state.emptyMessage)
     }
 
     @Test
