@@ -29,24 +29,27 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.AuthLoginResult
-import com.remotecodex.android.api.RelayLoginResult
+import com.remotecodex.android.api.RelayCreateDeviceResult
+import com.remotecodex.android.api.RelayDeviceSummary
+import com.remotecodex.android.api.RelayPortalSummary
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorClientError
 import com.remotecodex.android.api.SupervisorConnectionCheck
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
-import com.remotecodex.android.api.parseSupervisorPairingPayload
 import com.remotecodex.android.ui.components.GraphBadge
 import com.remotecodex.android.ui.components.GraphBadgeVariant
 import com.remotecodex.android.ui.components.GraphButton
@@ -54,7 +57,6 @@ import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
 import com.remotecodex.android.ui.components.GraphSelectionGlyph
 import com.remotecodex.android.ui.theme.ThreadColors
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,12 +73,13 @@ fun SupervisorConnectionSetupScreen(
     var password by remember { mutableStateOf("") }
     var relayDeviceId by remember(initialConfig) { mutableStateOf(initialConfig?.relayDeviceId.orEmpty()) }
     var authToken by remember(initialConfig) { mutableStateOf(initialConfig?.authToken.orEmpty()) }
-    var pairingPayload by remember { mutableStateOf("") }
+    var relayPortal by remember { mutableStateOf<RelayPortalSummary?>(null) }
+    var createdDevice by remember { mutableStateOf<RelayCreateDeviceResult?>(null) }
+    var newDeviceName by remember { mutableStateOf("Android workstation") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
     fun buildBaseConfig(token: String? = authToken) = SupervisorConnectionConfig(
         mode = mode,
@@ -85,20 +88,38 @@ fun SupervisorConnectionSetupScreen(
         relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
     )
 
-    fun importPairingPayload(rawPayload: String) {
-        try {
-            val parsed = parseSupervisorPairingPayload(rawPayload)
-            val config = parsed.toConnectionConfig()
-            mode = config.mode
-            baseUrl = config.normalizedBaseUrl
-            relayDeviceId = config.relayDeviceId.orEmpty()
-            authToken = config.authToken.orEmpty()
-            pairingPayload = rawPayload
-            statusMessage = "Pairing payload imported."
-            errorMessage = null
-        } catch (error: SupervisorClientError) {
-            errorMessage = error.message
+    fun loadRelayPortal(token: String = authToken) {
+        if (token.isBlank()) {
+            errorMessage = "Log in to the relay before loading devices."
             statusMessage = null
+            return
+        }
+        busy = true
+        errorMessage = null
+        statusMessage = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    SupervisorApiClient(buildBaseConfig(token)).fetchRelayPortal()
+                }
+            }
+            busy = false
+            result
+                .onSuccess { portal ->
+                    relayPortal = portal
+                    val selectedStillExists = portal.devices.any { it.id == relayDeviceId }
+                    if (!selectedStillExists) {
+                        relayDeviceId = portal.devices.firstOrNull()?.id.orEmpty()
+                    }
+                    statusMessage = if (portal.devices.isEmpty()) {
+                        "Relay login succeeded. Register a device to connect a backend."
+                    } else {
+                        "Relay login succeeded. Select a backend device."
+                    }
+                }
+                .onFailure { error ->
+                    errorMessage = userFacingConnectionError(error)
+                }
         }
     }
 
@@ -139,6 +160,8 @@ fun SupervisorConnectionSetupScreen(
                             if (baseUrl.isBlank() || baseUrl == defaultUrlForMode(SupervisorConnectionMode.Local)) {
                                 baseUrl = defaultUrlForMode(option)
                             }
+                            relayPortal = null
+                            createdDevice = null
                             errorMessage = null
                             statusMessage = null
                         },
@@ -154,14 +177,6 @@ fun SupervisorConnectionSetupScreen(
                     contentDescription = "Supervisor URL",
                     keyboardType = KeyboardType.Uri,
                 )
-                if (mode == SupervisorConnectionMode.Relay) {
-                    ConnectionTextField(
-                        label = "Relay device id",
-                        value = relayDeviceId,
-                        onValueChange = { relayDeviceId = it },
-                        contentDescription = "Relay device id",
-                    )
-                }
             }
 
             if (mode != SupervisorConnectionMode.Local) {
@@ -182,58 +197,97 @@ fun SupervisorConnectionSetupScreen(
                         contentDescription = "Login password",
                         password = true,
                     )
+                    if (mode == SupervisorConnectionMode.Relay) {
+                        GraphButton(
+                            label = if (busy) "Loading..." else "Log in / refresh devices",
+                            enabled = !busy,
+                            variant = GraphButtonVariant.Secondary,
+                            size = GraphButtonSize.Default,
+                            contentDescription = "Load relay devices",
+                            onClick = {
+                                busy = true
+                                errorMessage = null
+                                statusMessage = null
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val baseConfig = buildBaseConfig(token = null)
+                                            val token = if (authToken.isNotBlank()) {
+                                                authToken
+                                            } else {
+                                                SupervisorApiClient(baseConfig).relayLogin(username, password).token
+                                            }
+                                            val portal = SupervisorApiClient(baseConfig.copy(authToken = token)).fetchRelayPortal()
+                                            token to portal
+                                        }
+                                    }
+                                    busy = false
+                                    result
+                                        .onSuccess { (token, portal) ->
+                                            authToken = token
+                                            relayPortal = portal
+                                            val selectedStillExists = portal.devices.any { it.id == relayDeviceId }
+                                            if (!selectedStillExists) {
+                                                relayDeviceId = portal.devices.firstOrNull()?.id.orEmpty()
+                                            }
+                                            statusMessage = if (portal.devices.isEmpty()) {
+                                                "Relay login succeeded. Register a device to connect a backend."
+                                            } else {
+                                                "Relay login succeeded. Select a backend device."
+                                            }
+                                        }
+                                        .onFailure { error ->
+                                            errorMessage = userFacingConnectionError(error)
+                                        }
+                                }
+                            },
+                        )
+                    }
                 }
             }
 
-            ConnectionPanel(title = "Pairing", detail = "Paste a QR payload to prefill mode, URL, token, and relay device id.") {
-                ConnectionTextField(
-                    label = "Pairing payload",
-                    value = pairingPayload,
-                    onValueChange = { pairingPayload = it },
-                    contentDescription = "Pairing payload",
-                    minLines = 2,
-                )
-                GraphButton(
-                    label = "Import payload",
-                    enabled = pairingPayload.isNotBlank() && !busy,
-                    variant = GraphButtonVariant.Secondary,
-                    size = GraphButtonSize.Default,
-                    contentDescription = "Import pairing payload",
-                    onClick = {
-                        importPairingPayload(pairingPayload)
-                    },
-                )
-                GraphButton(
-                    label = "Scan QR",
-                    enabled = !busy,
-                    variant = GraphButtonVariant.Outline,
-                    size = GraphButtonSize.Default,
-                    contentDescription = "Scan pairing QR code",
-                    onClick = {
+            if (mode == SupervisorConnectionMode.Relay) {
+                RelayDevicesPanel(
+                    devices = relayPortal?.devices.orEmpty(),
+                    selectedDeviceId = relayDeviceId,
+                    createdDevice = createdDevice,
+                    relayBaseUrl = baseUrl,
+                    newDeviceName = newDeviceName,
+                    busy = busy,
+                    onSelectDevice = { relayDeviceId = it },
+                    onNewDeviceNameChange = { newDeviceName = it },
+                    onRefresh = { loadRelayPortal() },
+                    onCreateDevice = {
+                        val token = authToken
+                        if (token.isBlank()) {
+                            errorMessage = "Log in to the relay before creating a device."
+                            statusMessage = null
+                            return@RelayDevicesPanel
+                        }
                         busy = true
                         errorMessage = null
-                        statusMessage = "Opening QR scanner..."
-                        GmsBarcodeScanning.getClient(context)
-                            .startScan()
-                            .addOnSuccessListener { barcode ->
-                                busy = false
-                                val rawValue = barcode.rawValue.orEmpty()
-                                if (rawValue.isBlank()) {
-                                    errorMessage = "QR code did not contain a pairing payload."
-                                    statusMessage = null
-                                } else {
-                                    importPairingPayload(rawValue)
+                        statusMessage = null
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val client = SupervisorApiClient(buildBaseConfig(token))
+                                    val created = client.createRelayDevice(newDeviceName)
+                                    val portal = client.fetchRelayPortal()
+                                    created to portal
                                 }
                             }
-                            .addOnCanceledListener {
-                                busy = false
-                                statusMessage = null
-                            }
-                            .addOnFailureListener { error ->
-                                busy = false
-                                statusMessage = null
-                                errorMessage = error.message ?: "QR scanner failed."
-                            }
+                            busy = false
+                            result
+                                .onSuccess { (created, portal) ->
+                                    createdDevice = created
+                                    relayPortal = portal
+                                    relayDeviceId = created.device.id
+                                    statusMessage = "Device registered. Use the one-time token on the backend."
+                                }
+                                .onFailure { error ->
+                                    errorMessage = userFacingConnectionError(error)
+                                }
+                        }
                     },
                 )
             }
@@ -247,7 +301,7 @@ fun SupervisorConnectionSetupScreen(
 
             GraphButton(
                 label = if (busy) "Connecting..." else "Connect",
-                enabled = !busy,
+                enabled = !busy && (mode != SupervisorConnectionMode.Relay || relayDeviceId.isNotBlank()),
                 variant = GraphButtonVariant.Default,
                 size = GraphButtonSize.Large,
                 contentDescription = "Connect supervisor",
@@ -317,6 +371,185 @@ private fun connectAndCheck(
 
 private fun AuthLoginResult.tokenFromSession(): String? {
     return token
+}
+
+@Composable
+private fun RelayDevicesPanel(
+    devices: List<RelayDeviceSummary>,
+    selectedDeviceId: String,
+    createdDevice: RelayCreateDeviceResult?,
+    relayBaseUrl: String,
+    newDeviceName: String,
+    busy: Boolean,
+    onSelectDevice: (String) -> Unit,
+    onNewDeviceNameChange: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onCreateDevice: () -> Unit,
+) {
+    ConnectionPanel(
+        title = "Relay devices",
+        detail = "Create a backend device, copy the one-time token to the private machine, then select the connected device.",
+    ) {
+        if (devices.isEmpty()) {
+            Text(
+                text = "No devices loaded for this relay account.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            devices.forEach { device ->
+                RelayDeviceRow(
+                    device = device,
+                    selected = device.id == selectedDeviceId,
+                    onClick = { onSelectDevice(device.id) },
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GraphButton(
+                label = "Refresh",
+                enabled = !busy,
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Small,
+                contentDescription = "Refresh relay devices",
+                onClick = onRefresh,
+            )
+        }
+
+        ConnectionTextField(
+            label = "New device name",
+            value = newDeviceName,
+            onValueChange = onNewDeviceNameChange,
+            contentDescription = "New relay device name",
+        )
+        GraphButton(
+            label = if (busy) "Creating..." else "Create device",
+            enabled = !busy && newDeviceName.isNotBlank(),
+            variant = GraphButtonVariant.Secondary,
+            size = GraphButtonSize.Default,
+            contentDescription = "Create relay device",
+            onClick = onCreateDevice,
+        )
+
+        createdDevice?.let { result ->
+            RelayDeviceTokenNotice(result = result, relayBaseUrl = relayBaseUrl)
+        }
+    }
+}
+
+@Composable
+private fun RelayDeviceRow(
+    device: RelayDeviceSummary,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) ThreadColors.SuccessSoft else ThreadColors.SurfaceStrong)
+            .border(1.dp, if (selected) ThreadColors.Success else ThreadColors.Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "Select relay device ${device.name}" }
+            .padding(10.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        GraphSelectionGlyph(selected = selected)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = device.name,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                GraphBadge(
+                    label = if (device.connected) "Online" else "Offline",
+                    variant = if (device.connected) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
+                )
+            }
+            Text(
+                text = device.tokenPreview.ifBlank { device.id },
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = deviceStatusLine(device),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RelayDeviceTokenNotice(result: RelayCreateDeviceResult, relayBaseUrl: String) {
+    val clipboard = LocalClipboardManager.current
+    val command = relaySupervisorCommand(relayBaseUrl, result.token)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.WarningSoft)
+            .border(1.dp, ThreadColors.Warning, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "One-time token for ${result.device.name}",
+            color = ThreadColors.Warning,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = result.token,
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            text = command,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(8.dp))
+                .padding(8.dp),
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GraphButton(
+                label = "Copy token",
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Small,
+                contentDescription = "Copy relay device token",
+                onClick = { clipboard.setText(AnnotatedString(result.token)) },
+            )
+            GraphButton(
+                label = "Copy command",
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Small,
+                contentDescription = "Copy relay supervisor command",
+                onClick = { clipboard.setText(AnnotatedString(command)) },
+            )
+        }
+    }
 }
 
 @Composable
@@ -446,6 +679,30 @@ private fun ConnectionStatus(message: String, error: Boolean) {
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
     )
+}
+
+private fun deviceStatusLine(device: RelayDeviceSummary): String {
+    val lastSeen = device.lastHeartbeatAt ?: device.connectedAt ?: "never"
+    return if (device.connected) {
+        "Connected. Last heartbeat: $lastSeen"
+    } else {
+        "Last online: $lastSeen"
+    }
+}
+
+private fun relaySupervisorCommand(relayBaseUrl: String, token: String): String {
+    val relayWsUrl = normalizeRelayWebsocketUrl(relayBaseUrl)
+    return "REMOTE_CODEX_RELAY_SERVER_URL=$relayWsUrl REMOTE_CODEX_RELAY_AGENT_TOKEN=$token remote-codex relay-supervisor"
+}
+
+private fun normalizeRelayWebsocketUrl(relayBaseUrl: String): String {
+    val normalized = relayBaseUrl.trim().trimEnd('/')
+    return when {
+        normalized.startsWith("https://") -> normalized.replaceFirst("https://", "wss://")
+        normalized.startsWith("http://") -> normalized.replaceFirst("http://", "ws://")
+        normalized.startsWith("wss://") || normalized.startsWith("ws://") -> normalized
+        else -> "wss://$normalized"
+    }
 }
 
 private fun defaultUrlForMode(mode: SupervisorConnectionMode): String {

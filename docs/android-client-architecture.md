@@ -13,7 +13,7 @@ This skeleton is the first step for a Kotlin Android client targeting Android 10
 - UI framework: Jetpack Compose and Material 3.
 - Initial module: `:app`.
 
-The first APK is still primarily a launchable native preview of the thread detail surface, but it now has a first-run supervisor connection setup path. The setup path supports local, server, and relay connection modes, persists the selected endpoint, can log in to server and relay auth endpoints, can import a pasted pairing payload, and exposes a QR scanner for the same payload format. After a connection is saved, the app reads a minimal backend home snapshot from `/api/workspaces` and `/api/threads` using direct or relay-forwarded paths. The thread detail timeline itself remains sample-driven until the next API integration stage replaces preview models with server DTOs and event projection state.
+The first APK is still primarily a launchable native preview of the thread detail surface, but it now has a first-run supervisor connection setup path. The setup path supports local, server, and relay connection modes, persists the selected endpoint, logs in to server and relay auth endpoints, and follows the relay account/device model rather than QR pairing. In relay mode the Android client can load `/relay/portal`, show registered backend devices with online/last-heartbeat status, create a new relay device, and display the one-time `rcd_...` token plus a `remote-codex relay-supervisor` command for the private backend. After a connection is saved, the app reads a minimal backend home snapshot from `/api/workspaces` and `/api/threads` using direct or relay-forwarded paths. The thread detail timeline itself remains sample-driven until the next API integration stage replaces preview models with server DTOs and event projection state.
 
 ## Directory Layout
 
@@ -39,9 +39,9 @@ apps/android
 
 Code should keep clear package boundaries:
 
-- `api`: REST transport, connection modes, auth/session DTOs, websocket URL derivation, and pairing payload parsing.
-- `auth`: future Android Keystore token storage, backend-minted device pairing, and revocation flows.
-- `settings`: persistent local app settings such as theme mode, base URL, auth token, relay device id, and pairing preferences.
+- `api`: REST transport, connection modes, auth/session DTOs, relay portal/device DTOs, websocket URL derivation, thread detail fetch, and prompt send methods.
+- `auth`: future Android Keystore token storage, relay account login, and device revocation flows.
+- `settings`: persistent local app settings such as theme mode, base URL, auth token, and selected relay device id.
 - `thread`: thread projection state, event reducers, optimistic sends, and reconnect reconciliation.
 - `workspace`: workspace list and file-preview models.
 - `voice`: native audio session orchestration.
@@ -123,7 +123,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `AppShellNavigation.tsx` | `SupervisorHomeScreen.kt` + `AppShellPanels.kt` + `ThreadTopBar.kt` | Native connected home with switchable Workspaces/Threads/Shells destinations, supervisor summary, live workspace/thread counts, recent thread/workspace rows from the supervisor snapshot, shell process preview rows, settings/change-connection actions, plus the in-thread app shell drawer with shared close icon controls and active-state badges. |
 | `AppShellNavContext.tsx` | `ThreadDetailPreviewScreen.kt` state + `ThemeMode.kt` | Local Compose state for nav/settings visibility plus persisted System/Light/Dark theme mode. |
 | `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection, native theme glyphs, Active badges, and shared-preferences persistence. |
-| `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state with shared selection glyphs, renderer status with graph badges, plugin source badges, capabilities, and import-policy placeholder. |
+| `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Native plugin/renderers settings skeleton showing enabled state with shared selection glyphs, renderer status with graph badges, plugin source badges, capabilities, and an import-plugin draft form with manifest URL/JSON validation plus queued-state feedback. |
 | `ThreadDetailSurface.tsx` | `ThreadDetailPreviewScreen.kt` | Preview shell with topbar, chat, workspace, shell, and fixed composer. |
 | `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` + `ThreadActionDialogs.kt` | Mobile topbar with Web-like app menu/settings glyph buttons, workspace/session/usage details disclosure, mobile workspace return and New Chat shortcut glyph pills, action/thread glyph pills, native rename/export/delete action glyphs, segmented Chat/Workspace/Shell navigation, rooms drawer with Web-like thread message, New Chat, close, wired rename/copy-session/delete buttons, copied-session feedback, Rooms header/count, active-room badge, native Create New Chat dialog with editable chat-name draft, and a tablet/desktop collapsed rooms rail with workspace mark, expand control, New Chat, room glyphs, active-room selection, and status dots. |
 | `GraphChatShellLayout.tsx` | `GraphChatShellLayout.kt` + `ThreadDetailPreviewScreen.kt` | Native shell root, frame, main panel, topbar shell, split region, mobile scrim, and rooms rail shell now wrap the preview screen. |
@@ -186,7 +186,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 Still open:
 
-- Full app shell destination behavior is still open: the connected home now switches between Workspaces/Threads/Shells and uses the supervisor snapshot, but workspace drill-in, real shell list/actions, import plugin, backend settings, and thread-list detail routing are not yet complete.
+- Full app shell destination behavior is still open: the connected home now switches between Workspaces/Threads/Shells and uses the supervisor snapshot, but workspace drill-in, real shell list/actions, plugin import API calls, backend settings, and thread-list detail routing are not yet complete.
 - Full markdown/GFM parity beyond the current native subset, especially KaTeX-quality math typesetting, advanced nested list edge cases, advanced syntax highlighting, and non-molecule plugin-rendered inline artifacts. Current Android math support keeps inline and display formulas readable as native monospaced notation but does not shape TeX into full mathematical layout.
 - Real image loading for markdown image sources is still open; Android currently renders stable native placeholders with alt text and basename.
 - Full Shiki parity for code blocks: language grammars, themes, token scopes, and line metadata are still open. Current Android highlighting is intentionally lightweight, with native copy affordances already present on fenced code and tool blocks.
@@ -209,9 +209,9 @@ Still open:
 - Real resizable workspace panel behavior on tablet/desktop form factors; current Android coverage keeps stable panel boundaries and handle visuals without drag resizing.
 - Real garbage folder mutation behind the current empty-garbage confirmation skeleton.
 - Real shell adapter actions behind the current native shell controls: create, attach, terminate, rename, split pane, copy visible output, PTY input, and control sequences.
-- Real thread/workspace detail binding, WebSocket event reducer, backend-minted device pairing, device revocation, and shell integration.
-- A true supervisor-side mobile pairing challenge is still open. Android currently supports scanning or pasting a payload such as `remote-codex://connect?mode=server&baseUrl=...&token=...` or equivalent JSON. The backend still needs dedicated `pair/start` and `pair/confirm` endpoints if QR pairing should mint tokens instead of transporting an already-created token.
-- Real plugin management behind the current native settings skeleton: refresh, import, enable/disable, uninstall, and trusted renderer policy.
+- Real thread/workspace detail binding, WebSocket event reducer, relay device deletion/revocation, shared-session selection, and shell integration.
+- A backend claim-code flow is still open. The current relay model is: login to the relay, create a device, copy the one-time `rcd_...` token to the private backend, and run `remote-codex relay-supervisor` with that token. A future smoother path can let the backend print a short claim code and let a logged-in Web or Android client bind that pending backend to the account.
+- Real plugin management behind the current native settings skeleton: refresh, persisted import, enable/disable, uninstall, and trusted renderer policy.
 - Screenshot-based E2E after emulator access is available.
 
 ## Build
@@ -313,7 +313,7 @@ ANDROID_SDK_ROOT=/home/u/Android/Sdk \
 2. Replace sample thread detail data with `GET /api/threads/:id` or relay-forwarded equivalents.
 3. Add websocket connect/reconnect and event projection for live thread updates.
 4. Move stored auth tokens from SharedPreferences to Android Keystore before broader remote usage.
-5. Add backend pairing endpoints that mint scoped mobile tokens from a QR challenge instead of requiring QR payloads to carry a token.
+5. Add a backend claim-code flow so `remote-codex relay-supervisor` can be bound to a logged-in relay account without manually copying the one-time device token.
 6. Add device revocation and relay device management.
 7. Add voice mode as a native feature instead of mirroring the web composer.
 8. Replace artifact fallbacks with richer native renderers where they are worth maintaining.

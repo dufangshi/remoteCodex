@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.screen
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,6 +27,36 @@ class SupervisorHomeScreenTest {
     fun homeShowsNavigationDestinationsAndOpensThreadPreview() {
         var openedThreadPreview = false
 
+        setHomeContent(onOpenThreadPreview = { openedThreadPreview = true })
+
+        composeRule.onNodeWithText("Remote Codex").assertExists()
+        composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
+        composeRule.onNodeWithContentDescription("Open Threads").assertExists()
+        composeRule.onNodeWithContentDescription("Open Shells").assertExists()
+        composeRule.onNodeWithText("remoteCodex-main").assertExists()
+
+        composeRule.onNodeWithContentDescription("Open Threads").performClick()
+        composeRule.onNodeWithText("Android native thread client").assertExists()
+        composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
+
+        assertTrue(openedThreadPreview)
+
+        composeRule.onNodeWithContentDescription("Open Shells").performClick()
+        composeRule.onNodeWithText("Build shell").assertExists()
+        composeRule.onNodeWithText("Shell adapter pending").assertExists()
+    }
+
+    @Test
+    fun settingsShowsImportPluginDraftForm() {
+        setHomeContent()
+
+        composeRule.onNodeWithContentDescription("Open settings").performClick()
+        composeRule.onNodeWithText("Import plugin").assertExists()
+        composeRule.onNodeWithTag("plugin-manifest-input", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("Import plugin").assertExists()
+    }
+
+    private fun setHomeContent(onOpenThreadPreview: () -> Unit = {}) {
         composeRule.setContent {
             RemoteCodexTheme(dark = false) {
                 SupervisorHomeScreen(
@@ -60,26 +91,10 @@ class SupervisorHomeScreenTest {
                     themeMode = ThemeMode.System,
                     darkThemeActive = false,
                     onThemeModeSelected = {},
-                    onOpenThreadPreview = { openedThreadPreview = true },
+                    onOpenThreadPreview = onOpenThreadPreview,
                     onChangeConnection = {},
                 )
             }
         }
-
-        composeRule.onNodeWithText("Remote Codex").assertExists()
-        composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
-        composeRule.onNodeWithContentDescription("Open Threads").assertExists()
-        composeRule.onNodeWithContentDescription("Open Shells").assertExists()
-        composeRule.onNodeWithText("remoteCodex-main").assertExists()
-
-        composeRule.onNodeWithContentDescription("Open Threads").performClick()
-        composeRule.onNodeWithText("Android native thread client").assertExists()
-        composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
-
-        assertTrue(openedThreadPreview)
-
-        composeRule.onNodeWithContentDescription("Open Shells").performClick()
-        composeRule.onNodeWithText("Build shell").assertExists()
-        composeRule.onNodeWithText("Shell adapter pending").assertExists()
     }
 }

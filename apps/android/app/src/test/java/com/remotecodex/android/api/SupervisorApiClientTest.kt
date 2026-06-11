@@ -114,6 +114,95 @@ class SupervisorApiClientTest {
         assertEquals("relay-token", transport.requests[1].bearerToken)
     }
 
+    @Test
+    fun relayPortalListsDeviceConnectionStatus() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"user":{"id":"u1","email":"dev@example.test","username":"dev","role":"user","enabled":true,"createdAt":"2026-01-01T00:00:00.000Z"},"devices":[{"id":"device-1","ownerUserId":"u1","name":"Home workstation","tokenPreview":"rcd_abc...xyz","connected":true,"connectedAt":"2026-01-02T00:00:00.000Z","lastHeartbeatAt":"2026-01-02T00:00:30.000Z","createdAt":"2026-01-01T00:00:00.000Z"}],"sharedWithMe":[],"sharedByMe":[]}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+            ),
+            transport,
+        )
+
+        val portal = client.fetchRelayPortal()
+
+        assertEquals(1, portal.devices.size)
+        assertEquals("Home workstation", portal.devices.single().name)
+        assertTrue(portal.devices.single().connected)
+        assertEquals("2026-01-02T00:00:30.000Z", portal.devices.single().lastHeartbeatAt)
+        assertEquals("https://relay.example.test/relay/portal", transport.requests.single().url)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
+    fun createRelayDeviceReturnsOneTimeToken() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"device":{"id":"device-1","ownerUserId":"u1","name":"Phone registered backend","tokenPreview":"rcd_abc...xyz","connected":false,"connectedAt":null,"lastHeartbeatAt":null,"createdAt":"2026-01-01T00:00:00.000Z"},"token":"rcd_secret_device_token"}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+            ),
+            transport,
+        )
+
+        val result = client.createRelayDevice("Phone registered backend")
+
+        assertEquals("device-1", result.device.id)
+        assertEquals("rcd_secret_device_token", result.token)
+        assertEquals("https://relay.example.test/relay/devices", transport.requests.single().url)
+        assertEquals("POST", transport.requests.single().method)
+        assertTrue(transport.requests.single().body!!.contains("\"name\":\"Phone registered backend\""))
+    }
+
+    @Test
+    fun threadDetailAndPromptUseRelayDevicePath() {
+        val detailJson = """{"thread":{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"running","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"},"workspace":{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null},"workspacePathStatus":"present","turns":[{"id":"turn-1","startedAt":null,"status":"inProgress","error":null,"items":[]}],"pendingRequests":[],"pendingSteers":[],"liveItems":{"items":[{"id":"item-1"}]},"goal":{"status":"active","objective":"Ship Android client"}}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, detailJson),
+            SupervisorHttpResponse(200, detailJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val detail = client.fetchThreadDetail("thread-1", limit = 20)
+        val prompted = client.sendThreadPrompt("thread-1", SendThreadPromptRequest("Continue"))
+
+        assertEquals("Android API", detail.thread.title)
+        assertEquals(1, detail.turnCount)
+        assertEquals(1, detail.liveItemCount)
+        assertEquals("active", prompted.goalStatus)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1?limit=20",
+            transport.requests[0].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/prompt",
+            transport.requests[1].url,
+        )
+        assertEquals("POST", transport.requests[1].method)
+        assertTrue(transport.requests[1].body!!.contains("\"prompt\":\"Continue\""))
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

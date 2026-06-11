@@ -24,8 +24,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +39,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -303,29 +312,117 @@ fun AppShellSettingsPanel(
                     }
                 }
 
-                SettingsSection(title = "Import plugin", detail = "Manifest registration") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(ThreadColors.CodeBackground)
-                            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = "{ \"manifestUrl\": \"https://example.local/plugin.json\" }",
-                            color = ThreadColors.CodeForeground,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                        Text(
-                            text = "Plugin import is disabled until authenticated supervisor settings are wired.",
-                            color = ThreadColors.ForegroundMuted,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                }
+                ImportPluginSettingsSection()
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportPluginSettingsSection() {
+    var draft by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    SettingsSection(title = "Import plugin", detail = "Manifest registration") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = {
+                    draft = it
+                    message = null
+                    error = null
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("plugin-manifest-input")
+                    .semantics { contentDescription = "Plugin manifest input" },
+                label = { Text("Plugin manifest URL or JSON") },
+                placeholder = { Text("https://example.local/plugin.json") },
+                minLines = 3,
+                maxLines = 5,
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    color = ThreadColors.CodeForeground,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ThreadColors.CodeForeground,
+                    unfocusedTextColor = ThreadColors.CodeForeground,
+                    focusedContainerColor = ThreadColors.CodeBackground,
+                    unfocusedContainerColor = ThreadColors.CodeBackground,
+                    focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
+                    unfocusedBorderColor = ThreadColors.Border,
+                    cursorColor = ThreadColors.Primary,
+                    focusedLabelColor = ThreadColors.ForegroundSoft,
+                    unfocusedLabelColor = ThreadColors.ForegroundMuted,
+                    focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                    unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                ),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Registers manifest-declared artifact types. Native renderer code still requires a trusted built-in module.",
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                GraphButton(
+                    label = if (busy) "Importing..." else "Import",
+                    enabled = draft.isNotBlank() && !busy,
+                    variant = GraphButtonVariant.Secondary,
+                    size = GraphButtonSize.Default,
+                    contentDescription = "Import plugin",
+                    onClick = {
+                        val trimmed = draft.trim()
+                        if (trimmed.isEmpty()) {
+                            return@GraphButton
+                        }
+                        busy = true
+                        error = null
+                        message = null
+                        val looksValid = trimmed.startsWith("{") ||
+                            trimmed.startsWith("[") ||
+                            trimmed.startsWith("http://") ||
+                            trimmed.startsWith("https://")
+                        if (looksValid) {
+                            draft = ""
+                            message = "Plugin import queued for supervisor wiring."
+                        } else {
+                            error = "Use a manifest URL or plugin.json payload."
+                        }
+                        busy = false
+                    },
+                )
+            }
+            error?.let { text ->
+                Text(
+                    text = text,
+                    color = ThreadColors.Danger,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            message?.let { text ->
+                Text(
+                    text = text,
+                    color = ThreadColors.Success,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }

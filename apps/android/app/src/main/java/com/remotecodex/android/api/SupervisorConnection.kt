@@ -151,6 +151,41 @@ data class SupervisorHomeSnapshot(
     val activeThreadCount: Int = threads.count { it.status == "running" }
 }
 
+data class SupervisorThreadDetail(
+    val thread: SupervisorThreadSummary,
+    val workspace: SupervisorWorkspaceSummary,
+    val turnCount: Int,
+    val pendingRequestCount: Int,
+    val liveItemCount: Int,
+    val goalStatus: String?,
+    val goalObjective: String?,
+)
+
+data class SendThreadPromptRequest(
+    val prompt: String,
+    val clientRequestId: String? = null,
+    val model: String? = null,
+)
+
+data class RelayDeviceSummary(
+    val id: String,
+    val name: String,
+    val tokenPreview: String,
+    val connected: Boolean,
+    val connectedAt: String?,
+    val lastHeartbeatAt: String?,
+    val createdAt: String,
+)
+
+data class RelayPortalSummary(
+    val devices: List<RelayDeviceSummary>,
+)
+
+data class RelayCreateDeviceResult(
+    val device: RelayDeviceSummary,
+    val token: String,
+)
+
 sealed class SupervisorClientError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class InvalidUrl(message: String) : SupervisorClientError(message)
     class Authentication(message: String) : SupervisorClientError(message)

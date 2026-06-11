@@ -1,7 +1,6 @@
 package com.remotecodex.android.api
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SupervisorConnectionTest {
@@ -37,27 +36,4 @@ class SupervisorConnectionTest {
         )
     }
 
-    @Test
-    fun parsesJsonPairingPayload() {
-        val payload = parseSupervisorPairingPayload(
-            """{"mode":"relay","baseUrl":"https://relay.example.test","token":"abc","deviceId":"device-1"}""",
-        )
-
-        assertEquals(SupervisorConnectionMode.Relay, payload.mode)
-        assertEquals("https://relay.example.test", payload.baseUrl)
-        assertEquals("abc", payload.token)
-        assertEquals("device-1", payload.relayDeviceId)
-    }
-
-    @Test
-    fun parsesUriPairingPayload() {
-        val payload = parseSupervisorPairingPayload(
-            "remote-codex://connect?mode=server&baseUrl=https%3A%2F%2Fserver.example.test&token=abc",
-        )
-
-        assertEquals(SupervisorConnectionMode.Server, payload.mode)
-        assertEquals("https://server.example.test", payload.baseUrl)
-        assertEquals("abc", payload.token)
-        assertNull(payload.relayDeviceId)
-    }
 }

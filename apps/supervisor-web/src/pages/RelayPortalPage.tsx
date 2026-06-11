@@ -167,6 +167,9 @@ export function RelayPortalPage() {
             <code className="mt-2 block break-all rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 font-mono text-xs">
               {createdDevice.token}
             </code>
+            <code className="mt-2 block break-all rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 font-mono text-xs">
+              {relaySupervisorCommand(createdDevice.token)}
+            </code>
           </RelayNotice>
         ) : null}
 
@@ -188,6 +191,11 @@ export function RelayPortalPage() {
                       </div>
                       <p className="mt-1 font-mono text-xs text-[var(--theme-fg-muted)]">
                         {device.tokenPreview}
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                        {device.connected
+                          ? `Online. Last heartbeat: ${formatRelayTimestamp(device.lastHeartbeatAt ?? device.connectedAt)}`
+                          : `Offline. Last online: ${formatRelayTimestamp(device.lastHeartbeatAt ?? device.connectedAt)}`}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -567,4 +575,23 @@ function RelayNotice({
       {children}
     </div>
   );
+}
+
+function relaySupervisorCommand(token: string) {
+  const relayUrl = relayWebsocketBaseUrl();
+  return `REMOTE_CODEX_RELAY_SERVER_URL=${relayUrl} REMOTE_CODEX_RELAY_AGENT_TOKEN=${token} remote-codex relay-supervisor`;
+}
+
+function relayWebsocketBaseUrl() {
+  if (typeof window === 'undefined') {
+    return 'wss://relay.example.com';
+  }
+
+  return window.location.origin
+    .replace(/^https:\/\//, 'wss://')
+    .replace(/^http:\/\//, 'ws://');
+}
+
+function formatRelayTimestamp(value: string | null | undefined) {
+  return value ?? 'never';
 }

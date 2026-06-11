@@ -65,6 +65,37 @@ class SupervisorApiClient(
         )
     }
 
+    fun fetchRelayPortal(): RelayPortalSummary {
+        return requestJson("/relay/portal").toRelayPortalSummary()
+    }
+
+    fun createRelayDevice(name: String): RelayCreateDeviceResult {
+        val body = JSONObject()
+            .put("name", name)
+            .toString()
+        return requestJson("/relay/devices", method = "POST", body = body).toRelayCreateDeviceResult()
+    }
+
+    fun fetchThreadDetail(threadId: String, limit: Int? = null, beforeTurnId: String? = null): SupervisorThreadDetail {
+        val query = buildQuery(
+            "limit" to limit?.toString(),
+            "beforeTurnId" to beforeTurnId,
+        )
+        return requestJson(config.restPath("/api/threads/${urlEncodePathSegment(threadId)}$query")).toThreadDetail()
+    }
+
+    fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadDetail {
+        val body = JSONObject()
+            .put("prompt", request.prompt)
+        request.clientRequestId?.takeIf { it.isNotBlank() }?.let { body.put("clientRequestId", it) }
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/prompt"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadDetail()
+    }
+
     fun checkConnection(): SupervisorConnectionCheck {
         val session = fetchAuthSession()
         val health = fetchHealth()
@@ -250,6 +281,34 @@ private fun JSONObject.toWorkspaceSummary(): SupervisorWorkspaceSummary {
     )
 }
 
+private fun JSONObject.toRelayPortalSummary(): RelayPortalSummary {
+    val devicesArray = optJSONArray("devices") ?: org.json.JSONArray()
+    return RelayPortalSummary(
+        devices = List(devicesArray.length()) { index ->
+            devicesArray.getJSONObject(index).toRelayDeviceSummary()
+        },
+    )
+}
+
+private fun JSONObject.toRelayCreateDeviceResult(): RelayCreateDeviceResult {
+    return RelayCreateDeviceResult(
+        device = getJSONObject("device").toRelayDeviceSummary(),
+        token = getString("token"),
+    )
+}
+
+private fun JSONObject.toRelayDeviceSummary(): RelayDeviceSummary {
+    return RelayDeviceSummary(
+        id = getString("id"),
+        name = optString("name", "Remote Codex device"),
+        tokenPreview = optString("tokenPreview"),
+        connected = optBoolean("connected", false),
+        connectedAt = optNullableString("connectedAt"),
+        lastHeartbeatAt = optNullableString("lastHeartbeatAt"),
+        createdAt = optString("createdAt"),
+    )
+}
+
 private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
     return SupervisorThreadSummary(
         id = optString("id"),
@@ -262,8 +321,42 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
     )
 }
 
+private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
+    val threadJson = getJSONObject("thread")
+    val workspaceJson = getJSONObject("workspace")
+    val liveItemsJson = optJSONObject("liveItems")
+    val goalJson = optJSONObject("goal")
+    return SupervisorThreadDetail(
+        thread = threadJson.toThreadSummary(),
+        workspace = workspaceJson.toWorkspaceSummary(),
+        turnCount = optJSONArray("turns")?.length() ?: 0,
+        pendingRequestCount = optJSONArray("pendingRequests")?.length() ?: 0,
+        liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
+        goalStatus = goalJson?.optNullableString("status"),
+        goalObjective = goalJson?.optNullableString("objective"),
+    )
+}
+
 private fun JSONObject.optNullableString(name: String): String? {
     return if (has(name) && !isNull(name)) optString(name) else null
+}
+
+private fun buildQuery(vararg pairs: Pair<String, String?>): String {
+    val entries = pairs.filter { (_, value) -> !value.isNullOrBlank() }
+    if (entries.isEmpty()) {
+        return ""
+    }
+    return entries.joinToString(prefix = "?", separator = "&") { (key, value) ->
+        "${urlEncodeQueryValue(key)}=${urlEncodeQueryValue(value.orEmpty())}"
+    }
+}
+
+private fun urlEncodePathSegment(value: String): String {
+    return java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+}
+
+private fun urlEncodeQueryValue(value: String): String {
+    return java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
 }
 
 private fun parseErrorMessage(body: String): String {
