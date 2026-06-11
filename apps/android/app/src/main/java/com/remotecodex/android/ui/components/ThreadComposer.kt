@@ -3029,15 +3029,27 @@ private fun AttachmentPanel(
     onPickAttachment: (ComposerAttachmentActionKind) -> Unit,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
 ) {
-    ComposerMenuSurface(
-        title = panelState.triggerLabel,
-        subtitle = "${panelState.actionCountLabel} · ${panelState.queuedCountLabel}",
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier
+                .wrapContentWidth(Alignment.Start)
+                .width(128.dp)
+                .semantics {
+                    contentDescription = panelState.triggerLabel
+                    stateDescription = panelState.actionCountLabel
+                }
+                .clip(RoundedCornerShape(16.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             panelState.actions.forEach { action ->
                 AttachmentButton(
                     action = action,
-                    modifier = Modifier.weight(1f),
                     onClick = { onPickAttachment(action.kind) },
                 )
             }
@@ -3366,20 +3378,21 @@ private fun AttachmentButton(
     Row(
         modifier = modifier
             .semantics { contentDescription = action.label }
+            .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(12.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(9.dp))
+                .size(22.dp)
+                .clip(CircleShape)
                 .background(ThreadColors.SurfaceStrong)
-                .border(1.dp, ThreadColors.Border, RoundedCornerShape(9.dp)),
+                .border(1.dp, ThreadColors.Border, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             AttachmentTileGlyph(icon = icon, color = ThreadColors.Info)
@@ -3393,13 +3406,6 @@ private fun AttachmentButton(
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = action.detail,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
