@@ -397,6 +397,45 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsGraphChatLivePlanStepStatusStates() {
+        val state = buildGraphChatLivePlanCardState(
+            LivePlanPreview(
+                title = "Plan",
+                explanation = null,
+                steps = listOf(
+                    LivePlanStepPreview("Wait for tests", PlanStepStatus.Running),
+                    LivePlanStepPreview("Review failure", PlanStepStatus.Failed),
+                    LivePlanStepPreview("Unknown next step", PlanStepStatus.Unknown),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                PlanStepStatusPresentationState(
+                    label = "Running",
+                    accessibilityLabel = "Plan step status: In progress",
+                    tone = PlanStepStatusTone.Running,
+                    running = true,
+                ),
+                PlanStepStatusPresentationState(
+                    label = "Failed",
+                    accessibilityLabel = "Plan step status: Failed",
+                    tone = PlanStepStatusTone.Danger,
+                    running = false,
+                ),
+                PlanStepStatusPresentationState(
+                    label = "Unknown",
+                    accessibilityLabel = "Plan step status: Unknown",
+                    tone = PlanStepStatusTone.Unknown,
+                    running = false,
+                ),
+            ),
+            state.steps.map { step -> step.statusState },
+        )
+    }
+
+    @Test
     fun buildsGraphChatLivePlanCardStateWithoutBlankExplanation() {
         assertEquals(
             null,

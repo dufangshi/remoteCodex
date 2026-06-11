@@ -123,6 +123,7 @@ data class LivePlanStepState(
     val number: Int,
     val text: String,
     val status: PlanStepStatus,
+    val statusState: PlanStepStatusPresentationState = buildPlanStepStatusPresentationState(status),
 )
 
 data class GraphChatTurnFrameState(
@@ -3103,6 +3104,7 @@ fun buildGraphChatLivePlanCardState(livePlan: LivePlanPreview): GraphChatLivePla
                 number = index + 1,
                 text = step.step,
                 status = step.status,
+                statusState = buildPlanStepStatusPresentationState(step.status),
             )
         },
     )

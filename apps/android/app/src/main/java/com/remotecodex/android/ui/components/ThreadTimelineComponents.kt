@@ -91,6 +91,7 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
+import com.remotecodex.android.ui.presentation.PlanStepStatusPresentationState
 import com.remotecodex.android.ui.presentation.TimelineNoteToneState
 import com.remotecodex.android.ui.presentation.TimelineRequestEntryState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
@@ -102,7 +103,6 @@ import com.remotecodex.android.ui.presentation.buildTimelineNoteCardState
 import com.remotecodex.android.ui.presentation.buildTimelineRequestEntryStates
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildUserMessageAttachmentState
-import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
 import com.remotecodex.android.ui.presentation.PlanStepStatusTone
 import com.remotecodex.android.ui.presentation.buildGraphChatTurnFrameState
 import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
@@ -509,6 +509,7 @@ private fun LivePlanCard(livePlan: LivePlanPreview) {
                     number = step.number,
                     text = step.text,
                     status = step.status,
+                    statusState = step.statusState,
                 )
             }
         }
@@ -520,6 +521,7 @@ private fun LivePlanStepRow(
     number: Int,
     text: String,
     status: PlanStepStatus,
+    statusState: PlanStepStatusPresentationState,
 ) {
     Row(
         modifier = Modifier
@@ -549,13 +551,15 @@ private fun LivePlanStepRow(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        PlanStepStatusPill(status = status)
+        PlanStepStatusPill(status = status, state = statusState)
     }
 }
 
 @Composable
-private fun PlanStepStatusPill(status: PlanStepStatus) {
-    val state = buildPlanStepStatusPresentationState(status)
+private fun PlanStepStatusPill(
+    status: PlanStepStatus,
+    state: PlanStepStatusPresentationState,
+) {
     val foreground = when (state.tone) {
         PlanStepStatusTone.Success -> ThreadColors.Success
         PlanStepStatusTone.Running -> ThreadColors.Warning
