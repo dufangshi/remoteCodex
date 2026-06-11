@@ -453,9 +453,9 @@ fun SupervisorHomeScreen(
                     }
                     item {
                         EmptyHomeRow(
-                            title = "Shell adapter pending",
-                            detail = "Open the thread preview to inspect current native shell controls while backend shell actions are being wired.",
-                            actionLabel = "Open Shell",
+                            title = "Shell disabled",
+                            detail = "Terminal access is policy-gated and is not part of the current Android client scope.",
+                            actionLabel = "Open Thread Preview",
                             onClick = { onOpenThread(null) },
                         )
                     }

@@ -83,7 +83,6 @@ Android equivalents are intentionally native Compose components. Shell/terminal 
 - `GraphChatHistoryEntries.kt`
 - `GraphAccordion.kt`
 - `ThreadComposer.kt`
-- `GraphChatShellLayout.kt`
 - `GraphResizablePanels.kt`
 - `GraphUiPrimitives.kt`
 - `GraphInputGroup.kt`
@@ -105,10 +104,14 @@ Android equivalents are intentionally native Compose components. Shell/terminal 
 - `WorkspacePanel.kt`
 - `WorkspaceInfoCard.kt`
 - `ArtifactPreviewCard.kt`
-- `ShellPanel.kt` (disabled; retained for possible future policy-gated use)
 - `RemoteCodexTheme.kt`
 - `RichMessageContent.kt`
 - `SupervisorHomeScreen.kt`
+
+Disabled shell/terminal code retained for possible future policy-gated use:
+
+- `GraphChatShellLayout.kt`
+- `ShellPanel.kt`
 
 The current thread detail screen is sample-data driven through `ThreadPreviewSample.kt`. The app shell now gates that preview behind a real connection setup screen, but the connected state only proves the selected supervisor or relay endpoint can authenticate and answer health/session requests.
 
@@ -127,7 +130,6 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `SupervisorApiClient` + `AppShellPreview` | Native plugin/renderers settings surface loads real plugins from `GET /api/plugins`, shows enabled state with shared selection glyphs, renderer status with graph badges, plugin source badges and capabilities, toggles plugin enabled state through `PATCH /api/plugins/:pluginId`, and imports plugin manifest JSON through `POST /api/plugins/import` in connected mode with preview-local fallback. |
 | `ThreadDetailSurface.tsx` | `ThreadDetailScreen.kt` + `ThreadDetailPreviewScreen.kt` | Real REST-backed thread detail route plus preview fallback, both sharing the native topbar, chat timeline, workspace switch, and fixed composer surface. |
 | `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` + `ThreadActionDialogs.kt` | Mobile topbar with Web-like app menu/settings glyph buttons, workspace/session/usage details disclosure, mobile workspace return and New Chat shortcut glyph pills, action/thread glyph pills, native rename/export/delete action glyphs, segmented Chat/Workspace navigation, rooms drawer with Web-like thread message, New Chat, close, wired rename/copy-session/delete buttons, copied-session feedback, Rooms header/count, active-room badge, native Create New Chat dialog with editable chat-name draft, and a tablet/desktop collapsed rooms rail with workspace mark, expand control, New Chat, room glyphs, active-room selection, and status dots. |
-| `GraphChatShellLayout.tsx` | `GraphChatShellLayout.kt` + `ThreadDetailPreviewScreen.kt` | Native root, frame, main panel, topbar shell, split region, mobile scrim, and rooms rail shell wrap the preview screen. Terminal access is excluded from the active Android parity plan and remains feature-gated off. |
 | `ThreadTimeline.tsx` top-level controls | `ThreadTimelineComponents.kt` + `TimelineAuxiliaryPreview` + `ThreadPresentation.kt` | Native preview rows for loading earlier history, activity notes, answered request notes, pending steers, ephemeral user prompt, and optimistic turn labeling. Activity notes now include a Web-like linked action pill such as `Open fork` for fork activity previews. Activity notes, pending requests, and answered request notes are projected into one Web-like request-entry section and sorted by `sortKey`, matching the `ActivityRequestEntrySection` created-at ordering model. |
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, body grouping, and Web-like per-turn collapse/expand control with compact collapsed summary. |
