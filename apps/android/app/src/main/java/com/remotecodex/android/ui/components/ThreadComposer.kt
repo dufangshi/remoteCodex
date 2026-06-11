@@ -173,6 +173,8 @@ fun ThreadComposer(
     pendingPromptAttachment: PendingPromptAttachmentUpload? = null,
     onSendShellInput: ((String) -> Unit)? = null,
     onSendShellControl: ((String) -> Unit)? = null,
+    followTailOverride: Boolean? = null,
+    onJumpLatest: (() -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     val initialActiveView = if (AndroidFeatureFlags.ShellEnabled) composer.activeView else ComposerActiveView.Chat
@@ -212,12 +214,13 @@ fun ThreadComposer(
     var shellToolPreviewStatus by remember { mutableStateOf<String?>(null) }
     var shellPromptPreviewStatus by remember { mutableStateOf<String?>(null) }
     var attachmentPreviewStatus by remember { mutableStateOf<String?>(null) }
+    val effectiveFollowTail = followTailOverride ?: followTailPreview
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
-        followTail = followTailPreview,
+        followTail = effectiveFollowTail,
         activeView = activeViewPreview,
         workspaceModeLabel = composer.workspaceModeLabel,
     )
@@ -335,7 +338,7 @@ fun ThreadComposer(
     )
     val frameState = buildComposerFrameState(
         activeView = activeViewPreview,
-        followTail = followTailPreview,
+        followTail = effectiveFollowTail,
         goalComposeMode = goalPanelState.composeCard.visible,
         error = composer.error,
     )
@@ -640,6 +643,7 @@ fun ThreadComposer(
             state = frameState.jumpLatest,
             onClick = {
                 followTailPreview = true
+                onJumpLatest?.invoke()
             },
         )
         forkPreviewStatus?.let { status ->

@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -125,6 +127,7 @@ private const val UserMessageUrlAnnotationTag = "user-message-url"
 fun ThreadTimeline(
     turns: List<TurnPreview>,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
     pendingRequests: List<PendingRequestPreview> = emptyList(),
     onOpenDetail: (DetailRequest) -> Unit = {},
@@ -139,6 +142,7 @@ fun ThreadTimeline(
         )
     }
     LazyColumn(
+        state = listState,
         modifier = modifier
             .background(ThreadColors.Workspace),
         verticalArrangement = Arrangement.spacedBy(8.dp),

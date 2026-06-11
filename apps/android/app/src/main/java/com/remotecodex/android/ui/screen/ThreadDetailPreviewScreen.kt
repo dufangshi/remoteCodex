@@ -14,9 +14,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +65,8 @@ import com.remotecodex.android.ui.components.WorkspacePanel
 import com.remotecodex.android.ui.presentation.buildGraphChatThreadUsageFooterState
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.launch
 
 @Composable
 fun ThreadDetailPreviewScreen(
@@ -154,6 +159,17 @@ fun ThreadDetailSurface(
     var threadActionRoom by remember { mutableStateOf<ThreadRoomPreview?>(null) }
     var copiedSessionRoomId by remember { mutableStateOf<String?>(null) }
     var openDetail by remember { mutableStateOf<DetailPreview?>(null) }
+    val timelineListState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val timelineTailVisible by remember(timelineListState) {
+        derivedStateOf { timelineListState.isTailVisible() }
+    }
+    val timelineContentKey = displayedDetail.timelineContentKey()
+    LaunchedEffect(timelineContentKey) {
+        if (timelineTailVisible) {
+            timelineListState.scrollToItem(timelineLastIndex(displayedDetail))
+        }
+    }
     GraphChatShellRoot {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val showCollapsedRoomsRail = maxWidth >= 720.dp
@@ -206,6 +222,7 @@ fun ThreadDetailSurface(
                         when (selectedView) {
                             ThreadSurfaceView.Chat -> ChatPreviewSurface(
                                 detail = displayedDetail,
+                                timelineListState = timelineListState,
                                 onOpenDetail = { request ->
                                     if (onOpenDetail != null) {
                                         onOpenDetail(request)
@@ -265,6 +282,12 @@ fun ThreadDetailSurface(
                     pendingPromptAttachment = pendingPromptAttachment,
                     onSendShellInput = if (AndroidFeatureFlags.ShellEnabled) onSendShellInput else null,
                     onSendShellControl = if (AndroidFeatureFlags.ShellEnabled) onSendShellControl else null,
+                    followTailOverride = timelineTailVisible,
+                    onJumpLatest = {
+                        coroutineScope.launch {
+                            timelineListState.animateScrollToItem(timelineLastIndex(displayedDetail))
+                        }
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)
@@ -379,6 +402,7 @@ fun ThreadDetailSurface(
 @Composable
 private fun ChatPreviewSurface(
     detail: ThreadDetailPreview,
+    timelineListState: androidx.compose.foundation.lazy.LazyListState,
     onOpenDetail: (DetailRequest) -> Unit,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit,
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit,
@@ -389,6 +413,7 @@ private fun ChatPreviewSurface(
     ) {
         ThreadTimeline(
             turns = detail.turns,
+            listState = timelineListState,
             auxiliary = detail.timelineAuxiliary,
             pendingRequests = detail.pendingRequests,
             onOpenDetail = onOpenDetail,
@@ -398,6 +423,54 @@ private fun ChatPreviewSurface(
         )
         ThreadUsageFooter(detail = detail)
     }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListState.isTailVisible(): Boolean {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) {
+        return true
+    }
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
+    return lastVisible >= totalItems - 2
+}
+
+private fun timelineLastIndex(detail: ThreadDetailPreview): Int {
+    return maxOf(detail.timelineItemCount() - 1, 0)
+}
+
+private fun ThreadDetailPreview.timelineContentKey(): String {
+    val turnKey = turns.joinToString("|") { turn ->
+        val lastMessage = turn.messages.lastOrNull()
+        listOf(
+            turn.index,
+            turn.statusLabel,
+            lastMessage?.status,
+            lastMessage?.text?.length,
+            lastMessage?.richText?.length,
+            lastMessage?.toolCall?.name,
+            lastMessage?.toolCall?.result?.length,
+        ).joinToString(":")
+    }
+    return listOf(
+        timelineAuxiliary.activityNotes.size,
+        pendingRequests.size,
+        timelineAuxiliary.answeredRequestNotes.size,
+        timelineAuxiliary.canLoadEarlier,
+        turns.size,
+        timelineAuxiliary.pendingSteers.size,
+        timelineAuxiliary.ephemeralUserNote?.length ?: 0,
+        turnKey,
+    ).joinToString("#")
+}
+
+private fun ThreadDetailPreview.timelineItemCount(): Int {
+    return timelineAuxiliary.activityNotes.size +
+        pendingRequests.size +
+        timelineAuxiliary.answeredRequestNotes.size +
+        (if (timelineAuxiliary.canLoadEarlier) 1 else 0) +
+        turns.size +
+        timelineAuxiliary.pendingSteers.size +
+        (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0)
 }
 
 @Composable
