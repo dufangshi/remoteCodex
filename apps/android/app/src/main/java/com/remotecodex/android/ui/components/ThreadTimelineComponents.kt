@@ -814,6 +814,7 @@ private fun UserPhotoAttachment(path: String) {
             .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.InfoSoft.copy(alpha = 0.38f))
             .border(1.dp, ThreadColors.Info.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
+            .widthIn(max = 124.dp)
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -844,34 +845,87 @@ private fun UserPhotoAttachment(path: String) {
 
 @Composable
 private fun UserFileAttachment(path: String) {
+    val fileName = basenameFromAssetPath(path).ifBlank { "Attached file" }
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.SuccessSoft.copy(alpha = 0.36f))
             .border(1.dp, ThreadColors.Success.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .widthIn(max = 192.dp)
+            .padding(horizontal = 9.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = "FILE",
+        UserFileGlyph(
             modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.SuccessSoft)
-                .border(1.dp, ThreadColors.Success.copy(alpha = 0.32f), RoundedCornerShape(999.dp))
-                .padding(horizontal = 7.dp, vertical = 4.dp),
+                .size(28.dp),
             color = ThreadColors.Success,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
         )
-        Text(
-            text = basenameFromAssetPath(path).ifBlank { "Attached file" },
-            color = ThreadColors.UserBubbleText,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                text = fileName,
+                color = ThreadColors.UserBubbleText,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Attached file",
+                color = ThreadColors.UserBubbleText.copy(alpha = 0.66f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun UserFileGlyph(
+    modifier: Modifier = Modifier,
+    color: Color,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SuccessSoft.copy(alpha = 0.92f))
+            .border(1.dp, color.copy(alpha = 0.32f), RoundedCornerShape(999.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(15.dp)) {
+            val stroke = Stroke(width = 1.45.dp.toPx(), cap = StrokeCap.Round)
+            val w = size.width
+            val h = size.height
+            val path = Path().apply {
+                moveTo(w * 0.30f, h * 0.14f)
+                lineTo(w * 0.58f, h * 0.14f)
+                lineTo(w * 0.76f, h * 0.32f)
+                lineTo(w * 0.76f, h * 0.86f)
+                lineTo(w * 0.30f, h * 0.86f)
+                close()
+                moveTo(w * 0.58f, h * 0.14f)
+                lineTo(w * 0.58f, h * 0.32f)
+                lineTo(w * 0.76f, h * 0.32f)
+            }
+            drawPath(path = path, color = color, style = stroke)
+            drawLine(
+                color = color,
+                start = Offset(w * 0.40f, h * 0.54f),
+                end = Offset(w * 0.66f, h * 0.54f),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = Offset(w * 0.40f, h * 0.68f),
+                end = Offset(w * 0.58f, h * 0.68f),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 
