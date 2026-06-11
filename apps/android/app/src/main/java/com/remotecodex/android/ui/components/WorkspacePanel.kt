@@ -47,7 +47,12 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
 import com.remotecodex.android.ui.model.WorkspaceNodePreview
 import com.remotecodex.android.ui.model.WorkspacePreview
+import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeRole
+import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeState
+import com.remotecodex.android.ui.presentation.WorkspaceGraphRowState
+import com.remotecodex.android.ui.presentation.WorkspaceGraphState
 import com.remotecodex.android.ui.presentation.toolStatusLabel
+import com.remotecodex.android.ui.presentation.buildWorkspaceGraphState
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -1004,6 +1009,7 @@ private fun WorkspaceGraphSurface(
     workspace: WorkspacePreview,
     modifier: Modifier = Modifier,
 ) {
+    val graphState = remember(workspace) { buildWorkspaceGraphState(workspace) }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -1019,61 +1025,19 @@ private fun WorkspaceGraphSurface(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Thread graph",
+                text = graphState.title,
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "floating edges",
+                text = graphState.summaryLabel,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        GraphHelperStrip()
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(190.dp)
-                .background(ThreadColors.CodeBackground)
-                .padding(12.dp),
-        ) {
-            val nodeColor = androidx.compose.ui.graphics.Color(0xFFE5E7EB)
-            val accent = androidx.compose.ui.graphics.Color(0xFF7DD3FC)
-            val warning = androidx.compose.ui.graphics.Color(0xFFFBBF24)
-            val muted = androidx.compose.ui.graphics.Color(0xFF64748B)
-            val points = listOf(
-                Offset(size.width * 0.16f, size.height * 0.50f),
-                Offset(size.width * 0.38f, size.height * 0.30f),
-                Offset(size.width * 0.38f, size.height * 0.70f),
-                Offset(size.width * 0.62f, size.height * 0.40f),
-                Offset(size.width * 0.80f, size.height * 0.58f),
-            )
-            listOf(0 to 1, 0 to 2, 1 to 3, 2 to 3, 3 to 4).forEachIndexed { index, (start, end) ->
-                drawFloatingEdge(
-                    start = points[start],
-                    end = points[end],
-                    color = if (index == 4) accent else muted,
-                )
-            }
-            points.forEachIndexed { index, point ->
-                drawCircle(
-                    color = when (index) {
-                        0 -> warning
-                        4 -> accent
-                        else -> nodeColor
-                    },
-                    radius = if (index == 0) 14f else 11f,
-                    center = point,
-                )
-                drawCircle(
-                    color = androidx.compose.ui.graphics.Color(0xFF0F172A).copy(alpha = 0.28f),
-                    radius = if (index == 0) 18f else 15f,
-                    center = point,
-                    style = Stroke(width = 2f),
-                )
-            }
-        }
+        GraphHelperStrip(graphState = graphState)
+        WorkspaceGraphCanvas(graphState = graphState)
         GraphLegendRow()
         Column(
             modifier = Modifier
@@ -1082,18 +1046,15 @@ private fun WorkspaceGraphSurface(
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            GraphNodeRow(label = "Thread", detail = workspace.title)
-            GraphNodeRow(label = "Workspace", detail = workspace.rootLabel)
-            workspace.toolEvents.forEach { event ->
-                GraphNodeRow(label = event.name, detail = event.result ?: "pending")
+            graphState.rows.forEach { row ->
+                GraphNodeRow(row = row)
             }
-            GraphNodeRow(label = "Artifact", detail = workspace.artifact.title)
         }
     }
 }
 
 @Composable
-private fun GraphHelperStrip() {
+private fun GraphHelperStrip(graphState: WorkspaceGraphState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1102,9 +1063,57 @@ private fun GraphHelperStrip() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        GraphHelperPill(label = "Bezier edges")
-        GraphHelperPill(label = "Arrow targets")
-        GraphHelperPill(label = "Live node", active = true)
+        graphState.helperLabels.forEachIndexed { index, label ->
+            GraphHelperPill(label = label, active = index == graphState.helperLabels.lastIndex)
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
+    val nodeColors = graphState.nodes.associate { node ->
+        node.id to graphNodeColor(node)
+    }
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(190.dp)
+            .background(ThreadColors.CodeBackground)
+            .padding(12.dp),
+    ) {
+        val nodePoints = graphState.nodes.associate { node ->
+            node.id to Offset(
+                x = size.width * node.xFraction,
+                y = size.height * node.yFraction,
+            )
+        }
+        graphState.edges.forEach { edge ->
+            val start = nodePoints[edge.sourceId]
+            val end = nodePoints[edge.targetId]
+            if (start != null && end != null) {
+                drawFloatingEdge(
+                    start = start,
+                    end = end,
+                    color = androidx.compose.ui.graphics.Color(0xFF64748B),
+                )
+            }
+        }
+        graphState.nodes.forEach { node ->
+            val point = nodePoints[node.id] ?: return@forEach
+            val fill = nodeColors[node.id] ?: androidx.compose.ui.graphics.Color(0xFFE5E7EB)
+            val radius = if (node.role == WorkspaceGraphNodeRole.Thread) 14f else 11f
+            drawCircle(
+                color = fill,
+                radius = radius,
+                center = point,
+            )
+            drawCircle(
+                color = androidx.compose.ui.graphics.Color(0xFF111827).copy(alpha = 0.32f),
+                radius = radius + 4f,
+                center = point,
+                style = Stroke(width = 2f),
+            )
+        }
     }
 }
 
@@ -1168,7 +1177,31 @@ private fun GraphLegendItem(
 }
 
 @Composable
-private fun GraphNodeRow(label: String, detail: String) {
+private fun graphNodeColor(node: WorkspaceGraphNodeState): Color {
+    return graphNodeRowColor(node.role, node.status)
+}
+
+@Composable
+private fun graphNodeRowColor(
+    role: WorkspaceGraphNodeRole,
+    status: ToolStatus?,
+): Color {
+    if (status == ToolStatus.Running) {
+        return ThreadColors.Warning
+    }
+    if (status == ToolStatus.Failed) {
+        return ThreadColors.Danger
+    }
+    return when (role) {
+        WorkspaceGraphNodeRole.Thread -> ThreadColors.Warning
+        WorkspaceGraphNodeRole.Workspace -> ThreadColors.ForegroundMuted
+        WorkspaceGraphNodeRole.Tool -> ThreadColors.ForegroundSoft
+        WorkspaceGraphNodeRole.Artifact -> ThreadColors.Info
+    }
+}
+
+@Composable
+private fun GraphNodeRow(row: WorkspaceGraphRowState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1182,11 +1215,11 @@ private fun GraphNodeRow(label: String, detail: String) {
             modifier = Modifier
                 .size(8.dp)
                 .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.Info),
+                .background(graphNodeRowColor(row.role, row.status)),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = label,
+                text = row.label,
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
@@ -1194,11 +1227,17 @@ private fun GraphNodeRow(label: String, detail: String) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = detail,
+                text = row.detail,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        row.status?.let { status ->
+            ToolStatusBadge(
+                label = toolStatusLabel(status),
+                status = status,
             )
         }
     }
