@@ -85,6 +85,8 @@ fun ShellPanel(
                 if (toolboxOpen) {
                     ShellToolbox(
                         controls = shell.controls,
+                        inputEnabled = shell.inputEnabled,
+                        commandRunning = shell.commandRunning,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(12.dp),
@@ -577,20 +579,69 @@ private fun ShellOutput(shell: ShellPreview) {
 @Composable
 private fun ShellToolbox(
     controls: List<String>,
+    inputEnabled: Boolean,
+    commandRunning: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    FlowRow(
+    val feedback = when {
+        !inputEnabled -> "Connect the shell first"
+        commandRunning -> "Shell is running"
+        else -> "Shell tools ready"
+    }
+    Column(
         modifier = modifier
             .fillMaxWidth(0.72f)
             .clip(RoundedCornerShape(18.dp))
             .background(ThreadColors.CodeBackground.copy(alpha = 0.97f))
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(18.dp))
             .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        controls.forEach { control ->
-            ShellControlPill(label = control)
+        Text(
+            text = feedback,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(
+                    when {
+                        !inputEnabled -> ThreadColors.WarningSoft
+                        commandRunning -> ThreadColors.SuccessSoft
+                        else -> ThreadColors.Surface.copy(alpha = 0.45f)
+                    },
+                )
+                .border(
+                    1.dp,
+                    when {
+                        !inputEnabled -> ThreadColors.Warning.copy(alpha = 0.52f)
+                        commandRunning -> ThreadColors.Success.copy(alpha = 0.52f)
+                        else -> ThreadColors.BorderStrong.copy(alpha = 0.62f)
+                    },
+                    RoundedCornerShape(999.dp),
+                )
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            color = when {
+                !inputEnabled -> ThreadColors.Warning
+                commandRunning -> ThreadColors.Success
+                else -> ThreadColors.ForegroundMuted
+            },
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            controls.forEach { control ->
+                val requiresInput = !control.equals("Paste", ignoreCase = true) &&
+                    !control.equals("Copy", ignoreCase = true)
+                val enabled = when {
+                    control.equals("Ctrl-C", ignoreCase = true) -> inputEnabled && commandRunning
+                    requiresInput -> inputEnabled
+                    else -> true
+                }
+                ShellControlPill(label = control, enabled = enabled)
+            }
         }
     }
 }
@@ -626,22 +677,26 @@ private fun ShellToolboxTrigger(
 }
 
 @Composable
-private fun ShellControlPill(label: String) {
+private fun ShellControlPill(label: String, enabled: Boolean = true) {
     val tone = when {
         label.equals("Ctrl-C", ignoreCase = true) -> ShellControlTone.Danger
         label.equals("Clear", ignoreCase = true) -> ShellControlTone.Info
         else -> ShellControlTone.Neutral
     }
+    val background = if (enabled) shellToneBackground(tone) else ThreadColors.Surface.copy(alpha = 0.24f)
+    val border = if (enabled) shellToneBorder(tone) else ThreadColors.BorderStrong.copy(alpha = 0.42f)
+    val foreground = if (enabled) shellToneForeground(tone) else ThreadColors.ForegroundMuted
     Text(
         text = label.uppercase(),
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(shellToneBackground(tone))
-            .border(1.dp, shellToneBorder(tone), RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = 10.dp, vertical = 7.dp),
-        color = shellToneForeground(tone),
+        color = foreground,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Bold,
+        maxLines = 1,
     )
 }
 
