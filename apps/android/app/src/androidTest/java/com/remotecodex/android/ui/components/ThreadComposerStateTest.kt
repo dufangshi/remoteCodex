@@ -3,11 +3,14 @@ package com.remotecodex.android.ui.components
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -336,6 +339,39 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithText("Prompt").assertExists()
         composeRule.onNodeWithContentDescription("Open slash toolbox").assertExists()
         composeRule.onNodeWithContentDescription("Open shell tools").assertDoesNotExist()
+    }
+
+    @Test
+    fun shellPromptInputSendsLocalDraftPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Shell,
+                busy = false,
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithText("Shell input").assertExists()
+        composeRule.onNodeWithContentDescription("Prompt").performTextInput("pwd")
+        composeRule.onNodeWithContentDescription("Send Shell Input").assertIsEnabled()
+        composeRule.onNodeWithContentDescription("Send Shell Input").performClick()
+
+        composeRule.onNodeWithText("Shell input preview sent: pwd").assertExists()
+        composeRule.onNodeWithText("pwd").assertDoesNotExist()
+    }
+
+    @Test
+    fun shellPromptInputKeepsUnavailableActionsDisabled() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Shell,
+                busy = true,
+                canInterrupt = false,
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Send Shell Input").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Send Ctrl-C").assertIsNotEnabled()
     }
 
     @Test

@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -163,6 +166,7 @@ fun ThreadComposer(
     var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
+    var shellDraft by remember(composer.prompt.text) { mutableStateOf(composer.prompt.text) }
     var followTailPreview by remember(composer.followTail) { mutableStateOf(composer.followTail) }
     var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
     var fastModeSelected by remember(composer.fastMode) { mutableStateOf(composer.fastMode) }
@@ -176,6 +180,7 @@ fun ThreadComposer(
     var compactBusyPreview by remember(composer.compactBusy) { mutableStateOf(composer.compactBusy) }
     var compactPreviewStatus by remember { mutableStateOf<String?>(null) }
     var shellToolPreviewStatus by remember { mutableStateOf<String?>(null) }
+    var shellPromptPreviewStatus by remember { mutableStateOf<String?>(null) }
     var attachmentPreviewStatus by remember { mutableStateOf<String?>(null) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
@@ -537,6 +542,9 @@ fun ThreadComposer(
         shellToolPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
+        shellPromptPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         attachmentPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
@@ -567,8 +575,28 @@ fun ThreadComposer(
             contextState = contextState,
             promptSlotState = promptSlotState,
             shellPromptInputState = shellPromptInputState,
+            shellDraft = shellDraft,
             goalPanelState = goalPanelState,
             onRemoveAttachment = removeAttachmentPreview,
+            onShellDraftChange = { value ->
+                shellDraft = value
+            },
+            onShellInterrupt = {
+                if (shellPromptInputState?.interruptEnabled == true) {
+                    shellPromptPreviewStatus = "Sent Ctrl-C preview"
+                }
+            },
+            onShellSend = {
+                if (shellPromptInputState?.sendEnabled == true) {
+                    val command = shellDraft.trim()
+                    shellPromptPreviewStatus = if (command.isEmpty()) {
+                        "Shell input preview sent"
+                    } else {
+                        "Shell input preview sent: $command"
+                    }
+                    shellDraft = ""
+                }
+            },
             onCancelGoal = {
                 goalComposeMode = false
                 goalLocalError = null
@@ -855,8 +883,12 @@ private fun ComposerFrameSlotsPreview(
     contextState: ComposerContextUsageState,
     promptSlotState: ComposerPromptSlotState,
     shellPromptInputState: ComposerShellPromptInputState?,
+    shellDraft: String,
     goalPanelState: ComposerGoalPanelState,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
+    onShellDraftChange: (String) -> Unit,
+    onShellInterrupt: () -> Unit,
+    onShellSend: () -> Unit,
     onCancelGoal: () -> Unit,
     onSubmitGoal: () -> Unit,
     submitReady: Boolean,
@@ -881,7 +913,15 @@ private fun ComposerFrameSlotsPreview(
             )
         }
         if (frameState.showShellPromptSlot && shellPromptInputState != null) {
-            ShellPromptInputPreview(state = shellPromptInputState)
+            ShellPromptInputPreview(
+                state = shellPromptInputState.copy(
+                    text = shellDraft,
+                    showPlaceholder = shellDraft.isBlank(),
+                ),
+                onValueChange = onShellDraftChange,
+                onInterrupt = onShellInterrupt,
+                onSend = onShellSend,
+            )
         }
         frameState.errorMessage?.let { message ->
             ComposerFrameError(message = message)
@@ -921,7 +961,12 @@ private fun ComposerPreviewFeedback(message: String) {
 }
 
 @Composable
-private fun ShellPromptInputPreview(state: ComposerShellPromptInputState) {
+private fun ShellPromptInputPreview(
+    state: ComposerShellPromptInputState,
+    onValueChange: (String) -> Unit,
+    onInterrupt: () -> Unit,
+    onSend: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -936,13 +981,34 @@ private fun ShellPromptInputPreview(state: ComposerShellPromptInputState) {
                 .padding(end = 52.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                text = if (state.showPlaceholder) state.placeholder else state.text,
-                color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else ThreadColors.CodeForeground,
-                style = MaterialTheme.typography.bodySmall,
+            OutlinedTextField(
+                value = state.text,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Prompt" },
                 minLines = state.minLines,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
+                maxLines = 5,
+                placeholder = {
+                    Text(
+                        text = state.placeholder,
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = ThreadColors.CodeForeground),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ThreadColors.CodeForeground,
+                    unfocusedTextColor = ThreadColors.CodeForeground,
+                    focusedContainerColor = ThreadColors.CodeBackground,
+                    unfocusedContainerColor = ThreadColors.CodeBackground,
+                    cursorColor = ThreadColors.Primary,
+                    focusedBorderColor = ThreadColors.Info.copy(alpha = 0.58f),
+                    unfocusedBorderColor = ThreadColors.Border.copy(alpha = 0.7f),
+                    focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                    unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                ),
             )
             Text(
                 text = "Shell input",
@@ -955,12 +1021,14 @@ private fun ShellPromptInputPreview(state: ComposerShellPromptInputState) {
         ComposerShellInterruptButton(
             label = state.interruptLabel,
             enabled = state.interruptEnabled,
+            onClick = onInterrupt,
             modifier = Modifier.align(Alignment.TopEnd),
         )
         ComposerShellSendButton(
             label = state.sendLabel,
             enabled = state.sendEnabled,
             accessibilityLabel = state.sendAccessibilityLabel,
+            onClick = onSend,
             modifier = Modifier.align(Alignment.BottomEnd),
         )
     }
@@ -970,6 +1038,7 @@ private fun ShellPromptInputPreview(state: ComposerShellPromptInputState) {
 private fun ComposerShellInterruptButton(
     label: String,
     enabled: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val foreground = if (enabled) ThreadColors.Danger else ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
@@ -978,8 +1047,15 @@ private fun ComposerShellInterruptButton(
     Row(
         modifier = modifier
             .size(34.dp)
-            .semantics { contentDescription = label }
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+                if (!enabled) {
+                    disabled()
+                }
+            }
             .clip(RoundedCornerShape(999.dp))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp)),
         verticalAlignment = Alignment.CenterVertically,
@@ -999,6 +1075,7 @@ private fun ComposerShellSendButton(
     label: String,
     enabled: Boolean,
     accessibilityLabel: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val background = if (enabled) ThreadColors.Primary else ThreadColors.SurfaceStrong
@@ -1006,8 +1083,15 @@ private fun ComposerShellSendButton(
     val border = if (enabled) ThreadColors.Primary else ThreadColors.Border
     Row(
         modifier = modifier
-            .semantics { contentDescription = accessibilityLabel }
+            .semantics {
+                contentDescription = accessibilityLabel
+                role = Role.Button
+                if (!enabled) {
+                    disabled()
+                }
+            }
             .clip(RoundedCornerShape(999.dp))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
