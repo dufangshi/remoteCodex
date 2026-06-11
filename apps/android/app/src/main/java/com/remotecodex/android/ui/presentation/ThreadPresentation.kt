@@ -37,6 +37,7 @@ import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
+import com.remotecodex.android.ui.model.ThreadDetailPreview
 import kotlin.math.round
 
 enum class MessageStatusTone {
@@ -114,6 +115,12 @@ data class GraphChatTurnFrameState(
     val collapseAccessibilityLabel: String,
     val collapseTitle: String,
     val collapsedSummary: String,
+)
+
+data class GraphChatThreadUsageFooterState(
+    val transcriptLabel: String,
+    val usageLabel: String,
+    val accessibilityLabel: String,
 )
 
 data class GraphChatHistoryGroupFrameState(
@@ -2959,6 +2966,33 @@ fun buildGraphChatTurnFrameState(
         collapseAccessibilityLabel = "${if (collapsed) "Expand" else "Collapse"} turn ${turn.index}",
         collapseTitle = if (collapsed) "Expand turn" else "Collapse turn",
         collapsedSummary = "Turn collapsed · $messageLabel$livePlanLabel",
+    )
+}
+
+fun buildGraphChatThreadUsageFooterState(
+    detail: ThreadDetailPreview,
+): GraphChatThreadUsageFooterState {
+    return buildGraphChatThreadUsageFooterState(
+        turnCount = detail.turns.size,
+        itemLabel = detail.items,
+        usageLabel = detail.usage,
+    )
+}
+
+fun buildGraphChatThreadUsageFooterState(
+    turnCount: Int,
+    itemLabel: String,
+    usageLabel: String,
+): GraphChatThreadUsageFooterState {
+    val turnLabel = "$turnCount turn${if (turnCount == 1) "" else "s"}"
+    val normalizedItemLabel = itemLabel.trim().takeIf { it.isNotEmpty() } ?: "0 items"
+    val usage = usageLabel.trim().takeIf { it.isNotEmpty() } ?: "waiting for agent usage"
+    val usageText = "Usage $usage"
+    val transcriptLabel = "$turnLabel | $normalizedItemLabel"
+    return GraphChatThreadUsageFooterState(
+        transcriptLabel = transcriptLabel,
+        usageLabel = usageText,
+        accessibilityLabel = "$transcriptLabel. $usageText",
     )
 }
 

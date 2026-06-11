@@ -5,11 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,10 +20,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
+import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.components.AppShellNavigationPanel
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
 import com.remotecodex.android.ui.components.GraphChatMainShell
@@ -41,6 +49,7 @@ import com.remotecodex.android.ui.components.ThreadTimeline
 import com.remotecodex.android.ui.components.ThreadSurfaceView
 import com.remotecodex.android.ui.components.ThreadTopBar
 import com.remotecodex.android.ui.components.WorkspacePanel
+import com.remotecodex.android.ui.presentation.buildGraphChatThreadUsageFooterState
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -204,7 +213,7 @@ fun ThreadDetailPreviewScreen(
 
 @Composable
 private fun ChatPreviewSurface(
-    detail: com.remotecodex.android.ui.model.ThreadDetailPreview,
+    detail: ThreadDetailPreview,
     onOpenDetail: (DetailPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -232,6 +241,38 @@ private fun ChatPreviewSurface(
             auxiliary = detail.timelineAuxiliary,
             onOpenDetail = onOpenDetail,
             modifier = Modifier.weight(4f),
+        )
+        ThreadUsageFooter(detail = detail)
+    }
+}
+
+@Composable
+private fun ThreadUsageFooter(detail: ThreadDetailPreview) {
+    val state = buildGraphChatThreadUsageFooterState(detail)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ThreadColors.Panel)
+            .semantics { contentDescription = state.accessibilityLabel }
+            .padding(horizontal = 14.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = state.transcriptLabel,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = state.usageLabel,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

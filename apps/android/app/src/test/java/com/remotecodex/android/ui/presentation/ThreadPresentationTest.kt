@@ -4770,6 +4770,38 @@ class ThreadPresentationTest {
         )
     }
 
+    @Test
+    fun buildsGraphChatThreadUsageFooterState() {
+        assertEquals(
+            GraphChatThreadUsageFooterState(
+                transcriptLabel = "2 turns | 27 transcript items",
+                usageLabel = "Usage in 42.8k / out 9.4k / cache 18.1k",
+                accessibilityLabel = "2 turns | 27 transcript items. Usage in 42.8k / out 9.4k / cache 18.1k",
+            ),
+            buildGraphChatThreadUsageFooterState(
+                turnCount = 2,
+                itemLabel = "27 transcript items",
+                usageLabel = "in 42.8k / out 9.4k / cache 18.1k",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsGraphChatThreadUsageFooterFallbacks() {
+        assertEquals(
+            GraphChatThreadUsageFooterState(
+                transcriptLabel = "1 turn | 0 items",
+                usageLabel = "Usage waiting for agent usage",
+                accessibilityLabel = "1 turn | 0 items. Usage waiting for agent usage",
+            ),
+            buildGraphChatThreadUsageFooterState(
+                turnCount = 1,
+                itemLabel = " ",
+                usageLabel = "",
+            ),
+        )
+    }
+
     private fun message(
         author: MessageAuthor,
         text: String,
