@@ -2255,9 +2255,12 @@ private fun GoalComposePreviewCard(
                     primary = true,
                 )
             } else if (onSubmitGoal == null || !state.primaryEnabled) {
-                GraphBadge(
+                GoalComposeActionBadge(
                     label = state.primaryLabel,
-                    variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+                    onClick = {},
+                    contentDescription = "Submit goal",
+                    primary = state.primaryEnabled,
+                    enabled = false,
                 )
             }
         }
@@ -2331,21 +2334,43 @@ private fun GoalComposeActionBadge(
     onClick: () -> Unit,
     contentDescription: String = label,
     primary: Boolean = false,
+    enabled: Boolean = true,
 ) {
+    val background = when {
+        !enabled -> ThreadColors.Surface.copy(alpha = 0.56f)
+        primary -> ThreadColors.Primary
+        else -> ThreadColors.SurfaceStrong
+    }
+    val foreground = when {
+        !enabled -> ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+        primary -> ThreadColors.PrimaryForeground
+        else -> ThreadColors.ForegroundMuted
+    }
+    val border = when {
+        !enabled -> ThreadColors.Border.copy(alpha = 0.62f)
+        primary -> ThreadColors.Primary
+        else -> ThreadColors.Border
+    }
     Text(
         text = label,
         modifier = Modifier
-            .semantics { this.contentDescription = contentDescription }
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+                if (!enabled) {
+                    disabled()
+                }
+            }
             .clip(RoundedCornerShape(999.dp))
-            .background(if (primary) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+            .background(background)
             .border(
                 1.dp,
-                if (primary) ThreadColors.Primary else ThreadColors.Border,
+                border,
                 RoundedCornerShape(999.dp),
             )
-            .clickable(onClick = onClick)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        color = if (primary) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
+        color = foreground,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,

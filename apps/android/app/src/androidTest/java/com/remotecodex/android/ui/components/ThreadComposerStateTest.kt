@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerActiveView
+import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
@@ -614,6 +615,27 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithText("Goal objective cannot be empty.").assertExists()
         composeRule.onNodeWithContentDescription("Goal token budget").assertTextEquals("12.5")
+    }
+
+    @Test
+    fun goalSubmitStaysDisabledWhileGoalIsBusy() {
+        setComposerContent(
+            composer = ComposerPreview(
+                prompt = ComposerPromptPreview(text = "Keep goal submission disabled while busy"),
+                goalPanel = ComposerGoalPanelPreview(
+                    composeMode = true,
+                    busy = true,
+                    updateAvailable = true,
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Setting...").assertExists()
+        composeRule.onNodeWithContentDescription("Submit goal").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Submit goal").performClick()
+
+        composeRule.onNodeWithText("Goal preview set: Keep goal submission disabled while busy").assertDoesNotExist()
+        composeRule.onNodeWithText("Max tokens (k)").assertExists()
     }
 
     @Test
