@@ -1,5 +1,9 @@
 package com.remotecodex.android.ui.presentation
 
+import org.json.JSONArray
+import org.json.JSONObject
+import org.json.JSONTokener
+
 data class ToolBlockPreprocessResult(
     val processedContent: String,
     val resultMap: Map<String, ToolResultState>,
@@ -75,6 +79,7 @@ data class GraphChatToolEntryDisplayState(
     val key: String,
     val value: String,
     val displayValue: String,
+    val copyValue: String,
     val kind: GraphChatToolValueKind,
     val displayKind: GraphChatToolEntryDisplayKind,
     val tone: GraphChatToolEntryValueTone,
@@ -313,6 +318,7 @@ fun buildGraphChatToolEntryDisplayState(
             }
             GraphChatToolEntryDisplayKind.Inline -> graphChatToolEntryInlineDisplayValue(entry)
         },
+        copyValue = graphChatToolEntryCopyValue(entry, displayKind),
         kind = entry.kind,
         displayKind = displayKind,
         tone = entry.kind.toDisplayTone(),
@@ -338,6 +344,21 @@ fun graphChatToolEntryInlineDisplayValue(entry: GraphChatToolEntry): String {
         }
         GraphChatToolValueKind.Null -> "null"
         else -> entry.value.ifBlank { "(empty)" }
+    }
+}
+
+fun graphChatToolEntryCopyValue(
+    entry: GraphChatToolEntry,
+    displayKind: GraphChatToolEntryDisplayKind,
+): String {
+    return when {
+        displayKind == GraphChatToolEntryDisplayKind.OutputBlock && entry.kind == GraphChatToolValueKind.Object -> {
+            entry.value.trim()
+        }
+        displayKind == GraphChatToolEntryDisplayKind.OutputBlock -> {
+            entry.value
+        }
+        else -> graphChatToolEntryInlineDisplayValue(entry)
     }
 }
 
@@ -379,6 +400,14 @@ private fun GraphChatToolValueKind.toDisplayTone(): GraphChatToolEntryValueTone 
 fun prettyGraphChatToolJsonValue(value: String): String {
     val trimmed = value.trim()
     if (trimmed.isEmpty()) return trimmed
+    val formatted = prettyJsonPreservingOrder(trimmed)
+    if (formatted != trimmed) {
+        return formatted
+    }
+    return prettyJsonWithOrgJson(trimmed) ?: formatted
+}
+
+private fun prettyJsonPreservingOrder(value: String): String {
     val output = StringBuilder()
     var indent = 0
     var inString = false
@@ -390,7 +419,7 @@ fun prettyGraphChatToolJsonValue(value: String): String {
         }
     }
 
-    trimmed.forEach { char ->
+    value.forEach { char ->
         if (escaped) {
             output.append(char)
             escaped = false
@@ -418,7 +447,9 @@ fun prettyGraphChatToolJsonValue(value: String): String {
                 appendIndent()
             }
             '}', ']' -> {
-                output.append('\n')
+                if (output.lastOrNull() != '\n') {
+                    output.append('\n')
+                }
                 indent -= 1
                 appendIndent()
                 output.append(char)
@@ -436,6 +467,16 @@ fun prettyGraphChatToolJsonValue(value: String): String {
     }
 
     return output.toString()
+}
+
+private fun prettyJsonWithOrgJson(value: String): String? {
+    return runCatching {
+        when (val parsed = JSONTokener(value).nextValue()) {
+            is JSONObject -> parsed.toString(2)
+            is JSONArray -> parsed.toString(2)
+            else -> null
+        }
+    }.getOrNull()
 }
 
 private fun isJsonObjectLiteral(body: String): Boolean {

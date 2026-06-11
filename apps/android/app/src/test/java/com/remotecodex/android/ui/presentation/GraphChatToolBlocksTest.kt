@@ -195,6 +195,7 @@ class GraphChatToolBlocksTest {
                 key = "cmd",
                 value = "gradlew test",
                 displayValue = "\"gradlew test\"",
+                copyValue = "\"gradlew test\"",
                 kind = GraphChatToolValueKind.String,
                 displayKind = GraphChatToolEntryDisplayKind.Inline,
                 tone = GraphChatToolEntryValueTone.String,
@@ -209,6 +210,7 @@ class GraphChatToolBlocksTest {
                 key = "missing",
                 value = "",
                 displayValue = "null",
+                copyValue = "null",
                 kind = GraphChatToolValueKind.Null,
                 displayKind = GraphChatToolEntryDisplayKind.Inline,
                 tone = GraphChatToolEntryValueTone.Null,
@@ -227,6 +229,7 @@ class GraphChatToolBlocksTest {
                 key = "stdout",
                 value = "",
                 displayValue = "(empty)",
+                copyValue = "",
                 kind = GraphChatToolValueKind.Raw,
                 displayKind = GraphChatToolEntryDisplayKind.OutputBlock,
                 tone = GraphChatToolEntryValueTone.Raw,
@@ -246,6 +249,7 @@ class GraphChatToolBlocksTest {
                   2
                 ]
                 """.trimIndent(),
+                copyValue = """["a",2]""",
                 kind = GraphChatToolValueKind.Object,
                 displayKind = GraphChatToolEntryDisplayKind.OutputBlock,
                 tone = GraphChatToolEntryValueTone.Object,
@@ -375,6 +379,34 @@ class GraphChatToolBlocksTest {
             """.trimIndent(),
             prettyGraphChatToolJsonValue("""["a",2]"""),
         )
+    }
+
+    @Test
+    fun prettyPrintsNestedToolJsonWithEscapedStringsAndKeepsRawCopyValue() {
+        val raw = """{"request":{"path":"apps/android","args":["a,b",{"quoted":"x\"y"}]},"ok":true}"""
+        val displayState = buildGraphChatToolEntryDisplayState(
+            entry = GraphChatToolEntry("request", raw, GraphChatToolValueKind.Object),
+            renderObjectAsBlock = true,
+        )
+
+        assertEquals(
+            """
+            {
+              "request": {
+                "path": "apps/android",
+                "args": [
+                  "a,b",
+                  {
+                    "quoted": "x\"y"
+                  }
+                ]
+              },
+              "ok": true
+            }
+            """.trimIndent(),
+            displayState.displayValue,
+        )
+        assertEquals(raw, displayState.copyValue)
     }
 
     @Test
