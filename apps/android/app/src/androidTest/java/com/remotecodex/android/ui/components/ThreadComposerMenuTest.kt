@@ -9,6 +9,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,5 +61,28 @@ class ThreadComposerMenuTest {
         assertNotNull(device.findObject(By.text("High")))
         assertNotNull(device.findObject(By.desc("Medium selected")))
         assertNotNull(device.findObject(By.desc("High available")))
+    }
+
+    @Test
+    fun slashToolboxOpensWithRootActionsAndStatuses() {
+        val slashButton = device.wait(Until.findObject(By.desc("Open slash toolbox")), 5_000)
+            ?: error("Slash toolbox button was not visible")
+        slashButton.click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("Slash toolbox")), 2_000))
+        assertNotNull(device.findObject(By.text("Thread actions")))
+        assertNotNull(device.findObject(By.text("/fast")))
+        assertNotNull(device.findObject(By.text("Off")))
+        assertNotNull(device.findObject(By.desc("Fast mode")))
+        assertNotNull(device.findObject(By.desc("Compact thread")))
+        assertNotNull(device.findObject(By.text("/goal")))
+        assertNotNull(device.findObject(By.text("Active")))
+        assertNotNull(device.findObject(By.desc("Goal")))
+        assertNotNull(device.findObject(By.text("/skills")))
+        assertNotNull(device.findObject(By.desc("Skills")))
+        assertTrue(
+            "Default preview should render backend toolbox rows instead of the empty state",
+            device.findObjects(By.text("No backend tools are available for this thread.")).isEmpty(),
+        )
     }
 }
