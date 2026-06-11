@@ -3144,10 +3144,7 @@ fun isRunningHistoryStatusLabel(statusLabel: String?): Boolean {
     return normalized == "running" ||
         normalized == "in_progress" ||
         normalized == "in progress" ||
-        normalized == "pending" ||
-        normalized.contains("running") ||
-        normalized.contains("inprogress") ||
-        normalized.contains("in_progress")
+        normalized == "pending"
 }
 
 fun graphChatHistoryGroupCountLabel(countLabel: String): String {

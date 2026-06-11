@@ -4401,9 +4401,11 @@ class ThreadPresentationTest {
 
     @Test
     fun recognizesWebAlignedRunningHistoryStatuses() {
-        listOf("running", "in_progress", "in progress", "pending", "still running").forEach { status ->
+        listOf("running", "in_progress", "in progress", "pending").forEach { status ->
             assertEquals(true, isRunningHistoryStatusLabel(status))
         }
+        assertEquals(false, isRunningHistoryStatusLabel("still running"))
+        assertEquals(false, isRunningHistoryStatusLabel("not running"))
         assertEquals(false, isRunningHistoryStatusLabel("completed"))
         assertEquals(false, isRunningHistoryStatusLabel(null))
     }
