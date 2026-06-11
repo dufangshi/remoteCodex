@@ -5441,6 +5441,8 @@ class ThreadPresentationTest {
                     "You selected ./gradlew :app:assembleDebug",
                 ),
                 timeLabel = "13:42",
+                actionLabel = null,
+                actionAccessibilityLabel = null,
                 tone = TimelineNoteToneState.Answered,
             ),
             buildTimelineNoteCardState(
@@ -5481,6 +5483,8 @@ class ThreadPresentationTest {
                 title = "System",
                 summaryLines = listOf("Socket resumed."),
                 timeLabel = null,
+                actionLabel = null,
+                actionAccessibilityLabel = null,
                 tone = TimelineNoteToneState.Activity,
             ),
             buildTimelineNoteCardState(
@@ -5488,6 +5492,30 @@ class ThreadPresentationTest {
                     title = " ",
                     summaryLines = listOf(" Socket resumed. "),
                     timeLabel = " ",
+                ),
+                tone = TimelineNoteToneState.Activity,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsActivityTimelineNoteActionState() {
+        assertEquals(
+            TimelineNoteCardState(
+                label = "Activity",
+                title = "Fork",
+                summaryLines = listOf("Thread forked from Turn 12."),
+                timeLabel = "13:40",
+                actionLabel = "Open fork",
+                actionAccessibilityLabel = "Open fork",
+                tone = TimelineNoteToneState.Activity,
+            ),
+            buildTimelineNoteCardState(
+                note = TimelineNotePreview(
+                    title = " Fork ",
+                    summaryLines = listOf(" Thread forked from Turn 12. "),
+                    timeLabel = " 13:40 ",
+                    actionLabel = " Open fork ",
                 ),
                 tone = TimelineNoteToneState.Activity,
             ),

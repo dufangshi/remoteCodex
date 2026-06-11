@@ -560,9 +560,10 @@ object ThreadPreviewSample {
             loadingEarlier = false,
             activityNotes = listOf(
                 TimelineNotePreview(
-                    title = "Supervisor reconnected",
-                    summaryLines = listOf("Socket resumed and timeline projection refreshed from thread detail."),
+                    title = "Fork",
+                    summaryLines = listOf("Thread forked from Turn 12 for Android timeline parity."),
                     timeLabel = "13:40",
+                    actionLabel = "Open fork",
                 ),
             ),
             answeredRequestNotes = listOf(

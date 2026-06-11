@@ -667,6 +667,7 @@ data class TimelineNotePreview(
     val title: String,
     val summaryLines: List<String>,
     val timeLabel: String? = null,
+    val actionLabel: String? = null,
 )
 
 data class TimelineSteerPreview(

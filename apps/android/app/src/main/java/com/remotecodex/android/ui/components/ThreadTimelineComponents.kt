@@ -138,17 +138,17 @@ fun ThreadTimeline(
             bottom = 132.dp,
         ),
     ) {
+        if (auxiliary.activityNotes.isNotEmpty()) {
+            items(auxiliary.activityNotes, key = { note -> "activity:${note.title}:${note.timeLabel}" }) { note ->
+                TimelineNoteCard(note = note, tone = TimelineNoteTone.Activity)
+            }
+        }
         items(pendingRequests, key = { request -> "pending-request:${request.id}" }) { request ->
             PendingRequestCard(request = request)
         }
         if (auxiliary.canLoadEarlier) {
             item(key = "load-earlier") {
                 LoadEarlierRow(loading = auxiliary.loadingEarlier)
-            }
-        }
-        if (auxiliary.activityNotes.isNotEmpty()) {
-            items(auxiliary.activityNotes, key = { note -> "activity:${note.title}:${note.timeLabel}" }) { note ->
-                TimelineNoteCard(note = note, tone = TimelineNoteTone.Activity)
             }
         }
         items(turns, key = { it.index }) { turn ->
@@ -392,6 +392,22 @@ private fun TimelineNoteCard(
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        state.actionLabel?.let { actionLabel ->
+            Text(
+                text = actionLabel,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .border(1.dp, foreground.copy(alpha = 0.40f), RoundedCornerShape(999.dp))
+                    .semantics {
+                        contentDescription = state.actionAccessibilityLabel ?: actionLabel
+                    }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                color = foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
             )
         }
     }

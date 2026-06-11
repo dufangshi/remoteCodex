@@ -260,6 +260,8 @@ data class TimelineNoteCardState(
     val title: String,
     val summaryLines: List<String>,
     val timeLabel: String?,
+    val actionLabel: String?,
+    val actionAccessibilityLabel: String?,
     val tone: TimelineNoteToneState,
 )
 
@@ -3594,6 +3596,11 @@ fun buildTimelineNoteCardState(
         title = title,
         summaryLines = summaryLines,
         timeLabel = note.timeLabel?.trim()?.takeIf { it.isNotEmpty() },
+        actionLabel = note.actionLabel?.trim()?.takeIf { it.isNotEmpty() },
+        actionAccessibilityLabel = note.actionLabel
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { action -> action },
         tone = tone,
     )
 }

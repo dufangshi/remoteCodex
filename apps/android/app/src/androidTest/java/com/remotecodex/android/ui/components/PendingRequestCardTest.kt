@@ -53,6 +53,7 @@ class PendingRequestCardTest {
 
     @Test
     fun freeFormQuestionRendersAndKeepsSubmitDisabledUntilTextIsProvided() {
+        device.swipeTimelineUp()
         assertNotNull(device.wait(Until.findObject(By.text("Follow-up")), 5_000))
         assertNotNull(device.findObject(By.text("Enter an answer")))
 
@@ -65,6 +66,23 @@ class PendingRequestCardTest {
         assertNotNull(followUpInput)
         assertTrue(followUpInput.isEnabled)
     }
+
+    @Test
+    fun activityNoteRendersForkAction() {
+        assertNotNull(device.wait(Until.findObject(By.text("Fork")), 2_000))
+        assertNotNull(device.findObject(By.text("Thread forked from Turn 12 for Android timeline parity.")))
+        assertNotNull(device.findObject(By.desc("Open fork")))
+    }
+}
+
+private fun UiDevice.swipeTimelineUp() {
+    swipe(
+        displayWidth / 2,
+        (displayHeight * 0.56f).toInt(),
+        displayWidth / 2,
+        (displayHeight * 0.31f).toInt(),
+        18,
+    )
 }
 
 private fun androidx.test.uiautomator.UiObject2.clickCenter() {
