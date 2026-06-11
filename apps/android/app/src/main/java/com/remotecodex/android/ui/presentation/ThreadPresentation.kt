@@ -20,6 +20,8 @@ import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
+import com.remotecodex.android.ui.model.ComposerPromptAttachmentPreview
+import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
@@ -115,6 +117,26 @@ data class ComposerContextUsageState(
     val remainingLabel: String,
     val progressFraction: Float,
     val available: Boolean,
+)
+
+data class ComposerPromptAttachmentState(
+    val label: String,
+    val kind: ComposerAttachmentActionKind,
+)
+
+data class ComposerPromptSlotState(
+    val chatVisible: Boolean,
+    val shellVisible: Boolean,
+    val text: String,
+    val placeholder: String,
+    val showPlaceholder: Boolean,
+    val disabled: Boolean,
+    val canInterrupt: Boolean,
+    val interruptLabel: String,
+    val sendButtonLabel: String,
+    val sendDisabled: Boolean,
+    val attachmentChips: List<ComposerPromptAttachmentState>,
+    val inputModeLabel: String,
 )
 
 data class ComposerSettingsState(
@@ -992,6 +1014,74 @@ fun buildComposerContextUsageState(context: ComposerContextPreview): ComposerCon
         progressFraction = if (available) percent / 100f else 0f,
         available = available,
     )
+}
+
+fun buildComposerPromptSlotState(
+    prompt: ComposerPromptPreview,
+    activeView: ComposerActiveView,
+    actionState: ComposerActionState,
+    busy: Boolean,
+    goalBusy: Boolean,
+): ComposerPromptSlotState {
+    val isShellView = activeView == ComposerActiveView.Shell
+    val activeAttachments = if (isShellView) {
+        emptyList()
+    } else {
+        activePromptAttachments(prompt.text, prompt.attachments)
+    }
+    return ComposerPromptSlotState(
+        chatVisible = !isShellView,
+        shellVisible = isShellView,
+        text = prompt.text,
+        placeholder = prompt.placeholder.takeIf { it.isNotBlank() } ?: "Ask Codex",
+        showPlaceholder = prompt.text.isBlank(),
+        disabled = prompt.disabled,
+        canInterrupt = actionState.showInterrupt || actionState.primaryKind == ComposerPrimaryActionKind.Stop,
+        interruptLabel = actionState.interruptLabel,
+        sendButtonLabel = actionState.primaryLabel,
+        sendDisabled = goalBusy || busy || prompt.disabled,
+        attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
+        inputModeLabel = if (isShellView) "Shell input" else "Prompt",
+    )
+}
+
+private fun activePromptAttachments(
+    promptText: String,
+    attachments: List<ComposerPromptAttachmentPreview>,
+): List<ComposerPromptAttachmentPreview> {
+    return attachments.filter { attachment ->
+        promptText.isBlank() || promptText.contains(attachment.placeholder)
+    }
+}
+
+private fun buildComposerPromptAttachmentState(
+    attachment: ComposerPromptAttachmentPreview,
+): ComposerPromptAttachmentState {
+    return ComposerPromptAttachmentState(
+        label = attachmentDisplayLabel(attachment.name, attachment.placeholder),
+        kind = when (attachment.kind) {
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.Photo -> ComposerAttachmentActionKind.Photo
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.File -> ComposerAttachmentActionKind.File
+        },
+    )
+}
+
+fun attachmentDisplayLabel(
+    name: String,
+    placeholder: String,
+): String {
+    val normalizedName = name.trim()
+    if (normalizedName.isNotEmpty()) {
+        return normalizedName.substringAfterLast('/').substringAfterLast('\\')
+    }
+    val normalizedPlaceholder = placeholder.trim()
+    val label = when {
+        normalizedPlaceholder.startsWith("[PHOTO ") -> normalizedPlaceholder.removePrefix("[PHOTO ")
+        normalizedPlaceholder.startsWith("[FILE ") -> normalizedPlaceholder.removePrefix("[FILE ")
+        normalizedPlaceholder.startsWith("[") -> normalizedPlaceholder.removePrefix("[")
+        else -> normalizedPlaceholder
+    }.removeSuffix("]").trim()
+    return label.ifEmpty { "attachment" }
 }
 
 fun formatContextTokenKilocount(value: Int): String {

@@ -53,6 +53,8 @@ import com.remotecodex.android.ui.presentation.ComposerMcpServerRowState
 import com.remotecodex.android.ui.presentation.ComposerMcpStatusMessageState
 import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
+import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
+import com.remotecodex.android.ui.presentation.ComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
@@ -73,6 +75,7 @@ import com.remotecodex.android.ui.presentation.buildComposerHooksPanelState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
+import com.remotecodex.android.ui.presentation.buildComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
@@ -106,6 +109,13 @@ fun ThreadComposer(
         followTail = composer.followTail,
     )
     val contextState = buildComposerContextUsageState(composer.context)
+    val promptSlotState = buildComposerPromptSlotState(
+        prompt = composer.prompt,
+        activeView = composer.activeView,
+        actionState = actionState,
+        busy = composer.busy,
+        goalBusy = composer.goalPanel.busy,
+    )
     val settingsState = buildComposerSettingsState(
         context = composer.context,
         reasoningEffort = composer.reasoningEffort,
@@ -216,7 +226,10 @@ fun ThreadComposer(
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Effort) },
             )
         }
-        ComposerInputGroupPreview(contextState = contextState)
+        ComposerInputGroupPreview(
+            contextState = contextState,
+            promptSlotState = promptSlotState,
+        )
         ComposerStatusStrip(chips = statusChips)
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -357,35 +370,106 @@ private fun ComposerStatusChip(chip: ComposerStatusChipModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ComposerInputGroupPreview(contextState: ComposerContextUsageState) {
+private fun ComposerInputGroupPreview(
+    contextState: ComposerContextUsageState,
+    promptSlotState: ComposerPromptSlotState,
+) {
     GraphInputGroup(
         blockStart = {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                AttachmentChip(icon = AttachmentTileIcon.Photo, name = "shell-preview.png")
-                AttachmentChip(icon = AttachmentTileIcon.File, name = "android-client-architecture.md")
+            if (promptSlotState.attachmentChips.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    promptSlotState.attachmentChips.forEach { attachment ->
+                        AttachmentChip(attachment = attachment)
+                    }
+                }
             }
         },
         control = {
-            Text(
-                text = "Ask the backend to inspect, modify, or explain code...",
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            ComposerPromptControl(state = promptSlotState)
             ContextProgressPreview(contextState = contextState)
         },
         blockEnd = {
             GraphInputGroupAddonRow {
-                GraphInputGroupAddon(label = "Prompt")
+                GraphInputGroupAddon(label = promptSlotState.inputModeLabel)
                 GraphInputGroupAddon(label = "Markdown")
                 Box(modifier = Modifier.weight(1f))
-                GraphInputGroupText(text = contextState.usageLabel)
+                if (promptSlotState.shellVisible) {
+                    GraphInputGroupText(text = if (promptSlotState.sendDisabled) "Shell send disabled" else "Shell ready")
+                } else {
+                    GraphInputGroupText(text = contextState.usageLabel)
+                }
             }
         },
     )
+}
+
+@Composable
+private fun ComposerPromptControl(state: ComposerPromptSlotState) {
+    val foreground = if (state.disabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundSoft
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = if (state.showPlaceholder) state.placeholder else state.text,
+                modifier = Modifier.weight(1f),
+                color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else foreground,
+                style = if (state.shellVisible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                maxLines = if (state.shellVisible) 3 else 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (state.canInterrupt) {
+                ComposerMiniStopButton(label = state.interruptLabel)
+            }
+        }
+        if (state.shellVisible) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GraphBadge(label = state.sendButtonLabel, variant = GraphBadgeVariant.Default)
+                GraphBadge(
+                    label = if (state.sendDisabled) "Disabled" else "Ready",
+                    variant = GraphBadgeVariant.Outline,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerMiniStopButton(label: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
+            .border(1.dp, ThreadColors.Danger.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(ThreadColors.Danger),
+        )
+        Text(
+            text = label,
+            color = ThreadColors.Danger,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable
@@ -425,6 +509,17 @@ private fun AttachmentChip(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+@Composable
+private fun AttachmentChip(attachment: ComposerPromptAttachmentState) {
+    AttachmentChip(
+        icon = when (attachment.kind) {
+            ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
+            ComposerAttachmentActionKind.File -> AttachmentTileIcon.File
+        },
+        name = attachment.label,
+    )
 }
 
 @Composable

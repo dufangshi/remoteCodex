@@ -23,6 +23,8 @@ import com.remotecodex.android.ui.model.ComposerMcpServerPreview
 import com.remotecodex.android.ui.model.ComposerMcpToolPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
+import com.remotecodex.android.ui.model.ComposerPromptAttachmentPreview
+import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
@@ -31,6 +33,7 @@ import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
+import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -431,6 +434,172 @@ class ThreadPresentationTest {
             ),
             buildComposerAttachmentActions(),
         )
+    }
+
+    @Test
+    fun buildsChatComposerPromptSlotState() {
+        assertEquals(
+            ComposerPromptSlotState(
+                chatVisible = true,
+                shellVisible = false,
+                text = "inspect [FILE active.txt]",
+                placeholder = "Ask Codex",
+                showPlaceholder = false,
+                disabled = false,
+                canInterrupt = false,
+                interruptLabel = "Stop Current Turn",
+                sendButtonLabel = "Send",
+                sendDisabled = false,
+                attachmentChips = listOf(
+                    ComposerPromptAttachmentState(
+                        label = "active.txt",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                ),
+                inputModeLabel = "Prompt",
+            ),
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "inspect [FILE active.txt]",
+                    placeholder = "Ask Codex",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "active",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "active.txt",
+                            placeholder = "[FILE active.txt]",
+                        ),
+                        ComposerPromptAttachmentPreview(
+                            clientId = "inactive",
+                            kind = ComposerAttachmentKindPreview.Photo,
+                            name = "inactive.png",
+                            placeholder = "[PHOTO inactive.png]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Chat,
+                actionState = ComposerActionState(
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                    interruptLabel = "Stop Current Turn",
+                    showInterrupt = false,
+                    sendEnabled = true,
+                ),
+                busy = false,
+                goalBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsEmptyChatComposerPromptSlotStateWithPlaceholderAndAllQueuedAttachments() {
+        assertEquals(
+            ComposerPromptSlotState(
+                chatVisible = true,
+                shellVisible = false,
+                text = "",
+                placeholder = "Ask Codex",
+                showPlaceholder = true,
+                disabled = true,
+                canInterrupt = true,
+                interruptLabel = "Stop Current Turn",
+                sendButtonLabel = "Stop Current Turn",
+                sendDisabled = true,
+                attachmentChips = listOf(
+                    ComposerPromptAttachmentState(
+                        label = "capture.png",
+                        kind = ComposerAttachmentActionKind.Photo,
+                    ),
+                    ComposerPromptAttachmentState(
+                        label = "report.md",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                ),
+                inputModeLabel = "Prompt",
+            ),
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "",
+                    placeholder = "Ask Codex",
+                    disabled = true,
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "photo",
+                            kind = ComposerAttachmentKindPreview.Photo,
+                            name = "/tmp/capture.png",
+                            placeholder = "[PHOTO capture.png]",
+                        ),
+                        ComposerPromptAttachmentPreview(
+                            clientId = "file",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "",
+                            placeholder = "[FILE report.md]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Chat,
+                actionState = ComposerActionState(
+                    primaryLabel = "Stop Current Turn",
+                    primaryKind = ComposerPrimaryActionKind.Stop,
+                    interruptLabel = "Stop Current Turn",
+                    showInterrupt = false,
+                    sendEnabled = true,
+                ),
+                busy = false,
+                goalBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsShellComposerPromptSlotState() {
+        assertEquals(
+            ComposerPromptSlotState(
+                chatVisible = false,
+                shellVisible = true,
+                text = "pnpm test",
+                placeholder = "Shell command",
+                showPlaceholder = false,
+                disabled = false,
+                canInterrupt = true,
+                interruptLabel = "Send Ctrl-C",
+                sendButtonLabel = "Send",
+                sendDisabled = true,
+                attachmentChips = emptyList(),
+                inputModeLabel = "Shell input",
+            ),
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "pnpm test",
+                    placeholder = "Shell command",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "ignored",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "ignored.txt",
+                            placeholder = "[FILE ignored.txt]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Shell,
+                actionState = ComposerActionState(
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                    interruptLabel = "Send Ctrl-C",
+                    showInterrupt = true,
+                    sendEnabled = false,
+                ),
+                busy = false,
+                goalBusy = true,
+            ),
+        )
+    }
+
+    @Test
+    fun derivesAttachmentDisplayLabels() {
+        assertEquals("image.png", attachmentDisplayLabel("/tmp/image.png", "[PHOTO image.png]"))
+        assertEquals("report.md", attachmentDisplayLabel("", "[FILE report.md]"))
+        assertEquals("attachment", attachmentDisplayLabel("", "[]"))
     }
 
     @Test

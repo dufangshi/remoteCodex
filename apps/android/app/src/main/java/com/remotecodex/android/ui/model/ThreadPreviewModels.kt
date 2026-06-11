@@ -163,6 +163,7 @@ data class ComposerPreview(
     val followTail: Boolean = true,
     val canInterrupt: Boolean = true,
     val workspaceModeLabel: String = "workspace write",
+    val prompt: ComposerPromptPreview = ComposerPromptPreview(),
     val context: ComposerContextPreview = ComposerContextPreview(),
     val reasoningEffort: String = "medium",
     val supportedReasoningEffortCount: Int = 3,
@@ -187,6 +188,40 @@ data class ComposerPreview(
 data class ComposerShellControlPreview(
     val shellInputEnabled: Boolean = true,
     val commandRunning: Boolean = true,
+)
+
+enum class ComposerAttachmentKindPreview {
+    Photo,
+    File,
+}
+
+data class ComposerPromptAttachmentPreview(
+    val clientId: String,
+    val kind: ComposerAttachmentKindPreview,
+    val name: String,
+    val placeholder: String,
+)
+
+data class ComposerPromptPreview(
+    val text: String = "",
+    val placeholder: String = "Ask the backend to inspect, modify, or explain code...",
+    val disabled: Boolean = false,
+    val attachments: List<ComposerPromptAttachmentPreview> = defaultComposerPromptAttachments,
+)
+
+val defaultComposerPromptAttachments = listOf(
+    ComposerPromptAttachmentPreview(
+        clientId = "photo-shell-preview",
+        kind = ComposerAttachmentKindPreview.Photo,
+        name = "shell-preview.png",
+        placeholder = "[PHOTO shell-preview.png]",
+    ),
+    ComposerPromptAttachmentPreview(
+        clientId = "file-android-client-architecture",
+        kind = ComposerAttachmentKindPreview.File,
+        name = "android-client-architecture.md",
+        placeholder = "[FILE android-client-architecture.md]",
+    ),
 )
 
 enum class ThreadGoalStatusPreview {
