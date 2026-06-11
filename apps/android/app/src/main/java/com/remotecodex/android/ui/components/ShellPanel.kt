@@ -647,6 +647,12 @@ private fun ShellControlPill(label: String) {
 
 @Composable
 private fun ShellCommandBar(shell: ShellPreview) {
+    val promptText = when {
+        !shell.inputEnabled -> "Connect the shell first"
+        shell.commandRunning -> "Command running..."
+        else -> "Run a command..."
+    }
+    val sendEnabled = shell.inputEnabled && !shell.commandRunning
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -663,20 +669,24 @@ private fun ShellCommandBar(shell: ShellPreview) {
             fontFamily = FontFamily.Monospace,
         )
         Text(
-            text = "Run a command...",
+            text = promptText,
             modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundMuted,
+            color = if (shell.inputEnabled) ThreadColors.ForegroundMuted else ThreadColors.Warning,
             style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = "Send",
+            text = if (shell.commandRunning) "Running" else "Send",
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.PrimaryForeground)
+                .background(if (sendEnabled) ThreadColors.PrimaryForeground else ThreadColors.Surface.copy(alpha = 0.42f))
+                .border(1.dp, if (sendEnabled) ThreadColors.PrimaryForeground else ThreadColors.BorderStrong, RoundedCornerShape(999.dp))
                 .padding(horizontal = 13.dp, vertical = 8.dp),
-            color = ThreadColors.Primary,
+            color = if (sendEnabled) ThreadColors.Primary else ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
         )
     }
 }
