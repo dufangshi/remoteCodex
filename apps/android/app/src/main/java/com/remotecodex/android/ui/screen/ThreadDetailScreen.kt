@@ -39,6 +39,7 @@ import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorShellEvent
 import com.remotecodex.android.api.SupervisorSocketConnection
+import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.api.TrustThreadHookRequest
 import com.remotecodex.android.api.UntrustThreadHookRequest
@@ -65,6 +66,7 @@ import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSuper
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
+import com.remotecodex.android.thread.reduceThreadEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -84,6 +86,7 @@ fun ThreadDetailScreen(
     onBackToHome: () -> Unit,
 ) {
     var detail by remember(threadId) { mutableStateOf<ThreadDetailPreview?>(null) }
+    var threadDetailDto by remember(threadId) { mutableStateOf<SupervisorThreadDetail?>(null) }
     var loading by remember(threadId) { mutableStateOf(true) }
     var error by remember(threadId) { mutableStateOf<String?>(null) }
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
@@ -161,7 +164,7 @@ fun ThreadDetailScreen(
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                client.fetchThreadDetailPreview(
+                client.fetchThreadDetailBundle(
                     threadId = threadId,
                     selectedWorkspaceFilePath = selectedWorkspaceFilePath,
                 )
@@ -169,9 +172,10 @@ fun ThreadDetailScreen(
         }
         loading = false
         result
-            .onSuccess { preview ->
-                detail = preview
-                selectedWorkspaceFilePath = preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
+            .onSuccess { bundle ->
+                threadDetailDto = bundle.dto
+                detail = bundle.preview
+                selectedWorkspaceFilePath = bundle.preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
                     ?: selectedWorkspaceFilePath
             }
             .onFailure { throwable -> error = throwable.message ?: "Thread detail failed." }
@@ -181,7 +185,21 @@ fun ThreadDetailScreen(
         val connection = eventSocketClient.connect(
             onThreadEvent = { event ->
                 if (event.threadId == threadId) {
-                    refreshNonce += 1
+                    val currentDto = threadDetailDto
+                    val currentPreview = detail
+                    if (currentDto == null || currentPreview == null) {
+                        refreshNonce += 1
+                    } else {
+                        val reduced = reduceThreadEvent(currentDto, event)
+                        threadDetailDto = reduced.detail
+                        detail = mergeThreadEventPreview(
+                            current = currentPreview,
+                            next = buildThreadDetailPreviewFromSupervisor(reduced.detail),
+                        )
+                        if (reduced.needsRefresh) {
+                            refreshNonce += 1
+                        }
+                    }
                 }
             },
             onShellEvent = { event ->
@@ -323,6 +341,7 @@ fun ThreadDetailScreen(
         result
             .onSuccess { preview ->
                 detail = preview
+                threadDetailDto = null
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Interrupt failed." }
@@ -341,6 +360,7 @@ fun ThreadDetailScreen(
         result
             .onSuccess { preview ->
                 detail = preview
+                threadDetailDto = null
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Settings update failed." }
@@ -932,6 +952,11 @@ private data class PendingRequestResponse(
     val answers: Map<String, List<String>>,
 )
 
+private data class ThreadDetailBundle(
+    val dto: SupervisorThreadDetail,
+    val preview: ThreadDetailPreview,
+)
+
 private fun SupervisorApiClient.fetchThreadDetailPreview(
     threadId: String,
     selectedWorkspaceFilePath: String? = null,
@@ -940,6 +965,24 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
     overrideWorkspaceTruncated: Boolean? = null,
     includeShell: Boolean = AndroidFeatureFlags.ShellEnabled,
 ): ThreadDetailPreview {
+    return fetchThreadDetailBundle(
+        threadId = threadId,
+        selectedWorkspaceFilePath = selectedWorkspaceFilePath,
+        overrideWorkspaceContent = overrideWorkspaceContent,
+        overrideWorkspaceNextOffset = overrideWorkspaceNextOffset,
+        overrideWorkspaceTruncated = overrideWorkspaceTruncated,
+        includeShell = includeShell,
+    ).preview
+}
+
+private fun SupervisorApiClient.fetchThreadDetailBundle(
+    threadId: String,
+    selectedWorkspaceFilePath: String? = null,
+    overrideWorkspaceContent: String? = null,
+    overrideWorkspaceNextOffset: Long? = null,
+    overrideWorkspaceTruncated: Boolean? = null,
+    includeShell: Boolean = AndroidFeatureFlags.ShellEnabled,
+): ThreadDetailBundle {
     val detail = fetchThreadDetail(threadId, limit = 30)
     val tree = runCatching { fetchWorkspaceTree(detail.workspace.id) }.getOrNull()
     val previewPath = selectedWorkspaceFilePath?.takeIf { it.isNotBlank() } ?: tree?.firstFilePath()
@@ -972,7 +1015,7 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
     val skillsResult = runCatching { fetchThreadSkills(threadId) }
     val mcpServersResult = runCatching { fetchThreadMcpServers(threadId) }
     val hooksResult = runCatching { fetchThreadHooks(threadId) }
-    return buildThreadDetailPreviewFromSupervisor(
+    val preview = buildThreadDetailPreviewFromSupervisor(
         detail = detail,
         workspaceTree = tree,
         workspaceFilePreview = filePreview,
@@ -986,6 +1029,33 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
         mcpServersError = mcpServersResult.exceptionOrNull()?.message,
         hooks = hooksResult.getOrNull(),
         hooksError = hooksResult.exceptionOrNull()?.message,
+    )
+    return ThreadDetailBundle(dto = detail, preview = preview)
+}
+
+private fun mergeThreadEventPreview(
+    current: ThreadDetailPreview,
+    next: ThreadDetailPreview,
+): ThreadDetailPreview {
+    return next.copy(
+        exportTurns = current.exportTurns,
+        workspacePreview = current.workspacePreview,
+        shellPreview = current.shellPreview,
+        composer = next.composer.copy(
+            activeView = current.composer.activeView,
+            followTail = current.composer.followTail,
+            prompt = current.composer.prompt,
+            modelOptions = current.composer.modelOptions,
+            reasoningEffortOptions = current.composer.reasoningEffortOptions,
+            shellControl = current.composer.shellControl,
+            forkTurnOptions = current.composer.forkTurnOptions,
+            goalComposeMode = current.composer.goalComposeMode,
+            slashPanelView = current.composer.slashPanelView,
+            toolboxItems = current.composer.toolboxItems,
+            skillsPanel = current.composer.skillsPanel,
+            mcpPanel = current.composer.mcpPanel,
+            hooksPanel = current.composer.hooksPanel,
+        ),
     )
 }
 

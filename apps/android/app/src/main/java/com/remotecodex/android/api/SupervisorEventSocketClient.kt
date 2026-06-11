@@ -102,6 +102,7 @@ data class SupervisorThreadEvent(
     val type: String,
     val threadId: String,
     val timestamp: String?,
+    val payload: JSONObject,
 )
 
 data class SupervisorShellEvent(
@@ -135,6 +136,7 @@ internal fun parseSupervisorThreadEvent(rawMessage: String): SupervisorThreadEve
         type = type,
         threadId = threadId,
         timestamp = json.optNullableString("timestamp"),
+        payload = payload,
     )
 }
 

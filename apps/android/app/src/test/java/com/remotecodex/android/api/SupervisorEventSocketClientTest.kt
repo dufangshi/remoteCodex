@@ -26,6 +26,8 @@ class SupervisorEventSocketClientTest {
         assertEquals("thread.output.delta", event?.type)
         assertEquals("thread-1", event?.threadId)
         assertEquals("2026-06-11T20:00:00.000Z", event?.timestamp)
+        assertEquals("turn-1", event?.payload?.optString("turnId"))
+        assertEquals("hello", event?.payload?.optString("delta"))
     }
 
     @Test

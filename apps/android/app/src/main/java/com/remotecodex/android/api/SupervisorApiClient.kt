@@ -1105,7 +1105,7 @@ private fun JSONObject.toAgentHookError(): SupervisorAgentHookError {
     )
 }
 
-private fun JSONObject.toThreadActionRequest(): SupervisorThreadActionRequest {
+internal fun JSONObject.toThreadActionRequest(): SupervisorThreadActionRequest {
     val questionsJson = optJSONArray("questions") ?: org.json.JSONArray()
     return SupervisorThreadActionRequest(
         id = optString("id"),
@@ -1140,7 +1140,7 @@ private fun JSONObject.toThreadActionQuestionOption(): SupervisorThreadActionQue
     )
 }
 
-private fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequestNote {
+internal fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequestNote {
     val linesJson = optJSONArray("summaryLines") ?: org.json.JSONArray()
     return SupervisorThreadAnsweredRequestNote(
         id = optString("id"),
@@ -1150,7 +1150,7 @@ private fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequestN
     )
 }
 
-private fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
+internal fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
     val itemsJson = optJSONArray("items") ?: org.json.JSONArray()
     return SupervisorThreadTurn(
         id = optString("id"),
@@ -1163,7 +1163,7 @@ private fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
     )
 }
 
-private fun JSONObject.toThreadTurnTokenUsage(): SupervisorThreadTurnTokenUsage {
+internal fun JSONObject.toThreadTurnTokenUsage(): SupervisorThreadTurnTokenUsage {
     return SupervisorThreadTurnTokenUsage(
         total = getJSONObject("total").toTokenBreakdown(),
         last = getJSONObject("last").toTokenBreakdown(),
@@ -1184,7 +1184,7 @@ private fun JSONObject.toTokenBreakdown(): SupervisorTokenBreakdown {
     )
 }
 
-private fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
+internal fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
     val artifact = optJSONObject("artifact")
     return SupervisorThreadTurnItem(
         id = optString("id"),
