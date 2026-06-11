@@ -82,10 +82,12 @@ import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
+import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
 import com.remotecodex.android.ui.presentation.PlanStepStatusTone
+import com.remotecodex.android.ui.presentation.buildGraphChatTurnFrameState
 import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
@@ -152,6 +154,7 @@ private fun TurnFrame(
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
     var collapsed by remember(turn.index, turn.optimistic) { mutableStateOf(false) }
+    val frameState = buildGraphChatTurnFrameState(turn = turn, collapsed = collapsed)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -167,46 +170,48 @@ private fun TurnFrame(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (turn.optimistic) "SENDING" else "TURN ${turn.index}",
+                text = frameState.indexLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
-                color = if (turn.optimistic) ThreadColors.Warning else ThreadColors.ForegroundMuted,
+                color = if (frameState.indexTone == ComposerStatusTone.Warning) {
+                    ThreadColors.Warning
+                } else {
+                    ThreadColors.ForegroundMuted
+                },
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
             Text(
-                text = turn.timeLabel,
+                text = frameState.timeLabel,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
             ThreadStatusBadge(
-                label = turn.statusLabel,
-                status = if (turn.statusLabel.equals("running", ignoreCase = true)) {
-                    ThreadStatus.Running
-                } else {
-                    ThreadStatus.Complete
-                },
+                label = frameState.statusLabel,
+                status = frameState.status,
             )
             Spacer(modifier = Modifier.weight(1f))
-            Text(
-                text = turn.tokenSummary,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            frameState.tokenSummary?.let { tokenSummary ->
+                Text(
+                    text = tokenSummary,
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             TurnCollapseButton(
                 collapsed = collapsed,
-                turnIndex = turn.index,
+                accessibilityLabel = frameState.collapseAccessibilityLabel,
                 onClick = { collapsed = !collapsed },
             )
         }
         if (collapsed) {
             Text(
-                text = collapsedTurnSummary(turn),
+                text = frameState.collapsedSummary,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
@@ -232,7 +237,7 @@ private fun TurnFrame(
 @Composable
 private fun TurnCollapseButton(
     collapsed: Boolean,
-    turnIndex: Int,
+    accessibilityLabel: String,
     onClick: () -> Unit,
 ) {
     Box(
@@ -243,11 +248,7 @@ private fun TurnCollapseButton(
             .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .semantics {
-                contentDescription = if (collapsed) {
-                    "Expand turn $turnIndex"
-                } else {
-                    "Collapse turn $turnIndex"
-                }
+                contentDescription = accessibilityLabel
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -273,13 +274,6 @@ private fun TurnCollapseButton(
             )
         }
     }
-}
-
-private fun collapsedTurnSummary(turn: TurnPreview): String {
-    val messageCount = turn.messages.size
-    val messageLabel = if (messageCount == 1) "1 message" else "$messageCount messages"
-    val livePlanLabel = if (turn.livePlan != null) " · live plan" else ""
-    return "Turn collapsed · $messageLabel$livePlanLabel"
 }
 
 @Composable

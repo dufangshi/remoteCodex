@@ -6,6 +6,7 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
+import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
 import com.remotecodex.android.ui.model.ComposerContextAvailability
@@ -83,6 +84,18 @@ data class PlanStepStatusPresentationState(
     val accessibilityLabel: String,
     val tone: PlanStepStatusTone,
     val running: Boolean,
+)
+
+data class GraphChatTurnFrameState(
+    val indexLabel: String,
+    val indexTone: ComposerStatusTone,
+    val timeLabel: String,
+    val statusLabel: String,
+    val status: ThreadStatus,
+    val tokenSummary: String?,
+    val collapseAccessibilityLabel: String,
+    val collapseTitle: String,
+    val collapsedSummary: String,
 )
 
 data class GraphChatHistoryGroupFrameState(
@@ -2837,6 +2850,31 @@ fun buildPlanStepStatusPresentationState(status: PlanStepStatus): PlanStepStatus
             PlanStepStatus.Unknown -> PlanStepStatusTone.Unknown
         },
         running = status == PlanStepStatus.Running,
+    )
+}
+
+fun buildGraphChatTurnFrameState(
+    turn: TurnPreview,
+    collapsed: Boolean,
+): GraphChatTurnFrameState {
+    val statusLabel = turn.statusLabel.trim().ifEmpty { "complete" }
+    val messageCount = turn.messages.size
+    val messageLabel = if (messageCount == 1) "1 message" else "$messageCount messages"
+    val livePlanLabel = if (turn.livePlan != null) " · live plan" else ""
+    return GraphChatTurnFrameState(
+        indexLabel = if (turn.optimistic) "SENDING" else "TURN ${turn.index}",
+        indexTone = if (turn.optimistic) ComposerStatusTone.Warning else ComposerStatusTone.Neutral,
+        timeLabel = turn.timeLabel.trim(),
+        statusLabel = statusLabel,
+        status = if (statusLabel.equals("running", ignoreCase = true)) {
+            ThreadStatus.Running
+        } else {
+            ThreadStatus.Complete
+        },
+        tokenSummary = turn.tokenSummary.trim().takeIf { it.isNotEmpty() },
+        collapseAccessibilityLabel = "${if (collapsed) "Expand" else "Collapse"} turn ${turn.index}",
+        collapseTitle = if (collapsed) "Expand turn" else "Collapse turn",
+        collapsedSummary = "Turn collapsed · $messageLabel$livePlanLabel",
     )
 }
 

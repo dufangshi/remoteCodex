@@ -43,6 +43,10 @@ import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
+import com.remotecodex.android.ui.model.TurnPreview
+import com.remotecodex.android.ui.model.LivePlanPreview
+import com.remotecodex.android.ui.model.LivePlanStepPreview
+import com.remotecodex.android.ui.model.MessagePreview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -275,6 +279,73 @@ class ThreadPresentationTest {
                 running = false,
             ),
             buildPlanStepStatusPresentationState(PlanStepStatus.Pending),
+        )
+    }
+
+    @Test
+    fun buildsGraphChatTurnFrameStateForOptimisticTurn() {
+        assertEquals(
+            GraphChatTurnFrameState(
+                indexLabel = "SENDING",
+                indexTone = ComposerStatusTone.Warning,
+                timeLabel = "12:04",
+                statusLabel = "running",
+                status = ThreadStatus.Running,
+                tokenSummary = null,
+                collapseAccessibilityLabel = "Collapse turn 9",
+                collapseTitle = "Collapse turn",
+                collapsedSummary = "Turn collapsed · 0 messages",
+            ),
+            buildGraphChatTurnFrameState(
+                turn = TurnPreview(
+                    index = 9,
+                    timeLabel = " 12:04 ",
+                    statusLabel = " running ",
+                    tokenSummary = " ",
+                    messages = emptyList(),
+                    optimistic = true,
+                ),
+                collapsed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsGraphChatTurnFrameStateForCollapsedTurnWithLivePlan() {
+        assertEquals(
+            GraphChatTurnFrameState(
+                indexLabel = "TURN 3",
+                indexTone = ComposerStatusTone.Neutral,
+                timeLabel = "09:15",
+                statusLabel = "complete",
+                status = ThreadStatus.Complete,
+                tokenSummary = "4.2k tokens",
+                collapseAccessibilityLabel = "Expand turn 3",
+                collapseTitle = "Expand turn",
+                collapsedSummary = "Turn collapsed · 1 message · live plan",
+            ),
+            buildGraphChatTurnFrameState(
+                turn = TurnPreview(
+                    index = 3,
+                    timeLabel = "09:15",
+                    statusLabel = " ",
+                    tokenSummary = " 4.2k tokens ",
+                    messages = listOf(
+                        MessagePreview(
+                            author = MessageAuthor.Assistant,
+                            status = ThreadStatus.Complete,
+                            timeLabel = "09:15",
+                            text = "Done",
+                        ),
+                    ),
+                    livePlan = LivePlanPreview(
+                        title = "Plan update",
+                        explanation = null,
+                        steps = listOf(LivePlanStepPreview("Ship", PlanStepStatus.Completed)),
+                    ),
+                ),
+                collapsed = true,
+            ),
         )
     }
 
