@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
+import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.api.SupervisorRuntimeConfig
@@ -90,6 +91,9 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithText("remote-codex 0.1.0 / test").assertExists()
         composeRule.onNodeWithText("local 127.0.0.1:8787").assertExists()
         composeRule.onAllNodesWithText("/home/u/dev").assertCountEquals(2)
+        composeRule.onNodeWithText("Codex").assertExists()
+        composeRule.onNodeWithText("Version: 1.2.3 / Latest: 1.2.4").assertExists()
+        composeRule.onNodeWithText("2/3 ready").assertExists()
         composeRule.onNodeWithContentDescription("Workspace dev home input").assertExists()
         composeRule.onNodeWithContentDescription("Default backend input").assertExists()
         composeRule.onNodeWithContentDescription("Save workspace defaults").assertExists()
@@ -158,6 +162,28 @@ class SupervisorHomeScreenTest {
                         devHome = "/home/u/dev",
                         defaultBackend = "codex",
                     ),
+                    initialAgentBackends = listOf(
+                        exampleBackend(
+                            provider = "codex",
+                            displayName = "Codex",
+                            enabled = true,
+                            isDefault = true,
+                            installedVersion = "1.2.3",
+                            latestVersion = "1.2.4",
+                        ),
+                        exampleBackend(
+                            provider = "claude",
+                            displayName = "Claude",
+                            enabled = true,
+                        ),
+                        exampleBackend(
+                            provider = "opencode",
+                            displayName = "OpenCode",
+                            enabled = false,
+                            installed = false,
+                            installedVersion = null,
+                        ),
+                    ),
                     onImportPluginManifest = {
                         examplePlugin(enabled = true)
                     },
@@ -177,6 +203,35 @@ class SupervisorHomeScreenTest {
             enabled = enabled,
             source = "imported",
             artifactTypes = listOf("chemistry.molecule3d"),
+        )
+    }
+
+    private fun exampleBackend(
+        provider: String,
+        displayName: String,
+        enabled: Boolean,
+        isDefault: Boolean = false,
+        installed: Boolean = true,
+        installedVersion: String? = "1.0.0",
+        latestVersion: String? = null,
+    ): SupervisorAgentBackend {
+        return SupervisorAgentBackend(
+            provider = provider,
+            displayName = displayName,
+            description = "$displayName runtime",
+            enabled = enabled,
+            isDefault = isDefault,
+            statusState = if (enabled) "running" else "stopped",
+            statusDetail = null,
+            installed = installed,
+            installedVersion = installedVersion,
+            latestVersion = latestVersion,
+            installAvailable = !installed,
+            updateAvailable = latestVersion != null,
+            busy = false,
+            lastError = null,
+            configArchives = provider == "codex",
+            buildRestart = provider == "codex",
         )
     }
 }

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.CreateSupervisorWorkspaceRequest
 import com.remotecodex.android.api.ImportSupervisorPluginRequest
+import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
@@ -89,6 +90,7 @@ fun SupervisorHomeScreen(
     initialPlugins: List<SupervisorPluginSummary>? = null,
     initialRuntimeConfig: SupervisorRuntimeConfig? = null,
     initialWorkspaceSettings: SupervisorWorkspaceSettings? = null,
+    initialAgentBackends: List<SupervisorAgentBackend>? = null,
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
     onSetPluginEnabled: (suspend (String, Boolean) -> SupervisorPluginSummary)? = null,
     onSaveWorkspaceSettings: (suspend (String, String?) -> SupervisorWorkspaceSettings)? = null,
@@ -108,6 +110,7 @@ fun SupervisorHomeScreen(
     var pluginsError by remember { mutableStateOf<String?>(null) }
     var runtimeConfig by remember(supervisorConnection) { mutableStateOf(initialRuntimeConfig) }
     var workspaceSettings by remember(supervisorConnection) { mutableStateOf(initialWorkspaceSettings) }
+    var agentBackends by remember(supervisorConnection) { mutableStateOf(initialAgentBackends) }
     var backendSettingsLoading by remember { mutableStateOf(false) }
     var backendSettingsSaving by remember { mutableStateOf(false) }
     var backendSettingsError by remember { mutableStateOf<String?>(null) }
@@ -121,6 +124,11 @@ fun SupervisorHomeScreen(
         initialRuntimeConfig?.let { runtimeConfig = it }
         initialWorkspaceSettings?.let { workspaceSettings = it }
     }
+    LaunchedEffect(initialAgentBackends) {
+        if (initialAgentBackends != null) {
+            agentBackends = initialAgentBackends
+        }
+    }
     fun refreshBackendSettings() {
         backendSettingsLoading = true
         backendSettingsError = null
@@ -128,14 +136,19 @@ fun SupervisorHomeScreen(
         coroutineScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client.fetchRuntimeConfig() to client.fetchWorkspaceSettings()
+                    Triple(
+                        client.fetchRuntimeConfig(),
+                        client.fetchWorkspaceSettings(),
+                        client.listAgentBackends(),
+                    )
                 }
             }
             backendSettingsLoading = false
             result
-                .onSuccess { (runtime, settings) ->
+                .onSuccess { (runtime, settings, backends) ->
                     runtimeConfig = runtime
                     workspaceSettings = settings
+                    agentBackends = backends
                 }
                 .onFailure { error ->
                     backendSettingsError = error.message ?: "Backend settings failed."
@@ -468,6 +481,7 @@ fun SupervisorHomeScreen(
                 backendSettingsSaving = backendSettingsSaving,
                 backendSettingsError = backendSettingsError,
                 backendSettingsMessage = backendSettingsMessage,
+                agentBackends = agentBackends,
                 onThemeModeSelected = onThemeModeSelected,
                 onChangeConnection = onChangeConnection,
                 onRefreshBackendSettings = { refreshBackendSettings() },

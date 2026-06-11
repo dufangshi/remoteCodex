@@ -148,6 +148,12 @@ class SupervisorApiClient(
         ).toWorkspaceSettings()
     }
 
+    fun listAgentBackends(): List<SupervisorAgentBackend> {
+        return requestArray(config.restPath("/api/agent-runtimes")).map { item ->
+            item.toAgentBackend()
+        }
+    }
+
     fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
         val query = buildQuery("path" to path)
         return requestJson(
@@ -743,6 +749,32 @@ private fun JSONObject.toWorkspaceSettings(): SupervisorWorkspaceSettings {
         workspaceRoot = optString("workspaceRoot"),
         devHome = optString("devHome"),
         defaultBackend = optString("defaultBackend"),
+    )
+}
+
+private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
+    val status = optJSONObject("status")
+    val installation = optJSONObject("installation")
+    val managementSchema = optJSONObject("managementSchema")
+    return SupervisorAgentBackend(
+        provider = optString("provider"),
+        displayName = optString("displayName"),
+        description = optString("description"),
+        enabled = optBoolean("enabled", false),
+        isDefault = optBoolean("isDefault", false),
+        statusState = status?.optString("state").orEmpty(),
+        statusDetail = status?.optNullableString("detail")
+            ?: status?.optNullableString("message")
+            ?: status?.optNullableString("lastError"),
+        installed = installation?.optBoolean("installed", false) ?: false,
+        installedVersion = installation?.optNullableString("installedVersion"),
+        latestVersion = installation?.optNullableString("latestVersion"),
+        installAvailable = !installation?.optNullableString("installCommand").isNullOrBlank(),
+        updateAvailable = !installation?.optNullableString("updateCommand").isNullOrBlank(),
+        busy = installation?.optBoolean("busy", false) ?: false,
+        lastError = installation?.optNullableString("lastError"),
+        configArchives = managementSchema?.optBoolean("configArchives", false) ?: false,
+        buildRestart = managementSchema?.optBoolean("buildRestart", false) ?: false,
     )
 }
 

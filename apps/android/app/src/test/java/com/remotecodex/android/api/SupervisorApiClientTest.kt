@@ -850,6 +850,48 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun listAgentBackendsUsesRelayDevicePathAndParsesInstallState() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """[{"provider":"codex","displayName":"Codex","description":"OpenAI Codex","enabled":true,"isDefault":true,"status":{"state":"running"},"capabilities":{},"managementSchema":{"hostConfigFiles":[],"toolboxItems":[],"hookCommandTemplates":[],"providerConfigFormat":"toml","mcpConfigFormat":"codex-toml","configArchives":true,"buildRestart":true},"installation":{"packageName":"@openai/codex","installed":true,"installedVersion":"1.2.3","latestVersion":"1.2.4","installCommand":null,"updateCommand":"npm install -g @openai/codex","busy":false,"lastError":null}},{"provider":"opencode","displayName":"OpenCode","description":"OpenCode runtime","enabled":false,"isDefault":false,"status":{"state":"stopped","detail":"Not installed"},"capabilities":{},"managementSchema":{"hostConfigFiles":[],"toolboxItems":[],"hookCommandTemplates":[],"providerConfigFormat":"json","mcpConfigFormat":"none","configArchives":false,"buildRestart":false},"installation":{"packageName":"opencode-ai","installed":false,"installedVersion":null,"latestVersion":null,"installCommand":"npm install -g opencode-ai","updateCommand":null,"busy":false,"lastError":"missing"}}]""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val backends = client.listAgentBackends()
+
+        assertEquals(2, backends.size)
+        assertEquals("codex", backends[0].provider)
+        assertEquals("Codex", backends[0].displayName)
+        assertTrue(backends[0].enabled)
+        assertTrue(backends[0].isDefault)
+        assertEquals("running", backends[0].statusState)
+        assertEquals("1.2.3", backends[0].installedVersion)
+        assertEquals("1.2.4", backends[0].latestVersion)
+        assertTrue(backends[0].updateAvailable)
+        assertTrue(backends[0].configArchives)
+        assertTrue(backends[0].buildRestart)
+        assertEquals("Not installed", backends[1].statusDetail)
+        assertTrue(backends[1].installAvailable)
+        assertEquals("missing", backends[1].lastError)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/agent-runtimes",
+            transport.requests.single().url,
+        )
+        assertEquals("GET", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
     fun threadRenameAndDeleteUseRelayDevicePath() {
         val renamedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
         val deletedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""

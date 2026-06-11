@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorPluginSummary
@@ -162,6 +163,7 @@ fun AppShellSettingsPanel(
     backendSettingsSaving: Boolean = false,
     backendSettingsError: String? = null,
     backendSettingsMessage: String? = null,
+    agentBackends: List<SupervisorAgentBackend>? = null,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onRefreshBackendSettings: (() -> Unit)? = null,
@@ -262,6 +264,7 @@ fun AppShellSettingsPanel(
                         saving = backendSettingsSaving,
                         error = backendSettingsError,
                         message = backendSettingsMessage,
+                        agentBackends = agentBackends,
                         onRefresh = onRefreshBackendSettings,
                         onSaveWorkspaceSettings = onSaveWorkspaceSettings,
                     )
@@ -499,6 +502,7 @@ private fun BackendSettingsSection(
     saving: Boolean,
     error: String?,
     message: String?,
+    agentBackends: List<SupervisorAgentBackend>?,
     onRefresh: (() -> Unit)?,
     onSaveWorkspaceSettings: ((String, String?) -> Unit)?,
 ) {
@@ -614,6 +618,7 @@ private fun BackendSettingsSection(
                 },
             )
         }
+        RuntimeControlsSummary(backends = agentBackends, loading = loading)
         error?.let { text ->
             Text(
                 text = text,
@@ -629,6 +634,159 @@ private fun BackendSettingsSection(
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
+        }
+    }
+}
+
+@Composable
+private fun RuntimeControlsSummary(
+    backends: List<SupervisorAgentBackend>?,
+    loading: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Runtime controls",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphBadge(
+                label = when {
+                    loading && backends == null -> "Loading"
+                    backends == null -> "Pending"
+                    else -> "${backends.count { it.enabled }}/${backends.size} ready"
+                },
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        if (backends == null) {
+            Text(
+                text = "Runtime status loads from the supervisor with backend settings.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else if (backends.isEmpty()) {
+            Text(
+                text = "No agent runtimes reported by this supervisor.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        } else {
+            backends.forEach { backend ->
+                AgentBackendRow(backend = backend)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentBackendRow(backend: SupervisorAgentBackend) {
+    val statusLabel = when {
+        backend.enabled -> "Ready"
+        backend.installed -> backend.statusState.ifBlank { "Installed" }
+        else -> "Not installed"
+    }
+    val versionLabel = buildString {
+        append("Version: ")
+        append(backend.installedVersion ?: if (backend.installed) "Installed" else "Unavailable")
+        backend.latestVersion?.takeIf { it.isNotBlank() }?.let { latest ->
+            append(" / Latest: ")
+            append(latest)
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(9.dp))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text(
+                    text = backend.displayName.ifBlank { backend.provider },
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (backend.isDefault) {
+                    GraphBadge(label = "Default", variant = GraphBadgeVariant.Secondary)
+                }
+            }
+            Text(
+                text = versionLabel,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            backend.lastError?.takeIf { it.isNotBlank() }?.let { text ->
+                Text(
+                    text = text,
+                    color = ThreadColors.Danger,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } ?: backend.statusDetail?.takeIf { it.isNotBlank() }?.let { detail ->
+                Text(
+                    text = detail,
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            GraphBadge(
+                label = if (backend.busy) "Busy" else statusLabel,
+                variant = if (backend.enabled) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
+                modifier = Modifier.widthIn(max = 116.dp),
+            )
+            if (backend.installAvailable || backend.updateAvailable || backend.configArchives || backend.buildRestart) {
+                Text(
+                    text = backend.runtimeActionLabel(),
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1191,4 +1349,14 @@ private fun SupervisorPluginSummary.capabilityLabel(): String {
         .take(4)
         .joinToString(", ")
         .ifBlank { "utility" }
+}
+
+private fun SupervisorAgentBackend.runtimeActionLabel(): String {
+    val actions = buildList {
+        if (installAvailable) add("install")
+        if (updateAvailable) add("update")
+        if (configArchives) add("archives")
+        if (buildRestart) add("build")
+    }
+    return actions.joinToString(" / ").ifBlank { "managed" }
 }

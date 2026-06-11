@@ -176,6 +176,25 @@ data class UpdateSupervisorWorkspaceSettingsRequest(
     val defaultBackend: String? = null,
 )
 
+data class SupervisorAgentBackend(
+    val provider: String,
+    val displayName: String,
+    val description: String,
+    val enabled: Boolean,
+    val isDefault: Boolean,
+    val statusState: String,
+    val statusDetail: String?,
+    val installed: Boolean,
+    val installedVersion: String?,
+    val latestVersion: String?,
+    val installAvailable: Boolean,
+    val updateAvailable: Boolean,
+    val busy: Boolean,
+    val lastError: String?,
+    val configArchives: Boolean,
+    val buildRestart: Boolean,
+)
+
 data class SupervisorWorkspaceTreeNode(
     val name: String,
     val path: String,
