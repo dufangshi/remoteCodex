@@ -91,6 +91,7 @@ data class HistoryItemPreview(
     val artifactTitle: String? = null,
     val artifactSummary: String? = null,
     val artifactHasRenderer: Boolean = true,
+    val hasDeferredDetail: Boolean = false,
 )
 
 data class HistoryGroupPreview(

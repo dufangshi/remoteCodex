@@ -3193,6 +3193,7 @@ fun buildGraphChatHistoryItemFrameState(
     summary: String,
     detail: String?,
     actionLabel: String?,
+    hasDeferredDetail: Boolean = false,
     changedFiles: Int? = null,
     addedLines: Int? = null,
     removedLines: Int? = null,
@@ -3239,8 +3240,8 @@ fun buildGraphChatHistoryItemFrameState(
         } else {
             emptyList()
         },
-        fileChangeCanOpen = isFileChange && (normalizedDetail != null || normalizedAction != null),
-        fileChangeOpenAccessibilityLabel = if (isFileChange && (normalizedDetail != null || normalizedAction != null)) {
+        fileChangeCanOpen = isFileChange && (normalizedDetail != null || hasDeferredDetail),
+        fileChangeOpenAccessibilityLabel = if (isFileChange && (normalizedDetail != null || hasDeferredDetail)) {
             "Open file change details"
         } else {
             null

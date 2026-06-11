@@ -1391,6 +1391,7 @@ private fun HistoryItemCard(
         summary = item.summary,
         detail = item.detail,
         actionLabel = item.actionLabel,
+        hasDeferredDetail = item.hasDeferredDetail,
         changedFiles = item.changedFiles,
         addedLines = item.addedLines,
         removedLines = item.removedLines,

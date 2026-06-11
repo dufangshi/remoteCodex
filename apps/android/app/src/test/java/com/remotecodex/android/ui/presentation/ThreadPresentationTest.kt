@@ -4605,6 +4605,48 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun opensFileChangeHistoryItemWhenDetailIsDeferred() {
+        val state = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.FileChange,
+            title = "File Change",
+            status = ToolStatus.Completed,
+            meta = null,
+            summary = "apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+            detail = null,
+            actionLabel = null,
+            hasDeferredDetail = true,
+            changedFiles = 1,
+            addedLines = 8,
+            removedLines = 0,
+        )
+
+        assertEquals(true, state.fileChangeCanOpen)
+        assertEquals("Open file change details", state.fileChangeOpenAccessibilityLabel)
+        assertEquals("File Change", state.detailTitle)
+    }
+
+    @Test
+    fun doesNotOpenFileChangeHistoryItemForActionLabelOnly() {
+        val state = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.FileChange,
+            title = "File Change",
+            status = ToolStatus.Completed,
+            meta = null,
+            summary = "apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+            detail = null,
+            actionLabel = "File Change Details",
+            hasDeferredDetail = false,
+            changedFiles = 1,
+            addedLines = 8,
+            removedLines = 0,
+        )
+
+        assertEquals(false, state.fileChangeCanOpen)
+        assertEquals(null, state.fileChangeOpenAccessibilityLabel)
+        assertEquals("File Change Details", state.detailTitle)
+    }
+
+    @Test
     fun buildsArtifactHistoryItemFrameStateWithoutGenericActionOrDetail() {
         assertEquals(
             GraphChatHistoryItemFrameState(
