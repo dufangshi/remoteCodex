@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.components
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -299,6 +300,24 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
         composeRule.onNodeWithText("Busy").assertExists()
+    }
+
+    @Test
+    fun viewToggleSwitchesBetweenChatAndShellPreviewSurfaces() {
+        setComposerContent(composer = ComposerPreview(activeView = ComposerActiveView.Chat))
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").assertExists()
+        composeRule.onNodeWithText("Prompt").assertExists()
+        composeRule.onAllNodesWithContentDescription("Switch to shell")[0].performClick()
+
+        composeRule.onNodeWithText("Shell input").assertExists()
+        composeRule.onNodeWithContentDescription("Open shell tools").assertExists()
+        composeRule.onNodeWithContentDescription("Open slash toolbox").assertDoesNotExist()
+        composeRule.onAllNodesWithContentDescription("Switch to chat")[0].performClick()
+
+        composeRule.onNodeWithText("Prompt").assertExists()
+        composeRule.onNodeWithContentDescription("Open slash toolbox").assertExists()
+        composeRule.onNodeWithContentDescription("Open shell tools").assertDoesNotExist()
     }
 
     @Test

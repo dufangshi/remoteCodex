@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
@@ -146,6 +147,7 @@ fun ThreadComposer(
     composer: ComposerPreview = ComposerPreview(),
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
+    var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
     var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
     var copiedSkillName by remember(composer.skillsPanel.copiedSkillName) { mutableStateOf(composer.skillsPanel.copiedSkillName) }
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
@@ -177,19 +179,19 @@ fun ThreadComposer(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
         followTail = composer.followTail,
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         workspaceModeLabel = composer.workspaceModeLabel,
     )
     val actionState = buildComposerActionState(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         canInterrupt = composer.canInterrupt,
     )
     val contextState = buildComposerContextUsageState(composer.context)
     val promptSlotState = buildComposerPromptSlotState(
         prompt = draftPrompt,
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         actionState = actionState,
         busy = composer.busy,
         goalBusy = composer.goalPanel.busy,
@@ -198,7 +200,7 @@ fun ThreadComposer(
     val shellPromptInputState = buildComposerShellPromptInputState(promptSlotState)
     val submitInputState = buildComposerSubmitInputState(
         prompt = draftPrompt,
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
     )
     val attachmentPanelState = buildComposerAttachmentPanelState(
         open = openMenu == ComposerMenu.Attachments,
@@ -218,13 +220,13 @@ fun ThreadComposer(
         settingsState = settingsState,
         openMenu = openMenu.toToolbarMenuState(),
         actionState = actionState,
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         promptDisabled = composer.prompt.disabled,
         goalComposeMode = goalComposeMode,
         goalBusy = composer.goalPanel.busy,
     )
     val toolbarState = buildComposerToolbarState(
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         openMenu = openMenu.toToolbarMenuState(),
         settingsState = settingsState,
         canToggleShellView = true,
@@ -280,7 +282,7 @@ fun ThreadComposer(
         ),
     )
     val frameState = buildComposerFrameState(
-        activeView = composer.activeView,
+        activeView = activeViewPreview,
         followTail = composer.followTail,
         goalComposeMode = goalPanelState.composeCard.visible,
         error = composer.error,
@@ -303,6 +305,13 @@ fun ThreadComposer(
             hooks = hooksPanelHooks,
         ),
     )
+    val toggleActiveViewPreview = {
+        openMenu = null
+        activeViewPreview = when (activeViewPreview) {
+            ComposerActiveView.Chat -> ComposerActiveView.Shell
+            ComposerActiveView.Shell -> ComposerActiveView.Chat
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -528,6 +537,7 @@ fun ThreadComposer(
                 }
                 openMenu = nextMenu
             },
+            onToggleView = toggleActiveViewPreview,
         )
         ComposerFrameSlotsPreview(
             frameState = frameState,
@@ -582,6 +592,9 @@ fun ThreadComposer(
                 ComposerViewToggleButton(
                     icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
                     label = if (toolbarState.viewToggleButton.selected) "Chat" else "Shell",
+                    accessibilityLabel = toolbarState.viewToggleButton.label,
+                    enabled = toolbarState.viewToggleButton.enabled,
+                    onClick = toggleActiveViewPreview,
                 )
             }
             ComposerActionControls(
@@ -630,6 +643,7 @@ private fun ComposerToolbarRow(
     attachmentPanelState: ComposerAttachmentPanelState,
     slashToolboxPanelState: ComposerSlashToolboxPanelState,
     onToggleMenu: (ComposerMenu) -> Unit,
+    onToggleView: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -658,7 +672,7 @@ private fun ComposerToolbarRow(
         ToolbarIconButton(
             state = toolbarState.viewToggleButton,
             icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
-            onClick = {},
+            onClick = onToggleView,
         )
         toolbarState.shellPromptLabel?.let { label ->
             GraphInputGroupText(
@@ -1619,20 +1633,28 @@ private fun ComposerPrimaryActionGlyph(
 private fun ComposerViewToggleButton(
     icon: ComposerToolIcon,
     label: String,
+    accessibilityLabel: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
 ) {
+    val foreground = if (enabled) ThreadColors.ForegroundSoft else ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+    val background = if (enabled) ThreadColors.SurfaceStrong else ThreadColors.Surface
+    val border = if (enabled) ThreadColors.Border else ThreadColors.Border.copy(alpha = 0.62f)
     Row(
         modifier = Modifier
+            .semantics { contentDescription = accessibilityLabel }
             .clip(RoundedCornerShape(999.dp))
-            .background(ThreadColors.SurfaceStrong)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 9.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        ComposerToolGlyph(icon = icon, color = ThreadColors.ForegroundSoft)
+        ComposerToolGlyph(icon = icon, color = foreground)
         Text(
             text = label,
-            color = ThreadColors.ForegroundSoft,
+            color = foreground,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
