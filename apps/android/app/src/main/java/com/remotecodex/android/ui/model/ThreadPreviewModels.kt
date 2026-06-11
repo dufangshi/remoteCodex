@@ -93,6 +93,8 @@ data class HistoryItemPreview(
     val artifactSummary: String? = null,
     val artifactHasRenderer: Boolean = true,
     val hasDeferredDetail: Boolean = false,
+    val callId: String? = null,
+    val toolName: String? = null,
 )
 
 data class HistoryGroupPreview(

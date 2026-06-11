@@ -283,4 +283,77 @@ class ThreadDetailMapperTest {
         assertEquals("apps/android/output/screen.png", turn.messages[1].historyItems[1].assetPath)
         assertTrue(preview.workspacePreview.nodes.single().selected)
     }
+
+    @Test
+    fun omitsMaterializedToolHistoryWhenStreamingToolBlockIsStillInAssistantMessage() {
+        val preview = buildThreadDetailPreviewFromSupervisor(
+            detail = SupervisorThreadDetail(
+                thread = SupervisorThreadSummary(
+                    id = "thread-1",
+                    workspaceId = "workspace-1",
+                    title = "Android API",
+                    status = "running",
+                    model = "gpt-5",
+                    reasoningEffort = null,
+                    fastMode = false,
+                    collaborationMode = "solo",
+                    sandboxMode = null,
+                    updatedAt = "2026-06-11T19:00:00Z",
+                    summaryText = null,
+                ),
+                workspace = SupervisorWorkspaceSummary(
+                    id = "workspace-1",
+                    label = "repo",
+                    absPath = "/repo",
+                    isFavorite = false,
+                    lastOpenedAt = "2026-06-11T19:00:00Z",
+                ),
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T18:58:00Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-message",
+                                kind = "agentMessage",
+                                text = """
+                                    Checking files.
+
+                                    ```tool-call
+                                    {"tool":"file.read","call_id":"call_1","args":{"path":"README.md"}}
+                                    ```
+                                """.trimIndent(),
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "item-tool",
+                                kind = "toolCall",
+                                text = "file.read",
+                                previewText = "README.md",
+                                status = "completed",
+                                callId = "call_1",
+                                toolName = "file.read",
+                            ),
+                        ),
+                    ),
+                ),
+                turnCount = 1,
+                totalTurnCount = 1,
+                pendingRequests = emptyList(),
+                answeredRequestNotes = emptyList(),
+                liveItemCount = 0,
+                goalStatus = null,
+                goalObjective = null,
+            ),
+            now = Instant.parse("2026-06-11T19:00:00Z"),
+        )
+
+        val assistant = preview.turns.single().messages.single()
+        assertEquals(MessageAuthor.Assistant, assistant.author)
+        assertTrue(assistant.richText.contains("```tool-call"))
+        assertEquals(emptyList<Any>(), assistant.historyItems)
+    }
 }

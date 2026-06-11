@@ -445,9 +445,11 @@ private fun List<SupervisorThreadTurnItem>.toMessagePreviews(startedAt: String?)
             item.toHistoryItemPreview()?.let { historyItem ->
                 if (messages.lastOrNull()?.author == MessageAuthor.Assistant) {
                     val last = messages.last()
-                    messages[messages.lastIndex] = last.copy(
-                        historyItems = last.historyItems + historyItem,
-                    )
+                    if (!last.hasStreamingToolBlockFor(historyItem)) {
+                        messages[messages.lastIndex] = last.copy(
+                            historyItems = last.historyItems + historyItem,
+                        )
+                    }
                 } else {
                     pendingHistory += historyItem
                 }
@@ -473,6 +475,32 @@ private fun List<SupervisorThreadTurnItem>.toMessagePreviews(startedAt: String?)
         }
     }
     return messages
+}
+
+private fun MessagePreview.hasStreamingToolBlockFor(historyItem: HistoryItemPreview): Boolean {
+    if (historyItem.kind !in setOf(HistoryItemKind.ToolCall, HistoryItemKind.AgentTool, HistoryItemKind.SkillTool)) {
+        return false
+    }
+    val callId = historyItem.callId?.trim()?.takeIf { it.isNotEmpty() }
+    if (callId != null && streamingToolCallIds(richText).contains(callId)) {
+        return true
+    }
+    val toolName = historyItem.toolName?.trim()?.takeIf { it.isNotEmpty() }
+        ?: historyItem.title.trim().takeIf { it.isNotEmpty() }
+    return toolName != null &&
+        richText.contains("```tool-", ignoreCase = true) &&
+        richText.contains(toolName)
+}
+
+private fun streamingToolCallIds(text: String): Set<String> {
+    if (!text.contains("```tool-", ignoreCase = true)) {
+        return emptySet()
+    }
+    return Regex(""""call_id"\s*:\s*"((?:\\.|[^"])*)"""")
+        .findAll(text)
+        .map { match -> match.groupValues[1].replace("\\\"", "\"").replace("\\\\", "\\") }
+        .filter { it.isNotBlank() }
+        .toSet()
 }
 
 private fun SupervisorThreadTurnItem.toMessagePreview(startedAt: String?): MessagePreview? {
@@ -518,6 +546,8 @@ private fun SupervisorThreadTurnItem.toHistoryItemPreview(): HistoryItemPreview?
         artifactSummary = artifactSummary,
         artifactHasRenderer = artifactHasRenderer,
         hasDeferredDetail = hasDeferredDetail,
+        callId = callId,
+        toolName = toolName,
     )
 }
 

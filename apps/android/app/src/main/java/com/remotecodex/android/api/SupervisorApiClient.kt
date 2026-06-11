@@ -1221,6 +1221,14 @@ internal fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
         artifactTitle = artifact?.optNullableString("title"),
         artifactSummary = artifact?.optNullableString("summaryText"),
         artifactHasRenderer = artifact?.optJSONArray("assets")?.length()?.let { it > 0 } ?: true,
+        callId = optNullableString("callId")
+            ?: optNullableString("call_id")
+            ?: optJSONObject("toolCall")?.optNullableString("callId")
+            ?: optJSONObject("toolCall")?.optNullableString("call_id"),
+        toolName = optNullableString("toolName")
+            ?: optNullableString("tool")
+            ?: optJSONObject("toolCall")?.optNullableString("toolName")
+            ?: optJSONObject("toolCall")?.optNullableString("tool"),
         sequence = optNullableInt("sequence"),
     )
 }
