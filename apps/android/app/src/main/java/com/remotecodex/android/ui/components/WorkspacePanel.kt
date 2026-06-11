@@ -647,6 +647,8 @@ private fun WorkspaceViewerCard(
     workspace: WorkspacePreview,
     modifier: Modifier = Modifier,
 ) {
+    val selectedFile = workspace.selectedFile
+    val fileMetaLabel = "${selectedFile.language} | ${selectedFile.sizeLabel}"
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -668,7 +670,7 @@ private fun WorkspaceViewerCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = workspace.selectedFile.title,
+                text = selectedFile.title,
                 modifier = Modifier.weight(1f),
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelMedium,
@@ -678,18 +680,40 @@ private fun WorkspaceViewerCard(
             ActionChip(label = "Copy", icon = WorkspaceActionIcon.Copy)
             ActionChip(label = "Open", icon = WorkspaceActionIcon.Open)
         }
-        Text(
-            text = "${workspace.selectedFile.language} | ${workspace.selectedFile.sizeLabel}" +
-                (workspace.selectedFile.truncatedLabel?.let { " | $it" } ?: ""),
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(ThreadColors.Surface)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = fileMetaLabel,
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            selectedFile.truncatedLabel?.let { truncatedLabel ->
+                Text(
+                    text = truncatedLabel,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(ThreadColors.WarningSoft)
+                        .border(1.dp, ThreadColors.Warning.copy(alpha = 0.36f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         Text(
-            text = workspace.selectedFile.content,
+            text = selectedFile.content,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -701,6 +725,30 @@ private fun WorkspaceViewerCard(
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Monospace,
         )
+        if (selectedFile.truncatedLabel != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ThreadColors.Surface)
+                    .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Load more preview",
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(ThreadColors.SurfaceStrong)
+                        .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(7.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 

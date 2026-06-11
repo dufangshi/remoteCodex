@@ -159,7 +159,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `ThreadGraphWorkspacePanel.tsx` | `WorkspacePanel.kt` | Native Workspace/Tool Usage/Guide/Graph/Extensions tabs inside the mobile Workspace surface. |
 | `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, row-level download glyph action, refresh/garbage action glyph chips, workspace summary strip, empty workspace state, and Web-like native folder/file/artifact/event glyphs. |
 | `workspaceTree.ts` | `WorkspaceTree.kt` + `WorkspacePanel.kt` | Native path helpers for extension/name extraction, ancestor expansion, directory-first sorting, and flat preview nodes used by the workspace explorer. |
-| `GraphWorkspacePreviewPane.tsx` | `WorkspacePanel.kt` | Code preview pane with metadata bar, native copy/open action glyph chips, and scrollable monospaced content. |
+| `GraphWorkspacePreviewPane.tsx` | `WorkspacePanel.kt` | Code preview pane with metadata bar, native copy/open action glyph chips, truncated preview warning chip, load-more footer affordance, and scrollable monospaced content. |
 | `GraphWorkspacePreviewPane.tsx` artifact branch | `ArtifactPreviewCard.kt` | Native fallback card with artifact metadata, source preview, and molecule-specific summary. |
 | `GraphMoleculeViewerData.ts` | `GraphMoleculeViewerData.kt` + `ArtifactPreviewCard.kt` | Native molecule data normalization for XYZ/extxyz, trajectory frame splitting, export-content joining, and first-frame atom parsing for the compact schematic preview. |
 | `GraphWorkspaceCards.tsx` | `WorkspaceInfoCard.kt` + `WorkspacePanel.kt` | Native workspace info card used by guide and extension surfaces, with compact label treatment and panel styling. |
