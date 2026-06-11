@@ -403,18 +403,69 @@ private fun DeleteThreadDialogPreview(
             )
         },
     ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "Thread to delete",
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = threadTitle,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(ThreadColors.DangerSoft)
+                    .border(1.dp, ThreadColors.Danger.copy(alpha = 0.38f), RoundedCornerShape(13.dp))
+                    .padding(12.dp),
+                color = ThreadColors.Danger,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(ThreadColors.SurfaceStrong)
+                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(13.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ConfirmRiskRow(label = "Scope", value = "Local supervisor history")
+                ConfirmRiskRow(label = "Recovery", value = "Cannot be undone in this preview")
+                ConfirmRiskRow(label = "Next step", value = "Use Delete only when the room is no longer needed")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmRiskRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text(
-            text = threadTitle,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(13.dp))
-                .background(ThreadColors.DangerSoft)
-                .border(1.dp, ThreadColors.Danger.copy(alpha = 0.38f), RoundedCornerShape(13.dp))
-                .padding(12.dp),
-            color = ThreadColors.Danger,
-            style = MaterialTheme.typography.bodyMedium,
+            text = label,
+            modifier = Modifier.weight(0.35f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(0.65f),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
     }
