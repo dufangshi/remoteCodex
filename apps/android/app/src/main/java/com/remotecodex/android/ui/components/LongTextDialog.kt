@@ -18,12 +18,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.presentation.prettyGraphChatToolJsonValue
 import com.remotecodex.android.ui.theme.ThreadColors
+import kotlinx.coroutines.delay
 
 @Composable
 fun LongTextDialog(
@@ -67,6 +74,7 @@ fun LongTextDialog(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                DetailCopyButton(value = detail.copyText())
                 GraphButton(
                     label = "Close",
                     variant = GraphButtonVariant.Ghost,
@@ -85,6 +93,39 @@ fun LongTextDialog(
             }
         }
     }
+}
+
+private fun DetailPreview.copyText(): String {
+    return image?.let { imagePreview ->
+        buildString {
+            appendLine(title)
+            appendLine(imagePreview.path)
+            appendLine(imagePreview.contentType ?: "image")
+            append("${imagePreview.bytes.size} bytes")
+        }
+    } ?: text
+}
+
+@Composable
+private fun DetailCopyButton(value: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(value) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+    GraphButton(
+        label = if (copied) "Copied" else "Copy",
+        variant = if (copied) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
+        size = GraphButtonSize.Small,
+        contentDescription = if (copied) "Detail copied" else "Copy detail",
+        onClick = {
+            clipboard.setText(AnnotatedString(value))
+            copied = true
+        },
+    )
 }
 
 @Composable

@@ -711,6 +711,7 @@ private fun MessageBubble(
             UserMessageFrameContent(
                 text = message.richText,
                 frameState = frameState,
+                copyText = message.text.takeIf { it.isNotBlank() },
             )
         } else {
             RichMessageContent(
@@ -752,6 +753,7 @@ private fun MessageBubble(
 private fun UserMessageFrameContent(
     text: String,
     frameState: GraphChatMessageFrameState,
+    copyText: String? = null,
     modifier: Modifier = Modifier,
     trailingContent: @Composable () -> Unit = {},
 ) {
@@ -761,15 +763,16 @@ private fun UserMessageFrameContent(
     ) {
         UserMessageBody(text = text)
         trailingContent()
-        UserMessageFooter(frameState = frameState)
+        UserMessageFooter(frameState = frameState, copyText = copyText)
     }
 }
 
 @Composable
 private fun UserMessageFooter(
     frameState: GraphChatMessageFrameState,
+    copyText: String?,
 ) {
-    if (!frameState.showFooterMetadata) {
+    if (!frameState.showFooterMetadata && copyText.isNullOrBlank()) {
         return
     }
     Row(
@@ -777,6 +780,15 @@ private fun UserMessageFooter(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        copyText?.takeIf { it.isNotBlank() }?.let { value ->
+            CopyTextButton(
+                value = value,
+                idleLabel = "Copy",
+                copiedLabel = "Copied",
+                contentDescription = "Copy user message",
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
         frameState.footerStatus?.let { MessageStatusBadge(model = it, compact = true) }
         frameState.timeLabel?.let { timeLabel ->
             Text(
