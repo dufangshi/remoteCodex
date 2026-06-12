@@ -286,6 +286,38 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
 - EKS staging:对常驻 worker 手动注入 callback env,走
   `sandbox-router.lnz.app` 验证公网回调路径。
 
+## 实施进展(2026-06-12)
+
+- ✅ worker 侧全部落地(config / 迁移 0027 / WorkerHarnessClient 扩展 /
+  HarnessWakeupService / hooks 与 watch 路由 / invoke 自动 watch /
+  developer instructions),单测 21 个全绿;另暴露
+  `GET /api/harness/job-watches` 供运维观测。
+- ✅ sandbox-router hooks 透传落地(resolver 入参重构为
+  `{sandboxId, userId}`,`POST /api/sandboxes/:id/hooks/*` 免 route
+  token、原始字节透传、不注入内部头、独立限流与审计),16 个测试全绿。
+- ✅ 本地 e2e 全链路通过(`harness-wakeup-local-e2e.test.ts`,
+  `RUN_HARNESS_WAKEUP_E2E=1` 门控):真实本地 harness → 提交 local
+  backend job → watch → 模拟 compute worker 上报 done → 真实 notify
+  回调(HMAC 原始字节)→ 验签 → reconcile → sendPrompt 注入
+  `[Harness job wakeup]` → watch delivered → 通知 ack。
+- ⏳ EKS staging 验证进行中:自建 `wakeup-e2e` 镜像已推 ECR;
+  独立测试 worker + 静态路由测试 router(公网 NLB)部署中。
+
+### 过程中发现的环境事实(影响后续部署)
+
+1. **Railway harness 没有 local backend 的 compute worker 在消费**:
+   提交的 probe job 一直 pending。staging 全闭环需要 harness 侧有
+   worker,或拿到其 `COMPUTE_WORKER_TOKEN` 模拟。
+2. **main 上 `packages/thread-ui` 已移除,lockfile 指向兄弟目录
+   `../remote-codex-thread-ui`(私有仓库)**:本机两把 ssh key 均无权
+   克隆;`Dockerfile.worker` 的全量 `pnpm install` 因此失败。本次用
+   filtered install(`--filter @remote-codex/supervisor-api...` 等)
+   绕过;`staging-images.yml` 对 main 的镜像构建大概率同样会挂,需要
+   后续适配(checkout 兄弟仓库或改 filtered install)。
+3. staging 的 sandbox-router 由 control-plane resolver 驱动,静态
+   endpoints 在 CP 配置存在时不参与解析;因此 EKS 验证采用独立测试
+   router(静态解析 + 临时 NLB),不动现网 router 的配置。
+
 ## 后续(非 Phase 1)
 
 - control-plane 在创建 sandbox pod 时注入
