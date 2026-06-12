@@ -1,0 +1,511 @@
+package com.remotecodex.android.ui.presentation
+
+sealed interface RichMessageBlock {
+    data class Paragraph(val text: String) : RichMessageBlock
+    data class Heading(val level: Int, val text: String) : RichMessageBlock
+    data class Bullet(val text: String, val checked: Boolean? = null, val level: Int = 0) : RichMessageBlock
+    data class OrderedItem(val number: Int, val text: String, val level: Int = 0) : RichMessageBlock
+    data class Quote(val text: String) : RichMessageBlock
+    data object HorizontalRule : RichMessageBlock
+    data class Math(val expression: String) : RichMessageBlock
+    data class Html(val source: String) : RichMessageBlock
+    data class Table(
+        val columns: List<TableColumn>,
+        val rows: List<List<String>>,
+    ) : RichMessageBlock
+    data class Code(val language: String, val code: String) : RichMessageBlock
+}
+
+data class TableColumn(
+    val header: String,
+    val alignment: TableAlignment = TableAlignment.Left,
+)
+
+enum class TableAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+fun parsePlainRichMessageBlocks(content: String): List<RichMessageBlock> {
+    return content
+        .trim()
+        .split(Regex("\\n{2,}"))
+        .mapNotNull { block ->
+            val value = block.trim()
+            if (value.isEmpty()) {
+                null
+            } else {
+                RichMessageBlock.Paragraph(value)
+            }
+        }
+}
+
+fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
+    val lines = content.trim().lines()
+    val blocks = mutableListOf<RichMessageBlock>()
+    val paragraph = StringBuilder()
+    var codeLanguage: String? = null
+    var codeFenceMarker: String? = null
+    val code = StringBuilder()
+    var index = 0
+
+    fun flushParagraph() {
+        val value = paragraph.toString().trim()
+        if (value.isNotEmpty()) {
+            blocks += RichMessageBlock.Paragraph(value)
+        }
+        paragraph.clear()
+    }
+
+    fun appendParagraphLine(value: String) {
+        if (paragraph.isNotEmpty()) {
+            paragraph.append('\n')
+        }
+        paragraph.append(value)
+    }
+
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmed = line.trimEnd()
+        if (codeLanguage != null) {
+            if (isClosingCodeFence(trimmed.trim(), codeFenceMarker.orEmpty())) {
+                blocks += RichMessageBlock.Code(codeLanguage.orEmpty(), code.toString())
+                codeLanguage = null
+                codeFenceMarker = null
+                code.clear()
+            } else {
+                code.appendLine(line)
+            }
+            index += 1
+            continue
+        }
+
+        val dollarMath = readDelimitedMathBlock(
+            lines = lines,
+            startIndex = index,
+            opening = "$$",
+            closing = "$$",
+        )
+        if (dollarMath != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Math(dollarMath.expression)
+            index = dollarMath.nextIndex
+            continue
+        }
+
+        val bracketMath = readDelimitedMathBlock(
+            lines = lines,
+            startIndex = index,
+            opening = "\\[",
+            closing = "\\]",
+        )
+        if (bracketMath != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Math(bracketMath.expression)
+            index = bracketMath.nextIndex
+            continue
+        }
+
+        val fenceOpening = readCodeFenceOpening(trimmed.trim())
+        if (fenceOpening != null) {
+            flushParagraph()
+            codeFenceMarker = fenceOpening.marker
+            codeLanguage = fenceOpening.language
+            index += 1
+            continue
+        }
+
+        if (trimmed.isBlank()) {
+            flushParagraph()
+            index += 1
+            continue
+        }
+
+        val table = readSimpleMarkdownTable(lines, index)
+        if (table != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Table(
+                columns = table.columns,
+                rows = table.rows,
+            )
+            index = table.nextIndex
+            continue
+        }
+
+        val setextHeading = readSetextHeading(lines, index)
+        if (setextHeading != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Heading(
+                level = setextHeading.level,
+                text = setextHeading.text,
+            )
+            index = setextHeading.nextIndex
+            continue
+        }
+
+        val heading = Regex("^(#{1,6})\\s+(.+)$").matchEntire(trimmed.trim())
+        if (heading != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Heading(
+                level = heading.groupValues[1].length,
+                text = heading.groupValues[2],
+            )
+            index += 1
+            continue
+        }
+
+        if (Regex("^(?:[-*_]\\s*){3,}$").matches(trimmed.trim())) {
+            flushParagraph()
+            blocks += RichMessageBlock.HorizontalRule
+            index += 1
+            continue
+        }
+
+        val quote = Regex("^>\\s?(.*)$").matchEntire(trimmed.trim())
+        if (quote != null) {
+            flushParagraph()
+            val quoteLines = mutableListOf(quote.groupValues[1])
+            index += 1
+            while (index < lines.size) {
+                val nextQuote = Regex("^>\\s?(.*)$").matchEntire(lines[index].trimEnd().trim())
+                if (nextQuote == null) break
+                quoteLines += nextQuote.groupValues[1]
+                index += 1
+            }
+            blocks += RichMessageBlock.Quote(quoteLines.joinToString("\n").trim())
+            continue
+        }
+
+        val html = readHtmlBlock(lines, index)
+        if (html != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Html(html.source)
+            index = html.nextIndex
+            continue
+        }
+
+        val taskBullet = Regex("^[-*+]\\s+\\[([ xX])]\\s+(.+)$").matchEntire(trimmed.trim())
+        if (taskBullet != null) {
+            flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = taskBullet.groupValues[2])
+            blocks += RichMessageBlock.Bullet(
+                text = item.text,
+                checked = taskBullet.groupValues[1].equals("x", ignoreCase = true),
+                level = listIndentLevel(line),
+            )
+            index = item.nextIndex
+            continue
+        }
+
+        val bullet = Regex("^[-*+]\\s+(.+)$").matchEntire(trimmed.trim())
+        if (bullet != null) {
+            flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = bullet.groupValues[1])
+            blocks += RichMessageBlock.Bullet(
+                text = item.text,
+                level = listIndentLevel(line),
+            )
+            index = item.nextIndex
+            continue
+        }
+
+        val ordered = Regex("^(\\d{1,9})[.)]\\s+(.+)$").matchEntire(trimmed.trim())
+        if (ordered != null) {
+            flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = ordered.groupValues[2])
+            blocks += RichMessageBlock.OrderedItem(
+                number = ordered.groupValues[1].toIntOrNull() ?: 1,
+                text = item.text,
+                level = listIndentLevel(line),
+            )
+            index = item.nextIndex
+            continue
+        }
+
+        appendParagraphLine(trimmed)
+        index += 1
+    }
+
+    if (codeLanguage != null) {
+        blocks += RichMessageBlock.Code(codeLanguage.orEmpty(), code.toString())
+    }
+    flushParagraph()
+    return blocks
+}
+
+private fun listIndentLevel(line: String): Int {
+    val leadingSpaces = line.takeWhile { it == ' ' }.length
+    return (leadingSpaces / 2).coerceIn(0, 4)
+}
+
+private fun isClosingCodeFence(trimmed: String, marker: String): Boolean {
+    if (marker.isBlank()) {
+        return false
+    }
+    val fenceCharacter = marker.first()
+    if (trimmed.any { it != fenceCharacter }) {
+        return false
+    }
+    return trimmed.length >= marker.length
+}
+
+private data class CodeFenceOpening(
+    val marker: String,
+    val language: String,
+)
+
+private fun readCodeFenceOpening(trimmed: String): CodeFenceOpening? {
+    val match = Regex("^(`{3,}|~{3,})(.*)$").matchEntire(trimmed) ?: return null
+    val marker = match.groupValues[1]
+    val info = match.groupValues.getOrNull(2).orEmpty().trim()
+    val language = info
+        .substringBefore(' ')
+        .takeIf { Regex("[A-Za-z0-9_-]+").matches(it) }
+        .orEmpty()
+    return CodeFenceOpening(marker = marker, language = language)
+}
+
+private data class ListItemReadResult(
+    val text: String,
+    val nextIndex: Int,
+)
+
+private fun readListItem(
+    lines: List<String>,
+    startIndex: Int,
+    initialText: String,
+): ListItemReadResult {
+    val continuationIndent = listContentColumn(lines[startIndex])
+    val parts = mutableListOf(initialText.trimEnd())
+    var index = startIndex + 1
+
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmedEnd = line.trimEnd()
+        if (trimmedEnd.isBlank()) {
+            break
+        }
+        if (isListItemLine(trimmedEnd.trim())) {
+            break
+        }
+        val leadingSpaces = line.takeWhile { it == ' ' }.length
+        if (leadingSpaces < continuationIndent) {
+            break
+        }
+
+        val continuation = line.drop(continuationIndent.coerceAtMost(line.length)).trimEnd()
+        if (continuation.isNotBlank()) {
+            parts += continuation
+        }
+        index += 1
+    }
+
+    return ListItemReadResult(
+        text = parts.joinToString("\n").trim(),
+        nextIndex = index,
+    )
+}
+
+private fun listContentColumn(line: String): Int {
+    val marker = Regex("^\\s*(?:[-*+]\\s+(?:\\[[ xX]]\\s+)?|\\d{1,9}[.)]\\s+)").find(line)
+    return marker?.value?.length ?: line.takeWhile { it == ' ' }.length + 2
+}
+
+private fun isListItemLine(trimmed: String): Boolean {
+    return Regex("^[-*+]\\s+(?:\\[[ xX]]\\s+)?\\S").containsMatchIn(trimmed) ||
+        Regex("^\\d{1,9}[.)]\\s+\\S").containsMatchIn(trimmed)
+}
+
+private data class TableReadResult(
+    val columns: List<TableColumn>,
+    val rows: List<List<String>>,
+    val nextIndex: Int,
+)
+
+private data class SetextHeadingReadResult(
+    val level: Int,
+    val text: String,
+    val nextIndex: Int,
+)
+
+private data class HtmlReadResult(
+    val source: String,
+    val nextIndex: Int,
+)
+
+private data class MathReadResult(
+    val expression: String,
+    val nextIndex: Int,
+)
+
+private fun readSetextHeading(lines: List<String>, startIndex: Int): SetextHeadingReadResult? {
+    if (startIndex + 1 >= lines.size) return null
+    val text = lines[startIndex].trim()
+    if (text.isEmpty() || text.startsWith("#") || text.startsWith(">")) return null
+    if (isListItemLine(text) || readCodeFenceOpening(text) != null || text.contains("|")) return null
+    val marker = lines[startIndex + 1].trim()
+    val level = when {
+        Regex("=+").matches(marker) -> 1
+        Regex("-+").matches(marker) -> 2
+        else -> return null
+    }
+    return SetextHeadingReadResult(
+        level = level,
+        text = text,
+        nextIndex = startIndex + 2,
+    )
+}
+
+private fun readHtmlBlock(lines: List<String>, startIndex: Int): HtmlReadResult? {
+    val first = lines[startIndex].trim()
+    if (!looksLikeHtmlBlockStart(first)) return null
+    val htmlLines = mutableListOf(lines[startIndex].trimEnd())
+    var index = startIndex + 1
+    while (index < lines.size) {
+        val line = lines[index]
+        if (line.isBlank()) break
+        val trimmed = line.trimEnd()
+        if (
+            readCodeFenceOpening(trimmed.trim()) != null ||
+            readSimpleMarkdownTable(lines, index) != null ||
+            Regex("^(#{1,6})\\s+.+$").matches(trimmed.trim()) ||
+            isListItemLine(trimmed.trim())
+        ) {
+            break
+        }
+        htmlLines += trimmed
+        index += 1
+    }
+    return HtmlReadResult(
+        source = htmlLines.joinToString("\n").trim(),
+        nextIndex = index,
+    )
+}
+
+private fun looksLikeHtmlBlockStart(trimmed: String): Boolean {
+    if (trimmed.startsWith("<!--")) return true
+    if (trimmed.startsWith("<![CDATA[")) return true
+    if (trimmed.startsWith("<?")) return true
+    return Regex("^</?[A-Za-z][A-Za-z0-9-]*(?:\\s+[^>]*)?>\\s*$").matches(trimmed) ||
+        Regex("^<([A-Za-z][A-Za-z0-9-]*)(?:\\s+[^>]*)?>.*</\\1>\\s*$").matches(trimmed)
+}
+
+private fun readDelimitedMathBlock(
+    lines: List<String>,
+    startIndex: Int,
+    opening: String,
+    closing: String,
+): MathReadResult? {
+    val startLine = lines[startIndex].trim()
+    if (!startLine.startsWith(opening)) {
+        return null
+    }
+
+    val firstBody = startLine.removePrefix(opening)
+    if (firstBody.endsWith(closing) && firstBody.length >= closing.length) {
+        return MathReadResult(
+            expression = firstBody.removeSuffix(closing).trim(),
+            nextIndex = startIndex + 1,
+        )
+    }
+
+    val body = StringBuilder()
+    if (firstBody.isNotBlank()) {
+        body.appendLine(firstBody)
+    }
+
+    var index = startIndex + 1
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmed = line.trim()
+        if (trimmed.endsWith(closing)) {
+            val beforeClosing = line.substringBeforeLast(closing).trimEnd()
+            if (beforeClosing.isNotBlank()) {
+                body.appendLine(beforeClosing)
+            }
+            return MathReadResult(
+                expression = body.toString().trim(),
+                nextIndex = index + 1,
+            )
+        }
+        body.appendLine(line)
+        index += 1
+    }
+
+    return MathReadResult(
+        expression = body.toString().trim(),
+        nextIndex = lines.size,
+    )
+}
+
+private fun readSimpleMarkdownTable(lines: List<String>, startIndex: Int): TableReadResult? {
+    if (startIndex + 1 >= lines.size) return null
+    val header = parseTableRow(lines[startIndex]) ?: return null
+    val alignments = parseTableSeparator(lines[startIndex + 1]) ?: return null
+    if (header.size < 2 || alignments.size < 2) return null
+
+    val columns = header.mapIndexed { index, title ->
+        TableColumn(
+            header = title,
+            alignment = alignments.getOrNull(index) ?: TableAlignment.Left,
+        )
+    }
+    val rows = mutableListOf<List<String>>()
+    var index = startIndex + 2
+    while (index < lines.size) {
+        val row = parseTableRow(lines[index]) ?: break
+        if (row.isEmpty()) break
+        rows += row.normalizeTableRow(columns.size)
+        index += 1
+    }
+    return TableReadResult(columns = columns, rows = rows, nextIndex = index)
+}
+
+private fun List<String>.normalizeTableRow(columnCount: Int): List<String> {
+    return when {
+        size == columnCount -> this
+        size > columnCount -> take(columnCount)
+        else -> this + List(columnCount - size) { "" }
+    }
+}
+
+private fun parseTableRow(line: String): List<String>? {
+    val trimmed = line.trim()
+    if (!trimmed.contains("|")) return null
+    val body = trimmed.trim('|')
+    val cells = mutableListOf<String>()
+    val current = StringBuilder()
+    var index = 0
+    while (index < body.length) {
+        val char = body[index]
+        if (char == '\\' && index + 1 < body.length && body[index + 1] == '|') {
+            current.append('|')
+            index += 2
+            continue
+        }
+        if (char == '|') {
+            cells += current.toString().trim()
+            current.clear()
+        } else {
+            current.append(char)
+        }
+        index += 1
+    }
+    cells += current.toString().trim()
+    return cells
+}
+
+private fun parseTableSeparator(line: String): List<TableAlignment>? {
+    val cells = parseTableRow(line) ?: return null
+    if (cells.any { cell -> !Regex(":?-{3,}:?").matches(cell) }) {
+        return null
+    }
+    return cells.map { cell ->
+        when {
+            cell.startsWith(":") && cell.endsWith(":") -> TableAlignment.Center
+            cell.endsWith(":") -> TableAlignment.Right
+            else -> TableAlignment.Left
+        }
+    }
+}

@@ -3,6 +3,16 @@ import type {
   AgentBackendDto,
   AgentBackendIdDto,
   ApiErrorShape,
+  AuthLoginResultDto,
+  AuthSessionDto,
+  RelayAdminSummaryDto,
+  RelayCreateDeviceResultDto,
+  RelayLoginResultDto,
+  RelayPortalSummaryDto,
+  RelayRegisterResultDto,
+  RelaySessionDto,
+  RelaySessionShareDto,
+  RelayUserDto,
   ProviderHostConfigArchiveDto,
   ProviderHostFileDto,
   CreateProviderHostConfigArchiveInput,
@@ -70,6 +80,135 @@ export class ApiError extends Error {
   }
 }
 
+const AUTH_TOKEN_STORAGE_KEY = 'remote-codex-auth-token';
+const RELAY_TOKEN_STORAGE_KEY = 'remote-codex-relay-token';
+const RELAY_MODE_STORAGE_KEY = 'remote-codex-relay-mode';
+const RELAY_DEVICE_STORAGE_KEY = 'remote-codex-relay-device-id';
+const RELAY_THREAD_STORAGE_KEY = 'remote-codex-relay-thread-id';
+
+declare global {
+  interface Window {
+    __REMOTE_CODEX_BOOTSTRAP__?: {
+      mode?: 'local' | 'server' | 'relay';
+      relayApiBase?: string;
+    };
+  }
+}
+
+function readStoredAuthToken() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredAuthToken(token: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    return;
+  }
+
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+function readStoredRelayToken() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage.getItem(RELAY_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredRelayToken(token: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(RELAY_TOKEN_STORAGE_KEY, token);
+    return;
+  }
+
+  window.localStorage.removeItem(RELAY_TOKEN_STORAGE_KEY);
+}
+
+function relayModeEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return window.__REMOTE_CODEX_BOOTSTRAP__?.mode === 'relay' ||
+    window.location.pathname.startsWith('/relay-portal') ||
+    window.location.pathname.startsWith('/relay-admin') ||
+    window.location.search.includes('relay=1') ||
+    window.localStorage.getItem(RELAY_MODE_STORAGE_KEY) === 'true';
+}
+
+export function enableRelayMode() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(RELAY_MODE_STORAGE_KEY, 'true');
+}
+
+export function relayModeActive() {
+  return relayModeEnabled();
+}
+
+export function readSelectedRelayDeviceId() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.localStorage.getItem(RELAY_DEVICE_STORAGE_KEY);
+}
+
+export function setSelectedRelayDeviceId(deviceId: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (deviceId) {
+    window.localStorage.setItem(RELAY_DEVICE_STORAGE_KEY, deviceId);
+    return;
+  }
+  window.localStorage.removeItem(RELAY_DEVICE_STORAGE_KEY);
+}
+
+export function readSelectedRelayThreadId() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.localStorage.getItem(RELAY_THREAD_STORAGE_KEY);
+}
+
+export function setSelectedRelayThreadId(threadId: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (threadId) {
+    window.localStorage.setItem(RELAY_THREAD_STORAGE_KEY, threadId);
+    return;
+  }
+  window.localStorage.removeItem(RELAY_THREAD_STORAGE_KEY);
+}
+
+function apiPath(path: string) {
+  if (!relayModeEnabled()) {
+    return path;
+  }
+  if (path.startsWith('/api/')) {
+    const deviceId = readSelectedRelayDeviceId();
+    if (deviceId) {
+      return `/relay/devices/${encodeURIComponent(deviceId)}${path}`;
+    }
+    return `/relay${path}`;
+  }
+  return path;
+}
+
 export interface FileDownloadResult {
   blob: Blob;
   filename: string;
@@ -78,6 +217,10 @@ export interface FileDownloadResult {
 function apiErrorCodeForStatus(status: number): ApiErrorShape['code'] {
   if (status === 400) {
     return 'bad_request';
+  }
+
+  if (status === 401) {
+    return 'unauthorized';
   }
 
   if (status === 403) {
@@ -195,10 +338,10 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(input, {
+  const response = await fetch(apiPath(String(input)), withAuthInit({
     ...init,
     headers,
-  });
+  }));
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -243,7 +386,7 @@ function parseContentDispositionFilename(value: string | null) {
 }
 
 async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promise<FileDownloadResult> {
-  const response = await fetch(input, init);
+  const response = await fetch(apiPath(String(input)), withAuthInit(init));
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -257,6 +400,23 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   return {
     blob: await response.blob(),
     filename,
+  };
+}
+
+function withAuthInit(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers);
+  const relayToken = readStoredRelayToken();
+  const token = readStoredAuthToken();
+  if (relayModeEnabled() && relayToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${relayToken}`);
+  } else if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return {
+    ...init,
+    credentials: init.credentials ?? 'same-origin',
+    headers,
   };
 }
 
@@ -972,6 +1132,122 @@ export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
 }
 
+export function fetchAuthSession() {
+  return request<AuthSessionDto>('/api/auth/session', {
+    cache: 'no-store',
+  });
+}
+
+export async function login(input: { username: string; password: string }) {
+  const result = await request<AuthLoginResultDto>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  setStoredAuthToken(result.token ?? null);
+  return result;
+}
+
+export async function logout() {
+  const result = await request<AuthSessionDto>('/api/auth/logout', {
+    method: 'POST',
+  });
+  setStoredAuthToken(null);
+  return result;
+}
+
+export function fetchRelaySession() {
+  return request<RelaySessionDto>('/relay/auth/session', {
+    credentials: 'same-origin',
+  });
+}
+
+export async function relayLogin(input: { identifier: string; password: string }) {
+  enableRelayMode();
+  const result = await request<RelayLoginResultDto>('/relay/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  setStoredRelayToken(result.token);
+  return result;
+}
+
+export async function relayRegister(input: {
+  email: string;
+  username: string;
+  password: string;
+}) {
+  enableRelayMode();
+  const result = await request<RelayRegisterResultDto>('/relay/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  setStoredRelayToken(result.token);
+  return result;
+}
+
+export async function relayLogout() {
+  const result = await request<RelaySessionDto>('/relay/auth/logout', {
+    method: 'POST',
+  });
+  setStoredRelayToken(null);
+  setSelectedRelayDeviceId(null);
+  setSelectedRelayThreadId(null);
+  return result;
+}
+
+export function fetchRelayPortal() {
+  return request<RelayPortalSummaryDto>('/relay/portal');
+}
+
+export function createRelayDevice(input: { name: string }) {
+  return request<RelayCreateDeviceResultDto>('/relay/devices', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteRelayDevice(deviceId: string) {
+  return request<{ id: string }>(`/relay/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function createRelayShare(input: {
+  targetUsername: string;
+  deviceId: string;
+  threadId: string;
+  label?: string;
+}) {
+  return request<RelaySessionShareDto>('/relay/shares', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function revokeRelayShare(shareId: string) {
+  return request<RelaySessionShareDto>(`/relay/shares/${encodeURIComponent(shareId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function fetchRelayAdmin() {
+  return request<RelayAdminSummaryDto>('/relay/admin');
+}
+
+export function setRelayRegistrationEnabled(enabled: boolean) {
+  return request<{ registrationEnabled: boolean }>('/relay/admin/settings/registration', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function setRelayUserEnabled(userId: string, enabled: boolean) {
+  return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export function fetchWorkspaceSettings() {
   return request<WorkspaceSettingsDto>('/api/config/workspace-settings', {
     cache: 'no-store',
@@ -1540,7 +1816,7 @@ export function updateWorkspaceFavorite(id: string, input: UpdateWorkspaceFavori
 
 export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) => void) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -1563,7 +1839,7 @@ export function connectShellSocket(
   } = {}
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -1586,6 +1862,29 @@ export function connectShellSocket(
       socket.send(JSON.stringify(message));
     }
   };
+}
+
+function buildSocketUrl(protocol: 'ws:' | 'wss:') {
+  const url = new URL(`${protocol}//${window.location.host}/ws`);
+  if (relayModeEnabled()) {
+    const deviceId = readSelectedRelayDeviceId();
+    url.pathname = deviceId
+      ? `/relay/devices/${encodeURIComponent(deviceId)}/ws`
+      : '/relay/ws';
+  }
+  const token = readStoredAuthToken();
+  const relayToken = readStoredRelayToken();
+  const relayThreadId = readSelectedRelayThreadId();
+  if (relayModeEnabled() && relayToken) {
+    url.searchParams.set('relaySession', relayToken);
+  }
+  if (relayModeEnabled() && relayThreadId) {
+    url.searchParams.set('threadId', relayThreadId);
+  }
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+  return url.toString();
 }
 
 function isThreadEventEnvelope(

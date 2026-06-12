@@ -8,6 +8,7 @@ import {
 } from '../../shared/src/index';
 
 export type AgentProviderId = AgentBackendIdDto;
+export type RuntimeMode = 'local' | 'server' | 'relay';
 
 export interface CodexProviderConfig {
   provider: 'codex';
@@ -43,6 +44,7 @@ export interface RuntimeConfig {
   runtimeRole: 'supervisor' | 'worker';
   sandboxId: string | null;
   userId: string | null;
+  mode: RuntimeMode;
   host: string;
   port: number;
   logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -63,6 +65,16 @@ export interface RuntimeConfig {
   appVersion: string;
   workspaceRoot: string;
   databaseUrl: string;
+  auth: {
+    adminUsername: string | null;
+    adminPassword: string | null;
+    sessionSecret: string | null;
+    sessionTtlSeconds: number;
+  };
+  relay: {
+    serverUrl: string | null;
+    agentToken: string | null;
+  };
   agentProviders: AgentProviderConfigMap;
 }
 
@@ -71,6 +83,7 @@ const envSchema = z.object({
   REMOTE_CODEX_RUNTIME_ROLE: z.enum(['supervisor', 'worker']).optional(),
   REMOTE_CODEX_SANDBOX_ID: z.string().min(1).optional(),
   REMOTE_CODEX_USER_ID: z.string().min(1).optional(),
+  REMOTE_CODEX_MODE: z.enum(['local', 'server', 'relay']).optional(),
   HOST: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
@@ -91,6 +104,12 @@ const envSchema = z.object({
   APP_VERSION: z.string().min(1).optional(),
   WORKSPACE_ROOT: z.string().optional(),
   DATABASE_URL: z.string().optional(),
+  REMOTE_CODEX_ADMIN_USERNAME: z.string().min(1).optional(),
+  REMOTE_CODEX_ADMIN_PASSWORD: z.string().min(1).optional(),
+  REMOTE_CODEX_SESSION_SECRET: z.string().min(16).optional(),
+  REMOTE_CODEX_SESSION_TTL_SECONDS: z.coerce.number().int().positive().optional(),
+  REMOTE_CODEX_RELAY_SERVER_URL: z.string().url().optional(),
+  REMOTE_CODEX_RELAY_AGENT_TOKEN: z.string().min(1).optional(),
   CODEX_HOME: z.string().optional(),
   CODEX_COMMAND: z.string().min(1).optional(),
   CODEX_APP_SERVER_START_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
@@ -106,6 +125,33 @@ function parseBoolean(value: string | undefined, defaultValue: boolean) {
     return defaultValue;
   }
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
+function optionalNonEmpty(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    WORKSPACE_ROOT: optionalNonEmpty(env.WORKSPACE_ROOT),
+    DATABASE_URL: optionalNonEmpty(env.DATABASE_URL),
+    REMOTE_CODEX_ADMIN_USERNAME: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_USERNAME),
+    REMOTE_CODEX_ADMIN_PASSWORD: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_PASSWORD),
+    REMOTE_CODEX_SESSION_SECRET: optionalNonEmpty(env.REMOTE_CODEX_SESSION_SECRET),
+    REMOTE_CODEX_RELAY_SERVER_URL: optionalNonEmpty(env.REMOTE_CODEX_RELAY_SERVER_URL),
+    REMOTE_CODEX_RELAY_AGENT_TOKEN: optionalNonEmpty(env.REMOTE_CODEX_RELAY_AGENT_TOKEN),
+    CODEX_HOME: optionalNonEmpty(env.CODEX_HOME),
+    CODEX_COMMAND: optionalNonEmpty(env.CODEX_COMMAND),
+    CLAUDE_HOME: optionalNonEmpty(env.CLAUDE_HOME),
+    CLAUDE_COMMAND: optionalNonEmpty(env.CLAUDE_COMMAND),
+    OPENCODE_HOME: optionalNonEmpty(env.OPENCODE_HOME),
+    OPENCODE_COMMAND: optionalNonEmpty(env.OPENCODE_COMMAND),
+    REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: optionalNonEmpty(
+      env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS,
+    ),
+  };
 }
 
 export function resolveDatabaseUrl(
@@ -128,9 +174,10 @@ export function resolveDatabaseUrl(
 }
 
 export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
-  const parsed = envSchema.parse(env);
+  const parsed = envSchema.parse(normalizeOptionalEnv(env));
   const nodeEnv = parsed.NODE_ENV ?? 'development';
   const runtimeRole = parsed.REMOTE_CODEX_RUNTIME_ROLE ?? 'supervisor';
+  const mode = parsed.REMOTE_CODEX_MODE ?? 'local';
   const workspaceRoot = parsed.WORKSPACE_ROOT?.trim()
     ? path.resolve(parsed.WORKSPACE_ROOT)
     : runtimeRole === 'worker'
@@ -163,6 +210,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     sandboxId: parsed.REMOTE_CODEX_SANDBOX_ID ?? null,
     userId: parsed.REMOTE_CODEX_USER_ID ?? null,
     host: parsed.HOST ?? (runtimeRole === 'worker' ? '0.0.0.0' : '127.0.0.1'),
+    mode,
     port: parsed.PORT ?? 8787,
     logLevel: parsed.LOG_LEVEL ?? (nodeEnv === 'production' ? 'warn' : 'info'),
     disableRequestLogging,
@@ -192,6 +240,16 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     appVersion: parsed.APP_VERSION ?? '0.1.0',
     workspaceRoot,
     databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL, runtimeRole),
+    auth: {
+      adminUsername: parsed.REMOTE_CODEX_ADMIN_USERNAME ?? null,
+      adminPassword: parsed.REMOTE_CODEX_ADMIN_PASSWORD ?? null,
+      sessionSecret: parsed.REMOTE_CODEX_SESSION_SECRET ?? null,
+      sessionTtlSeconds: parsed.REMOTE_CODEX_SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 7,
+    },
+    relay: {
+      serverUrl: parsed.REMOTE_CODEX_RELAY_SERVER_URL ?? null,
+      agentToken: parsed.REMOTE_CODEX_RELAY_AGENT_TOKEN ?? null,
+    },
     agentProviders: {
       codex: {
         provider: 'codex',

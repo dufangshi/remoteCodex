@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="remote_codex_background">#F8FAFC</color>
+    <color name="remote_codex_on_background">#111827</color>
+    <color name="remote_codex_secondary_text">#4B5563</color>
+</resources>

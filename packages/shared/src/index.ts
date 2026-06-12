@@ -16,6 +16,7 @@ export type {
 
 export type ApiErrorCode =
   | 'bad_request'
+  | 'unauthorized'
   | 'not_found'
   | 'conflict'
   | 'provider_goal_error'
@@ -59,10 +60,163 @@ export function truncateAutoThreadTitle(value: string) {
 export interface RuntimeConfigDto {
   appName: string;
   appVersion: string;
+  mode: 'local' | 'server' | 'relay';
   host: string;
   port: number;
   workspaceRoot: string;
   environment: string;
+}
+
+export interface AuthSessionDto {
+  authenticated: boolean;
+  username: string | null;
+  expiresAt: string | null;
+  mode: 'local' | 'server' | 'relay';
+  authRequired: boolean;
+}
+
+export interface AuthLoginResultDto {
+  token: string | null;
+  session: AuthSessionDto;
+}
+
+export interface RelayHealthDto {
+  status: 'ok';
+  supervisorConnected: boolean;
+  supervisorConnectedAt: string | null;
+  lastSupervisorHeartbeatAt: string | null;
+  supervisorCount?: number;
+}
+
+export type RelayUserRoleDto = 'admin' | 'user';
+
+export interface RelayUserDto {
+  id: string;
+  email: string;
+  username: string;
+  role: RelayUserRoleDto;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface RelayDeviceDto {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  tokenPreview: string;
+  connected: boolean;
+  connectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+}
+
+export interface RelaySessionShareDto {
+  id: string;
+  ownerUserId: string;
+  ownerUsername: string;
+  targetUsername: string;
+  targetUserId: string;
+  deviceId: string;
+  deviceName: string;
+  threadId: string;
+  label: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface RelaySessionDto {
+  authenticated: boolean;
+  user: RelayUserDto | null;
+  registrationEnabled: boolean;
+}
+
+export interface RelayLoginResultDto {
+  token: string;
+  session: RelaySessionDto;
+}
+
+export interface RelayRegisterResultDto {
+  token: string;
+  session: RelaySessionDto;
+}
+
+export interface RelayCreateDeviceResultDto {
+  device: RelayDeviceDto;
+  token: string;
+}
+
+export interface RelayPortalSummaryDto {
+  user: RelayUserDto;
+  devices: RelayDeviceDto[];
+  sharedWithMe: RelaySessionShareDto[];
+  sharedByMe: RelaySessionShareDto[];
+}
+
+export interface RelayAdminSummaryDto {
+  users: RelayUserDto[];
+  devices: RelayDeviceDto[];
+  registrationEnabled: boolean;
+}
+
+export type RelaySupervisorEnvelope =
+  | {
+      type: 'relay.connected';
+      timestamp: string;
+      deviceId?: string;
+    }
+  | {
+      type: 'relay.heartbeat';
+      timestamp: string;
+      deviceId?: string;
+    }
+  | {
+      type: 'relay.request';
+      timestamp: string;
+      requestId: string;
+      deviceId?: string;
+      payload: RelayHttpRequestPayload;
+    }
+  | {
+      type: 'relay.response';
+      timestamp: string;
+      requestId: string;
+      deviceId?: string;
+      payload: RelayHttpResponsePayload;
+    }
+  | {
+      type: 'relay.client.connected';
+      timestamp: string;
+      clientId: string;
+    }
+  | {
+      type: 'relay.client.disconnected';
+      timestamp: string;
+      clientId: string;
+    }
+  | {
+      type: 'relay.client.message';
+      timestamp: string;
+      clientId: string;
+      payload: SupervisorSocketClientEnvelope;
+    }
+  | {
+      type: 'relay.server.message';
+      timestamp: string;
+      clientId: string;
+      payload: SupervisorSocketServerEnvelope;
+    };
+
+export interface RelayHttpRequestPayload {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: string | null;
+}
+
+export interface RelayHttpResponsePayload {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
 }
 
 export interface AgentRuntimeStatusDto {

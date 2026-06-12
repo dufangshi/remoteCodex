@@ -19,3 +19,7 @@ aws-staging-preflight.json
 staging-phase-one-smoke.json
 phase-zero-six-verification.json
 artifact-secret-scan.json
+apps/android/.gradle/
+apps/android/build/
+apps/android/**/build/
+apps/android/local.properties

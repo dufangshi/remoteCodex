@@ -261,7 +261,6 @@ export interface StartAgentTurnInput {
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   workspacePath?: string | null;
   performanceMode?: 'standard' | 'fast' | null;
-  developerInstructions?: string | null;
   hidden?: boolean;
   displayTurnId?: string | null;
 }

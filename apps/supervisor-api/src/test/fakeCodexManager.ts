@@ -82,7 +82,6 @@ export class FakeCodexManager extends EventEmitter {
     prompt: string;
     developerInstructions?: string | null;
     serviceTier?: 'fast' | 'flex' | null;
-    developerInstructions?: string | null;
   }> = [];
 
   async start() {
@@ -221,7 +220,6 @@ export class FakeCodexManager extends EventEmitter {
     developerInstructions?: string | null;
     sandboxPolicy?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
     serviceTier?: 'fast' | 'flex' | null;
-    developerInstructions?: string | null;
   }) {
     this.startTurnCalls.push({
       threadId: input.threadId,

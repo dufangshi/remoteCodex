@@ -12,6 +12,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.runtimeRole).toBe('supervisor');
     expect(config.sandboxId).toBeNull();
     expect(config.userId).toBeNull();
+    expect(config.mode).toBe('local');
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(8787);
     expect(config.logLevel).toBe('info');
@@ -27,6 +28,16 @@ describe('loadRuntimeConfig', () => {
     expect(config.workerRuntimeManifestPath).toBeNull();
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
+    expect(config.auth).toEqual({
+      adminUsername: null,
+      adminPassword: null,
+      sessionSecret: null,
+      sessionTtlSeconds: 60 * 60 * 24 * 7,
+    });
+    expect(config.relay).toEqual({
+      serverUrl: null,
+      agentToken: null,
+    });
     expect(config.agentProviders.codex).toEqual({
       provider: 'codex',
       enabled: true,
@@ -56,6 +67,33 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.codex.enabled).toBe(true);
     expect(config.agentProviders.claude.enabled).toBe(false);
     expect(config.agentProviders.opencode.enabled).toBe(false);
+  });
+
+  it('treats blank optional environment variables as unset', () => {
+    const config = loadRuntimeConfig({
+      REMOTE_CODEX_MODE: 'local',
+      WORKSPACE_ROOT: '',
+      DATABASE_URL: '',
+      REMOTE_CODEX_RELAY_SERVER_URL: '',
+      REMOTE_CODEX_RELAY_AGENT_TOKEN: '',
+      CODEX_HOME: '',
+      CODEX_COMMAND: '',
+      CLAUDE_HOME: '',
+      CLAUDE_COMMAND: '',
+      OPENCODE_HOME: '',
+      OPENCODE_COMMAND: '',
+    });
+
+    expect(config.mode).toBe('local');
+    expect(config.relay).toEqual({
+      serverUrl: null,
+      agentToken: null,
+    });
+    expect(config.workspaceRoot).toBe(os.homedir());
+    expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
+    expect(config.agentProviders.codex.command).toBe('codex');
+    expect(config.agentProviders.claude.command).toBe('claude');
+    expect(config.agentProviders.opencode.command).toBe('opencode');
   });
 
   it('resolves production database to user home', () => {
@@ -130,17 +168,35 @@ describe('loadRuntimeConfig', () => {
       CLAUDE_COMMAND: 'claude-custom',
       OPENCODE_HOME: '/tmp/opencode-home',
       OPENCODE_COMMAND: 'opencode-custom',
+      REMOTE_CODEX_MODE: 'server',
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'secret',
+      REMOTE_CODEX_SESSION_SECRET: 'session-secret-value',
+      REMOTE_CODEX_SESSION_TTL_SECONDS: '3600',
+      REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+      REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
       REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,claude'
     });
 
     expect(config.nodeEnv).toBe('test');
     expect(config.runtimeRole).toBe('supervisor');
+    expect(config.mode).toBe('server');
     expect(config.host).toBe('0.0.0.0');
     expect(config.port).toBe(9999);
     expect(config.logLevel).toBe('error');
     expect(config.disableRequestLogging).toBe(true);
     expect(config.workspaceRoot).toBe('/tmp/workspaces');
     expect(config.databaseUrl).toBe('/tmp/db.sqlite');
+    expect(config.auth).toEqual({
+      adminUsername: 'admin',
+      adminPassword: 'secret',
+      sessionSecret: 'session-secret-value',
+      sessionTtlSeconds: 3600,
+    });
+    expect(config.relay).toEqual({
+      serverUrl: 'wss://relay.example.test',
+      agentToken: 'relay-token',
+    });
     expect(config.agentProviders.codex).toEqual({
       provider: 'codex',
       enabled: true,

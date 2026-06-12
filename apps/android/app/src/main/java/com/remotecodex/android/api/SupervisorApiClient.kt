@@ -1,0 +1,1439 @@
+package com.remotecodex.android.api
+
+import org.json.JSONObject
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+
+class SupervisorApiClient(
+    private val config: SupervisorConnectionConfig,
+    private val transport: SupervisorHttpTransport = UrlConnectionSupervisorHttpTransport(),
+) {
+    fun fetchAuthSession(): AuthSession {
+        return when (config.mode) {
+            SupervisorConnectionMode.Local,
+            SupervisorConnectionMode.Server,
+            -> requestJson(config.restPath("/api/auth/session")).toAuthSession()
+            SupervisorConnectionMode.Relay -> requestJson("/relay/auth/session").toRelaySession().toAuthSession()
+        }
+    }
+
+    fun login(username: String, password: String): AuthLoginResult {
+        val body = JSONObject()
+            .put("username", username)
+            .put("password", password)
+            .toString()
+        val json = requestJson(config.restPath("/api/auth/login"), method = "POST", body = body)
+        return json.toAuthLoginResult()
+    }
+
+    fun relayLogin(identifier: String, password: String): RelayLoginResult {
+        val body = JSONObject()
+            .put("identifier", identifier)
+            .put("password", password)
+            .toString()
+        val json = requestJson("/relay/auth/login", method = "POST", body = body)
+        return json.toRelayLoginResult()
+    }
+
+    fun fetchHealth(): SupervisorHealth {
+        val path = when (config.mode) {
+            SupervisorConnectionMode.Local,
+            SupervisorConnectionMode.Server,
+            -> "/healthz"
+            SupervisorConnectionMode.Relay -> "/healthz"
+        }
+        return requestJson(path).toSupervisorHealth()
+    }
+
+    fun listWorkspaces(): List<SupervisorWorkspaceSummary> {
+        return requestArray(config.restPath("/api/workspaces")).map { item ->
+            item.toWorkspaceSummary()
+        }
+    }
+
+    fun listThreads(): List<SupervisorThreadSummary> {
+        return requestArray(config.restPath("/api/threads")).map { item ->
+            item.toThreadSummary()
+        }
+    }
+
+    fun createWorkspace(request: CreateSupervisorWorkspaceRequest): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("absPath", request.absPath)
+        request.label?.takeIf { it.isNotBlank() }?.let { body.put("label", it) }
+        return requestJson(
+            config.restPath("/api/workspaces"),
+            method = "POST",
+            body = body.toString(),
+        ).toWorkspaceSummary()
+    }
+
+    fun updateWorkspace(workspaceId: String, request: UpdateSupervisorWorkspaceRequest): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("label", request.label)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}"),
+            method = "PATCH",
+            body = body,
+        ).toWorkspaceSummary()
+    }
+
+    fun deleteWorkspace(workspaceId: String): String {
+        val json = requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}"),
+            method = "DELETE",
+        )
+        return json.optString("id", workspaceId)
+    }
+
+    fun setWorkspaceFavorite(workspaceId: String, isFavorite: Boolean): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("isFavorite", isFavorite)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/favorite"),
+            method = "POST",
+            body = body,
+        ).toWorkspaceSummary()
+    }
+
+    fun openWorkspace(workspaceId: String): SupervisorWorkspaceSummary {
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/open"),
+            method = "POST",
+        ).toWorkspaceSummary()
+    }
+
+    fun startThread(request: StartSupervisorThreadRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+            .put("workspaceId", request.workspaceId)
+            .put("model", request.model)
+            .put("approvalMode", request.approvalMode)
+        request.title?.takeIf { it.isNotBlank() }?.let { body.put("title", it) }
+        request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        return requestJson(
+            config.restPath("/api/threads/start"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
+    fun fetchHomeSnapshot(): SupervisorHomeSnapshot {
+        return SupervisorHomeSnapshot(
+            workspaces = listWorkspaces(),
+            threads = listThreads(),
+        )
+    }
+
+    fun fetchRuntimeConfig(): SupervisorRuntimeConfig {
+        return requestJson(config.restPath("/api/config/runtime")).toRuntimeConfig()
+    }
+
+    fun fetchWorkspaceSettings(): SupervisorWorkspaceSettings {
+        return requestJson(config.restPath("/api/config/workspace-settings")).toWorkspaceSettings()
+    }
+
+    fun updateWorkspaceSettings(
+        request: UpdateSupervisorWorkspaceSettingsRequest,
+    ): SupervisorWorkspaceSettings {
+        val body = JSONObject()
+            .put("devHome", request.devHome)
+        request.defaultBackend?.takeIf { it.isNotBlank() }?.let { body.put("defaultBackend", it) }
+        return requestJson(
+            config.restPath("/api/config/workspace-settings"),
+            method = "PATCH",
+            body = body.toString(),
+        ).toWorkspaceSettings()
+    }
+
+    fun listAgentBackends(): List<SupervisorAgentBackend> {
+        return requestArray(config.restPath("/api/agent-runtimes")).map { item ->
+            item.toAgentBackend()
+        }
+    }
+
+    fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
+        val query = buildQuery("path" to path)
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/tree$query"),
+        ).toWorkspaceTreeNode()
+    }
+
+    fun fetchWorkspaceFilePreview(
+        workspaceId: String,
+        path: String,
+        offset: Long? = null,
+        limit: Int? = null,
+    ): SupervisorWorkspaceFilePreview {
+        val query = buildQuery(
+            "path" to path,
+            "offset" to offset?.toString(),
+            "limit" to limit?.toString(),
+        )
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/preview$query"),
+        ).toWorkspaceFilePreview()
+    }
+
+    fun fetchWorkspaceRawFile(workspaceId: String, path: String): SupervisorWorkspaceRawFile {
+        val query = buildQuery("path" to path)
+        val response = requestDownload(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/raw$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "workspace-file" },
+        )
+        return SupervisorWorkspaceRawFile(
+            path = path,
+            contentType = response.contentType,
+            bytes = response.bytes,
+        )
+    }
+
+    fun downloadWorkspaceFile(workspaceId: String, path: String): SupervisorFileDownload {
+        val query = buildQuery("path" to path)
+        return requestDownload(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/download$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "workspace-file" },
+        )
+    }
+
+    fun uploadWorkspaceFile(workspaceId: String, request: UploadWorkspaceFileRequest): SupervisorWorkspaceUploadResult {
+        val boundary = "remoteCodexAndroid${System.currentTimeMillis()}"
+        val body = buildMultipartFileBody(
+            boundary = boundary,
+            fieldName = "file",
+            filename = request.filename,
+            contentType = request.contentType,
+            bytes = request.bytes,
+        )
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/upload"),
+            method = "POST",
+            rawBody = body,
+            contentType = "multipart/form-data; boundary=$boundary",
+        ).toWorkspaceUploadResult()
+    }
+
+    fun listPlugins(): List<SupervisorPluginSummary> {
+        return requestArray(config.restPath("/api/plugins")).map { item ->
+            item.toPluginSummary()
+        }
+    }
+
+    fun importPlugin(request: ImportSupervisorPluginRequest): SupervisorPluginSummary {
+        val body = JSONObject()
+            .put("manifestJson", request.manifestJson)
+            .put("enabled", request.enabled)
+            .toString()
+        return requestJson(
+            config.restPath("/api/plugins/import"),
+            method = "POST",
+            body = body,
+        ).toPluginSummary()
+    }
+
+    fun updatePlugin(pluginId: String, request: UpdateSupervisorPluginRequest): SupervisorPluginSummary {
+        val body = JSONObject()
+            .put("enabled", request.enabled)
+            .toString()
+        return requestJson(
+            config.restPath("/api/plugins/${urlEncodePathSegment(pluginId)}"),
+            method = "PATCH",
+            body = body,
+        ).toPluginSummary()
+    }
+
+    fun fetchRelayPortal(): RelayPortalSummary {
+        return requestJson("/relay/portal").toRelayPortalSummary()
+    }
+
+    fun createRelayDevice(name: String): RelayCreateDeviceResult {
+        val body = JSONObject()
+            .put("name", name)
+            .toString()
+        return requestJson("/relay/devices", method = "POST", body = body).toRelayCreateDeviceResult()
+    }
+
+    fun deleteRelayDevice(deviceId: String): String {
+        val response = requestJson(
+            "/relay/devices/${urlEncodePathSegment(deviceId)}",
+            method = "DELETE",
+        )
+        return response.optString("id", deviceId)
+    }
+
+    fun fetchThreadDetail(threadId: String, limit: Int? = null, beforeTurnId: String? = null): SupervisorThreadDetail {
+        val query = buildQuery(
+            "limit" to limit?.toString(),
+            "beforeTurnId" to beforeTurnId,
+        )
+        return requestJson(config.restPath("/api/threads/${urlEncodePathSegment(threadId)}$query")).toThreadDetail()
+    }
+
+    fun fetchThreadHistoryItemDetail(threadId: String, itemId: String): SupervisorThreadHistoryItemDetail {
+        return requestJson(
+            config.restPath(
+                "/api/threads/${urlEncodePathSegment(threadId)}/items/${urlEncodePathSegment(itemId)}/detail",
+            ),
+        ).toThreadHistoryItemDetail()
+    }
+
+    fun fetchThreadImageAsset(threadId: String, path: String): SupervisorFileDownload {
+        val query = buildQuery("path" to path)
+        return requestDownload(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/assets/image$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "thread-image" },
+        )
+    }
+
+    fun fetchThreadShellState(threadId: String): SupervisorThreadShellState {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/shell"),
+        ).toThreadShellState()
+    }
+
+    fun fetchThreadForkTurns(threadId: String): List<SupervisorThreadForkTurnOption> {
+        return requestArray(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/fork-turns"),
+        ).map { item ->
+            item.toThreadForkTurnOption()
+        }
+    }
+
+    fun fetchThreadExportTurns(threadId: String): SupervisorThreadExportTurns {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/export-turns"),
+        ).toThreadExportTurns()
+    }
+
+    fun downloadThreadTranscriptExport(threadId: String, request: ExportThreadRequest): SupervisorFileDownload {
+        val query = buildQuery(
+            "format" to request.format,
+            "mode" to request.mode,
+            "limit" to request.limit?.toString(),
+            "turnIds" to request.turnIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+            "profile" to request.profile,
+            "includeTokenAndPrice" to request.includeTokenAndPrice.toString(),
+            "includeCommandOutput" to request.includeCommandOutput?.toString(),
+            "includeAbsolutePaths" to request.includeAbsolutePaths?.toString(),
+        )
+        return requestDownload(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/exports/pdf$query"),
+            fallbackFilename = if (request.format == "html") {
+                "remote-codex-transcript.html"
+            } else {
+                "remote-codex-transcript.pdf"
+            },
+        )
+    }
+
+    fun forkThread(threadId: String, request: ForkThreadRequest): SupervisorThreadForkResult {
+        val body = JSONObject()
+            .put("mode", request.mode)
+        request.turnId?.takeIf { it.isNotBlank() }?.let { body.put("turnId", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/fork"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadForkResult()
+    }
+
+    fun fetchThreadSkills(threadId: String): SupervisorThreadSkills {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/skills"),
+        ).toThreadSkills()
+    }
+
+    fun fetchThreadMcpServers(threadId: String): SupervisorThreadMcpServers {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/mcp-servers"),
+        ).toThreadMcpServers()
+    }
+
+    fun fetchThreadHooks(threadId: String): SupervisorThreadHooks {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks"),
+        ).toThreadHooks()
+    }
+
+    fun trustThreadHook(threadId: String, request: TrustThreadHookRequest): SupervisorThreadHooks {
+        val body = JSONObject()
+            .put("key", request.key)
+            .put("currentHash", request.currentHash)
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks/trust"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadHooks()
+    }
+
+    fun untrustThreadHook(threadId: String, request: UntrustThreadHookRequest): SupervisorThreadHooks {
+        val body = JSONObject()
+            .put("key", request.key)
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks/untrust"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadHooks()
+    }
+
+    fun createThreadShell(threadId: String, request: CreateSupervisorShellRequest = CreateSupervisorShellRequest()): SupervisorThreadShellState {
+        val body = JSONObject()
+        request.cols?.let { body.put("cols", it) }
+        request.rows?.let { body.put("rows", it) }
+        request.label?.takeIf { it.isNotBlank() }?.let { body.put("label", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/shell"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadShellState()
+    }
+
+    fun terminateShell(shellId: String): SupervisorThreadShellState {
+        return requestJson(
+            config.restPath("/api/shells/${urlEncodePathSegment(shellId)}/terminate"),
+            method = "POST",
+        ).toThreadShellState()
+    }
+
+    fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadSummary {
+        if (request.attachments.isNotEmpty()) {
+            val boundary = "remoteCodexAndroidPrompt${System.currentTimeMillis()}"
+            val body = buildPromptMultipartBody(boundary, request)
+            return requestJson(
+                config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/prompt"),
+                method = "POST",
+                rawBody = body,
+                contentType = "multipart/form-data; boundary=$boundary",
+            ).toThreadSummary()
+        }
+        val body = JSONObject()
+            .put("prompt", request.prompt)
+        request.clientRequestId?.takeIf { it.isNotBlank() }?.let { body.put("clientRequestId", it) }
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/prompt"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
+    fun updateThread(threadId: String, request: UpdateThreadRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+            .put("title", request.title)
+            .toString()
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}"),
+            method = "PATCH",
+            body = body,
+        ).toThreadSummary()
+    }
+
+    fun updateThreadSettings(threadId: String, request: UpdateThreadSettingsRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        request.reasoningEffort?.let { body.put("reasoningEffort", it) }
+        request.fastMode?.let { body.put("fastMode", it) }
+        request.collaborationMode?.takeIf { it.isNotBlank() }?.let { body.put("collaborationMode", it) }
+        request.sandboxMode?.let { body.put("sandboxMode", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/settings"),
+            method = "PATCH",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
+    fun deleteThread(threadId: String): SupervisorThreadSummary {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}"),
+            method = "DELETE",
+        ).toThreadSummary()
+    }
+
+    fun interruptThread(threadId: String, turnId: String? = null): SupervisorThreadSummary {
+        val body = JSONObject()
+        turnId?.takeIf { it.isNotBlank() }?.let { body.put("turnId", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/interrupt"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
+    fun compactThread(threadId: String): SupervisorThreadSummary {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/compact"),
+            method = "POST",
+        ).toThreadSummary()
+    }
+
+    fun updateThreadGoal(threadId: String, request: UpdateThreadGoalRequest) {
+        val body = JSONObject()
+        request.objective?.let { body.put("objective", it) }
+        request.status?.let { body.put("status", it) }
+        request.tokenBudget?.let { body.put("tokenBudget", it) }
+        requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/goal"),
+            method = "PATCH",
+            body = body.toString(),
+        )
+    }
+
+    fun respondToThreadRequest(
+        threadId: String,
+        requestId: String,
+        request: RespondThreadRequest,
+    ): SupervisorThreadDetail {
+        val answersJson = JSONObject()
+        request.answers.forEach { (questionId, answer) ->
+            answersJson.put(
+                questionId,
+                JSONObject().put("answers", org.json.JSONArray(answer.answers)),
+            )
+        }
+        val body = JSONObject()
+            .put("answers", answersJson)
+            .toString()
+        return requestJson(
+            config.restPath(
+                "/api/threads/${urlEncodePathSegment(threadId)}/requests/${urlEncodePathSegment(requestId)}/respond",
+            ),
+            method = "POST",
+            body = body,
+        ).toThreadDetail()
+    }
+
+    fun checkConnection(): SupervisorConnectionCheck {
+        val session = fetchAuthSession()
+        val health = fetchHealth()
+        return SupervisorConnectionCheck(
+            config = config,
+            authenticated = session.authenticated,
+            authRequired = session.authRequired,
+            sessionLabel = when {
+                session.authenticated && session.authRequired -> "Authenticated as ${session.username ?: "admin"}"
+                session.authenticated -> "Trusted ${session.mode} session"
+                else -> "Login required"
+            },
+            healthLabel = when {
+                health.supervisorConnected == true -> "Relay connected"
+                health.supervisorConnected == false -> "Relay waiting for supervisor"
+                else -> "Supervisor ${health.status}"
+            },
+            websocketUrl = config.websocketUrl(),
+        )
+    }
+
+    private fun requestJson(
+        path: String,
+        method: String = "GET",
+        body: String? = null,
+        rawBody: ByteArray? = null,
+        contentType: String = "application/json",
+    ): JSONObject {
+        val response = transport.request(
+            SupervisorHttpRequest(
+                url = config.normalizedBaseUrl + path,
+                method = method,
+                body = body,
+                rawBody = rawBody,
+                contentType = contentType,
+                bearerToken = config.authToken,
+            ),
+        )
+        if (response.statusCode !in 200..299) {
+            val message = response.body?.let(::parseErrorMessage) ?: "HTTP ${response.statusCode}"
+            throw SupervisorClientError.Http(response.statusCode, message, response.body)
+        }
+        try {
+            return JSONObject(response.body ?: "{}")
+        } catch (error: Exception) {
+            throw SupervisorClientError.Parse("Response was not valid JSON.", error)
+        }
+    }
+
+    private fun requestArray(path: String, method: String = "GET", body: String? = null): List<JSONObject> {
+        val response = transport.request(
+            SupervisorHttpRequest(
+                url = config.normalizedBaseUrl + path,
+                method = method,
+                body = body,
+                bearerToken = config.authToken,
+            ),
+        )
+        if (response.statusCode !in 200..299) {
+            val message = response.body?.let(::parseErrorMessage) ?: "HTTP ${response.statusCode}"
+            throw SupervisorClientError.Http(response.statusCode, message, response.body)
+        }
+        try {
+            val array = org.json.JSONArray(response.body ?: "[]")
+            return List(array.length()) { index -> array.getJSONObject(index) }
+        } catch (error: Exception) {
+            throw SupervisorClientError.Parse("Response was not a valid JSON array.", error)
+        }
+    }
+
+    private fun requestDownload(path: String, fallbackFilename: String): SupervisorFileDownload {
+        val response = transport.request(
+            SupervisorHttpRequest(
+                url = config.normalizedBaseUrl + path,
+                method = "GET",
+                bearerToken = config.authToken,
+                accept = "*/*",
+            ),
+        )
+        if (response.statusCode !in 200..299) {
+            val message = response.body?.let(::parseErrorMessage) ?: "HTTP ${response.statusCode}"
+            throw SupervisorClientError.Http(response.statusCode, message, response.body)
+        }
+        return SupervisorFileDownload(
+            filename = parseContentDispositionFilename(response.headers["content-disposition"]) ?: fallbackFilename,
+            contentType = response.headers["content-type"],
+            bytes = response.bytes ?: response.body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0),
+        )
+    }
+}
+
+data class SupervisorHttpRequest(
+    val url: String,
+    val method: String,
+    val body: String? = null,
+    val rawBody: ByteArray? = null,
+    val contentType: String = "application/json",
+    val bearerToken: String? = null,
+    val accept: String = "application/json",
+)
+
+data class SupervisorHttpResponse(
+    val statusCode: Int,
+    val body: String?,
+    val headers: Map<String, String> = emptyMap(),
+    val bytes: ByteArray? = null,
+)
+
+interface SupervisorHttpTransport {
+    fun request(request: SupervisorHttpRequest): SupervisorHttpResponse
+}
+
+class UrlConnectionSupervisorHttpTransport : SupervisorHttpTransport {
+    override fun request(request: SupervisorHttpRequest): SupervisorHttpResponse {
+        val connection = try {
+            (URL(request.url).openConnection() as HttpURLConnection).apply {
+                requestMethod = request.method
+                connectTimeout = 10_000
+                readTimeout = 15_000
+                setRequestProperty("Accept", request.accept)
+                request.bearerToken?.takeIf { it.isNotBlank() }?.let { token ->
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+                request.rawBody?.let { payload ->
+                    doOutput = true
+                    setRequestProperty("Content-Type", request.contentType)
+                    outputStream.use { stream ->
+                        stream.write(payload)
+                    }
+                } ?: request.body?.let { payload ->
+                    doOutput = true
+                    setRequestProperty("Content-Type", request.contentType)
+                    outputStream.use { stream ->
+                        stream.write(payload.toByteArray(Charsets.UTF_8))
+                    }
+                }
+            }
+        } catch (error: IOException) {
+            throw SupervisorClientError.Network("Could not open supervisor connection.", error)
+        }
+
+        try {
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val bytes = stream?.use { it.readBytes() }
+            val contentType = connection.getHeaderField("Content-Type")
+            val body = if (contentType?.contains("text", ignoreCase = true) == true ||
+                contentType?.contains("json", ignoreCase = true) == true
+            ) {
+                bytes?.toString(Charsets.UTF_8)
+            } else {
+                null
+            }
+            val headers = connection.headerFields
+                .filterKeys { key -> key != null }
+                .mapKeys { (key, _) -> key.lowercase() }
+                .mapValues { (_, values) -> values.firstOrNull().orEmpty() }
+            return SupervisorHttpResponse(statusCode = status, body = body, headers = headers, bytes = bytes)
+        } catch (error: IOException) {
+            throw SupervisorClientError.Network("Supervisor request failed.", error)
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+private fun JSONObject.toAuthLoginResult(): AuthLoginResult {
+    return AuthLoginResult(
+        token = optNullableString("token"),
+        session = getJSONObject("session").toAuthSession(),
+    )
+}
+
+private fun JSONObject.toAuthSession(): AuthSession {
+    return AuthSession(
+        authenticated = optBoolean("authenticated", false),
+        username = optNullableString("username"),
+        expiresAt = optNullableString("expiresAt"),
+        mode = optString("mode", "local"),
+        authRequired = optBoolean("authRequired", false),
+    )
+}
+
+private fun JSONObject.toRelayLoginResult(): RelayLoginResult {
+    return RelayLoginResult(
+        token = getString("token"),
+        session = getJSONObject("session").toRelaySession(),
+    )
+}
+
+private fun JSONObject.toRelaySession(): RelaySession {
+    return RelaySession(
+        authenticated = optBoolean("authenticated", false),
+        user = optJSONObject("user")?.toRelayUser(),
+        registrationEnabled = optBoolean("registrationEnabled", false),
+    )
+}
+
+private fun JSONObject.toRelayUser(): RelayUser {
+    return RelayUser(
+        id = optString("id"),
+        email = optString("email"),
+        username = optString("username"),
+        role = optString("role"),
+        enabled = optBoolean("enabled", true),
+    )
+}
+
+private fun RelaySession.toAuthSession(): AuthSession {
+    return AuthSession(
+        authenticated = authenticated,
+        username = user?.username,
+        expiresAt = null,
+        mode = "relay",
+        authRequired = true,
+    )
+}
+
+private fun JSONObject.toSupervisorHealth(): SupervisorHealth {
+    return SupervisorHealth(
+        status = optString("status", "unknown"),
+        timestamp = optNullableString("timestamp"),
+        supervisorConnected = if (has("supervisorConnected")) optBoolean("supervisorConnected") else null,
+    )
+}
+
+private fun JSONObject.toWorkspaceSummary(): SupervisorWorkspaceSummary {
+    return SupervisorWorkspaceSummary(
+        id = optString("id"),
+        label = optString("label"),
+        absPath = optString("absPath"),
+        isFavorite = optBoolean("isFavorite", false),
+        lastOpenedAt = optNullableString("lastOpenedAt"),
+    )
+}
+
+private fun JSONObject.toRuntimeConfig(): SupervisorRuntimeConfig {
+    return SupervisorRuntimeConfig(
+        appName = optString("appName"),
+        appVersion = optString("appVersion"),
+        mode = optString("mode"),
+        host = optString("host"),
+        port = optInt("port", 0),
+        workspaceRoot = optString("workspaceRoot"),
+        environment = optString("environment"),
+    )
+}
+
+private fun JSONObject.toWorkspaceSettings(): SupervisorWorkspaceSettings {
+    return SupervisorWorkspaceSettings(
+        workspaceRoot = optString("workspaceRoot"),
+        devHome = optString("devHome"),
+        defaultBackend = optString("defaultBackend"),
+    )
+}
+
+private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
+    val status = optJSONObject("status")
+    val installation = optJSONObject("installation")
+    val managementSchema = optJSONObject("managementSchema")
+    return SupervisorAgentBackend(
+        provider = optString("provider"),
+        displayName = optString("displayName"),
+        description = optString("description"),
+        enabled = optBoolean("enabled", false),
+        isDefault = optBoolean("isDefault", false),
+        statusState = status?.optString("state").orEmpty(),
+        statusDetail = status?.optNullableString("detail")
+            ?: status?.optNullableString("message")
+            ?: status?.optNullableString("lastError"),
+        installed = installation?.optBoolean("installed", false) ?: false,
+        installedVersion = installation?.optNullableString("installedVersion"),
+        latestVersion = installation?.optNullableString("latestVersion"),
+        installAvailable = !installation?.optNullableString("installCommand").isNullOrBlank(),
+        updateAvailable = !installation?.optNullableString("updateCommand").isNullOrBlank(),
+        busy = installation?.optBoolean("busy", false) ?: false,
+        lastError = installation?.optNullableString("lastError"),
+        configArchives = managementSchema?.optBoolean("configArchives", false) ?: false,
+        buildRestart = managementSchema?.optBoolean("buildRestart", false) ?: false,
+    )
+}
+
+private fun JSONObject.toWorkspaceTreeNode(): SupervisorWorkspaceTreeNode {
+    val childrenJson = optJSONArray("children") ?: org.json.JSONArray()
+    return SupervisorWorkspaceTreeNode(
+        name = optString("name"),
+        path = optString("path"),
+        kind = optString("kind"),
+        size = if (has("size") && !isNull("size")) optLong("size") else null,
+        children = List(childrenJson.length()) { index ->
+            childrenJson.getJSONObject(index).toWorkspaceTreeNode()
+        },
+    )
+}
+
+private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview {
+    return SupervisorWorkspaceFilePreview(
+        path = optString("path"),
+        name = optString("name"),
+        content = optString("content"),
+        language = optString("language", "text"),
+        size = optLong("size", 0L),
+        truncated = optBoolean("truncated", false),
+        nextOffset = optLong("nextOffset", 0L),
+    )
+}
+
+private fun JSONObject.toWorkspaceUploadResult(): SupervisorWorkspaceUploadResult {
+    val pathsJson = optJSONArray("paths") ?: org.json.JSONArray()
+    return SupervisorWorkspaceUploadResult(
+        kind = optString("kind"),
+        file = optJSONObject("file")?.toWorkspaceUploadedFile(),
+        archiveName = optNullableString("archiveName"),
+        extractedCount = if (has("extractedCount") && !isNull("extractedCount")) {
+            optInt("extractedCount")
+        } else {
+            null
+        },
+        paths = List(pathsJson.length()) { index -> pathsJson.optString(index) },
+    )
+}
+
+private fun JSONObject.toWorkspaceUploadedFile(): SupervisorWorkspaceUploadedFile {
+    return SupervisorWorkspaceUploadedFile(
+        path = optString("path"),
+        name = optString("name"),
+        size = optLong("size", 0L),
+    )
+}
+
+private fun JSONObject.toPluginSummary(): SupervisorPluginSummary {
+    val capabilities = optJSONObject("capabilities")
+    return SupervisorPluginSummary(
+        id = optString("id"),
+        name = optString("name"),
+        version = optString("version"),
+        description = optString("description"),
+        remoteCodex = optString("remoteCodex"),
+        enabled = optBoolean("enabled", false),
+        source = optNullableString("source"),
+        artifactTypes = capabilities?.optJSONArray("artifactTypes").stringListFromObjects("type").orEmpty(),
+        timelineRenderers = capabilities?.optJSONArray("timelineRenderers").stringList().orEmpty(),
+        threadPanels = capabilities?.optJSONArray("threadPanels").stringListFromObjects("kind", "id").orEmpty(),
+        modelHints = capabilities?.optJSONArray("modelHints").stringListFromObjects("text", "id").orEmpty(),
+        mcpServers = capabilities?.optJSONArray("mcpServers").stringListFromObjects("name", "id").orEmpty(),
+    )
+}
+
+private fun JSONObject.toThreadShellState(): SupervisorThreadShellState {
+    val shellsJson = optJSONArray("shells") ?: org.json.JSONArray()
+    return SupervisorThreadShellState(
+        threadId = optString("threadId"),
+        workspaceId = optString("workspaceId"),
+        workspacePathStatus = optString("workspacePathStatus"),
+        state = optString("state"),
+        shell = optJSONObject("shell")?.toShellSession(),
+        shells = List(shellsJson.length()) { index ->
+            shellsJson.getJSONObject(index).toShellSession()
+        },
+        activeShellId = optNullableString("activeShellId"),
+    )
+}
+
+private fun JSONObject.toShellSession(): SupervisorShellSession {
+    return SupervisorShellSession(
+        id = optString("id"),
+        threadId = optString("threadId"),
+        workspaceId = optString("workspaceId"),
+        label = optNullableString("label"),
+        tmuxSessionName = optString("tmuxSessionName"),
+        backend = optString("backend"),
+        cwd = optString("cwd"),
+        status = optString("status"),
+        attachedViewerId = optNullableString("attachedViewerId"),
+        createdAt = optString("createdAt"),
+        updatedAt = optString("updatedAt"),
+        lastActivityAt = optNullableString("lastActivityAt"),
+    )
+}
+
+private fun JSONObject.toRelayPortalSummary(): RelayPortalSummary {
+    val devicesArray = optJSONArray("devices") ?: org.json.JSONArray()
+    return RelayPortalSummary(
+        devices = List(devicesArray.length()) { index ->
+            devicesArray.getJSONObject(index).toRelayDeviceSummary()
+        },
+    )
+}
+
+private fun JSONObject.toRelayCreateDeviceResult(): RelayCreateDeviceResult {
+    return RelayCreateDeviceResult(
+        device = getJSONObject("device").toRelayDeviceSummary(),
+        token = getString("token"),
+    )
+}
+
+private fun JSONObject.toRelayDeviceSummary(): RelayDeviceSummary {
+    return RelayDeviceSummary(
+        id = getString("id"),
+        name = optString("name", "Remote Codex device"),
+        tokenPreview = optString("tokenPreview"),
+        connected = optBoolean("connected", false),
+        connectedAt = optNullableString("connectedAt"),
+        lastHeartbeatAt = optNullableString("lastHeartbeatAt"),
+        createdAt = optString("createdAt"),
+    )
+}
+
+private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
+    return SupervisorThreadSummary(
+        id = optString("id"),
+        workspaceId = optString("workspaceId"),
+        title = optString("title"),
+        status = optString("status"),
+        model = optNullableString("model"),
+        reasoningEffort = optNullableString("reasoningEffort"),
+        fastMode = optBoolean("fastMode", false),
+        collaborationMode = optString("collaborationMode", "default"),
+        sandboxMode = optNullableString("sandboxMode"),
+        updatedAt = optString("updatedAt"),
+        summaryText = optNullableString("summaryText"),
+    )
+}
+
+private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
+    val threadJson = getJSONObject("thread")
+    val workspaceJson = getJSONObject("workspace")
+    val liveItemsJson = optJSONObject("liveItems")
+    val goalJson = optJSONObject("goal")
+    val turns = optJSONArray("turns") ?: org.json.JSONArray()
+    val parsedTurns = List(turns.length()) { index ->
+        turns.getJSONObject(index).toThreadTurn()
+    }
+    return SupervisorThreadDetail(
+        thread = threadJson.toThreadSummary(),
+        workspace = workspaceJson.toWorkspaceSummary(),
+        turns = parsedTurns,
+        turnCount = optJSONArray("turns")?.length() ?: 0,
+        totalTurnCount = optInt("totalTurnCount", parsedTurns.size),
+        pendingRequests = (optJSONArray("pendingRequests") ?: org.json.JSONArray()).let { array ->
+            List(array.length()) { index -> array.getJSONObject(index).toThreadActionRequest() }
+        },
+        answeredRequestNotes = (optJSONArray("answeredRequestNotes") ?: org.json.JSONArray()).let { array ->
+            List(array.length()) { index -> array.getJSONObject(index).toAnsweredRequestNote() }
+        },
+        liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
+        goalStatus = goalJson?.optNullableString("status"),
+        goalObjective = goalJson?.optNullableString("objective"),
+        contextUsage = threadJson.optJSONObject("contextUsage")?.toThreadContextUsage(),
+    )
+}
+
+internal fun JSONObject.toThreadContextUsage(): SupervisorThreadContextUsage {
+    return SupervisorThreadContextUsage(
+        availability = optString("availability", "unavailable"),
+        remainingPercent = optNullableInt("remainingPercent"),
+        tokensInContextWindow = optNullableInt("tokensInContextWindow"),
+        modelContextWindow = optNullableInt("modelContextWindow"),
+        updatedAt = optNullableString("updatedAt"),
+    )
+}
+
+private fun JSONObject.toThreadForkTurnOption(): SupervisorThreadForkTurnOption {
+    return SupervisorThreadForkTurnOption(
+        turnId = optString("turnId"),
+        turnIndex = optInt("turnIndex", 0),
+        startedAt = optNullableString("startedAt"),
+        status = optString("status"),
+    )
+}
+
+private fun JSONObject.toThreadForkResult(): SupervisorThreadForkResult {
+    return SupervisorThreadForkResult(
+        thread = getJSONObject("thread").toThreadDetail(),
+        sourceThreadId = optString("sourceThreadId"),
+        sourceTurnId = optNullableString("sourceTurnId"),
+        sourceTurnIndex = if (has("sourceTurnIndex") && !isNull("sourceTurnIndex")) {
+            optInt("sourceTurnIndex")
+        } else {
+            null
+        },
+    )
+}
+
+private fun JSONObject.toThreadExportTurns(): SupervisorThreadExportTurns {
+    val turnsJson = optJSONArray("turns") ?: org.json.JSONArray()
+    return SupervisorThreadExportTurns(
+        turns = List(turnsJson.length()) { index ->
+            turnsJson.getJSONObject(index).toThreadExportTurnOption()
+        },
+        totalTurnCount = optInt("totalTurnCount", turnsJson.length()),
+    )
+}
+
+private fun JSONObject.toThreadExportTurnOption(): SupervisorThreadExportTurnOption {
+    return SupervisorThreadExportTurnOption(
+        turnId = optString("turnId"),
+        turnIndex = optInt("turnIndex", 0),
+        startedAt = optNullableString("startedAt"),
+        status = optString("status"),
+        userPromptPreview = optString("userPromptPreview"),
+    )
+}
+
+private fun JSONObject.toThreadSkills(): SupervisorThreadSkills {
+    val skillsJson = optJSONArray("skills") ?: org.json.JSONArray()
+    val errorsJson = optJSONArray("errors") ?: org.json.JSONArray()
+    return SupervisorThreadSkills(
+        cwd = optString("cwd"),
+        skills = List(skillsJson.length()) { index ->
+            skillsJson.getJSONObject(index).toAgentSkill()
+        },
+        errors = List(errorsJson.length()) { index ->
+            errorsJson.getJSONObject(index).toAgentSkillError()
+        },
+    )
+}
+
+private fun JSONObject.toAgentSkill(): SupervisorAgentSkill {
+    val interfaceJson = optJSONObject("interface")
+    return SupervisorAgentSkill(
+        name = optString("name"),
+        description = optString("description"),
+        shortDescription = optNullableString("shortDescription"),
+        interfaceShortDescription = interfaceJson?.optNullableString("shortDescription"),
+        path = optString("path"),
+        scope = optString("scope"),
+        enabled = optBoolean("enabled", true),
+    )
+}
+
+private fun JSONObject.toAgentSkillError(): SupervisorAgentSkillError {
+    return SupervisorAgentSkillError(
+        path = optString("path"),
+        message = optString("message"),
+    )
+}
+
+private fun JSONObject.toThreadMcpServers(): SupervisorThreadMcpServers {
+    val serversJson = optJSONArray("servers") ?: org.json.JSONArray()
+    return SupervisorThreadMcpServers(
+        servers = List(serversJson.length()) { index ->
+            serversJson.getJSONObject(index).toAgentMcpServer()
+        },
+    )
+}
+
+private fun JSONObject.toAgentMcpServer(): SupervisorAgentMcpServer {
+    val toolsJson = optJSONArray("tools") ?: org.json.JSONArray()
+    return SupervisorAgentMcpServer(
+        name = optString("name"),
+        authStatus = optString("authStatus"),
+        tools = List(toolsJson.length()) { index ->
+            toolsJson.getJSONObject(index).toAgentMcpTool()
+        },
+        resourceCount = optInt("resourceCount", 0),
+        resourceTemplateCount = optInt("resourceTemplateCount", 0),
+    )
+}
+
+private fun JSONObject.toAgentMcpTool(): SupervisorAgentMcpTool {
+    return SupervisorAgentMcpTool(
+        name = optString("name"),
+        title = optNullableString("title"),
+        description = optNullableString("description"),
+    )
+}
+
+private fun JSONObject.toThreadHooks(): SupervisorThreadHooks {
+    val hooksJson = optJSONArray("hooks") ?: org.json.JSONArray()
+    val warningsJson = optJSONArray("warnings") ?: org.json.JSONArray()
+    val errorsJson = optJSONArray("errors") ?: org.json.JSONArray()
+    return SupervisorThreadHooks(
+        cwd = optString("cwd"),
+        hooks = List(hooksJson.length()) { index ->
+            hooksJson.getJSONObject(index).toAgentHook()
+        },
+        warnings = List(warningsJson.length()) { index -> warningsJson.optString(index) },
+        errors = List(errorsJson.length()) { index ->
+            errorsJson.getJSONObject(index).toAgentHookError()
+        },
+        globalHooksPath = optString("globalHooksPath"),
+        projectHooksPath = optString("projectHooksPath"),
+    )
+}
+
+private fun JSONObject.toAgentHook(): SupervisorAgentHook {
+    return SupervisorAgentHook(
+        key = optString("key"),
+        eventName = optString("eventName"),
+        handlerType = optString("handlerType"),
+        matcher = optNullableString("matcher"),
+        command = optNullableString("command"),
+        timeoutSec = optInt("timeoutSec", 0),
+        statusMessage = optNullableString("statusMessage"),
+        sourcePath = optString("sourcePath"),
+        source = optString("source"),
+        pluginId = optNullableString("pluginId"),
+        displayOrder = optInt("displayOrder", 0),
+        enabled = optBoolean("enabled", true),
+        isManaged = optBoolean("isManaged", false),
+        currentHash = optNullableString("currentHash"),
+        trustStatus = optString("trustStatus"),
+    )
+}
+
+private fun JSONObject.toAgentHookError(): SupervisorAgentHookError {
+    return SupervisorAgentHookError(
+        path = optString("path"),
+        message = optString("message"),
+    )
+}
+
+internal fun JSONObject.toThreadActionRequest(): SupervisorThreadActionRequest {
+    val questionsJson = optJSONArray("questions") ?: org.json.JSONArray()
+    return SupervisorThreadActionRequest(
+        id = optString("id"),
+        kind = optString("kind"),
+        title = optString("title"),
+        description = optNullableString("description"),
+        createdAt = optString("createdAt"),
+        questions = List(questionsJson.length()) { index ->
+            questionsJson.getJSONObject(index).toThreadActionQuestion()
+        },
+        turnId = optNullableString("turnId"),
+        itemId = optNullableString("itemId"),
+    )
+}
+
+private fun JSONObject.toThreadActionQuestion(): SupervisorThreadActionQuestion {
+    val optionsJson = optJSONArray("options") ?: org.json.JSONArray()
+    return SupervisorThreadActionQuestion(
+        id = optString("id"),
+        header = optString("header"),
+        question = optString("question"),
+        multiSelect = optBoolean("multiSelect", false),
+        isOther = optBoolean("isOther", false),
+        options = List(optionsJson.length()) { index ->
+            optionsJson.getJSONObject(index).toThreadActionQuestionOption()
+        },
+    )
+}
+
+private fun JSONObject.toThreadActionQuestionOption(): SupervisorThreadActionQuestionOption {
+    return SupervisorThreadActionQuestionOption(
+        label = optString("label"),
+        description = optString("description"),
+    )
+}
+
+internal fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequestNote {
+    val linesJson = optJSONArray("summaryLines") ?: org.json.JSONArray()
+    return SupervisorThreadAnsweredRequestNote(
+        id = optString("id"),
+        title = optString("title"),
+        summaryLines = List(linesJson.length()) { index -> linesJson.optString(index) },
+        createdAt = optString("createdAt"),
+        turnId = optNullableString("turnId"),
+        itemId = optNullableString("itemId"),
+    )
+}
+
+internal fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
+    val itemsJson = optJSONArray("items") ?: org.json.JSONArray()
+    return SupervisorThreadTurn(
+        id = optString("id"),
+        startedAt = optNullableString("startedAt"),
+        status = optString("status"),
+        error = optNullableString("error"),
+        model = optNullableString("model"),
+        tokenUsage = optJSONObject("tokenUsage")?.toThreadTurnTokenUsage(),
+        items = List(itemsJson.length()) { index -> itemsJson.getJSONObject(index).toThreadTurnItem() },
+    )
+}
+
+internal fun JSONObject.toThreadTurnTokenUsage(): SupervisorThreadTurnTokenUsage {
+    return SupervisorThreadTurnTokenUsage(
+        total = getJSONObject("total").toTokenBreakdown(),
+        last = getJSONObject("last").toTokenBreakdown(),
+        modelContextWindow = if (has("modelContextWindow") && !isNull("modelContextWindow")) {
+            optInt("modelContextWindow")
+        } else {
+            null
+        },
+    )
+}
+
+private fun JSONObject.toTokenBreakdown(): SupervisorTokenBreakdown {
+    return SupervisorTokenBreakdown(
+        inputTokens = optInt("inputTokens", 0),
+        cachedInputTokens = optInt("cachedInputTokens", 0),
+        outputTokens = optInt("outputTokens", 0),
+        reasoningOutputTokens = optInt("reasoningOutputTokens", 0),
+    )
+}
+
+internal fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
+    val artifact = optJSONObject("artifact")
+    return SupervisorThreadTurnItem(
+        id = optString("id"),
+        kind = optString("kind"),
+        text = optString("text"),
+        previewText = optNullableString("previewText"),
+        detailText = optNullableString("detailText"),
+        hasDeferredDetail = optBoolean("hasDeferredDetail", false),
+        status = optNullableString("status"),
+        assetPath = optNullableString("assetPath"),
+        changedFiles = optNullableInt("changedFiles"),
+        addedLines = optNullableInt("addedLines"),
+        removedLines = optNullableInt("removedLines"),
+        hookEventLabel = optNullableString("hookEventLabel"),
+        hookStatusMessage = optNullableString("hookStatusMessage"),
+        hookOutput = optJSONArray("hookOutputEntries")?.joinTextEntries(),
+        artifactType = artifact?.optNullableString("type"),
+        artifactTitle = artifact?.optNullableString("title"),
+        artifactSummary = artifact?.optNullableString("summaryText"),
+        artifactHasRenderer = artifact?.optJSONArray("assets")?.length()?.let { it > 0 } ?: true,
+        callId = optNullableString("callId")
+            ?: optNullableString("call_id")
+            ?: optJSONObject("toolCall")?.optNullableString("callId")
+            ?: optJSONObject("toolCall")?.optNullableString("call_id"),
+        toolName = optNullableString("toolName")
+            ?: optNullableString("tool")
+            ?: optJSONObject("toolCall")?.optNullableString("toolName")
+            ?: optJSONObject("toolCall")?.optNullableString("tool"),
+        sequence = optNullableInt("sequence"),
+    )
+}
+
+private fun JSONObject.toThreadHistoryItemDetail(): SupervisorThreadHistoryItemDetail {
+    return SupervisorThreadHistoryItemDetail(
+        id = optString("id"),
+        kind = optString("kind"),
+        title = optString("title"),
+        text = optString("text"),
+        contentType = optNullableString("contentType"),
+        sourcePath = optNullableString("sourcePath"),
+        assetPath = optNullableString("assetPath"),
+    )
+}
+
+private fun JSONObject.optNullableString(name: String): String? {
+    return if (has(name) && !isNull(name)) optString(name) else null
+}
+
+private fun JSONObject.optNullableInt(name: String): Int? {
+    return if (has(name) && !isNull(name)) optInt(name) else null
+}
+
+private fun org.json.JSONArray?.stringList(): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return List(length()) { index -> optString(index) }
+        .filter { it.isNotBlank() }
+}
+
+private fun org.json.JSONArray?.stringListFromObjects(vararg keys: String): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return List(length()) { index ->
+        val value = opt(index)
+        when (value) {
+            is JSONObject -> keys.firstNotNullOfOrNull { key ->
+                value.optNullableString(key)?.takeIf { it.isNotBlank() }
+            }.orEmpty()
+            is String -> value
+            else -> ""
+        }
+    }.filter { it.isNotBlank() }
+}
+
+private fun org.json.JSONArray.joinTextEntries(): String {
+    return List(length()) { index ->
+        optJSONObject(index)?.optNullableString("text").orEmpty()
+    }
+        .filter { it.isNotBlank() }
+        .joinToString("\n")
+        .takeIf { it.isNotBlank() }
+        .orEmpty()
+}
+
+private fun buildQuery(vararg pairs: Pair<String, String?>): String {
+    val entries = pairs.filter { (_, value) -> !value.isNullOrBlank() }
+    if (entries.isEmpty()) {
+        return ""
+    }
+    return entries.joinToString(prefix = "?", separator = "&") { (key, value) ->
+        "${urlEncodeQueryValue(key)}=${urlEncodeQueryValue(value.orEmpty())}"
+    }
+}
+
+private fun urlEncodePathSegment(value: String): String {
+    return java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+}
+
+private fun urlEncodeQueryValue(value: String): String {
+    return java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
+}
+
+private fun parseErrorMessage(body: String): String {
+    return try {
+        JSONObject(body).optString("message", "Request failed.")
+    } catch (_: Exception) {
+        body.ifBlank { "Request failed." }
+    }
+}
+
+private fun parseContentDispositionFilename(value: String?): String? {
+    if (value.isNullOrBlank()) {
+        return null
+    }
+    val utf8Match = Regex("""filename\*=UTF-8''([^;]+)""", RegexOption.IGNORE_CASE).find(value)
+    if (utf8Match != null) {
+        val encoded = utf8Match.groupValues.getOrNull(1)?.trim().orEmpty()
+        return runCatching {
+            java.net.URLDecoder.decode(encoded, Charsets.UTF_8.name())
+        }.getOrDefault(encoded).takeIf { it.isNotBlank() }
+    }
+    val quotedMatch = Regex("filename=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(value)
+    if (quotedMatch != null) {
+        return quotedMatch.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+    return Regex("""filename=([^;]+)""", RegexOption.IGNORE_CASE)
+        .find(value)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+}
+
+private fun buildMultipartFileBody(
+    boundary: String,
+    fieldName: String,
+    filename: String,
+    contentType: String,
+    bytes: ByteArray,
+): ByteArray {
+    val safeFilename = filename.ifBlank { "upload.txt" }.replace("\"", "_")
+    val prefix = buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"; filename=\"")
+        append(safeFilename)
+        append("\"\r\n")
+        append("Content-Type: ")
+        append(contentType.ifBlank { "application/octet-stream" })
+        append("\r\n\r\n")
+    }.toByteArray(Charsets.UTF_8)
+    val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+    return prefix + bytes + suffix
+}
+
+private fun buildPromptMultipartBody(
+    boundary: String,
+    request: SendThreadPromptRequest,
+): ByteArray {
+    val parts = mutableListOf<ByteArray>()
+    parts += buildMultipartTextPart(boundary, "prompt", request.prompt)
+    request.clientRequestId?.takeIf { it.isNotBlank() }?.let { value ->
+        parts += buildMultipartTextPart(boundary, "clientRequestId", value)
+    }
+    request.model?.takeIf { it.isNotBlank() }?.let { value ->
+        parts += buildMultipartTextPart(boundary, "model", value)
+    }
+    val manifest = org.json.JSONArray()
+    request.attachments.forEach { attachment ->
+        manifest.put(
+            JSONObject()
+                .put("clientId", attachment.clientId)
+                .put("kind", attachment.kind)
+                .put("originalName", attachment.originalName)
+                .put("placeholder", attachment.placeholder),
+        )
+    }
+    parts += buildMultipartTextPart(boundary, "attachmentManifest", manifest.toString())
+    request.attachments.forEach { attachment ->
+        parts += buildMultipartBinaryPart(
+            boundary = boundary,
+            fieldName = "attachments",
+            filename = attachment.originalName,
+            contentType = attachment.contentType,
+            bytes = attachment.bytes,
+        )
+    }
+    parts += "--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+    return parts.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+}
+
+private fun buildMultipartTextPart(
+    boundary: String,
+    fieldName: String,
+    value: String,
+): ByteArray {
+    return buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"\r\n\r\n")
+        append(value)
+        append("\r\n")
+    }.toByteArray(Charsets.UTF_8)
+}
+
+private fun buildMultipartBinaryPart(
+    boundary: String,
+    fieldName: String,
+    filename: String,
+    contentType: String,
+    bytes: ByteArray,
+): ByteArray {
+    val safeFilename = filename.ifBlank { "attachment" }.replace("\"", "_")
+    val prefix = buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"; filename=\"")
+        append(safeFilename)
+        append("\"\r\n")
+        append("Content-Type: ")
+        append(contentType.ifBlank { "application/octet-stream" })
+        append("\r\n\r\n")
+    }.toByteArray(Charsets.UTF_8)
+    return prefix + bytes + "\r\n".toByteArray(Charsets.UTF_8)
+}

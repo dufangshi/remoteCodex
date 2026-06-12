@@ -51,7 +51,6 @@ interface PromptTurnInput {
   sandboxMode: SandboxModeDto;
   performanceMode: 'fast' | 'standard';
   workspacePath: string;
-  developerInstructions?: string | null;
   hidden?: boolean;
   displayTurnId?: string | null;
 }

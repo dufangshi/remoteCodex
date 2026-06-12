@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@source "../../../packages/thread-ui/src/**/*.{ts,tsx}";
+@source "../../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
 @source "../../../node_modules/streamdown/dist/*.js";
 @source "../../../node_modules/@streamdown/code/dist/*.js";
 
@@ -2070,4 +2070,67 @@ input {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
+}
+
+.relay-input {
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-surface);
+  padding: 0 0.75rem;
+  color: var(--theme-fg);
+  font-size: 0.875rem;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.relay-input:focus {
+  border-color: var(--theme-accent-border);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--theme-accent-border) 28%, transparent);
+}
+
+.relay-button-primary,
+.relay-button-secondary {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  padding: 0 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+
+.relay-button-primary {
+  border: 1px solid var(--theme-accent-solid);
+  background: var(--theme-accent-solid);
+  color: var(--theme-accent-solid-fg);
+}
+
+.relay-button-primary:hover {
+  background: var(--theme-accent-solid-hover);
+}
+
+.relay-button-secondary {
+  border: 1px solid var(--theme-border);
+  background: var(--theme-surface);
+  color: var(--theme-fg);
+}
+
+.relay-button-secondary:hover {
+  background: var(--theme-hover);
+}
+
+.relay-button-primary:disabled,
+.relay-button-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }

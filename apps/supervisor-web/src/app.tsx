@@ -9,7 +9,11 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PluginProvider } from '@remote-codex/thread-ui';
 
-import type { AgentBackendIdDto } from '@remote-codex/shared';
+import type {
+  AgentBackendIdDto,
+  AuthSessionDto,
+  RelaySessionDto,
+} from '../../../packages/shared/src/index';
 import {
   defaultAgentBackendId,
   normalizeAgentBackendId,
@@ -30,13 +34,26 @@ import {
 } from './pages/ControlPlaneLoginPage';
 import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
 import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
+import { RelayAdminPage } from './pages/RelayAdminPage';
+import { RelayPortalPage } from './pages/RelayPortalPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
 import { ThreadNewPage } from './pages/ThreadNewPage';
 import { ThreadsPage } from './pages/ThreadsPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
-import { deletePlugin, fetchPlugins, importPlugin, updatePlugin } from './lib/api';
+import {
+  ApiError,
+  deletePlugin,
+  fetchAuthSession,
+  fetchPlugins,
+  fetchRelaySession,
+  importPlugin,
+  login,
+  relayModeActive,
+  updatePlugin,
+} from './lib/api';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -212,6 +229,211 @@ function AppShell({
   );
 }
 
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<
+    | { status: 'checking' }
+    | { status: 'authenticated' }
+    | { status: 'loginRequired'; session: AuthSessionDto; error: string | null }
+    | { status: 'unavailable'; error: string }
+  >({ status: 'checking' });
+
+  async function checkSession(cancelled?: () => boolean) {
+    try {
+      const session = await fetchAuthSession();
+      if (cancelled?.()) {
+        return;
+      }
+      setState(
+        !session.authRequired || session.authenticated
+          ? { status: 'authenticated' }
+          : { status: 'loginRequired', session, error: null },
+      );
+    } catch (caught) {
+      if (cancelled?.()) {
+        return;
+      }
+      if (caught instanceof ApiError && caught.statusCode === 401) {
+        setState({
+          status: 'loginRequired',
+          session: {
+            authenticated: false,
+            username: null,
+            expiresAt: null,
+            mode: 'server',
+            authRequired: true,
+          },
+          error: null,
+        });
+        return;
+      }
+      setState({
+        status: 'unavailable',
+        error: caught instanceof Error ? caught.message : 'Unable to check supervisor access.',
+      });
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void checkSession(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleLogin(input: { username: string; password: string }) {
+    await login(input);
+    setState({ status: 'authenticated' });
+  }
+
+  function handleRetry() {
+    setState({ status: 'checking' });
+    void checkSession();
+  }
+
+  if (state.status === 'checking') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-muted)]">
+        Checking supervisor access...
+      </main>
+    );
+  }
+
+  if (state.status === 'unavailable') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-[var(--app-fg)]">
+        <section className="w-full max-w-md rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_14%,transparent)] sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-muted)]">
+            Supervisor Access
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
+            Unable to reach supervisor
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[var(--theme-muted)]">
+            {state.error}
+          </p>
+          <button
+            className="mt-5 h-11 rounded-xl bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)]"
+            onClick={handleRetry}
+            type="button"
+          >
+            Retry
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (state.status === 'loginRequired') {
+    return (
+      <>
+        {state.error && (
+          <div className="fixed left-1/2 top-4 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 py-2 text-sm text-[var(--status-warning-fg)]">
+            {state.error}
+          </div>
+        )}
+        <LoginPage onLogin={handleLogin} />
+      </>
+    );
+  }
+
+  return children;
+}
+
+function RelayGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<
+    | { status: 'checking' }
+    | { status: 'authenticated'; session: RelaySessionDto }
+    | { status: 'loginRequired' }
+  >({ status: 'checking' });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRelaySession()
+      .then((session) => {
+        if (cancelled) {
+          return;
+        }
+        setState(
+          session.authenticated
+            ? { status: 'authenticated', session }
+            : { status: 'loginRequired' },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState({ status: 'loginRequired' });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state.status === 'checking') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-muted)]">
+        Checking relay access...
+      </main>
+    );
+  }
+
+  if (state.status === 'loginRequired') {
+    return <RelayPortalPage />;
+  }
+
+  return children;
+}
+
+function SupervisorRoutes({
+  themeMode,
+  setThemeMode,
+  effectiveTheme,
+}: {
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  effectiveTheme: 'light' | 'dark';
+}) {
+  return (
+    <Routes>
+      <Route path="/" element={relayModeActive() ? <RelayPortalPage /> : <LandingPage />} />
+      <Route
+        element={
+          <AppShell
+            themeMode={themeMode}
+            setThemeMode={setThemeMode}
+            effectiveTheme={effectiveTheme}
+          />
+        }
+      >
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+        <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
+        <Route
+          path="/control-plane"
+          element={
+            <ControlPlaneAuthGuard>
+              <ControlPlanePage />
+            </ControlPlaneAuthGuard>
+          }
+        />
+        <Route
+          path="/control-plane/sessions/:sessionId"
+          element={
+            <ControlPlaneAuthGuard>
+              <ControlPlaneSessionPage />
+            </ControlPlaneAuthGuard>
+          }
+        />
+        <Route path="/threads" element={<ThreadsPage />} />
+        <Route path="/threads/import" element={<ThreadImportPage />} />
+        <Route path="/threads/new" element={<ThreadNewPage />} />
+        <Route path="/threads/:id" element={<ThreadDetailPage />} />
+      </Route>
+    </Routes>
+  );
+}
+
 export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readInitialThemeMode());
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() =>
@@ -265,39 +487,30 @@ export function App() {
         <RoutePluginProvider>
           <Routes>
             <Route path="/" element={<RootPage />} />
+            <Route path="/relay-portal" element={<RelayPortalPage />} />
+            <Route path="/relay-admin" element={<RelayAdminPage />} />
             <Route
+              path="/*"
               element={
-                <AppShell
-                  themeMode={themeMode}
-                  setThemeMode={setThemeMode}
-                  effectiveTheme={effectiveTheme}
-                />
+                relayModeActive() ? (
+                  <RelayGate>
+                    <SupervisorRoutes
+                      themeMode={themeMode}
+                      setThemeMode={setThemeMode}
+                      effectiveTheme={effectiveTheme}
+                    />
+                  </RelayGate>
+                ) : (
+                  <AuthGate>
+                    <SupervisorRoutes
+                      themeMode={themeMode}
+                      setThemeMode={setThemeMode}
+                      effectiveTheme={effectiveTheme}
+                    />
+                  </AuthGate>
+                )
               }
-            >
-              <Route path="/workspaces" element={<WorkspacesPage />} />
-              <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-              <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
-              <Route
-                path="/control-plane"
-                element={
-                  <ControlPlaneAuthGuard>
-                    <ControlPlanePage />
-                  </ControlPlaneAuthGuard>
-                }
-              />
-              <Route
-                path="/control-plane/sessions/:sessionId"
-                element={
-                  <ControlPlaneAuthGuard>
-                    <ControlPlaneSessionPage />
-                  </ControlPlaneAuthGuard>
-                }
-              />
-              <Route path="/threads" element={<ThreadsPage />} />
-              <Route path="/threads/import" element={<ThreadImportPage />} />
-              <Route path="/threads/new" element={<ThreadNewPage />} />
-              <Route path="/threads/:id" element={<ThreadDetailPage />} />
-            </Route>
+            />
           </Routes>
         </RoutePluginProvider>
       </BrowserRouter>

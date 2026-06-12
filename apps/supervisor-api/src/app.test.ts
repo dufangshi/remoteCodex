@@ -7,7 +7,15 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SUPERVISOR_LOG_REDACTION_PATHS, buildApp } from './app';
+import {
+  SUPERVISOR_LOG_REDACTION_PATHS,
+  buildApp,
+  createRelayClientConnectedHandler,
+  createRelayRequestHandler,
+  createRelaySocketBridge,
+  handleRelayClientMessage,
+} from './app';
+import type { RelayTunnelClient } from './relay-tunnel-client';
 import {
   AgentRuntime,
   AgentRuntimeEvent,
@@ -411,6 +419,7 @@ describe('supervisor api', () => {
       claudeRuntime?: FakeClaudeRuntime;
       env?: Record<string, string>;
       controlPlaneSyncClient?: BuildAppOptions['controlPlaneSyncClient'];
+      relayTunnelClient?: RelayTunnelClient;
     } = {},
   ) {
     const runtimes: AgentRuntime[] = [
@@ -449,6 +458,9 @@ describe('supervisor api', () => {
     if (options.controlPlaneSyncClient) {
       buildOptions.controlPlaneSyncClient = options.controlPlaneSyncClient;
     }
+    if (options.relayTunnelClient) {
+      buildOptions.relayTunnelClient = options.relayTunnelClient;
+    }
     return buildApp(buildOptions);
   }
 
@@ -486,6 +498,392 @@ describe('supervisor api', () => {
     await app.close();
     vi.unstubAllEnvs();
     await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('keeps local mode unauthenticated by default', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/version',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+  });
+
+  it('requires auth for protected API routes in server mode', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'server',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+      },
+    });
+    await app.ready();
+
+    const protectedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/version',
+    });
+
+    expect(protectedResponse.statusCode).toBe(401);
+    expect(protectedResponse.json()).toEqual({
+      code: 'unauthorized',
+      message: 'Authentication is required.',
+    });
+
+    const sessionResponse = await app.inject({
+      method: 'GET',
+      url: '/api/auth/session',
+    });
+    expect(sessionResponse.statusCode).toBe(200);
+    expect(sessionResponse.json()).toEqual({
+      authenticated: false,
+      username: null,
+      expiresAt: null,
+      mode: 'server',
+      authRequired: true,
+    });
+  });
+
+  it('returns a token and accepts bearer and query auth in server mode', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'server',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+      },
+    });
+    await app.ready();
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: {
+        username: 'admin',
+        password: 'password',
+      },
+    });
+
+    expect(loginResponse.statusCode).toBe(200);
+    expect(loginResponse.headers['set-cookie']).toContain('remote_codex_session=');
+    const loginBody = loginResponse.json() as {
+      token: string;
+      session: {
+        authenticated: boolean;
+        username: string;
+        expiresAt: string;
+        mode: string;
+        authRequired: boolean;
+      };
+    };
+    expect(loginBody.token).toEqual(expect.any(String));
+    expect(loginBody.session.authenticated).toBe(true);
+    expect(loginBody.session.username).toBe('admin');
+    expect(loginBody.session.expiresAt).toEqual(expect.any(String));
+    expect(loginBody.session.mode).toBe('server');
+    expect(loginBody.session.authRequired).toBe(true);
+
+    const protectedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/version',
+      headers: {
+        authorization: `Bearer ${loginBody.token}`,
+      },
+    });
+
+    expect(protectedResponse.statusCode).toBe(200);
+    expect(protectedResponse.json()).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+
+    const queryTokenResponse = await app.inject({
+      method: 'GET',
+      url: `/api/version?token=${encodeURIComponent(loginBody.token)}`,
+    });
+
+    expect(queryTokenResponse.statusCode).toBe(200);
+    expect(queryTokenResponse.json()).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+  });
+
+  it('rejects invalid admin credentials in server mode', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'server',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+      },
+    });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: {
+        username: 'admin',
+        password: 'wrong',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      code: 'unauthorized',
+      message: 'Invalid username or password.',
+    });
+  });
+
+  it('requires relay tunnel configuration in relay mode', async () => {
+    await app.close();
+
+    expect(() =>
+      buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_MODE: 'relay',
+          REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+          REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+          REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+        },
+      }),
+    ).toThrow(/REMOTE_CODEX_RELAY_SERVER_URL/);
+
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+  });
+
+  it('requires admin auth configuration in relay mode', async () => {
+    await app.close();
+
+    expect(() =>
+      buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_MODE: 'relay',
+          REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+          REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
+        },
+      }),
+    ).toThrow(/REMOTE_CODEX_ADMIN_USERNAME/);
+
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+  });
+
+  it('starts the outbound relay tunnel when relay mode is configured', async () => {
+    await app.close();
+    const relayTunnelClient = {
+      validateConfig: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'relay',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+        REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+        REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
+      },
+      relayTunnelClient: relayTunnelClient as any,
+    });
+    await app.ready();
+
+    expect(relayTunnelClient.validateConfig).toHaveBeenCalledOnce();
+    expect(relayTunnelClient.start).toHaveBeenCalledOnce();
+
+    await app.close();
+    expect(relayTunnelClient.stop).toHaveBeenCalledOnce();
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+  });
+
+  it('handles relayed supervisor HTTP requests through Fastify inject', async () => {
+    const handler = createRelayRequestHandler(app);
+
+    const response = await handler({
+      method: 'GET',
+      path: '/api/version',
+      headers: {},
+      body: null,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+    expect(response.headers['content-type']).toContain('application/json');
+  });
+
+  it('accepts relayed HTTP requests in relay mode without supervisor admin auth', async () => {
+    await app.close();
+    const relayTunnelClient = {
+      validateConfig: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'relay',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+        REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+        REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
+      },
+      relayTunnelClient: relayTunnelClient as any,
+    });
+    await app.ready();
+    const directResponse = await app.inject({
+      method: 'GET',
+      url: '/api/version',
+    });
+    expect(directResponse.statusCode).toBe(401);
+
+    const relayResponse = await createRelayRequestHandler(app)({
+      method: 'GET',
+      path: '/api/version',
+      headers: {},
+      body: null,
+    });
+    expect(relayResponse.statusCode).toBe(200);
+    expect(JSON.parse(relayResponse.body)).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+  });
+
+  it('bridges supervisor websocket events to relay clients', async () => {
+    const sent: any[] = [];
+    const unsubscribe = createRelayClientConnectedHandler(app.services.eventBus)(
+      'relay-client-1',
+      (message) => sent.push(message),
+    );
+
+    expect(sent[0]).toMatchObject({
+      type: 'supervisor.connected',
+    });
+
+    app.services.eventBus.emitThreadEvent({
+      type: 'thread.updated',
+      threadId: 'thread-1',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      payload: {
+        status: 'running',
+      },
+    });
+
+    expect(sent[1]).toMatchObject({
+      type: 'thread.updated',
+      threadId: 'thread-1',
+      payload: {
+        status: 'running',
+      },
+    });
+
+    unsubscribe();
+    app.services.eventBus.emitThreadEvent({
+      type: 'thread.updated',
+      threadId: 'thread-1',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      payload: {
+        status: 'idle',
+      },
+    });
+    expect(sent).toHaveLength(2);
+  });
+
+  it('responds to relay websocket ping messages', () => {
+    const sent: any[] = [];
+
+    handleRelayClientMessage(
+      'relay-client-1',
+      {
+        type: 'supervisor.ping',
+        timestamp: '2026-06-10T00:00:00.000Z',
+      },
+      (message) => sent.push(message),
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: 'supervisor.pong',
+      payload: {
+        requestTimestamp: '2026-06-10T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('routes relay websocket client messages through backend plugin handlers', async () => {
+    const handledMessages: any[] = [];
+    const fakeBackendPluginHost = {
+      handleSocketMessage: vi.fn(async (context: any) => {
+        handledMessages.push(context.message);
+        context.send({
+          type: 'shell.status',
+          shellId: context.message.shellId,
+          timestamp: '2026-06-10T00:00:00.000Z',
+          payload: {
+            threadId: 'thread-1',
+            state: 'attached',
+          },
+        });
+        return true;
+      }),
+    };
+    const bridge = createRelaySocketBridge(
+      app,
+      app.services.eventBus,
+      fakeBackendPluginHost as any,
+    );
+    const sent: any[] = [];
+    const cleanup = bridge.handleConnected('relay-client-1', (message) => {
+      sent.push(message);
+    });
+
+    await bridge.handleMessage('relay-client-1', {
+      type: 'shell.input',
+      shellId: 'shell-1',
+      viewerId: 'viewer-1',
+      data: 'ls\n',
+    });
+
+    expect(fakeBackendPluginHost.handleSocketMessage).toHaveBeenCalledOnce();
+    expect(handledMessages).toEqual([
+      {
+        type: 'shell.input',
+        shellId: 'shell-1',
+        viewerId: 'viewer-1',
+        data: 'ls\n',
+      },
+    ]);
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: 'supervisor.connected',
+      }),
+      {
+        type: 'shell.status',
+        shellId: 'shell-1',
+        timestamp: '2026-06-10T00:00:00.000Z',
+        payload: {
+          threadId: 'thread-1',
+          state: 'attached',
+        },
+      },
+    ]);
+
+    cleanup();
   });
 
   async function createLocalCodexFixture(options: {
