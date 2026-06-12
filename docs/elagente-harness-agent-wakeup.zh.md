@@ -300,8 +300,29 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
   backend job → watch → 模拟 compute worker 上报 done → 真实 notify
   回调(HMAC 原始字节)→ 验签 → reconcile → sendPrompt 注入
   `[Harness job wakeup]` → watch delivered → 通知 ack。
-- ⏳ EKS staging 验证进行中:自建 `wakeup-e2e` 镜像已推 ECR;
-  独立测试 worker + 静态路由测试 router(公网 NLB)部署中。
+- ✅ **EKS staging 全闭环验证通过**(2026-06-12):
+  - 部署:`remote-codex-worker-wakeup-e2e`(Deployment + ClusterIP,
+    复用 sandbox `843a5aa6` 的 INACT key 与 LLM gateway token)、
+    `remote-codex-router-wakeup-e2e`(静态解析 + internet-facing NLB,
+    注解 `aws-load-balancer-scheme: internet-facing` 必需);镜像 tag
+    `wakeup-e2e` 已推 ECR。
+  - 流程:staging worker 内创建真实 codex thread →
+    `GET /api/harness/wakeup`(向 **Railway 生产 harness** 注册回调,
+    notifyTo=11)→ 提交 job 143(notify_to)→ 注册 watch →
+    `POST /compute/jobs/143/cancel`(未认领的 pending job cancel 即
+    terminal,**无需 compute worker 即可触发 notify**,staging 验证
+    的关键技巧)→ Railway harness 经公网 NLB 回调 → 测试 router 透传
+    → worker 验签 → reconcile → **watch=delivered**,thread 历史中出现
+    `[Harness job wakeup] Compute job 143 ... status: cancelled`。
+  - 发现并修复一个真实 bug:Railway 版 inact 的 inbox `from` 渲染为
+    `"Agent #jobs#jobs"`(本地版是 `"jobs"`),原 ack 过滤条件过严导致
+    通知不被置读、revival 永久重发;已放宽为 `from` 包含 `jobs` 且
+    message 能解析出 job id(含单测)。
+  - 待办:ack 修复后的镜像因 AWS SSO 会话过期未能完成推送/滚动,
+    staging 上的 inbox 残留未读通知会被 revival 每 10 分钟重发到测试
+    worker(无害,reconcile 为 no-op);SSO 重新登录后需:推送镜像 →
+    `rollout restart` → 再跑一轮 submit/cancel 验证 ack → 清理
+    `purpose=wakeup-e2e` 的测试资源(两个 Deployment/Service,含 NLB)。
 
 ### 过程中发现的环境事实(影响后续部署)
 
