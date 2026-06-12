@@ -1004,6 +1004,10 @@ export function getHarnessJobWatchByJobId(db: DatabaseClient, jobId: string) {
     .get();
 }
 
+export function listHarnessJobWatches(db: DatabaseClient) {
+  return db.select().from(harnessJobWatches).orderBy(desc(harnessJobWatches.createdAt)).all();
+}
+
 export function listPendingHarnessJobWatches(db: DatabaseClient) {
   return db
     .select()

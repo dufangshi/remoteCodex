@@ -17,6 +17,7 @@ import {
 } from '../workspace-settings';
 import {
   getLatestThreadTurnMetadataByThreadId,
+  listHarnessJobWatches,
   listThreadRecords,
 } from '../../../../packages/db/src/repositories';
 import { HttpError } from '../app';
@@ -488,6 +489,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
         message: error instanceof Error ? error.message : 'ElAgenteHarness is unavailable.',
       });
     }
+  });
+
+  app.get('/api/harness/job-watches', async () => {
+    return {
+      watches: listHarnessJobWatches(app.services.database.db),
+    };
   });
 
   app.post('/api/harness/job-watches', async (request, reply) => {
