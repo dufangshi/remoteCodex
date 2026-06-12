@@ -113,6 +113,8 @@ data class DetailPreview(
     val title: String,
     val text: String,
     val image: DetailImagePreview? = null,
+    val contentType: String? = null,
+    val sourcePath: String? = null,
 )
 
 data class DetailImagePreview(

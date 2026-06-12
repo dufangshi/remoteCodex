@@ -1239,6 +1239,9 @@ private fun JSONObject.toThreadHistoryItemDetail(): SupervisorThreadHistoryItemD
         kind = optString("kind"),
         title = optString("title"),
         text = optString("text"),
+        contentType = optNullableString("contentType"),
+        sourcePath = optNullableString("sourcePath"),
+        assetPath = optNullableString("assetPath"),
     )
 }
 

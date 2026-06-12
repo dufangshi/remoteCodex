@@ -314,6 +314,9 @@ data class SupervisorThreadHistoryItemDetail(
     val kind: String,
     val title: String,
     val text: String,
+    val contentType: String? = null,
+    val sourcePath: String? = null,
+    val assetPath: String? = null,
 )
 
 data class SupervisorTokenBreakdown(

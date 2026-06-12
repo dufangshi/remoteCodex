@@ -64,6 +64,7 @@ import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
+import com.remotecodex.android.ui.presentation.buildHistoryDetailPreview
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -304,10 +305,7 @@ fun ThreadDetailScreen(
                     pendingDetailRequest = null
                     result
                         .onSuccess { item ->
-                            val detailPreview = DetailPreview(
-                                title = item.title.ifBlank { request.fallback.title },
-                                text = item.text.ifBlank { request.fallback.text },
-                            )
+                            val detailPreview = buildHistoryDetailPreview(item, request.fallback)
                             detailCache = detailCache + (request.itemId to detailPreview)
                             openDetail = detailPreview
                         }

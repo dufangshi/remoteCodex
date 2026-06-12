@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.presentation.prettyGraphChatToolJsonValue
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
@@ -138,11 +139,40 @@ private fun DetailDialogBody(detail: DetailPreview) {
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        Text(
-            text = detail.text,
-            color = ThreadColors.CodeForeground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
+        DetailTextContent(detail = detail)
+    }
+}
+
+@Composable
+private fun DetailTextContent(detail: DetailPreview) {
+    val contentType = detail.contentType?.substringBefore(';')?.trim()?.lowercase()
+    when {
+        contentType == "application/json" -> {
+            Text(
+                text = prettyGraphChatToolJsonValue(detail.text),
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        contentType == "text/markdown" -> {
+            RichMessageContent(content = detail.text)
+        }
+        contentType == "image/reference" -> {
+            Text(
+                text = detail.sourcePath ?: detail.text,
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        else -> {
+            Text(
+                text = detail.text,
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
     }
 }

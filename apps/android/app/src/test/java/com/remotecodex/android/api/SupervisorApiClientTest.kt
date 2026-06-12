@@ -1134,7 +1134,7 @@ class SupervisorApiClientTest {
         val transport = RecordingTransport(
             SupervisorHttpResponse(
                 200,
-                """{"id":"item-1","kind":"fileChange","title":"File Change Details","text":"diff --git a/App.kt b/App.kt"}""",
+                """{"id":"item-1","kind":"fileChange","title":"File Change Details","text":"diff --git a/App.kt b/App.kt","contentType":"text/x-diff","sourcePath":"App.kt","assetPath":"patches/app.diff"}""",
             ),
         )
         val client = SupervisorApiClient(
@@ -1152,6 +1152,9 @@ class SupervisorApiClientTest {
         assertEquals("item-1", detail.id)
         assertEquals("File Change Details", detail.title)
         assertEquals("diff --git a/App.kt b/App.kt", detail.text)
+        assertEquals("text/x-diff", detail.contentType)
+        assertEquals("App.kt", detail.sourcePath)
+        assertEquals("patches/app.diff", detail.assetPath)
         assertEquals(
             "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/items/item%201/detail",
             transport.requests.single().url,
