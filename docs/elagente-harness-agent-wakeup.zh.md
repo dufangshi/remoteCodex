@@ -1,7 +1,7 @@
-# 从 ElAgenteHarness 唤醒 Agent Session:调查报告
+# 从 ElAgenteHarness 唤醒 Agent Session:调查报告与 Phase 1 计划
 
 日期:2026-06-12
-状态:调查结论,未实施。
+状态:Phase 1(thread-level wakeup)实施中,见文末实施章节。
 范围:ElAgenteHarness(含 inact 子模块)与 remoteCodex 双侧代码。
 
 ## 背景与目标
@@ -173,3 +173,122 @@ reaper 对空闲 4 小时的 sandbox 执行停止
 热路径(turn 级唤醒)是一个小特性的量级,可以完全不碰 control-plane;
 冷路径(sandbox 级唤醒)是真正的工程量所在,但可以推迟,且 notify 的
 重试机制保证两期之间不丢信号。
+
+---
+
+# Phase 1 实施方案(thread-level wakeup)
+
+前提:worker pod 常驻热运行,不考虑冷启动恢复。control-plane 代码
+零改动(staging 测试用 kubectl 手动注入 env;动态 sandbox 的 env
+注入列为后续部署 TODO)。harness 侧代码零改动。
+
+## 实施前确认的事实(代码核对结论)
+
+- agent 被 developer instructions 指示**直接** curl harness
+  (`harness-developer-instructions.ts`),携带 sandbox env
+  `INACT_X_APP_KEY`;agent 与 worker 共用同一个 harness member 身份。
+- worker 全局 onRequest hook 对除 `/healthz`、`/readyz` 外的所有路径
+  强制 worker token(`app.ts` WORKER_AUTH_EXEMPT_PATHS);agent 在
+  pod 内无 worker token,所以 agent 自助路由需 loopback 放行。
+- notify 回调签名:HMAC-SHA256 **hexdigest**,签 JSON 原始字节
+  (`X-Webhook-Signature`);Python `json.dumps` 与 JS
+  `JSON.stringify` 字节不同,因此回调链路全程必须保留**原始 body**
+  (router 与 worker 都用 scoped buffer content-type parser)。
+- 通知已读语义:`GET /notify/inbox/{id}` 标记已读;revival 只对未读
+  通知每 600s 重发;未读残留会导致 revival 永久重发,所以唤醒成功后
+  必须 ack。
+- 路由器 route token TTL 300s,不能用于回调;hooks 路径需要免
+  route-token 透传,由 worker 自鉴权(URL 内 256-bit token + HMAC)。
+- `GET /members/.me` 返回 TOML,含数字 `id`,即 `notify_to` 与
+  `/notify/register` 的 `agent_id`。
+- `GET /compute/jobs/{id}` 返回 TOML(`status` ∈
+  pending/running/done/failed/cancelled);inbox 列表为
+  `[[notifications]]` TOML 块,均可行解析。
+
+## 改动清单
+
+### packages/config
+
+- 新增 `REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL`(见下)→
+  `harnessWakeupCallbackBaseUrl: string | null`。
+  语义:**映射到本 worker `/api/hooks` 的公网(或本地)base URL**:
+  - EKS:`https://sandbox-router.lnz.app/api/sandboxes/<sandboxId>/hooks`
+  - 本地:`http://127.0.0.1:8787/api/hooks`
+  未设置 = wakeup 关闭。
+
+### packages/db(迁移 0027)
+
+- `harness_notify_registrations`:单行(id='default'),存
+  agent_id、hook_token、secret、callback_url、注册时间。回调 URL
+  变化时重新注册。
+- `harness_job_watches`:job_id UNIQUE、thread_id、title、
+  status(pending|delivered|failed)、last_job_status、last_error、
+  delivered_at。
+
+### apps/supervisor-api
+
+- `WorkerHarnessClient` 新增:`whoami()`(解析 .me 的 id)、
+  `registerNotifyCallback()`、`getComputeJob()`(TOML 行解析)、
+  `listInboxUnread()`、`markNotificationRead()`。
+- 新服务 `HarnessWakeupService`:
+  - `ensureRegistration()`:懒注册;生成 hook token + HMAC secret,
+    callback = `${base}/harness-notify/${token}?u=${userId}`。
+  - `watchJob({jobId, threadId?, title?})`:threadId 缺省时复用
+    invoke 路由的"唯一 running thread"推断;upsert watch 并确保注册。
+  - `handleCallback(token, rawBody, signature)`:timing-safe 校验
+    token + HMAC → 立即 202 → 后台 reconcile(harness 回调超时仅 5s)。
+  - `reconcile()`:对所有 pending watch 查 job 状态;terminal →
+    唤醒(thread 断连先 `resumeThread`,再 `sendPrompt` 注入唤醒
+    消息);成功标记 delivered;thread 正在跑 turn 且 backend 不支持
+    steering(409)→ 保持 pending,靠 revival 重试;最后对“对应
+    watch 已 delivered/不存在”的未读 jobs 通知逐条 ack。
+- 路由:
+  - `POST /api/hooks/harness-notify/:token`:豁免 worker token 与
+    product auth;scoped buffer parser 保原始字节。
+  - `GET /api/harness/wakeup`:返回 {enabled, notifyTo};
+  - `POST /api/harness/job-watches`:注册 watch;
+    后两条豁免全局 worker-token hook,handler 内放行
+    loopback(pod 内 agent)或合法 worker token。
+- invoke 路由(`/api/harness/modules/:module/tools/:tool/invoke`):
+  响应含 jobId 且上下文有 threadId 时自动 watchJob(尽力而为)。
+- developer instructions:wakeup 启用时追加说明,教 agent:
+  `GET /api/harness/wakeup` 拿 notify_to → 提交 job 带 notify_to →
+  `POST /api/harness/job-watches` → 结束 turn 等唤醒。
+
+### apps/sandbox-router
+
+- `SandboxEndpointResolver` 入参从 routeToken 改为
+  `{sandboxId, userId}`(纯重构)。
+- 新路由 `POST /api/sandboxes/:sandboxId/hooks/*`:
+  - 免 route token;scoped buffer parser,原始字节透传;
+  - userId 取 `?u=`(control-plane resolver 需要);
+  - 限流 key `hook:<sandboxId>`;审计 action `hook.forwarded`;
+  - **不**注入 worker token / identity headers(剥除入站内部头不变);
+  - 转发到 worker `/api/hooks/<rest>`,剥除 `u`/`token` 查询参数。
+
+## 唤醒消息(注入 prompt)
+
+```
+[Harness job wakeup] Job <id> ("<title>") finished with status: <status>.
+Fetch details/outputs via the harness API (GET /compute/jobs/<id>,
+GET /compute/jobs/<id>/files/...), then continue the original task.
+```
+
+## 测试计划
+
+- supervisor-api 单测:watch 注册(loopback/worker-token/拒绝)、
+  回调验签(token/HMAC/原始字节)、reconcile 唤醒与 409 重试、
+  通知 ack、TOML 解析。
+- sandbox-router 单测:hooks 免 token 转发、原始 body 透传、不注入
+  内部头、限流。
+- 本地 e2e:本地起 harness(uv)+ supervisor,真实提交 local
+  backend job,验证回调→唤醒闭环。
+- EKS staging:对常驻 worker 手动注入 callback env,走
+  `sandbox-router.lnz.app` 验证公网回调路径。
+
+## 后续(非 Phase 1)
+
+- control-plane 在创建 sandbox pod 时注入
+  `REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL`;
+- 冷唤醒(sandbox 重建)与 control-plane webhook 接收端;
+- provider session 状态持久化验证(EFS)。
