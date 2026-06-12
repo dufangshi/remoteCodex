@@ -359,7 +359,7 @@ describe('HarnessWakeupService', () => {
       listUnreadNotifications: vi.fn(async () => [
         {
           id: '7',
-          from: 'jobs',
+          from: 'Agent #jobs#jobs',
           message: 'Job "a" finished — status: done\nid: job-done\nGET /compute/jobs/job-done',
         },
         {
@@ -368,6 +368,7 @@ describe('HarnessWakeupService', () => {
           message: 'Job "b" finished — status: done\nid: job-running\nGET /compute/jobs/job-running',
         },
         { id: '9', from: 'tasks', message: 'unrelated' },
+        { id: '10', from: 'jobs', message: 'no job id in this message' },
       ]),
     });
     const service = makeService({ client });
@@ -381,6 +382,7 @@ describe('HarnessWakeupService', () => {
     expect(readIds).toContain('7');
     expect(readIds).not.toContain('8');
     expect(readIds).not.toContain('9');
+    expect(readIds).not.toContain('10');
   });
 });
 

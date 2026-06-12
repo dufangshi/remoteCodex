@@ -298,11 +298,16 @@ export class HarnessWakeupService {
       return;
     }
     for (const notification of notifications) {
-      if (notification.from !== 'jobs') {
+      // Depending on the inact version, the inbox renders the sender as
+      // "jobs" or as a decorated string like "Agent #jobs#jobs".
+      if (!notification.from.includes('jobs')) {
         continue;
       }
       const jobId = JOB_ID_FROM_MESSAGE_PATTERN.exec(notification.message)?.[1] ?? null;
-      const watch = jobId ? getHarnessJobWatchByJobId(this.db, jobId) : null;
+      if (!jobId) {
+        continue;
+      }
+      const watch = getHarnessJobWatchByJobId(this.db, jobId);
       if (watch && watch.status === 'pending') {
         continue;
       }
