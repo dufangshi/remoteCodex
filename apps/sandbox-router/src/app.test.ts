@@ -542,4 +542,105 @@ describe('sandbox router', () => {
     });
     vi.useRealTimers();
   });
+
+  it('forwards hook callbacks without a route token and without internal headers', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ accepted: true }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const app = buildApp();
+    // Raw bytes must reach the worker untouched: the harness HMAC signature is
+    // computed over Python json.dumps output, which JSON.stringify cannot
+    // reproduce.
+    const rawBody = '{"type": "notification", "id": 7, "from": "jobs", "message": "id: job-1"}';
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/sandbox_1/hooks/harness-notify/hook-token-1?u=user_1',
+      headers: {
+        'content-type': 'application/json',
+        'x-webhook-signature': 'abc123',
+        'x-remote-codex-worker-token': 'forged-token',
+      },
+      payload: rawBody,
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe(
+      'https://worker.example.test/api/hooks/harness-notify/hook-token-1',
+    );
+    expect(init.method).toBe('POST');
+    expect(Buffer.from(init.body as Uint8Array).toString('utf8')).toBe(rawBody);
+    const headers = init.headers as Headers;
+    expect(headers.get('x-webhook-signature')).toBe('abc123');
+    expect(headers.get('x-remote-codex-worker-token')).toBeNull();
+    expect(headers.get('x-remote-codex-user')).toBeNull();
+    expect(headers.get('x-remote-codex-signature')).toBeNull();
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'hook.forwarded',
+        sandboxId: 'sandbox_1',
+        userId: 'user_1',
+        path: 'harness-notify/hook-token-1',
+        statusCode: 202,
+      }),
+    );
+  });
+
+  it('requires the u parameter for hooks when the control-plane resolver is configured', async () => {
+    const app = buildApp(undefined, {
+      SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+      SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: 'service-token-0123456789abcdef',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/sandbox_1/hooks/harness-notify/hook-token-1',
+      headers: { 'content-type': 'application/json' },
+      payload: '{}',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'missing_user' });
+  });
+
+  it('rate limits hook callbacks per sandbox', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValue(new Response('{}', { status: 202 }));
+    const app = buildApp(undefined, {
+      SANDBOX_ROUTER_RATE_LIMIT_REQUESTS: '1',
+    });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/sandbox_1/hooks/harness-notify/hook-token-1',
+      headers: { 'content-type': 'application/json' },
+      payload: '{}',
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/sandbox_1/hooks/harness-notify/hook-token-1',
+      headers: { 'content-type': 'application/json' },
+      payload: '{}',
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(429);
+  });
+
+  it('still requires route tokens on non-hook proxy paths', async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/sandbox_1/api/threads/thread_1/prompt',
+      headers: { 'content-type': 'application/json' },
+      payload: '{}',
+    });
+    expect(response.statusCode).toBe(401);
+  });
 });
