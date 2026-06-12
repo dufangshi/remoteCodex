@@ -1,1 +1,1 @@
-export { builtinFrontendPlugins } from '@remote-codex/thread-ui';
+export { builtinFrontendPlugins } from '@remote-codex/thread-ui/builtin-plugins';

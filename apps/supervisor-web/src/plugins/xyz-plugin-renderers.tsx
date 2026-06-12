@@ -1,4 +1,4 @@
 export {
   InlineXyzRenderer,
   XyzArtifactRenderer,
-} from '@remote-codex/thread-ui';
+} from '@remote-codex/thread-ui/builtin-plugins';

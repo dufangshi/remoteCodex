@@ -4357,6 +4357,8 @@ describe('ThreadTimeline', () => {
         answeredRequestNotes={[
           {
             id: 'request-1',
+            turnId: 'turn-1',
+            createdAt: '2026-06-11T12:00:00.000Z',
             title: 'Planning Preferences',
             summaryLines: ['Plan object: foundation', 'Detail level: medium'],
           },
