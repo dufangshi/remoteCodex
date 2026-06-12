@@ -5,6 +5,8 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
 import {
+  harnessJobWatches,
+  harnessNotifyRegistrations,
   notifications,
   shellSessions,
   threadActivityNotes,
@@ -937,4 +939,121 @@ export function deleteNotificationsByThreadId(db: DatabaseClient, threadId: stri
 
 export function deleteWorkspaceRecord(db: DatabaseClient, id: string) {
   db.delete(workspaces).where(eq(workspaces.id, id)).run();
+}
+
+export type HarnessJobWatchStatus = 'pending' | 'delivered' | 'failed';
+
+export interface UpsertHarnessNotifyRegistrationInput {
+  agentId: string;
+  hookToken: string;
+  secret: string;
+  callbackUrl: string;
+}
+
+export function getHarnessNotifyRegistration(db: DatabaseClient) {
+  return db
+    .select()
+    .from(harnessNotifyRegistrations)
+    .where(eq(harnessNotifyRegistrations.id, 'default'))
+    .get();
+}
+
+export function upsertHarnessNotifyRegistration(
+  db: DatabaseClient,
+  input: UpsertHarnessNotifyRegistrationInput,
+) {
+  const now = new Date().toISOString();
+  const existing = getHarnessNotifyRegistration(db);
+  if (existing) {
+    db.update(harnessNotifyRegistrations)
+      .set({
+        agentId: input.agentId,
+        hookToken: input.hookToken,
+        secret: input.secret,
+        callbackUrl: input.callbackUrl,
+        updatedAt: now,
+      })
+      .where(eq(harnessNotifyRegistrations.id, 'default'))
+      .run();
+    return getHarnessNotifyRegistration(db)!;
+  }
+  const record = {
+    id: 'default',
+    agentId: input.agentId,
+    hookToken: input.hookToken,
+    secret: input.secret,
+    callbackUrl: input.callbackUrl,
+    registeredAt: now,
+    updatedAt: now,
+  };
+  db.insert(harnessNotifyRegistrations).values(record).run();
+  return record;
+}
+
+export interface CreateHarnessJobWatchInput {
+  jobId: string;
+  threadId: string;
+  title?: string | null;
+}
+
+export function getHarnessJobWatchByJobId(db: DatabaseClient, jobId: string) {
+  return db
+    .select()
+    .from(harnessJobWatches)
+    .where(eq(harnessJobWatches.jobId, jobId))
+    .get();
+}
+
+export function listPendingHarnessJobWatches(db: DatabaseClient) {
+  return db
+    .select()
+    .from(harnessJobWatches)
+    .where(eq(harnessJobWatches.status, 'pending'))
+    .all();
+}
+
+export function upsertHarnessJobWatch(db: DatabaseClient, input: CreateHarnessJobWatchInput) {
+  const now = new Date().toISOString();
+  const existing = getHarnessJobWatchByJobId(db, input.jobId);
+  if (existing) {
+    db.update(harnessJobWatches)
+      .set({
+        threadId: input.threadId,
+        title: input.title ?? existing.title,
+        updatedAt: now,
+      })
+      .where(eq(harnessJobWatches.id, existing.id))
+      .run();
+    return getHarnessJobWatchByJobId(db, input.jobId)!;
+  }
+  const record = {
+    id: randomUUID(),
+    jobId: input.jobId,
+    threadId: input.threadId,
+    title: input.title ?? null,
+    status: 'pending',
+    lastJobStatus: null,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now,
+    deliveredAt: null,
+  };
+  db.insert(harnessJobWatches).values(record).run();
+  return record;
+}
+
+export function updateHarnessJobWatch(
+  db: DatabaseClient,
+  id: string,
+  input: {
+    status?: HarnessJobWatchStatus;
+    lastJobStatus?: string | null;
+    lastError?: string | null;
+    deliveredAt?: string | null;
+  },
+) {
+  db.update(harnessJobWatches)
+    .set({ ...input, updatedAt: new Date().toISOString() })
+    .where(eq(harnessJobWatches.id, id))
+    .run();
 }

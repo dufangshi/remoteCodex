@@ -54,6 +54,14 @@ const harnessToolParamSchema = harnessModuleParamSchema.extend({
   tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/),
 });
 const harnessInvokeBodySchema = z.record(z.string(), z.unknown());
+const harnessJobWatchBodySchema = z.object({
+  jobId: z.string().trim().min(1).max(200).regex(/^[a-zA-Z0-9_.:-]+$/),
+  threadId: z.string().trim().min(1).max(200).optional(),
+  title: z.string().trim().min(1).max(300).optional(),
+});
+const harnessHookParamSchema = z.object({
+  token: z.string().trim().min(1).max(200).regex(/^[a-zA-Z0-9_-]+$/),
+});
 const harnessInvokeContextSchema = z.object({
   workspaceId: z.string().uuid().nullable().optional(),
   sessionId: z.string().uuid().nullable().optional(),
@@ -441,6 +449,21 @@ export async function registerSystemRoutes(app: FastifyInstance) {
           metadata: harnessUsageMetadata(payload, attributionSource),
         }).catch(() => undefined);
       }
+      const invokeJobId = stringField(result, ['job_id', 'jobId', 'compute_job_id', 'computeJobId']);
+      if (invokeJobId && context.threadId && app.services.harnessWakeupService.enabled()) {
+        await app.services.harnessWakeupService
+          .watchJob({
+            jobId: invokeJobId,
+            threadId: context.threadId,
+            title: `${params.module}/${params.tool}`,
+          })
+          .catch((watchError) => {
+            request.log.warn(
+              { err: watchError, jobId: invokeJobId },
+              'Harness wakeup auto-watch failed.',
+            );
+          });
+      }
       return payload;
     } catch (error) {
       if (error instanceof HttpError) {
@@ -451,6 +474,69 @@ export async function registerSystemRoutes(app: FastifyInstance) {
         message: error instanceof Error ? error.message : 'ElAgenteHarness is unavailable.',
       });
     }
+  });
+
+  app.get('/api/harness/wakeup', async () => {
+    try {
+      return await app.services.harnessWakeupService.getWakeupInfo();
+    } catch (error) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
+      throw new HttpError(503, {
+        code: 'harness_unavailable',
+        message: error instanceof Error ? error.message : 'ElAgenteHarness is unavailable.',
+      });
+    }
+  });
+
+  app.post('/api/harness/job-watches', async (request, reply) => {
+    const body = harnessJobWatchBodySchema.parse(request.body ?? {});
+    try {
+      const result = await app.services.harnessWakeupService.watchJob({
+        jobId: body.jobId,
+        threadId: body.threadId ?? null,
+        title: body.title ?? null,
+      });
+      reply.status(201);
+      return result;
+    } catch (error) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
+      throw new HttpError(503, {
+        code: 'harness_unavailable',
+        message: error instanceof Error ? error.message : 'ElAgenteHarness is unavailable.',
+      });
+    }
+  });
+
+  app.register(async (hookApp) => {
+    hookApp.addContentTypeParser(
+      ['application/json', 'text/plain'],
+      { parseAs: 'buffer' },
+      (_request, body, done) => done(null, body),
+    );
+    hookApp.addContentTypeParser(
+      '*',
+      { parseAs: 'buffer' },
+      (_request, body, done) => done(null, body),
+    );
+
+    hookApp.post('/api/hooks/harness-notify/:token', async (request, reply) => {
+      const params = harnessHookParamSchema.parse(request.params);
+      const signatureHeader = request.headers['x-webhook-signature'];
+      const rawBody = Buffer.isBuffer(request.body)
+        ? request.body
+        : Buffer.from(typeof request.body === 'string' ? request.body : '');
+      const result = app.services.harnessWakeupService.handleCallback({
+        hookToken: params.token,
+        rawBody,
+        signature: typeof signatureHeader === 'string' ? signatureHeader : null,
+      });
+      reply.status(202);
+      return result;
+    });
   });
 
   app.get('/api/config/workspace-settings', async () => {
