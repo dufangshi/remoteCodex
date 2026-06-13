@@ -17,7 +17,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   RELAY_CONTAINER_NAME: remote-codex-relay
-  RELAY_HOST_PORT: '8788'
+  RELAY_HOST_PORT: '8798'
 
 jobs:
   build-and-push:
@@ -87,6 +87,21 @@ jobs:
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
             docker pull "${image}"
+
+            old_relay_pids="$(
+              ps -eo pid=,args= \
+                | awk '($0 ~ /node .*remote-codex relay/ || $0 ~ /node .*apps\/relay-server\/dist\/index.js/) && $0 !~ /awk/ { print $1 }'
+            )"
+            if [ -n "${old_relay_pids}" ]; then
+              echo "Stopping existing remote-codex relay processes: ${old_relay_pids}"
+              kill ${old_relay_pids} 2>/dev/null || true
+              sleep 2
+              for pid in ${old_relay_pids}; do
+                if kill -0 "${pid}" 2>/dev/null; then
+                  kill -9 "${pid}" 2>/dev/null || true
+                fi
+              done
+            fi
 
             docker rm -f "${container}" 2>/dev/null || true
 
