@@ -71,8 +71,16 @@ export default defineConfig(({ mode }) => {
 
   const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8787';
   const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET ?? 'ws://127.0.0.1:8787';
+  const threadUiRoot = path.resolve(__dirname, '../../../remote-codex-thread-ui');
+  const xyzViewerRoot = path.join(threadUiRoot, 'packages/plugin-xyz-viewer');
+  const xyzViewerInstallRoot = path.resolve(
+    __dirname,
+    'node_modules/@remote-codex/plugin-xyz-viewer',
+  );
+  const xyzViewerEntry = path.join(xyzViewerInstallRoot, 'dist/index.js');
+  const xyzViewerStyles = path.join(xyzViewerInstallRoot, 'src/styles.css');
   const threeDmolSource = require.resolve('3dmol/build/3Dmol-min.js', {
-    paths: [path.resolve(__dirname, '../../packages/plugin-xyz-viewer')],
+    paths: [xyzViewerRoot],
   });
 
   return {
@@ -93,6 +101,12 @@ export default defineConfig(({ mode }) => {
         },
       },
     ],
+    resolve: {
+      alias: {
+        '@remote-codex/plugin-xyz-viewer/styles.css': xyzViewerStyles,
+        '@remote-codex/plugin-xyz-viewer': xyzViewerEntry,
+      },
+    },
     optimizeDeps: {
       exclude: ['@remote-codex/thread-ui'],
     },
@@ -105,7 +119,7 @@ export default defineConfig(({ mode }) => {
       fs: {
         allow: [
           path.resolve(__dirname, '../..'),
-          path.resolve(__dirname, '../../../remote-codex-thread-ui'),
+          threadUiRoot,
         ]
       },
       proxy: {
