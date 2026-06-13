@@ -620,8 +620,8 @@ export class ThreadService {
     return this.toThreadDto(record, new Set([session.response.providerSessionId]));
   }
 
-  async importThread(sessionId: ImportThreadInput['sessionId']): Promise<ThreadDetailDto> {
-    const localThreadId = await this.importCoordinator.importLocalCodexThread(sessionId);
+  async importThread(input: ImportThreadInput): Promise<ThreadDetailDto> {
+    const localThreadId = await this.importCoordinator.importLocalThread(input);
     return this.getThreadDetail(localThreadId);
   }
 

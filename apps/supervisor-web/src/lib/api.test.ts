@@ -96,7 +96,10 @@ describe('api request helper', () => {
     await createWorkspace({
       absPath: '/Users/fonsh/remoteCodex'
     });
-    await importThread('019d6fb7-7033-7a30-a2c7-74d0919e87d4');
+    await importThread({
+      sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+      provider: 'claude',
+    });
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls).toHaveLength(2);
@@ -105,6 +108,10 @@ describe('api request helper', () => {
       const headers = new Headers(init?.headers);
       expect(headers.get('Content-Type')).toBe('application/json');
     }
+    expect(calls[1]?.[1]?.body).toBe(JSON.stringify({
+      sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+      provider: 'claude',
+    }));
   });
 
   it('keeps shell create and terminate request shapes aligned', async () => {

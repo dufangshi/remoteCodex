@@ -1121,6 +1121,7 @@ export interface UpdateThreadInput {
 
 export interface ImportThreadInput {
   sessionId: string;
+  provider?: AgentBackendIdDto;
 }
 
 export interface SendThreadPromptInput {

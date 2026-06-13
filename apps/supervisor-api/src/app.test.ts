@@ -6490,6 +6490,85 @@ describe('supervisor api', () => {
     });
   });
 
+  it('imports a Claude runtime session when a provider is selected', async () => {
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    const importedWorkspace = path.join(tempDir, 'imported-claude-project');
+    await fs.mkdir(importedWorkspace);
+    const expectedWorkspacePath = await fs.realpath(importedWorkspace);
+    fakeClaudeRuntime.sessions.set('claude-session-import-1', {
+      provider: 'claude',
+      providerSessionId: 'claude-session-import-1',
+      cwd: importedWorkspace,
+      title: 'Imported Claude session',
+      preview: 'Claude import preview',
+      createdAt: '2026-06-12T10:00:00.000Z',
+      updatedAt: '2026-06-12T10:01:00.000Z',
+      status: 'idle',
+      turns: [
+        {
+          providerTurnId: 'claude-import-turn-1',
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'claude-import-user-1',
+              kind: 'userMessage',
+              text: 'import from claude',
+            },
+            {
+              id: 'claude-import-agent-1',
+              kind: 'agentMessage',
+              text: 'claude imported reply',
+            },
+          ],
+          rawTurn: null,
+        },
+      ],
+      rawSession: null,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/import',
+      payload: {
+        provider: 'claude',
+        sessionId: 'claude-session-import-1',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      thread: {
+        provider: 'claude',
+        providerSessionId: 'claude-session-import-1',
+        source: 'supervisor',
+        title: 'Imported Claude session',
+        isLoaded: false,
+      },
+      workspace: {
+        absPath: expectedWorkspacePath,
+        label: 'imported-claude-project',
+      },
+      turns: [
+        {
+          id: 'claude-import-turn-1',
+          status: 'completed',
+          items: [
+            {
+              kind: 'userMessage',
+              text: 'import from claude',
+            },
+            {
+              kind: 'agentMessage',
+              text: 'claude imported reply',
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('persists fast mode via config service_tier and records a timeline activity note', async () => {
     fakeCodexManager.models = [
       {

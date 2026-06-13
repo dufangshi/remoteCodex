@@ -13,6 +13,7 @@ import {
 } from './dto';
 import { HttpError } from './app';
 import type { ThreadSessionCoordinator } from './thread-session-coordinator';
+import { normalizeAgentBackendId, type ImportThreadInput } from '../../../packages/shared/src/index';
 
 async function pathExists(absPath: string) {
   try {
@@ -75,27 +76,29 @@ export class ThreadImportCoordinator {
     private readonly workspaceRoot: string,
   ) {}
 
-  async importLocalCodexThread(sessionId: string) {
-    const normalizedSessionId = sessionId.trim();
+  async importLocalThread(input: ImportThreadInput) {
+    const normalizedSessionId = input.sessionId.trim();
     if (!normalizedSessionId) {
       throw new HttpError(400, {
         code: 'bad_request',
         message: 'Session id is required.',
       });
     }
+    const provider = normalizeAgentBackendId(input.provider ?? 'codex') ?? 'codex';
 
     const existingThread = getThreadRecordByProviderSessionId(
       this.db,
-      'codex',
+      provider,
       normalizedSessionId,
     );
     if (existingThread) {
       return existingThread.id;
     }
 
-    const importSession = await this.sessionCoordinator.resolveLocalImportSession(
-      normalizedSessionId,
-    );
+    const importSession = await this.sessionCoordinator.resolveLocalImportSession({
+      provider,
+      sessionId: normalizedSessionId,
+    });
     if (!importSession) {
       throw new HttpError(404, {
         code: 'not_found',

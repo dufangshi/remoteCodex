@@ -1566,10 +1566,13 @@ export function createThread(input: CreateThreadInput) {
   });
 }
 
-export function importThread(sessionId: ImportThreadInput['sessionId']) {
+export function importThread(input: ImportThreadInput | ImportThreadInput['sessionId']) {
+  const body = typeof input === 'string'
+    ? { sessionId: input }
+    : input;
   return request<ThreadDetailDto>('/api/threads/import', {
     method: 'POST',
-    body: JSON.stringify({ sessionId })
+    body: JSON.stringify(body)
   });
 }
 

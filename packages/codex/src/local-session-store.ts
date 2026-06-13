@@ -252,8 +252,11 @@ export class LocalCodexSessionStore {
 
   async findImportSession(
     sessionId: string,
-    input: { fastMode: boolean },
+    input: { fastMode: boolean; provider?: string | null },
   ): Promise<LocalCodexImportSession | null> {
+    if (input.provider && input.provider !== 'codex') {
+      return null;
+    }
     const localSession = await this.findSession(sessionId);
     if (!localSession) {
       return null;

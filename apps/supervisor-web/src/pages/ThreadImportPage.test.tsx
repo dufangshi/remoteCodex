@@ -8,13 +8,35 @@ describe('ThreadImportPage', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          thread: {
-            id: 'thread-imported-1',
-          },
-        }),
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/api/agent-runtimes') && !init?.method) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                provider: 'codex',
+                displayName: 'Codex',
+                enabled: true,
+                isDefault: true,
+              },
+              {
+                provider: 'claude',
+                displayName: 'Claude Code',
+                enabled: true,
+                isDefault: false,
+              },
+            ],
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            thread: {
+              id: 'thread-imported-1',
+            },
+          }),
+        });
       }),
     );
   });
@@ -29,7 +51,11 @@ describe('ThreadImportPage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText(/local session id/i), {
+    await screen.findByLabelText(/backend/i);
+    fireEvent.change(screen.getByLabelText(/backend/i), {
+      target: { value: 'claude' },
+    });
+    fireEvent.change(screen.getByLabelText(/^session id$/i), {
       target: { value: ' 019d6fb7-7033-7a30-a2c7-74d0919e87d4 ' },
     });
     fireEvent.click(screen.getByRole('button', { name: /import session/i }));
@@ -38,12 +64,14 @@ describe('ThreadImportPage', () => {
       expect(screen.getByText('Imported Thread Ready')).toBeInTheDocument();
     });
 
-    const [input, init] = vi.mocked(fetch).mock.calls[0]!;
+    const [, importCall] = vi.mocked(fetch).mock.calls;
+    const [input, init] = importCall!;
     expect(String(input)).toContain('/api/threads/import');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(
       JSON.stringify({
         sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+        provider: 'claude',
       }),
     );
   });
