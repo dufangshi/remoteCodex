@@ -33,7 +33,12 @@ RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
   && pnpm --filter @remote-codex/relay-server... --filter @remote-codex/supervisor-web... install --frozen-lockfile \
   && rm -rf apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/dist \
     apps/supervisor-web/node_modules/@remote-codex/thread-ui/dist \
+  && mkdir -p apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/src \
+    apps/supervisor-web/node_modules/@remote-codex/thread-ui \
+  && cp /opt/remote-codex-thread-ui/packages/plugin-xyz-viewer/package.json apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/package.json \
+  && cp /opt/remote-codex-thread-ui/packages/thread-ui/package.json apps/supervisor-web/node_modules/@remote-codex/thread-ui/package.json \
   && cp -R /opt/remote-codex-thread-ui/packages/plugin-xyz-viewer/dist apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/dist \
+  && cp /opt/remote-codex-thread-ui/packages/plugin-xyz-viewer/src/styles.css apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/src/styles.css \
   && cp -R /opt/remote-codex-thread-ui/packages/thread-ui/dist apps/supervisor-web/node_modules/@remote-codex/thread-ui/dist \
   && pnpm --filter @remote-codex/relay-server build \
   && pnpm --filter @remote-codex/plugin-runtime build \
