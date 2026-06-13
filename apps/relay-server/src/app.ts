@@ -215,6 +215,23 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
     });
   });
 
+  app.get('/relay/devices/:deviceId/healthz', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const { deviceId } = z.object({ deviceId: z.string().uuid() }).parse(request.params);
+    await forwardRelayHttp({
+      request,
+      reply,
+      state,
+      store,
+      user,
+      deviceId,
+      targetPath: '/healthz',
+    });
+  });
+
   app.all('/relay/api/*', async (request, reply) => {
     const user = requireRelayUser(request, reply, store);
     if (!user) {
@@ -660,6 +677,7 @@ function readRelaySessionToken(request: FastifyRequest) {
   return (
     bearerToken(request.headers.authorization) ??
     queryToken(request.query, 'relaySession') ??
+    queryToken(request.query, 'token') ??
     readCookie(request.headers.cookie, RELAY_COOKIE_NAME)
   );
 }

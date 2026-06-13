@@ -148,6 +148,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.2.0
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
       fastify:
         specifier: ^5.2.1
         version: 5.8.5

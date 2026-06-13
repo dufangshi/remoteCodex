@@ -174,6 +174,38 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('accepts relay session tokens from websocket-compatible query parameters', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'admin',
+        password: 'password123',
+      },
+    });
+    const token = loginResponse.json().token;
+
+    for (const queryName of ['relaySession', 'token']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/relay/auth/session?${queryName}=${encodeURIComponent(token)}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        authenticated: true,
+        user: {
+          username: 'admin',
+        },
+      });
+    }
+
+    await app.close();
+  });
+
   it('lets admin disable registration', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();
@@ -375,6 +407,50 @@ describe('relay server', () => {
       },
     });
     expect(otherThreadResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('routes device health checks through the selected relay device', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'dev@example.test',
+        username: 'devuser',
+        password: 'password123',
+      },
+    });
+    const token = registerResponse.json().token;
+
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        name: 'Android workstation',
+      },
+    });
+    const deviceId = deviceResponse.json().device.id;
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/healthz`,
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      code: 'service_unavailable',
+      message: 'No supervisor is connected for this device.',
+    });
 
     await app.close();
   });
