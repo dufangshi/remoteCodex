@@ -55,6 +55,7 @@ const registerSchema = z.object({
   email: z.string().trim().email(),
   username: z.string().trim().min(3),
   password: z.string().min(8),
+  registrationPassword: z.string().optional(),
 });
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -76,6 +77,9 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
     config.sessionSecret,
     config.registrationEnabled,
   );
+  if (config.registrationEnabledConfigured) {
+    store.setRegistrationEnabled(config.registrationEnabled);
+  }
   store.seedAdmin({
     username: config.adminUsername,
     email: config.adminEmail,
@@ -103,7 +107,18 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
 
   app.post('/relay/auth/register', async (request, reply) => {
     const body = registerSchema.parse(request.body ?? {});
-    const result = store.register(body);
+    if (
+      config.registrationPassword &&
+      body.registrationPassword !== config.registrationPassword
+    ) {
+      reply.status(403).send({
+        code: 'forbidden',
+        message: 'Invalid registration password.',
+      } satisfies ApiErrorShape);
+      return;
+    }
+    const { registrationPassword: _registrationPassword, ...registerInput } = body;
+    const result = store.register(registerInput);
     attachRelayCookie(reply, result.token);
     return result;
   });

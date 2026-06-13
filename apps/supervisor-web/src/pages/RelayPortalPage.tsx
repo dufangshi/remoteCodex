@@ -315,6 +315,7 @@ function RelayAuthPanel({
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [registrationPassword, setRegistrationPassword] = useState('');
   const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
 
@@ -326,7 +327,7 @@ function RelayAuthPanel({
       if (mode === 'login') {
         await relayLogin({ identifier, password });
       } else {
-        await relayRegister({ email, username, password });
+        await relayRegister({ email, username, password, registrationPassword });
       }
       await onAuthenticated();
     } catch (caught) {
@@ -356,6 +357,13 @@ function RelayAuthPanel({
           <>
             <RelayInput autoComplete="email" label="Email" onChange={setEmail} value={email} />
             <RelayInput autoComplete="username" label="Username" onChange={setUsername} value={username} />
+            <RelayInput
+              autoComplete="one-time-code"
+              label="Registration password"
+              onChange={setRegistrationPassword}
+              type="password"
+              value={registrationPassword}
+            />
           </>
         )}
         <RelayInput

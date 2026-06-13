@@ -21,6 +21,8 @@ function testConfig(
     dataDir: `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`,
     sessionSecret: 'test-relay-session-secret',
     registrationEnabled: true,
+    registrationEnabledConfigured: false,
+    registrationPassword: null,
     webDistDir: null,
     ...overrides,
   };
@@ -174,6 +176,58 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('requires the configured registration password when registering users', async () => {
+    const app = buildRelayServer(
+      testConfig({ registrationPassword: 'invite-password-123' }),
+    );
+    await app.ready();
+
+    const missingPasswordResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'missing@example.test',
+        username: 'missing',
+        password: 'password123',
+      },
+    });
+    expect(missingPasswordResponse.statusCode).toBe(403);
+    expect(missingPasswordResponse.json()).toEqual({
+      code: 'forbidden',
+      message: 'Invalid registration password.',
+    });
+
+    const wrongPasswordResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'wrong@example.test',
+        username: 'wrongpw',
+        password: 'password123',
+        registrationPassword: 'wrong-password',
+      },
+    });
+    expect(wrongPasswordResponse.statusCode).toBe(403);
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'invited@example.test',
+        username: 'invited',
+        password: 'password123',
+        registrationPassword: 'invite-password-123',
+      },
+    });
+    expect(registerResponse.statusCode).toBe(200);
+    expect(registerResponse.json().session.user).toMatchObject({
+      email: 'invited@example.test',
+      username: 'invited',
+    });
+
+    await app.close();
+  });
+
   it('accepts relay session tokens from websocket-compatible query parameters', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();
@@ -249,6 +303,37 @@ describe('relay server', () => {
     expect(registerResponse.statusCode).toBe(403);
 
     await app.close();
+  });
+
+  it('lets explicit config override a persisted registration setting on restart', async () => {
+    const dataDir = `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`;
+    const firstApp = buildRelayServer(
+      testConfig({ dataDir, registrationEnabled: false }),
+    );
+    await firstApp.ready();
+    await firstApp.close();
+
+    const restartedApp = buildRelayServer(
+      testConfig({
+        dataDir,
+        registrationEnabled: true,
+        registrationEnabledConfigured: true,
+      }),
+    );
+    await restartedApp.ready();
+
+    const registerResponse = await restartedApp.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'enabled@example.test',
+        username: 'enabled',
+        password: 'password123',
+      },
+    });
+    expect(registerResponse.statusCode).toBe(200);
+
+    await restartedApp.close();
   });
 
   it('shares a device thread with another username', async () => {

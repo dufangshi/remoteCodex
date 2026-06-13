@@ -1175,6 +1175,7 @@ export async function relayRegister(input: {
   email: string;
   username: string;
   password: string;
+  registrationPassword?: string;
 }) {
   enableRelayMode();
   const result = await request<RelayRegisterResultDto>('/relay/auth/register', {
