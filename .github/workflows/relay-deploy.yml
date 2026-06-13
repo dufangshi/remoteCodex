@@ -53,10 +53,14 @@ jobs:
 
       - name: Build and push relay
         uses: docker/build-push-action@v5
+        env:
+          REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
         with:
           context: .
           file: Dockerfile.relay
           push: true
+          secret-envs: |
+            remote_codex_thread_ui_deploy_key=REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64
           tags: |
             ${{ steps.image.outputs.image_latest }}
             ${{ steps.image.outputs.image_sha }}
