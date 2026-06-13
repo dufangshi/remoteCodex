@@ -27,6 +27,9 @@ RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
   REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
   bash ./scripts/setup-thread-ui-git-auth.sh \
   && git clone --depth 1 --branch "${REMOTE_CODEX_THREAD_UI_REF}" "${REMOTE_CODEX_THREAD_UI_REPO}" /opt/remote-codex-thread-ui \
+  && pnpm --dir /opt/remote-codex-thread-ui install --frozen-lockfile \
+  && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/plugin-xyz-viewer build \
+  && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/thread-ui build \
   && pnpm --filter @remote-codex/relay-server... --filter @remote-codex/supervisor-web... install --frozen-lockfile \
   && pnpm --filter @remote-codex/relay-server build \
   && pnpm --filter @remote-codex/plugin-runtime build \
