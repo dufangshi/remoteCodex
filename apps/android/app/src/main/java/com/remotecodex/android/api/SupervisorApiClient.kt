@@ -36,12 +36,29 @@ class SupervisorApiClient(
         return json.toRelayLoginResult()
     }
 
+    fun relayRegister(email: String, username: String, password: String): RelayLoginResult {
+        val body = JSONObject()
+            .put("email", email)
+            .put("username", username)
+            .put("password", password)
+            .toString()
+        val json = requestJson("/relay/auth/register", method = "POST", body = body)
+        return json.toRelayLoginResult()
+    }
+
     fun fetchHealth(): SupervisorHealth {
         val path = when (config.mode) {
             SupervisorConnectionMode.Local,
             SupervisorConnectionMode.Server,
             -> "/healthz"
-            SupervisorConnectionMode.Relay -> "/healthz"
+            SupervisorConnectionMode.Relay -> {
+                val deviceId = config.relayDeviceId?.trim().orEmpty()
+                if (deviceId.isNotEmpty()) {
+                    "/relay/devices/${urlEncodePathSegment(deviceId)}/healthz"
+                } else {
+                    "/healthz"
+                }
+            }
         }
         return requestJson(path).toSupervisorHealth()
     }
@@ -113,11 +130,23 @@ class SupervisorApiClient(
             .put("approvalMode", request.approvalMode)
         request.title?.takeIf { it.isNotBlank() }?.let { body.put("title", it) }
         request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        request.reasoningEffort?.takeIf { it.isNotBlank() }?.let { body.put("reasoningEffort", it) }
         return requestJson(
             config.restPath("/api/threads/start"),
             method = "POST",
             body = body.toString(),
         ).toThreadSummary()
+    }
+
+    fun importThread(request: ImportSupervisorThreadRequest): SupervisorThreadDetail {
+        val body = JSONObject()
+            .put("sessionId", request.sessionId)
+        request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        return requestJson(
+            config.restPath("/api/threads/import"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadDetail()
     }
 
     fun fetchHomeSnapshot(): SupervisorHomeSnapshot {
@@ -152,6 +181,12 @@ class SupervisorApiClient(
         return requestArray(config.restPath("/api/agent-runtimes")).map { item ->
             item.toAgentBackend()
         }
+    }
+
+    fun listAgentModels(provider: String): List<SupervisorModelOption> {
+        return requestArray(
+            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/models"),
+        ).map { item -> item.toModelOption() }
     }
 
     fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
@@ -783,6 +818,26 @@ private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
         lastError = installation?.optNullableString("lastError"),
         configArchives = managementSchema?.optBoolean("configArchives", false) ?: false,
         buildRestart = managementSchema?.optBoolean("buildRestart", false) ?: false,
+    )
+}
+
+private fun JSONObject.toModelOption(): SupervisorModelOption {
+    val effortsJson = optJSONArray("supportedReasoningEfforts") ?: org.json.JSONArray()
+    return SupervisorModelOption(
+        id = optString("id"),
+        model = optString("model"),
+        displayName = optString("displayName", optString("model")),
+        description = optString("description"),
+        isDefault = optBoolean("isDefault", false),
+        hidden = optBoolean("hidden", false),
+        supportedReasoningEfforts = List(effortsJson.length()) { index ->
+            val item = effortsJson.getJSONObject(index)
+            SupervisorReasoningEffortOption(
+                reasoningEffort = item.optString("reasoningEffort"),
+                description = item.optNullableString("description"),
+            )
+        },
+        defaultReasoningEffort = optNullableString("defaultReasoningEffort"),
     )
 }
 

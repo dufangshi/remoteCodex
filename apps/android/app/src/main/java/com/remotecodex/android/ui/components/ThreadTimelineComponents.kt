@@ -37,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -92,6 +94,8 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
+import com.remotecodex.android.ui.presentation.MessageStatusModel
+import com.remotecodex.android.ui.presentation.MessageStatusTone
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
@@ -154,7 +158,7 @@ fun ThreadTimeline(
             start = 8.dp,
             end = 8.dp,
             top = 8.dp,
-            bottom = 132.dp,
+            bottom = 336.dp,
         ),
     ) {
         items(requestEntries, key = { entry -> entry.key }) { entry ->
@@ -244,20 +248,8 @@ private fun TurnFrame(
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
-            ThreadStatusBadge(
-                label = frameState.statusLabel,
-                status = frameState.status,
-            )
+            ThreadStatusIcon(status = frameState.status)
             Spacer(modifier = Modifier.weight(1f))
-            frameState.tokenSummary?.let { tokenSummary ->
-                Text(
-                    text = tokenSummary,
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             TurnCollapseButton(
                 collapsed = collapsed,
                 accessibilityLabel = frameState.collapseAccessibilityLabel,
@@ -468,19 +460,8 @@ private fun EphemeralUserNoteCard(text: String) {
 
 @Composable
 private fun AuxiliaryUserNoteCard(state: AuxiliaryUserNoteCardState) {
-    val footerState = GraphChatMessageFrameState(
-        isUser = true,
-        senderLabel = null,
-        headerStatus = null,
-        footerStatus = state.footerStatus,
-        showReasoningBeforeContent = false,
-        showFooterMetadata = state.statusLabel.isNotEmpty() || state.timeLabel != null,
-        showCopyAction = false,
-        timeLabel = state.timeLabel,
-    )
     UserMessageFrameContent(
         text = state.text,
-        frameState = footerState,
         modifier = Modifier.messageBubbleContainer(isUser = true),
     )
 }
@@ -689,19 +670,9 @@ private fun MessageBubble(
                     AssistantSenderPill(label = senderLabel)
                 }
                 frameState.headerStatus?.let {
-                    MessageStatusBadge(model = it, compact = true)
+                    MessageStatusIcon(model = it)
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                if (frameState.showCopyAction) {
-                    AssistantCopyButton(value = message.text)
-                }
-                frameState.timeLabel?.let { timeLabel ->
-                    Text(
-                        text = timeLabel,
-                        color = ThreadColors.ForegroundMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
             }
         }
         if (!frameState.isUser && frameState.showReasoningBeforeContent && message.reasoningItems.isNotEmpty()) {
@@ -710,14 +681,27 @@ private fun MessageBubble(
         if (frameState.isUser) {
             UserMessageFrameContent(
                 text = message.richText,
-                frameState = frameState,
                 copyText = message.text.takeIf { it.isNotBlank() },
             )
         } else {
-            RichMessageContent(
-                content = message.richText,
-                imageResolver = imageResolver,
-            )
+            Box {
+                if (message.richText.isBlank() && message.status == ThreadStatus.Running) {
+                    AssistantTypingPlaceholder()
+                } else {
+                    RichMessageContent(
+                        content = message.richText,
+                        imageResolver = imageResolver,
+                        modifier = Modifier.padding(end = if (frameState.showCopyAction) 34.dp else 0.dp),
+                    )
+                }
+                if (frameState.showCopyAction) {
+                    InlineCopyButton(
+                        value = message.text,
+                        contentDescription = "Copy assistant reply",
+                        modifier = Modifier.align(Alignment.BottomEnd),
+                    )
+                }
+            }
         }
         if (!frameState.isUser && !frameState.showReasoningBeforeContent && message.reasoningItems.isNotEmpty()) {
             ReasoningAccordion(items = message.reasoningItems)
@@ -750,20 +734,45 @@ private fun MessageBubble(
 }
 
 @Composable
+private fun AssistantTypingPlaceholder() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SurfaceStrong.copy(alpha = 0.72f))
+            .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        RunningDots(color = ThreadColors.Warning, dotSize = 4.dp, spacing = 3.dp)
+    }
+}
+
+@Composable
 private fun UserMessageFrameContent(
     text: String,
-    frameState: GraphChatMessageFrameState,
     copyText: String? = null,
     modifier: Modifier = Modifier,
     trailingContent: @Composable () -> Unit = {},
 ) {
-    Column(
+    Box(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        UserMessageBody(text = text)
-        trailingContent()
-        UserMessageFooter(frameState = frameState, copyText = copyText)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = if (copyText.isNullOrBlank()) 0.dp else 42.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            UserMessageBody(text = text)
+            trailingContent()
+        }
+        copyText?.takeIf { it.isNotBlank() }?.let { value ->
+            InlineCopyButton(
+                value = value,
+                contentDescription = "Copy user message",
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
     }
 }
 
@@ -802,7 +811,117 @@ private fun UserMessageFooter(
 }
 
 @Composable
-private fun AssistantCopyButton(value: String) {
+private fun ThreadStatusIcon(status: ThreadStatus) {
+    val color = when (status) {
+        ThreadStatus.Running -> ThreadColors.Warning
+        ThreadStatus.Complete -> ThreadColors.Success
+        ThreadStatus.Failed -> ThreadColors.Danger
+        ThreadStatus.Waiting -> ThreadColors.Info
+    }
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(color.copy(alpha = 0.15f))
+            .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
+            .semantics { contentDescription = "Turn status" },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (status == ThreadStatus.Running) {
+            RunningDots(color = color)
+        } else {
+            StatusGlyph(
+                color = color,
+                complete = status == ThreadStatus.Complete,
+                failed = status == ThreadStatus.Failed,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageStatusIcon(model: MessageStatusModel) {
+    val color = when (model.tone) {
+        MessageStatusTone.Success -> ThreadColors.Success
+        MessageStatusTone.Danger -> ThreadColors.Danger
+        MessageStatusTone.Running -> ThreadColors.Warning
+        MessageStatusTone.Neutral -> ThreadColors.ForegroundMuted
+    }
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(color.copy(alpha = 0.13f))
+            .border(1.dp, color.copy(alpha = 0.36f), RoundedCornerShape(999.dp))
+            .semantics { contentDescription = model.accessibilityLabel },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (model.tone == MessageStatusTone.Running) {
+            RunningDots(color = color)
+        } else {
+            StatusGlyph(
+                color = color,
+                complete = model.tone == MessageStatusTone.Success,
+                failed = model.tone == MessageStatusTone.Danger,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusGlyph(
+    color: Color,
+    complete: Boolean,
+    failed: Boolean,
+) {
+    Canvas(modifier = Modifier.size(12.dp)) {
+        val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+        when {
+            complete -> {
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.22f, size.height * 0.54f),
+                    end = Offset(size.width * 0.43f, size.height * 0.73f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.43f, size.height * 0.73f),
+                    end = Offset(size.width * 0.80f, size.height * 0.26f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+            }
+            failed -> {
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.28f, size.height * 0.28f),
+                    end = Offset(size.width * 0.72f, size.height * 0.72f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.72f, size.height * 0.28f),
+                    end = Offset(size.width * 0.28f, size.height * 0.72f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+            }
+            else -> {
+                drawCircle(color = color, radius = size.minDimension * 0.22f)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineCopyButton(
+    value: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
     val clipboard = LocalClipboardManager.current
     var copyState by remember(value) { mutableStateOf(TimelineCopyFeedbackState.Idle) }
 
@@ -813,35 +932,23 @@ private fun AssistantCopyButton(value: String) {
         }
     }
 
-    val shape = RoundedCornerShape(7.dp)
     val foreground = when (copyState) {
         TimelineCopyFeedbackState.Idle -> ThreadColors.ForegroundMuted
         TimelineCopyFeedbackState.Copied -> ThreadColors.Info
         TimelineCopyFeedbackState.Failed -> ThreadColors.Danger
     }
     val background = when (copyState) {
-        TimelineCopyFeedbackState.Idle -> ThreadColors.Panel
+        TimelineCopyFeedbackState.Idle -> ThreadColors.SurfaceStrong.copy(alpha = 0.90f)
         TimelineCopyFeedbackState.Copied -> ThreadColors.InfoSoft
         TimelineCopyFeedbackState.Failed -> ThreadColors.DangerSoft
     }
-    val border = when (copyState) {
-        TimelineCopyFeedbackState.Idle -> ThreadColors.Border
-        TimelineCopyFeedbackState.Copied -> ThreadColors.Info.copy(alpha = 0.44f)
-        TimelineCopyFeedbackState.Failed -> ThreadColors.Danger.copy(alpha = 0.42f)
-    }
+    val shape = RoundedCornerShape(topStart = 9.dp, bottomEnd = 12.dp)
     Box(
-        modifier = Modifier
-            .size(28.dp)
+        modifier = modifier
+            .size(27.dp)
             .clip(shape)
             .background(background)
-            .border(1.dp, border, shape)
-            .semantics {
-                contentDescription = when (copyState) {
-                    TimelineCopyFeedbackState.Idle -> "Copy assistant reply"
-                    TimelineCopyFeedbackState.Copied -> "Assistant reply copied"
-                    TimelineCopyFeedbackState.Failed -> "Copy assistant reply failed"
-                }
-            }
+            .border(1.dp, foreground.copy(alpha = 0.26f), shape)
             .clickable {
                 copyState = try {
                     clipboard.setText(AnnotatedString(value))
@@ -849,20 +956,52 @@ private fun AssistantCopyButton(value: String) {
                 } catch (_: RuntimeException) {
                     TimelineCopyFeedbackState.Failed
                 }
-            },
+            }
+            .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = when (copyState) {
-                TimelineCopyFeedbackState.Idle -> "C"
-                TimelineCopyFeedbackState.Copied -> "OK"
-                TimelineCopyFeedbackState.Failed -> "!"
-            },
-            color = foreground,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
+        CopyFeedbackIcon(copyState = copyState, color = foreground)
+    }
+}
+
+@Composable
+private fun CopyFeedbackIcon(
+    copyState: TimelineCopyFeedbackState,
+    color: Color,
+) {
+    Canvas(modifier = Modifier.size(13.dp)) {
+        val stroke = Stroke(width = 1.45.dp.toPx(), cap = StrokeCap.Round)
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke.width, StrokeCap.Round)
+        }
+        when (copyState) {
+            TimelineCopyFeedbackState.Idle -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(w * 0.18f, h * 0.28f),
+                    size = Size(w * 0.43f, h * 0.52f),
+                    cornerRadius = CornerRadius(w * 0.08f, h * 0.08f),
+                    style = stroke,
+                )
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(w * 0.38f, h * 0.16f),
+                    size = Size(w * 0.43f, h * 0.52f),
+                    cornerRadius = CornerRadius(w * 0.08f, h * 0.08f),
+                    style = stroke,
+                )
+            }
+            TimelineCopyFeedbackState.Copied -> {
+                line(0.20f, 0.54f, 0.42f, 0.74f)
+                line(0.42f, 0.74f, 0.82f, 0.28f)
+            }
+            TimelineCopyFeedbackState.Failed -> {
+                line(0.50f, 0.20f, 0.50f, 0.62f)
+                drawCircle(color = color, radius = w * 0.045f, center = Offset(w * 0.50f, h * 0.80f))
+            }
+        }
     }
 }
 

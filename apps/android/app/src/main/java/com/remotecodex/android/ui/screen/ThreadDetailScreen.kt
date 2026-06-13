@@ -63,17 +63,25 @@ import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
+import com.remotecodex.android.ui.model.TimelineSteerPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
 import com.remotecodex.android.ui.presentation.buildHistoryDetailPreview
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import com.remotecodex.android.thread.ThreadProjectionState
+import com.remotecodex.android.thread.OptimisticPromptTurn
+import com.remotecodex.android.thread.applyOptimisticPromptProjection
 import com.remotecodex.android.thread.reconcileWithDetail
 import com.remotecodex.android.thread.reduceThreadEvent
+import com.remotecodex.android.thread.shouldClearOptimisticPrompt
+import com.remotecodex.android.thread.withAcceptedThread
+import com.remotecodex.android.thread.withFailure
+import com.remotecodex.android.thread.withStartedTurn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 @Composable
 fun ThreadDetailScreen(
@@ -96,6 +104,8 @@ fun ThreadDetailScreen(
     var error by remember(threadId) { mutableStateOf<String?>(null) }
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
     var submittingPrompt by remember(threadId) { mutableStateOf(false) }
+    var optimisticPromptTurn by remember(threadId) { mutableStateOf<OptimisticPromptTurn?>(null) }
+    var optimisticSteers by remember(threadId) { mutableStateOf<List<OptimisticSteer>>(emptyList()) }
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingPromptRequest by remember(threadId) { mutableStateOf<SendThreadPromptRequest?>(null) }
     var pendingPromptAttachmentKind by remember(threadId) { mutableStateOf<ComposerAttachmentActionKind?>(null) }
@@ -187,10 +197,16 @@ fun ThreadDetailScreen(
             .onSuccess { bundle ->
                 val reconciledState = threadProjectionState?.reconcileWithDetail(bundle.dto)
                     ?: ThreadProjectionState(detail = bundle.dto)
+                val nextOptimisticPrompt = optimisticPromptTurn
+                    ?.takeUnless { optimistic -> shouldClearOptimisticPrompt(reconciledState.detail, optimistic) }
+                optimisticPromptTurn = nextOptimisticPrompt
+                optimisticSteers = optimisticSteers.retainForDetail(reconciledState.detail)
                 threadProjectionState = reconciledState
-                detail = mergeThreadEventPreview(
+                detail = buildProjectedThreadPreview(
                     current = bundle.preview,
-                    next = buildThreadDetailPreviewFromSupervisor(reconciledState.detail),
+                    state = reconciledState,
+                    optimisticPrompt = nextOptimisticPrompt,
+                    optimisticSteers = optimisticSteers,
                 )
                 selectedWorkspaceFilePath = bundle.preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
                     ?: selectedWorkspaceFilePath
@@ -207,11 +223,25 @@ fun ThreadDetailScreen(
                     if (currentProjection == null || currentPreview == null) {
                         refreshNonce += 1
                     } else {
+                        val startedTurnId = if (event.type == "thread.turn.started") {
+                            event.payload.optString("turnId").takeIf { it.isNotBlank() }
+                        } else {
+                            null
+                        }
+                        val eventOptimisticPrompt = startedTurnId?.let { turnId ->
+                            optimisticPromptTurn?.withStartedTurn(turnId)
+                        } ?: optimisticPromptTurn
                         val reduced = reduceThreadEvent(currentProjection, event)
+                        val nextOptimisticPrompt = eventOptimisticPrompt
+                            ?.takeUnless { optimistic -> shouldClearOptimisticPrompt(reduced.detail, optimistic) }
+                        optimisticPromptTurn = nextOptimisticPrompt
+                        optimisticSteers = optimisticSteers.retainForDetail(reduced.detail)
                         threadProjectionState = reduced.state
-                        detail = mergeThreadEventPreview(
+                        detail = buildProjectedThreadPreview(
                             current = currentPreview,
-                            next = buildThreadDetailPreviewFromSupervisor(reduced.detail),
+                            state = reduced.state,
+                            optimisticPrompt = nextOptimisticPrompt,
+                            optimisticSteers = optimisticSteers,
                         )
                         if (reduced.needsRefresh) {
                             refreshNonce += 1
@@ -234,51 +264,192 @@ fun ThreadDetailScreen(
         }
     }
 
+    LaunchedEffect(threadId, detail?.composer?.busy, submittingPrompt) {
+        while (detail?.composer?.busy == true || submittingPrompt) {
+            delay(3500)
+            refreshNonce += 1
+        }
+    }
+
     LaunchedEffect(pendingPrompt) {
         val prompt = pendingPrompt ?: return@LaunchedEffect
+        val shouldSteer = threadProjectionState?.detail?.thread?.status.equals("running", ignoreCase = true)
+        val optimistic = if (shouldSteer) null else createOptimisticPromptTurn(prompt, threadProjectionState?.detail)
+        val optimisticSteer = if (shouldSteer) createOptimisticSteer(prompt) else null
+        if (optimistic != null) {
+            optimisticPromptTurn = optimistic
+        }
+        if (optimisticSteer != null) {
+            optimisticSteers = optimisticSteers + optimisticSteer
+        }
+        threadProjectionState?.let { state ->
+            detail = detail?.let { current ->
+                buildProjectedThreadPreview(
+                    current = current,
+                    state = state,
+                    optimisticPrompt = optimistic,
+                    optimisticSteers = optimisticSteers,
+                )
+            }
+        }
         submittingPrompt = true
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.sendThreadPrompt(
                     threadId = threadId,
-                    request = SendThreadPromptRequest(prompt = prompt),
+                    request = SendThreadPromptRequest(
+                        prompt = prompt,
+                        clientRequestId = "android-${optimistic?.id ?: optimisticSteer?.id ?: System.currentTimeMillis()}",
+                    ),
                 )
             }
         }
         submittingPrompt = false
         pendingPrompt = null
         result
-            .onSuccess {
+            .onSuccess { thread ->
+                if (optimistic != null) {
+                    optimisticPromptTurn = optimisticPromptTurn
+                        ?.takeIf { it.id == optimistic.id }
+                        ?.withAcceptedThread(thread)
+                        ?: optimisticPromptTurn
+                }
+                if (optimisticSteer != null) {
+                    optimisticSteers = optimisticSteers.map { steer ->
+                        if (steer.id == optimisticSteer.id) steer.copy(statusLabel = "Accepted") else steer
+                    }
+                }
+                threadProjectionState?.let { state ->
+                    detail = detail?.let { current ->
+                        buildProjectedThreadPreview(
+                            current = current,
+                            state = state,
+                            optimisticPrompt = optimisticPromptTurn,
+                            optimisticSteers = optimisticSteers,
+                        )
+                    }
+                }
                 refreshNonce += 1
                 delay(900)
                 refreshNonce += 1
             }
-            .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
+            .onFailure { throwable ->
+                val message = throwable.message ?: "Prompt send failed."
+                error = message
+                if (optimistic != null) {
+                    optimisticPromptTurn = optimisticPromptTurn
+                        ?.takeIf { it.id == optimistic.id }
+                        ?.withFailure(message)
+                        ?: optimisticPromptTurn
+                }
+                if (optimisticSteer != null) {
+                    optimisticSteers = optimisticSteers.map { steer ->
+                        if (steer.id == optimisticSteer.id) steer.copy(statusLabel = "Failed") else steer
+                    }
+                }
+                threadProjectionState?.let { state ->
+                    detail = detail?.let { current ->
+                        buildProjectedThreadPreview(
+                            current = current,
+                            state = state,
+                            optimisticPrompt = optimisticPromptTurn,
+                            optimisticSteers = optimisticSteers,
+                        )
+                    }
+                }
+            }
     }
 
     LaunchedEffect(pendingPromptRequest) {
         val promptRequest = pendingPromptRequest ?: return@LaunchedEffect
+        val shouldSteer = threadProjectionState?.detail?.thread?.status.equals("running", ignoreCase = true)
+        val optimistic = if (shouldSteer) null else createOptimisticPromptTurn(promptRequest.prompt, threadProjectionState?.detail)
+        val optimisticSteer = if (shouldSteer) createOptimisticSteer(promptRequest.prompt) else null
+        if (optimistic != null) {
+            optimisticPromptTurn = optimistic
+        }
+        if (optimisticSteer != null) {
+            optimisticSteers = optimisticSteers + optimisticSteer
+        }
+        threadProjectionState?.let { state ->
+            detail = detail?.let { current ->
+                buildProjectedThreadPreview(
+                    current = current,
+                    state = state,
+                    optimisticPrompt = optimistic,
+                    optimisticSteers = optimisticSteers,
+                )
+            }
+        }
         submittingPrompt = true
         error = null
+        val effectivePromptRequest = promptRequest.copy(
+            clientRequestId = promptRequest.clientRequestId ?: "android-${optimistic?.id ?: optimisticSteer?.id ?: System.currentTimeMillis()}",
+        )
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.sendThreadPrompt(
                     threadId = threadId,
-                    request = promptRequest,
+                    request = effectivePromptRequest,
                 )
             }
         }
         submittingPrompt = false
         pendingPromptRequest = null
         result
-            .onSuccess {
+            .onSuccess { thread ->
+                if (optimistic != null) {
+                    optimisticPromptTurn = optimisticPromptTurn
+                        ?.takeIf { it.id == optimistic.id }
+                        ?.withAcceptedThread(thread)
+                        ?: optimisticPromptTurn
+                }
+                if (optimisticSteer != null) {
+                    optimisticSteers = optimisticSteers.map { steer ->
+                        if (steer.id == optimisticSteer.id) steer.copy(statusLabel = "Accepted") else steer
+                    }
+                }
                 pendingPromptAttachment = null
+                threadProjectionState?.let { state ->
+                    detail = detail?.let { current ->
+                        buildProjectedThreadPreview(
+                            current = current,
+                            state = state,
+                            optimisticPrompt = optimisticPromptTurn,
+                            optimisticSteers = optimisticSteers,
+                        )
+                    }
+                }
                 refreshNonce += 1
                 delay(900)
                 refreshNonce += 1
             }
-            .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
+            .onFailure { throwable ->
+                val message = throwable.message ?: "Prompt send failed."
+                error = message
+                if (optimistic != null) {
+                    optimisticPromptTurn = optimisticPromptTurn
+                        ?.takeIf { it.id == optimistic.id }
+                        ?.withFailure(message)
+                        ?: optimisticPromptTurn
+                }
+                if (optimisticSteer != null) {
+                    optimisticSteers = optimisticSteers.map { steer ->
+                        if (steer.id == optimisticSteer.id) steer.copy(statusLabel = "Failed") else steer
+                    }
+                }
+                threadProjectionState?.let { state ->
+                    detail = detail?.let { current ->
+                        buildProjectedThreadPreview(
+                            current = current,
+                            state = state,
+                            optimisticPrompt = optimisticPromptTurn,
+                            optimisticSteers = optimisticSteers,
+                        )
+                    }
+                }
+            }
     }
 
     LaunchedEffect(pendingDetailRequest) {
@@ -774,13 +945,20 @@ fun ThreadDetailScreen(
             .onSuccess { page ->
                 val merged = mergeEarlierThreadDetail(currentState.detail, page)
                 val reconciledState = currentState.reconcileWithDetail(merged)
+                val nextOptimisticPrompt = optimisticPromptTurn
+                    ?.takeUnless { optimistic -> shouldClearOptimisticPrompt(reconciledState.detail, optimistic) }
+                optimisticPromptTurn = nextOptimisticPrompt
                 threadProjectionState = reconciledState
                 detail = detail?.let { currentPreview ->
-                    mergeThreadEventPreview(
+                    buildProjectedThreadPreview(
                         current = currentPreview,
-                        next = buildThreadDetailPreviewFromSupervisor(reconciledState.detail),
+                        state = reconciledState,
+                        optimisticPrompt = nextOptimisticPrompt,
+                        optimisticSteers = optimisticSteers,
                     )
-                } ?: buildThreadDetailPreviewFromSupervisor(merged)
+                } ?: buildThreadDetailPreviewFromSupervisor(
+                    applyOptimisticPromptProjection(reconciledState.detail, nextOptimisticPrompt),
+                )
             }
             .onFailure { throwable -> error = throwable.message ?: "Earlier history failed." }
     }
@@ -810,7 +988,12 @@ fun ThreadDetailScreen(
             .onSuccess { dto ->
                 threadProjectionState = threadProjectionState?.reconcileWithDetail(dto)
                     ?: ThreadProjectionState(detail = dto)
-                detail = buildThreadDetailPreviewFromSupervisor(dto)
+                detail = buildProjectedThreadPreview(
+                    current = detail ?: buildThreadDetailPreviewFromSupervisor(dto),
+                    state = threadProjectionState ?: ThreadProjectionState(detail = dto),
+                    optimisticPrompt = optimisticPromptTurn,
+                    optimisticSteers = optimisticSteers,
+                )
             }
             .onFailure { throwable ->
                 error = "${response.request.title.ifBlank { "Request" }} failed: ${throwable.message ?: "Could not send response."}"
@@ -1061,6 +1244,101 @@ private data class PendingRequestResponse(
     val answers: Map<String, List<String>>,
     val selectedOptionLabel: String? = null,
 )
+
+private data class OptimisticSteer(
+    val id: String,
+    val prompt: String,
+    val statusLabel: String,
+    val createdAt: String,
+)
+
+private fun createOptimisticPromptTurn(
+    prompt: String,
+    detail: SupervisorThreadDetail?,
+): OptimisticPromptTurn {
+    val now = Instant.now().toString()
+    return OptimisticPromptTurn(
+        id = "optimistic-${System.currentTimeMillis()}",
+        prompt = prompt,
+        startedAt = now,
+        model = detail?.thread?.model,
+    )
+}
+
+private fun createOptimisticSteer(prompt: String): OptimisticSteer {
+    val now = Instant.now().toString()
+    return OptimisticSteer(
+        id = "optimistic-steer-${System.currentTimeMillis()}",
+        prompt = prompt,
+        statusLabel = "Steering",
+        createdAt = now,
+    )
+}
+
+private fun buildProjectedThreadPreview(
+    current: ThreadDetailPreview,
+    state: ThreadProjectionState,
+    optimisticPrompt: OptimisticPromptTurn?,
+    optimisticSteers: List<OptimisticSteer> = emptyList(),
+): ThreadDetailPreview {
+    val projectedDetail = applyOptimisticPromptProjection(
+        detail = state.detail,
+        optimistic = optimisticPrompt,
+    )
+    return mergeThreadEventPreview(
+        current = current,
+        next = buildThreadDetailPreviewFromSupervisor(projectedDetail),
+    ).withOptimisticSteers(optimisticSteers)
+}
+
+private fun ThreadDetailPreview.withOptimisticSteers(
+    optimisticSteers: List<OptimisticSteer>,
+): ThreadDetailPreview {
+    if (optimisticSteers.isEmpty()) {
+        return this
+    }
+    val optimisticPreviews = optimisticSteers.map { steer ->
+        TimelineSteerPreview(
+            prompt = steer.prompt,
+            statusLabel = steer.statusLabel,
+            timeLabel = shortClockLabel(steer.createdAt),
+        )
+    }
+    return copy(
+        timelineAuxiliary = timelineAuxiliary.copy(
+            pendingSteers = timelineAuxiliary.pendingSteers + optimisticPreviews,
+        ),
+    )
+}
+
+private fun List<OptimisticSteer>.retainForDetail(
+    detail: SupervisorThreadDetail,
+): List<OptimisticSteer> {
+    if (isEmpty()) {
+        return this
+    }
+    val materializedText = detail.turns
+        .flatMap { turn -> turn.items }
+        .filter { item -> item.kind == "userMessage" }
+        .map { item -> item.text.normalizedPromptTextForScreen() }
+        .toSet()
+    return filter { steer ->
+        steer.statusLabel == "Failed" ||
+            steer.prompt.normalizedPromptTextForScreen() !in materializedText
+    }
+}
+
+private fun String.normalizedPromptTextForScreen(): String {
+    return trim().replace(Regex("\\s+"), " ")
+}
+
+private fun shortClockLabel(value: String): String {
+    return runCatching {
+        java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(Instant.parse(value))
+    }.getOrDefault("")
+}
 
 private fun ThreadDetailPreview.withPendingRequestBusy(
     requestId: String?,

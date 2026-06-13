@@ -230,7 +230,11 @@ private fun reduceThreadItem(
     val turns = detail.turns.map { turn ->
         if (turn.id == turnId) {
             changed = true
-            turn.copy(items = upsertItem(turn.items, item))
+            turn.copy(items = upsertItem(
+                items = turn.items,
+                item = item,
+                protectedItemIds = state.seenOutputDeltaKeys.deltaItemIds(),
+            ))
         } else {
             turn
         }
@@ -322,7 +326,28 @@ private fun reduceOutputDelta(
         }
     }
     if (!changed) {
-        return ThreadEventReduceResult(state = state, needsRefresh = true)
+        val turn = SupervisorThreadTurn(
+            id = turnId,
+            startedAt = null,
+            status = "running",
+            error = null,
+            model = detail.thread.model,
+            tokenUsage = null,
+            items = appendOutputDelta(emptyList(), itemId, sequence, delta),
+        )
+        return ThreadEventReduceResult(
+            state = state.copy(
+                detail = detail.copy(
+                    turns = detail.turns + turn,
+                    turnCount = maxOf(detail.turnCount, detail.turns.size + 1),
+                    totalTurnCount = maxOf(detail.totalTurnCount, detail.turns.size + 1),
+                    liveItemCount = maxOf(detail.liveItemCount, 1),
+                    thread = detail.thread.copy(status = "running"),
+                ),
+                seenOutputDeltaKeys = state.seenOutputDeltaKeys + key,
+            ),
+            needsRefresh = true,
+        )
     }
     return ThreadEventReduceResult(
         state = state.copy(
@@ -369,12 +394,17 @@ private fun appendOutputDelta(
 private fun upsertItem(
     items: List<SupervisorThreadTurnItem>,
     item: SupervisorThreadTurnItem,
+    protectedItemIds: Set<String>,
 ): List<SupervisorThreadTurnItem> {
     var replaced = false
     val next = items.map { existing ->
         if (existing.id == item.id) {
             replaced = true
-            item
+            mergeTurnItem(
+                serverItem = item,
+                localItem = existing,
+                protectLocalText = existing.id in protectedItemIds,
+            )
         } else {
             existing
         }
@@ -438,7 +468,133 @@ private fun org.json.JSONArray.toStringList(): List<String> {
 }
 
 fun ThreadProjectionState.reconcileWithDetail(detail: SupervisorThreadDetail): ThreadProjectionState {
-    return withDetail(detail, provisionalAnsweredRequestNotes = provisionalAnsweredRequestNotes)
+    return withDetail(mergeDetailWithLocalProjection(detail), provisionalAnsweredRequestNotes = provisionalAnsweredRequestNotes)
+}
+
+private fun ThreadProjectionState.mergeDetailWithLocalProjection(
+    serverDetail: SupervisorThreadDetail,
+): SupervisorThreadDetail {
+    val localTurnsById = detail.turns.associateBy { turn -> turn.id }
+    val serverTurnIds = serverDetail.turns.map { turn -> turn.id }.toSet()
+    val protectedItemIds = seenOutputDeltaKeys.deltaItemIds()
+    val mergedServerTurns = serverDetail.turns.map { serverTurn ->
+        val localTurn = localTurnsById[serverTurn.id] ?: return@map serverTurn
+        serverTurn.copy(items = mergeTurnItems(
+            serverItems = serverTurn.items,
+            localItems = localTurn.items,
+            protectedItemIds = protectedItemIds,
+            serverTurnCompleted = serverTurn.status == "completed" || serverTurn.status == "failed",
+        ))
+    }
+    val localOnlyTurns = detail.turns.filter { localTurn ->
+        localTurn.id !in serverTurnIds && localTurn.shouldRetainAcrossRefresh(protectedItemIds)
+    }
+    val mergedTurns = (mergedServerTurns + localOnlyTurns).sortTurnsByExistingOrder(
+        localTurns = detail.turns,
+        serverTurns = serverDetail.turns,
+    )
+    return serverDetail.copy(
+        turns = mergedTurns,
+        turnCount = maxOf(serverDetail.turnCount, mergedTurns.size),
+        totalTurnCount = maxOf(serverDetail.totalTurnCount, detail.totalTurnCount, mergedTurns.size),
+        liveItemCount = maxOf(serverDetail.liveItemCount, detail.liveItemCount),
+    )
+}
+
+private fun mergeTurnItems(
+    serverItems: List<SupervisorThreadTurnItem>,
+    localItems: List<SupervisorThreadTurnItem>,
+    protectedItemIds: Set<String>,
+    serverTurnCompleted: Boolean,
+): List<SupervisorThreadTurnItem> {
+    if (localItems.isEmpty()) {
+        return serverItems
+    }
+    val localItemsById = localItems.associateBy { item -> item.id }
+    val serverItemIds = serverItems.map { item -> item.id }.toSet()
+    val mergedServerItems = serverItems.map { serverItem ->
+        val localItem = localItemsById[serverItem.id] ?: return@map serverItem
+        mergeTurnItem(
+            serverItem = serverItem,
+            localItem = localItem,
+            protectLocalText = localItem.id in protectedItemIds,
+        )
+    }
+    val localOnlyItems = localItems.filter { localItem ->
+        if (localItem.id in serverItemIds) {
+            return@filter false
+        }
+        val protectCompleted = localItem.id in protectedItemIds
+        localItem.shouldRetainAcrossRefresh(protectCompleted = protectCompleted) &&
+            !localItem.isSupersededByCompletedServerTurn(serverItems, serverTurnCompleted)
+    }
+    return (mergedServerItems + localOnlyItems).sortBySequence()
+}
+
+private fun SupervisorThreadTurnItem.isSupersededByCompletedServerTurn(
+    serverItems: List<SupervisorThreadTurnItem>,
+    serverTurnCompleted: Boolean,
+): Boolean {
+    if (!serverTurnCompleted || kind != "agentMessage") {
+        return false
+    }
+    val localSequence = sequence
+    return serverItems.any { serverItem ->
+        serverItem.kind == "agentMessage" &&
+            serverItem.text.isNotBlank() &&
+            (
+                localSequence == null ||
+                    serverItem.sequence == localSequence ||
+                    (serverItem.sequence != null && serverItem.sequence >= localSequence)
+            )
+    }
+}
+
+private fun mergeTurnItem(
+    serverItem: SupervisorThreadTurnItem,
+    localItem: SupervisorThreadTurnItem,
+    protectLocalText: Boolean,
+): SupervisorThreadTurnItem {
+    if (!protectLocalText || !localItem.shouldRetainAcrossRefresh(protectCompleted = true)) {
+        return serverItem
+    }
+    if (serverItem.text.length >= localItem.text.length) {
+        return serverItem
+    }
+    return serverItem.copy(
+        text = localItem.text,
+        previewText = localItem.previewText ?: serverItem.previewText,
+        detailText = localItem.detailText ?: serverItem.detailText,
+        status = serverItem.status ?: localItem.status,
+    )
+}
+
+private fun SupervisorThreadTurn.shouldRetainAcrossRefresh(protectedItemIds: Set<String> = emptySet()): Boolean {
+    return status == "running" || items.any { item ->
+        item.shouldRetainAcrossRefresh(protectCompleted = item.id in protectedItemIds)
+    }
+}
+
+private fun SupervisorThreadTurnItem.shouldRetainAcrossRefresh(protectCompleted: Boolean = false): Boolean {
+    return kind == "agentMessage" && text.isNotBlank() && (protectCompleted || status != "completed")
+}
+
+private fun Set<String>.deltaItemIds(): Set<String> {
+    return mapNotNull { key ->
+        val parts = key.split(':')
+        parts.getOrNull(1)
+    }.toSet()
+}
+
+private fun List<SupervisorThreadTurn>.sortTurnsByExistingOrder(
+    localTurns: List<SupervisorThreadTurn>,
+    serverTurns: List<SupervisorThreadTurn>,
+): List<SupervisorThreadTurn> {
+    val order = buildMap {
+        serverTurns.forEachIndexed { index, turn -> put(turn.id, index) }
+        localTurns.forEachIndexed { index, turn -> putIfAbsent(turn.id, serverTurns.size + index) }
+    }
+    return sortedBy { turn -> order[turn.id] ?: Int.MAX_VALUE }
 }
 
 private fun ThreadProjectionState.withDetail(
@@ -474,6 +630,7 @@ private fun List<SupervisorThreadTurnItem>.sortBySequence(): List<SupervisorThre
     return mapIndexed { index, item -> index to item }
         .sortedWith(
             compareBy<Pair<Int, SupervisorThreadTurnItem>>(
+                { (_, item) -> if (item.kind == "userMessage") 0 else 1 },
                 { (_, item) -> item.sequence ?: Int.MAX_VALUE },
                 { (index, _) -> index },
             ),

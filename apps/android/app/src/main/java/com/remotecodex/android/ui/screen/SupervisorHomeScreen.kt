@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.CreateSupervisorWorkspaceRequest
+import com.remotecodex.android.api.ImportSupervisorThreadRequest
 import com.remotecodex.android.api.ImportSupervisorPluginRequest
 import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorApiClient
@@ -49,6 +50,7 @@ import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.api.SupervisorRuntimeConfig
+import com.remotecodex.android.api.SupervisorModelOption
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSettings
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
@@ -291,19 +293,21 @@ fun SupervisorHomeScreen(
                 }
         }
     }
-    fun runWorkspaceThreadStart(workspaceId: String, title: String?, model: String) {
+    fun runWorkspaceThreadStart(workspaceId: String, draft: StartThreadDraft) {
         workspaceActionBusyId = workspaceId
         workspaceActionError = null
         coroutineScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     client.startThread(
-                        StartSupervisorThreadRequest(
-                            workspaceId = workspaceId,
-                            title = title?.takeIf { it.isNotBlank() },
-                            model = model,
-                            approvalMode = "yolo",
-                        ),
+	                        StartSupervisorThreadRequest(
+	                            workspaceId = workspaceId,
+	                            title = draft.title?.takeIf { it.isNotBlank() },
+	                            provider = draft.provider,
+	                            model = draft.model,
+                                reasoningEffort = draft.reasoningEffort,
+	                            approvalMode = "yolo",
+	                        ),
                     )
                 }
             }
@@ -316,6 +320,32 @@ fun SupervisorHomeScreen(
                 }
                 .onFailure { error ->
                     workspaceActionError = error.message ?: "Thread start failed."
+                }
+        }
+    }
+    fun runThreadImport(provider: String, sessionId: String) {
+        workspaceActionBusyId = ImportThreadBusyId
+        workspaceActionError = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client.importThread(
+                        ImportSupervisorThreadRequest(
+                            sessionId = sessionId,
+                            provider = provider,
+                        ),
+                    )
+                }
+            }
+            workspaceActionBusyId = null
+            result
+                .onSuccess { detail ->
+                    workspaceDialog = null
+                    onRefreshHomeSnapshot()
+                    onOpenThread(detail.thread.id)
+                }
+                .onFailure { error ->
+                    workspaceActionError = error.message ?: "Thread import failed."
                 }
         }
     }
@@ -368,15 +398,28 @@ fun SupervisorHomeScreen(
 
             when (selectedDestination) {
                 HomeDestination.Workspaces -> {
-                    item {
-                        HomeSectionTitle(
-                            title = "Workspaces",
-                            detail = "Trusted project roots",
-                            actionLabel = "New",
+	                    item {
+	                        HomeSectionTitle(
+	                            title = "Workspaces",
+	                            detail = "Trusted project roots",
+	                            actionLabel = "New",
                             actionContentDescription = "Create workspace",
                             onAction = {
                                 workspaceActionError = null
                                 workspaceDialog = WorkspaceActionDialog.Create
+	                            },
+	                        )
+	                    }
+                    item {
+                        GraphButton(
+                            label = "Import Session",
+                            icon = GraphActionIcon.Open,
+                            variant = GraphButtonVariant.Outline,
+                            size = GraphButtonSize.Small,
+                            contentDescription = "Import existing backend session",
+                            onClick = {
+                                workspaceActionError = null
+                                workspaceDialog = WorkspaceActionDialog.ImportThread
                             },
                         )
                     }
@@ -550,6 +593,8 @@ fun SupervisorHomeScreen(
         workspaceDialog?.let { dialog ->
             WorkspaceActionDialogOverlay(
                 dialog = dialog,
+                backends = agentBackends.orEmpty(),
+                loadModels = { provider -> client.listAgentModels(provider) },
                 busy = dialog.busyId == workspaceActionBusyId,
                 error = workspaceActionError,
                 onClose = {
@@ -568,10 +613,13 @@ fun SupervisorHomeScreen(
                         }
                     }
                 },
-                onStartThread = { title, model ->
+                onStartThread = { draft ->
                     dialog.workspace?.let { workspace ->
-                        runWorkspaceThreadStart(workspace.id, title, model)
+                        runWorkspaceThreadStart(workspace.id, draft)
                     }
+                },
+                onImportThread = { provider, sessionId ->
+                    runThreadImport(provider, sessionId)
                 },
                 onDeleteWorkspace = {
                     dialog.workspace?.let { workspace ->
@@ -643,10 +691,10 @@ private fun HomeHeader(
                 onClick = onOpenSettings,
             )
             GraphButton(
-                label = "Change",
+                label = "Connection",
                 variant = GraphButtonVariant.Secondary,
                 size = GraphButtonSize.Small,
-                contentDescription = "Change connection",
+                contentDescription = "Open connection settings",
                 onClick = onChangeConnection,
             )
         }
@@ -1051,13 +1099,28 @@ private fun SupervisorWorkspaceSummary.workspaceMetaLabel(): String {
 }
 
 private const val CreateWorkspaceBusyId = "__create_workspace__"
+private const val ImportThreadBusyId = "__import_thread__"
+
+private data class StartThreadDraft(
+    val title: String?,
+    val provider: String,
+    val model: String,
+    val reasoningEffort: String?,
+)
 
 private sealed class WorkspaceActionDialog {
     abstract val workspace: SupervisorWorkspaceSummary?
     val busyId: String
-        get() = workspace?.id ?: CreateWorkspaceBusyId
+        get() = when (this) {
+            ImportThread -> ImportThreadBusyId
+            else -> workspace?.id ?: CreateWorkspaceBusyId
+        }
 
     object Create : WorkspaceActionDialog() {
+        override val workspace: SupervisorWorkspaceSummary? = null
+    }
+
+    object ImportThread : WorkspaceActionDialog() {
         override val workspace: SupervisorWorkspaceSummary? = null
     }
 
@@ -1069,12 +1132,15 @@ private sealed class WorkspaceActionDialog {
 @Composable
 private fun WorkspaceActionDialogOverlay(
     dialog: WorkspaceActionDialog,
+    backends: List<SupervisorAgentBackend>,
+    loadModels: suspend (String) -> List<SupervisorModelOption>,
     busy: Boolean,
     error: String?,
     onClose: () -> Unit,
     onCreateWorkspace: (String, String?) -> Unit,
     onRenameWorkspace: (String) -> Unit,
-    onStartThread: (String?, String) -> Unit,
+    onStartThread: (StartThreadDraft) -> Unit,
+    onImportThread: (String, String) -> Unit,
     onDeleteWorkspace: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1093,8 +1159,17 @@ private fun WorkspaceActionDialogOverlay(
                 onClose = onClose,
                 onRenameWorkspace = onRenameWorkspace,
             )
+            is WorkspaceActionDialog.ImportThread -> ImportThreadDialog(
+                backends = backends,
+                busy = busy,
+                error = error,
+                onClose = onClose,
+                onImportThread = onImportThread,
+            )
             is WorkspaceActionDialog.StartThread -> StartThreadDialog(
                 workspace = dialog.workspace,
+                backends = backends,
+                loadModels = loadModels,
                 busy = busy,
                 error = error,
                 onClose = onClose,
@@ -1179,13 +1254,49 @@ private fun CreateWorkspaceDialog(
 @Composable
 private fun StartThreadDialog(
     workspace: SupervisorWorkspaceSummary,
+    backends: List<SupervisorAgentBackend>,
+    loadModels: suspend (String) -> List<SupervisorModelOption>,
     busy: Boolean,
     error: String?,
     onClose: () -> Unit,
-    onStartThread: (String?, String) -> Unit,
+    onStartThread: (StartThreadDraft) -> Unit,
 ) {
     var title by rememberSaveable(workspace.id) { mutableStateOf("") }
-    var model by rememberSaveable(workspace.id) { mutableStateOf(DefaultStartThreadModel) }
+    val enabledBackends = backends.filter { it.enabled }.ifEmpty { backends }
+    var provider by rememberSaveable(workspace.id, backends.map { it.provider }.joinToString(",")) {
+        mutableStateOf(enabledBackends.firstOrNull { it.isDefault }?.provider ?: enabledBackends.firstOrNull()?.provider ?: "codex")
+    }
+    var models by remember(provider) { mutableStateOf<List<SupervisorModelOption>>(emptyList()) }
+    var modelsLoading by remember(provider) { mutableStateOf(false) }
+    var modelsError by remember(provider) { mutableStateOf<String?>(null) }
+    var model by rememberSaveable(workspace.id, provider) { mutableStateOf(DefaultStartThreadModel) }
+    var reasoningEffort by rememberSaveable(workspace.id, provider, model) { mutableStateOf<String?>(null) }
+    LaunchedEffect(provider) {
+        modelsLoading = true
+        modelsError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadModels(provider) }
+        }
+        modelsLoading = false
+        result
+            .onSuccess { loaded ->
+                models = loaded.filterNot { it.hidden }
+                val selectedModel = models.firstOrNull { it.model == model }
+                    ?: models.firstOrNull { it.isDefault }
+                    ?: models.firstOrNull()
+                if (selectedModel != null) {
+                    model = selectedModel.model
+                    reasoningEffort = selectedModel.defaultReasoningEffort
+                        ?: selectedModel.supportedReasoningEfforts.firstOrNull()?.reasoningEffort
+                }
+            }
+            .onFailure { throwable ->
+                models = emptyList()
+                modelsError = throwable.message ?: "Model options failed."
+            }
+    }
+    val selectedModel = models.firstOrNull { it.model == model }
+    val reasoningOptions = selectedModel?.supportedReasoningEfforts.orEmpty()
     val normalizedTitle = title.trim()
     val normalizedModel = model.trim()
     GraphDialogFrame(
@@ -1200,13 +1311,61 @@ private fun StartThreadDialog(
                 onCancel = onClose,
                 onPrimary = {
                     onStartThread(
-                        normalizedTitle.takeIf { it.isNotBlank() },
-                        normalizedModel,
+                        StartThreadDraft(
+                            title = normalizedTitle.takeIf { it.isNotBlank() },
+                            provider = provider,
+                            model = normalizedModel,
+                            reasoningEffort = reasoningEffort,
+                        ),
                     )
                 },
             )
         },
     ) {
+        OptionSelector(
+            label = "Backend",
+            options = enabledBackends.map { backend ->
+                backend.provider to (backend.displayName.ifBlank { backend.provider } + if (backend.enabled) "" else " (not ready)")
+            }.ifEmpty { listOf("codex" to "Codex") },
+            selected = provider,
+            enabled = !busy,
+            onSelected = { provider = it },
+        )
+        if (models.isNotEmpty()) {
+            OptionSelector(
+                label = "Model",
+                options = models.map { option -> option.model to option.displayName.ifBlank { option.model } },
+                selected = model,
+                enabled = !busy && !modelsLoading,
+                onSelected = { nextModel ->
+                    model = nextModel
+                    val next = models.firstOrNull { it.model == nextModel }
+                    reasoningEffort = next?.defaultReasoningEffort
+                        ?: next?.supportedReasoningEfforts?.firstOrNull()?.reasoningEffort
+                },
+            )
+        } else {
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Model") },
+                singleLine = true,
+                colors = workspaceTextFieldColors(),
+            )
+        }
+        if (reasoningOptions.isNotEmpty()) {
+            OptionSelector(
+                label = "Reasoning",
+                options = reasoningOptions.map { option ->
+                    option.reasoningEffort to option.reasoningEffort.uppercase()
+                },
+                selected = reasoningEffort ?: reasoningOptions.first().reasoningEffort,
+                enabled = !busy,
+                onSelected = { reasoningEffort = it },
+            )
+        }
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
@@ -1216,17 +1375,15 @@ private fun StartThreadDialog(
             singleLine = true,
             colors = workspaceTextFieldColors(),
         )
-        OutlinedTextField(
-            value = model,
-            onValueChange = { model = it },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Model") },
-            singleLine = true,
-            colors = workspaceTextFieldColors(),
-        )
+        modelsError?.let { message ->
+            Text(
+                text = message,
+                color = ThreadColors.Warning,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
         Text(
-            text = "Starts a Codex thread in ${workspace.absPath}.",
+            text = "Starts a ${provider} thread in ${workspace.absPath}.",
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -1236,6 +1393,116 @@ private fun StartThreadDialog(
                 color = ThreadColors.Danger,
                 style = MaterialTheme.typography.labelSmall,
             )
+        }
+    }
+}
+
+@Composable
+private fun ImportThreadDialog(
+    backends: List<SupervisorAgentBackend>,
+    busy: Boolean,
+    error: String?,
+    onClose: () -> Unit,
+    onImportThread: (String, String) -> Unit,
+) {
+    val enabledBackends = backends.filter { it.enabled }.ifEmpty { backends }
+    var provider by rememberSaveable(backends.map { it.provider }.joinToString(",")) {
+        mutableStateOf(enabledBackends.firstOrNull { it.isDefault }?.provider ?: enabledBackends.firstOrNull()?.provider ?: "codex")
+    }
+    var sessionId by rememberSaveable { mutableStateOf("") }
+    val normalizedSessionId = sessionId.trim()
+    GraphDialogFrame(
+        title = "Import Session",
+        subtitle = "Existing backend session",
+        onClose = onClose,
+        footer = {
+            GraphDialogFooter(
+                primaryLabel = if (busy) "Importing" else "Import",
+                primaryTone = GraphDialogActionTone.Success,
+                primaryEnabled = !busy && normalizedSessionId.isNotBlank(),
+                onCancel = onClose,
+                onPrimary = { onImportThread(provider, normalizedSessionId) },
+            )
+        },
+    ) {
+        OptionSelector(
+            label = "Backend",
+            options = enabledBackends.map { backend ->
+                backend.provider to (backend.displayName.ifBlank { backend.provider } + if (backend.enabled) "" else " (not ready)")
+            }.ifEmpty { listOf("codex" to "Codex") },
+            selected = provider,
+            enabled = !busy,
+            onSelected = { provider = it },
+        )
+        OutlinedTextField(
+            value = sessionId,
+            onValueChange = { sessionId = it },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Session ID") },
+            placeholder = { Text("019d6fb7-7033-7a30-a2c7-74d0919e87d4") },
+            singleLine = true,
+            colors = workspaceTextFieldColors(),
+        )
+        Text(
+            text = "The selected backend must support local session import on this supervisor.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        error?.let { message ->
+            Text(
+                text = message,
+                color = ThreadColors.Danger,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun OptionSelector(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    enabled: Boolean,
+    onSelected: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            options.forEach { (value, title) ->
+                val active = value == selected
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (active) ThreadColors.Primary else ThreadColors.Surface)
+                        .border(
+                            1.dp,
+                            if (active) ThreadColors.Primary else ThreadColors.Border,
+                            RoundedCornerShape(999.dp),
+                        )
+                        .then(if (enabled) Modifier.clickable { onSelected(value) } else Modifier)
+                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = title,
+                        color = if (active) ThreadColors.PrimaryForeground else ThreadColors.ForegroundSoft,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }

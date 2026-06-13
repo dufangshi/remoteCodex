@@ -385,6 +385,7 @@ data class ComposerActionState(
     val interruptLabel: String,
     val showInterrupt: Boolean,
     val sendEnabled: Boolean,
+    val sending: Boolean = false,
 )
 
 data class ComposerJumpLatestState(
@@ -2349,8 +2350,10 @@ fun buildComposerPromptSlotState(
     }
     val promptSendDisabled = if (isShellView) {
         !actionState.sendEnabled || goalBusy || busy
-    } else {
+    } else if (goalComposeMode) {
         !actionState.sendEnabled || goalBusy || busy || prompt.disabled
+    } else {
+        !actionState.sendEnabled || goalBusy || prompt.disabled || prompt.text.isBlank()
     }
     val activeAttachments = if (isShellView) {
         emptyList()
@@ -2364,7 +2367,7 @@ fun buildComposerPromptSlotState(
         placeholder = placeholder,
         showPlaceholder = prompt.text.isBlank(),
         disabled = prompt.disabled,
-        canInterrupt = actionState.showInterrupt || actionState.primaryKind == ComposerPrimaryActionKind.Stop,
+        canInterrupt = actionState.showInterrupt,
         interruptLabel = actionState.interruptLabel,
         sendButtonLabel = actionState.primaryLabel,
         sendDisabled = promptSendDisabled,
@@ -2895,21 +2898,17 @@ fun buildComposerActionState(
     val sendLabel = when {
         !threadConnected && busy -> "Connecting..."
         !threadConnected -> "Send"
-        busy && !isShellView -> "Sending..."
         else -> "Send"
     }
-    val primaryKind = when {
-        canInterrupt && !isShellView -> ComposerPrimaryActionKind.Stop
-        !threadConnected && busy -> ComposerPrimaryActionKind.Connecting
-        else -> ComposerPrimaryActionKind.Send
-    }
+    val primaryKind = if (!threadConnected && busy) ComposerPrimaryActionKind.Connecting else ComposerPrimaryActionKind.Send
 
     return ComposerActionState(
-        primaryLabel = if (primaryKind == ComposerPrimaryActionKind.Stop) interruptLabel else sendLabel,
+        primaryLabel = sendLabel,
         primaryKind = primaryKind,
         interruptLabel = interruptLabel,
-        showInterrupt = canInterrupt && isShellView,
+        showInterrupt = canInterrupt,
         sendEnabled = !(busy && isShellView),
+        sending = busy && !isShellView,
     )
 }
 

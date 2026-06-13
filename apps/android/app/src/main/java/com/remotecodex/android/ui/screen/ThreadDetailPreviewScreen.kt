@@ -63,7 +63,6 @@ import com.remotecodex.android.ui.components.ThreadTimeline
 import com.remotecodex.android.ui.components.ThreadSurfaceView
 import com.remotecodex.android.ui.components.ThreadTopBar
 import com.remotecodex.android.ui.components.WorkspacePanel
-import com.remotecodex.android.ui.presentation.buildGraphChatThreadUsageFooterState
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -430,7 +429,6 @@ private fun ChatPreviewSurface(
             imageResolver = imageResolver,
             modifier = Modifier.weight(1f),
         )
-        ThreadUsageFooter(detail = detail)
     }
 }
 
@@ -480,35 +478,4 @@ private fun ThreadDetailPreview.timelineItemCount(): Int {
         turns.size +
         timelineAuxiliary.pendingSteers.size +
         (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0)
-}
-
-@Composable
-private fun ThreadUsageFooter(detail: ThreadDetailPreview) {
-    val state = buildGraphChatThreadUsageFooterState(detail)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(ThreadColors.Panel)
-            .semantics { contentDescription = state.accessibilityLabel }
-            .padding(horizontal = 14.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = state.transcriptLabel,
-            modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = state.usageLabel,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }

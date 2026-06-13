@@ -146,7 +146,6 @@ import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerSlashToolboxPanelState
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
-import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
 import com.remotecodex.android.ui.presentation.buildComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
@@ -218,13 +217,6 @@ fun ThreadComposer(
     val effectiveFollowTail = followTailOverride ?: followTailPreview
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
-    val statusChips = buildComposerStatusStrip(
-        threadConnected = composer.threadConnected,
-        busy = composer.busy,
-        followTail = effectiveFollowTail,
-        activeView = activeViewPreview,
-        workspaceModeLabel = composer.workspaceModeLabel,
-    )
     val actionState = buildComposerActionState(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -674,28 +666,6 @@ fun ThreadComposer(
         attachmentPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
-        ComposerToolbarRow(
-            toolbarState = toolbarState,
-            settingsToolbarState = settingsToolbarState,
-            attachmentPanelState = attachmentPanelState,
-            slashToolboxPanelState = slashToolboxPanelState,
-            onToggleMenu = { menu ->
-                val nextMenu = openMenu.toggle(menu)
-                if (nextMenu != ComposerMenu.Slash) {
-                    slashPanelView = ComposerSlashPanelViewState.Root
-                    copiedSkillName = composer.skillsPanel.copiedSkillName
-                    mcpPanelMode = composer.mcpPanel.mode
-                    mcpPanelServers = composer.mcpPanel.servers
-                    mcpPanelSuccess = composer.mcpPanel.configSuccess
-                    hooksPanelMode = composer.hooksPanel.mode
-                    hooksPanelForm = composer.hooksPanel.form
-                    hooksPanelHooks = composer.hooksPanel.hooks
-                    hooksPanelSuccess = composer.hooksPanel.configSuccess
-                }
-                openMenu = nextMenu
-            },
-            onToggleView = toggleActiveViewPreview,
-        )
         ComposerFrameSlotsPreview(
             frameState = frameState,
             contextState = contextState,
@@ -722,7 +692,6 @@ fun ThreadComposer(
             onShellDraftChange = { value ->
                 shellDraft = value
             },
-            onPromptInterrupt = stopCurrentTurnPreview,
             onShellInterrupt = {
                 if (shellPromptInputState?.interruptEnabled == true) {
                     if (onSendShellControl != null) {
@@ -796,104 +765,96 @@ fun ThreadComposer(
                     draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
                 }
             },
-            submitReady = submitInputState != null,
-        )
-        ComposerStatusStrip(chips = statusChips)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (settingsToolbarState.planButton.visible) {
-                ComposerModeChip(
-                    label = settingsToolbarState.planButton.label,
-                    selected = settingsToolbarState.planButton.selected,
-                    pressed = settingsToolbarState.planPressed,
-                    enabled = settingsToolbarState.planButton.enabled,
-                    onClick = {
-                        if (settingsToolbarState.planButton.enabled) {
-                            val nextPlanMode = !planModeSelected
-                            planModeSelected = nextPlanMode
-                            onUpdateSettings?.let { updateSettings ->
-                                updateSettings(
-                                    UpdateThreadSettingsRequest(
-                                        collaborationMode = if (nextPlanMode) "plan" else "default",
-                                    ),
-                                )
-                            }
-                        }
-                    },
-                )
-            }
-            ComposerModeChip(label = queuedAttachmentCount.attachmentCountLabel(), selected = queuedAttachmentCount > 0)
-            Box(modifier = Modifier.weight(1f))
-            if (toolbarState.viewToggleButton.visible) {
-                ComposerViewToggleButton(
-                    icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
-                    label = if (toolbarState.viewToggleButton.selected) "Chat" else "Shell",
-                    accessibilityLabel = toolbarState.viewToggleButton.label,
-                    enabled = toolbarState.viewToggleButton.enabled,
-                    onClick = toggleActiveViewPreview,
-                )
-            }
-            ComposerActionControls(
-                actionState = actionState,
-                sendButtonState = sendButtonState,
-                onInterrupt = {
-                    if (onInterruptThread != null) {
-                        onInterruptThread()
-                    } else {
-                        stopCurrentTurnPreview()
+                planButtonState = settingsToolbarState.planButton,
+            planPressed = settingsToolbarState.planPressed,
+            attachmentCount = queuedAttachmentCount,
+            toolbarState = toolbarState,
+            settingsToolbarState = settingsToolbarState,
+            sendButtonState = sendButtonState,
+            actionState = actionState,
+            onToggleMenu = { menu ->
+                val nextMenu = openMenu.toggle(menu)
+                if (nextMenu != ComposerMenu.Slash) {
+                    slashPanelView = ComposerSlashPanelViewState.Root
+                    copiedSkillName = composer.skillsPanel.copiedSkillName
+                    mcpPanelMode = composer.mcpPanel.mode
+                    mcpPanelServers = composer.mcpPanel.servers
+                    mcpPanelSuccess = composer.mcpPanel.configSuccess
+                    hooksPanelMode = composer.hooksPanel.mode
+                    hooksPanelForm = composer.hooksPanel.form
+                    hooksPanelHooks = composer.hooksPanel.hooks
+                    hooksPanelSuccess = composer.hooksPanel.configSuccess
+                }
+                openMenu = nextMenu
+            },
+            onTogglePlanMode = {
+                if (settingsToolbarState.planButton.enabled) {
+                    val nextPlanMode = !planModeSelected
+                    planModeSelected = nextPlanMode
+                    onUpdateSettings?.let { updateSettings ->
+                        updateSettings(
+                            UpdateThreadSettingsRequest(
+                                collaborationMode = if (nextPlanMode) "plan" else "default",
+                            ),
+                        )
                     }
-                },
-                onPrimaryAction = {
-                    when (sendButtonState.primaryKind) {
-                        ComposerPrimaryActionKind.Stop -> {
-                            if (onInterruptThread != null) {
-                                onInterruptThread()
-                            } else {
-                                stopCurrentTurnPreview()
-                            }
+                }
+            },
+            onToggleView = toggleActiveViewPreview,
+            onActionInterrupt = {
+                if (onInterruptThread != null) {
+                    onInterruptThread()
+                } else {
+                    stopCurrentTurnPreview()
+                }
+            },
+            onPrimaryAction = {
+                when (sendButtonState.primaryKind) {
+                    ComposerPrimaryActionKind.Stop -> {
+                        if (onInterruptThread != null) {
+                            onInterruptThread()
+                        } else {
+                            stopCurrentTurnPreview()
                         }
-                        ComposerPrimaryActionKind.Connecting -> Unit
-                        ComposerPrimaryActionKind.Send -> {
-                            if (sendButtonState.enabled) {
-                                val promptText = normalizePromptText(draftPrompt.text).trim()
-                                if (onSubmitPromptRequest != null) {
-                                    val activeUploads = draftAttachmentUploads
-                                        .filter { upload -> promptText.contains(upload.placeholder) }
-                                        .map { upload -> upload.toPromptAttachmentUploadRequest() }
-                                    if (promptText.isNotEmpty()) {
-                                        onSubmitPromptRequest(
-                                            SendThreadPromptRequest(
-                                                prompt = promptText,
-                                                attachments = activeUploads,
-                                            ),
-                                        )
-                                        draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
-                                        draftAttachmentUploads = emptyList()
-                                    }
-                                } else if (onSubmitPrompt != null) {
-                                    if (promptText.isNotEmpty()) {
-                                        onSubmitPrompt(promptText)
-                                        draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
-                                        draftAttachmentUploads = emptyList()
-                                    }
-                                } else {
-                                    promptPreviewStatus = if (promptText.isEmpty()) {
-                                        "Prompt preview sent"
-                                    } else {
-                                        "Prompt preview sent: $promptText"
-                                    }
+                    }
+                    ComposerPrimaryActionKind.Connecting -> Unit
+                    ComposerPrimaryActionKind.Send -> {
+                        if (sendButtonState.enabled) {
+                            val promptText = normalizePromptText(draftPrompt.text).trim()
+                            if (onSubmitPromptRequest != null) {
+                                val activeUploads = draftAttachmentUploads
+                                    .filter { upload -> promptText.contains(upload.placeholder) }
+                                    .map { upload -> upload.toPromptAttachmentUploadRequest() }
+                                if (promptText.isNotEmpty()) {
+                                    onSubmitPromptRequest(
+                                        SendThreadPromptRequest(
+                                            prompt = promptText,
+                                            attachments = activeUploads,
+                                        ),
+                                    )
                                     draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
                                     draftAttachmentUploads = emptyList()
                                 }
+                            } else if (onSubmitPrompt != null) {
+                                if (promptText.isNotEmpty()) {
+                                    onSubmitPrompt(promptText)
+                                    draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                    draftAttachmentUploads = emptyList()
+                                }
+                            } else {
+                                promptPreviewStatus = if (promptText.isEmpty()) {
+                                    "Prompt preview sent"
+                                } else {
+                                    "Prompt preview sent: $promptText"
+                                }
+                                draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                draftAttachmentUploads = emptyList()
                             }
                         }
                     }
-                },
-            )
-        }
+                }
+            },
+        )
     }
 }
 
@@ -1166,13 +1127,23 @@ private fun ComposerFrameSlotsPreview(
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onPromptChange: (String) -> Unit,
     onShellDraftChange: (String) -> Unit,
-    onPromptInterrupt: () -> Unit,
     onShellInterrupt: () -> Unit,
     onShellSend: () -> Unit,
     onCancelGoal: () -> Unit,
     onGoalTokenBudgetChange: (String) -> Unit,
     onSubmitGoal: () -> Unit,
-    submitReady: Boolean,
+    planButtonState: ComposerToolbarButtonState,
+    planPressed: Boolean,
+    attachmentCount: Int,
+    toolbarState: ComposerToolbarState,
+    settingsToolbarState: ComposerSettingsToolbarState,
+    sendButtonState: ComposerSendButtonState,
+    actionState: ComposerActionState,
+    onToggleMenu: (ComposerMenu) -> Unit,
+    onTogglePlanMode: () -> Unit,
+    onToggleView: () -> Unit,
+    onActionInterrupt: () -> Unit,
+    onPrimaryAction: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1182,10 +1153,20 @@ private fun ComposerFrameSlotsPreview(
             ComposerInputGroupPreview(
                 contextState = contextState,
                 promptSlotState = promptSlotState,
-                submitReady = submitReady,
                 onRemoveAttachment = onRemoveAttachment,
                 onPromptChange = onPromptChange,
-                onInterrupt = onPromptInterrupt,
+                planButtonState = planButtonState,
+                planPressed = planPressed,
+                attachmentCount = attachmentCount,
+                toolbarState = toolbarState,
+                settingsToolbarState = settingsToolbarState,
+                sendButtonState = sendButtonState,
+                actionState = actionState,
+                onToggleMenu = onToggleMenu,
+                onTogglePlanMode = onTogglePlanMode,
+                onToggleView = onToggleView,
+                onActionInterrupt = onActionInterrupt,
+                onPrimaryAction = onPrimaryAction,
             )
         }
         if (frameState.showGoalSlot) {
@@ -1417,10 +1398,20 @@ private fun ComposerFrameError(message: String) {
 private fun ComposerInputGroupPreview(
     contextState: ComposerContextUsageState,
     promptSlotState: ComposerPromptSlotState,
-    submitReady: Boolean,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onPromptChange: (String) -> Unit,
-    onInterrupt: () -> Unit,
+    planButtonState: ComposerToolbarButtonState,
+    planPressed: Boolean,
+    attachmentCount: Int,
+    toolbarState: ComposerToolbarState,
+    settingsToolbarState: ComposerSettingsToolbarState,
+    sendButtonState: ComposerSendButtonState,
+    actionState: ComposerActionState,
+    onToggleMenu: (ComposerMenu) -> Unit,
+    onTogglePlanMode: () -> Unit,
+    onToggleView: () -> Unit,
+    onActionInterrupt: () -> Unit,
+    onPrimaryAction: () -> Unit,
 ) {
     GraphInputGroup(
         blockStart = {
@@ -1443,21 +1434,22 @@ private fun ComposerInputGroupPreview(
             ComposerPromptControl(
                 state = promptSlotState,
                 onValueChange = onPromptChange,
-                onInterrupt = onInterrupt,
             )
-            ContextProgressPreview(contextState = contextState)
-        },
-        blockEnd = {
-            GraphInputGroupAddonRow {
-                GraphInputGroupAddon(label = promptSlotState.inputModeLabel)
-                GraphInputGroupAddon(label = "Markdown")
-                Box(modifier = Modifier.weight(1f))
-                if (promptSlotState.shellVisible) {
-                    GraphInputGroupText(text = if (promptSlotState.sendDisabled) "Shell send disabled" else "Shell ready")
-                } else {
-                    GraphInputGroupText(text = if (submitReady) contextState.usageLabel else "Nothing to send")
-                }
-            }
+            ContextControlRow(
+                contextState = contextState,
+                attachmentCount = attachmentCount,
+                toolbarState = toolbarState,
+                settingsToolbarState = settingsToolbarState,
+                planButtonState = planButtonState,
+                planPressed = planPressed,
+                sendButtonState = sendButtonState,
+                actionState = actionState,
+                onToggleMenu = onToggleMenu,
+                onTogglePlanMode = onTogglePlanMode,
+                onToggleView = onToggleView,
+                onActionInterrupt = onActionInterrupt,
+                onPrimaryAction = onPrimaryAction,
+            )
         },
     )
 }
@@ -1466,7 +1458,6 @@ private fun ComposerInputGroupPreview(
 private fun ComposerPromptControl(
     state: ComposerPromptSlotState,
     onValueChange: (String) -> Unit,
-    onInterrupt: () -> Unit,
 ) {
     val foreground = if (state.disabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundSoft
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -1488,8 +1479,8 @@ private fun ComposerPromptControl(
                             }
                         },
                     enabled = !state.disabled,
-                    minLines = 3,
-                    maxLines = 6,
+                    minLines = 2,
+                    maxLines = 4,
                     placeholder = {
                         Text(
                             text = state.placeholder,
@@ -1533,10 +1524,7 @@ private fun ComposerPromptControl(
                 )
             }
             if (state.canInterrupt) {
-                ComposerMiniStopButton(
-                    label = state.interruptLabel,
-                    onClick = onInterrupt,
-                )
+                // The primary action area owns stop/interruption on mobile.
             }
         }
         if (state.shellVisible) {
@@ -1619,7 +1607,7 @@ private fun ComposerPromptPhotoAttachmentSegment(segment: ComposerPromptSegmentS
             )
             .padding(4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
             modifier = Modifier
@@ -1735,7 +1723,11 @@ private fun ComposerMiniStopButton(
 @Composable
 private fun ContextProgressPreview(contextState: ComposerContextUsageState) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        GraphSlider(fraction = contextState.progressFraction, enabled = contextState.available)
+        GraphSlider(
+            fraction = contextState.progressFraction,
+            modifier = Modifier.width(116.dp),
+            enabled = contextState.available,
+        )
         Text(
             text = contextState.remainingLabel,
             color = ThreadColors.ForegroundMuted,
@@ -1743,6 +1735,101 @@ private fun ContextProgressPreview(contextState: ComposerContextUsageState) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun ContextControlRow(
+    contextState: ComposerContextUsageState,
+    attachmentCount: Int,
+    toolbarState: ComposerToolbarState,
+    settingsToolbarState: ComposerSettingsToolbarState,
+    planButtonState: ComposerToolbarButtonState,
+    planPressed: Boolean,
+    sendButtonState: ComposerSendButtonState,
+    actionState: ComposerActionState,
+    onToggleMenu: (ComposerMenu) -> Unit,
+    onTogglePlanMode: () -> Unit,
+    onToggleView: () -> Unit,
+    onActionInterrupt: () -> Unit,
+    onPrimaryAction: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            ToolbarIconButton(
+                state = toolbarState.slashButton,
+                icon = ComposerToolIcon.Slash,
+                onClick = { onToggleMenu(ComposerMenu.Slash) },
+            )
+            ToolbarIconButton(
+                state = toolbarState.attachmentButton,
+                icon = ComposerToolIcon.Plus,
+                onClick = { onToggleMenu(ComposerMenu.Attachments) },
+            )
+            if (toolbarState.shellToolsButton.visible) {
+                ToolbarIconButton(
+                    state = toolbarState.shellToolsButton,
+                    icon = ComposerToolIcon.Terminal,
+                    onClick = { onToggleMenu(ComposerMenu.ShellTools) },
+                )
+            }
+            Box(modifier = Modifier.weight(1f))
+            ToolbarInlineToggle(
+                state = settingsToolbarState.modelButton,
+                onClick = { onToggleMenu(ComposerMenu.Model) },
+                title = settingsToolbarState.modelTitle,
+                expanded = settingsToolbarState.modelMenuExpanded,
+            )
+            if (planButtonState.visible) {
+                ComposerModeChip(
+                    label = planButtonState.label,
+                    selected = planButtonState.selected,
+                    pressed = planPressed,
+                    enabled = planButtonState.enabled,
+                    onClick = onTogglePlanMode,
+                )
+            }
+            ToolbarInlineToggle(
+                state = settingsToolbarState.effortButton,
+                onClick = { onToggleMenu(ComposerMenu.Effort) },
+                title = settingsToolbarState.effortTitle,
+                expanded = settingsToolbarState.effortMenuExpanded,
+            )
+            if (toolbarState.viewToggleButton.visible) {
+                ComposerViewToggleButton(
+                    icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
+                    label = if (toolbarState.viewToggleButton.selected) "Chat" else "Shell",
+                    accessibilityLabel = toolbarState.viewToggleButton.label,
+                    enabled = toolbarState.viewToggleButton.enabled,
+                    onClick = onToggleView,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            GraphSlider(
+                fraction = contextState.progressFraction,
+                enabled = contextState.available,
+                modifier = Modifier.width(112.dp),
+            )
+            if (attachmentCount > 0) {
+                ComposerModeChip(label = attachmentCount.attachmentCountLabel(), selected = true)
+            }
+            Box(modifier = Modifier.weight(1f))
+            ComposerActionControls(
+                actionState = actionState,
+                sendButtonState = sendButtonState,
+                onInterrupt = onActionInterrupt,
+                onPrimaryAction = onPrimaryAction,
+            )
+        }
     }
 }
 
@@ -1924,7 +2011,7 @@ private fun ComposerIcon(
     }
     Box(
         modifier = Modifier
-            .size(34.dp)
+            .size(36.dp)
             .semantics { contentDescription = label }
             .clip(CircleShape)
             .background(background)
@@ -2024,8 +2111,9 @@ private fun ComposerInterruptButton(
     label: String,
     onClick: () -> Unit,
 ) {
-    Row(
+    Box(
         modifier = Modifier
+            .size(34.dp)
             .semantics {
                 contentDescription = label
                 role = Role.Button
@@ -2034,23 +2122,14 @@ private fun ComposerInterruptButton(
             .clickable(onClick = onClick)
             .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
             .border(1.dp, ThreadColors.Danger.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 9.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(10.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(9.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(ThreadColors.Danger),
-        )
-        Text(
-            text = label,
-            color = ThreadColors.Danger,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -2061,22 +2140,18 @@ private fun ComposerPrimaryActionButton(
     onClick: () -> Unit,
 ) {
     val enabled = sendButtonState.enabled
-    val isStop = sendButtonState.primaryKind == ComposerPrimaryActionKind.Stop
     val isConnecting = sendButtonState.primaryKind == ComposerPrimaryActionKind.Connecting
     val background = when {
-        isStop -> ThreadColors.Danger
         isConnecting -> ThreadColors.WarningSoft
         enabled -> ThreadColors.Primary
         else -> ThreadColors.SurfaceStrong
     }
     val foreground = when {
-        isStop -> ThreadColors.PrimaryForeground
         isConnecting -> ThreadColors.Warning
         enabled -> ThreadColors.PrimaryForeground
         else -> ThreadColors.ForegroundMuted
     }
     val border = when {
-        isStop -> ThreadColors.Danger
         isConnecting -> ThreadColors.Warning.copy(alpha = 0.46f)
         enabled -> ThreadColors.Primary
         else -> ThreadColors.Border
@@ -2100,7 +2175,7 @@ private fun ComposerPrimaryActionButton(
                 }
             }
             .clip(RoundedCornerShape(999.dp))
-            .then(if (enabled || isStop) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = horizontalPadding, vertical = 8.dp),

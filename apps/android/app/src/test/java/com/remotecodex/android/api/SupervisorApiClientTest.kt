@@ -49,7 +49,29 @@ class SupervisorApiClientTest {
     }
 
     @Test
-    fun checkConnectionUsesBearerTokenAndRelayHealth() {
+    fun relayRegisterUsesRelayAuthEndpoint() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"token":"relay-token","session":{"authenticated":true,"registrationEnabled":true,"user":{"id":"u1","email":"dev@example.test","username":"dev","role":"user","enabled":true}}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(SupervisorConnectionMode.Relay, "https://relay.example.test"),
+            transport,
+        )
+
+        val result = client.relayRegister("dev@example.test", "dev", "password123")
+
+        assertEquals("relay-token", result.token)
+        assertEquals("https://relay.example.test/relay/auth/register", transport.requests.single().url)
+        assertEquals("POST", transport.requests.single().method)
+        assertTrue(transport.requests.single().body!!.contains("\"email\":\"dev@example.test\""))
+        assertTrue(transport.requests.single().body!!.contains("\"username\":\"dev\""))
+    }
+
+    @Test
+    fun checkConnectionUsesBearerTokenAndRelayDeviceHealth() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(
                 200,
@@ -77,7 +99,7 @@ class SupervisorApiClientTest {
         assertEquals("Relay connected", check.healthLabel)
         assertEquals("relay-token", transport.requests[0].bearerToken)
         assertEquals("https://relay.example.test/relay/auth/session", transport.requests[0].url)
-        assertEquals("https://relay.example.test/healthz", transport.requests[1].url)
+        assertEquals("https://relay.example.test/relay/devices/device-1/healthz", transport.requests[1].url)
     }
 
     @Test
@@ -140,6 +162,7 @@ class SupervisorApiClientTest {
                 model = "gpt-5",
                 approvalMode = "yolo",
                 provider = "codex",
+                reasoningEffort = "xhigh",
             ),
         )
 
@@ -155,6 +178,61 @@ class SupervisorApiClientTest {
         assertTrue(body.contains("\"model\":\"gpt-5\""))
         assertTrue(body.contains("\"approvalMode\":\"yolo\""))
         assertTrue(body.contains("\"provider\":\"codex\""))
+        assertTrue(body.contains("\"reasoningEffort\":\"xhigh\""))
+    }
+
+    @Test
+    fun listAgentModelsParsesReasoningOptions() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """[{"id":"gpt-5","model":"gpt-5","displayName":"GPT-5","description":"Flagship","isDefault":true,"hidden":false,"defaultReasoningEffort":"xhigh","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"xhigh","description":"Deep"}]}]""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(SupervisorConnectionMode.Server, "https://server.example.test"),
+            transport,
+        )
+
+        val models = client.listAgentModels("codex")
+
+        assertEquals("https://server.example.test/api/agent-runtimes/codex/models", transport.requests.single().url)
+        assertEquals("gpt-5", models.single().model)
+        assertEquals("xhigh", models.single().defaultReasoningEffort)
+        assertEquals(listOf("low", "xhigh"), models.single().supportedReasoningEfforts.map { it.reasoningEffort })
+    }
+
+    @Test
+    fun importThreadPostsProviderAndSessionThroughRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"thread":{"id":"thread-imported","workspaceId":"workspace-1","title":"Imported","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":null},"workspace":{"id":"workspace-1","label":"Remote Codex","absPath":"/repo","isFavorite":false,"lastOpenedAt":null},"turns":[],"pendingRequests":[],"answeredRequestNotes":[],"liveItems":{"items":[]}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val detail = client.importThread(
+            ImportSupervisorThreadRequest(
+                sessionId = "session-1",
+                provider = "claude",
+            ),
+        )
+
+        assertEquals("thread-imported", detail.thread.id)
+        assertEquals("https://relay.example.test/relay/devices/device-1/api/threads/import", transport.requests.single().url)
+        assertEquals("POST", transport.requests.single().method)
+        val body = transport.requests.single().body!!
+        assertTrue(body.contains("\"sessionId\":\"session-1\""))
+        assertTrue(body.contains("\"provider\":\"claude\""))
     }
 
     @Test

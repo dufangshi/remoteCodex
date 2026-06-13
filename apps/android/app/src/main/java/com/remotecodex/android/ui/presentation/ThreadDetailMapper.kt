@@ -511,11 +511,21 @@ private fun SupervisorThreadTurnItem.toMessagePreview(startedAt: String?): Messa
     }
     return MessagePreview(
         author = author,
-        status = null,
+        status = if (author == MessageAuthor.Assistant && status.isRunningStatus()) {
+            ThreadStatus.Running
+        } else {
+            null
+        },
         timeLabel = startedAt?.let(::shortTimeLabel).orEmpty(),
         text = text,
         richText = text,
     )
+}
+
+private fun String?.isRunningStatus(): Boolean {
+    return equals("running", ignoreCase = true) ||
+        equals("started", ignoreCase = true) ||
+        equals("in_progress", ignoreCase = true)
 }
 
 private fun SupervisorThreadTurnItem.toHistoryItemPreview(): HistoryItemPreview? {

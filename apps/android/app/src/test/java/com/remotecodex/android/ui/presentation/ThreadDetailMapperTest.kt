@@ -34,6 +34,66 @@ import org.junit.Test
 
 class ThreadDetailMapperTest {
     @Test
+    fun mapsRunningAssistantPlaceholderAsRunningMessage() {
+        val preview = buildThreadDetailPreviewFromSupervisor(
+            detail = SupervisorThreadDetail(
+                thread = SupervisorThreadSummary(
+                    id = "thread-1",
+                    workspaceId = "workspace-1",
+                    title = "Android API",
+                    status = "running",
+                    model = "gpt-5",
+                    reasoningEffort = "medium",
+                    fastMode = false,
+                    collaborationMode = "default",
+                    sandboxMode = "workspace-write",
+                    updatedAt = "2026-06-11T18:59:00Z",
+                    summaryText = null,
+                ),
+                workspace = SupervisorWorkspaceSummary(
+                    id = "workspace-1",
+                    label = "remoteCodex-main",
+                    absPath = "/home/u/dev/remoteCodex-main",
+                    isFavorite = false,
+                    lastOpenedAt = null,
+                ),
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T18:58:00Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem("item-user", "userMessage", "Continue"),
+                            SupervisorThreadTurnItem(
+                                id = "item-agent-placeholder",
+                                kind = "agentMessage",
+                                text = "",
+                                status = "running",
+                            ),
+                        ),
+                    ),
+                ),
+                turnCount = 1,
+                totalTurnCount = 1,
+                pendingRequests = emptyList(),
+                answeredRequestNotes = emptyList(),
+                liveItemCount = 1,
+                goalStatus = null,
+                goalObjective = null,
+            ),
+        )
+
+        val messages = preview.turns.single().messages
+        assertEquals(MessageAuthor.User, messages[0].author)
+        assertEquals(MessageAuthor.Assistant, messages[1].author)
+        assertEquals(ThreadStatus.Running, messages[1].status)
+        assertEquals("", messages[1].text)
+    }
+
+    @Test
     fun mapsSupervisorDetailIntoNativeThreadPreview() {
         val preview = buildThreadDetailPreviewFromSupervisor(
             detail = SupervisorThreadDetail(
