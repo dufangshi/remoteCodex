@@ -31,8 +31,8 @@ RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
   && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/plugin-xyz-viewer build \
   && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/thread-ui build \
   && pnpm --filter @remote-codex/relay-server... --filter @remote-codex/supervisor-web... install --frozen-lockfile \
-  && rm -rf apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/dist \
-    apps/supervisor-web/node_modules/@remote-codex/thread-ui/dist \
+  && rm -rf apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer \
+    apps/supervisor-web/node_modules/@remote-codex/thread-ui \
   && mkdir -p apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/src \
     apps/supervisor-web/node_modules/@remote-codex/thread-ui \
   && cp /opt/remote-codex-thread-ui/packages/plugin-xyz-viewer/package.json apps/supervisor-web/node_modules/@remote-codex/plugin-xyz-viewer/package.json \
