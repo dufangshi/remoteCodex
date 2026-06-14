@@ -143,6 +143,7 @@ data class SupervisorThreadSummary(
     val sandboxMode: String?,
     val updatedAt: String,
     val summaryText: String?,
+    val isLoaded: Boolean = true,
 )
 
 data class SupervisorHomeSnapshot(
@@ -594,6 +595,11 @@ data class SendThreadPromptRequest(
     val clientRequestId: String? = null,
     val model: String? = null,
     val attachments: List<PromptAttachmentUploadRequest> = emptyList(),
+)
+
+data class ResumeThreadRequest(
+    val model: String? = null,
+    val sandboxMode: String? = null,
 )
 
 data class PromptAttachmentUploadRequest(

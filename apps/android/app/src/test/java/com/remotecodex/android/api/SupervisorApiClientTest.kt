@@ -794,6 +794,37 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun resumeThreadUsesRelayDevicePathAndParsesLoadedState() {
+        val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
+        val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","isLoaded":true,"model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Resumed"}"""
+        val detailJson = """{"thread":$threadJson,"workspace":$workspaceJson,"workspacePathStatus":"present","turns":[],"totalTurnCount":0,"pendingRequests":[],"answeredRequestNotes":[],"pendingSteers":[],"liveItems":{"items":[]}}"""
+        val transport = RecordingTransport(SupervisorHttpResponse(200, detailJson))
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val detail = client.resumeThread(
+            "thread-1",
+            ResumeThreadRequest(model = "gpt-5", sandboxMode = "danger-full-access"),
+        )
+
+        assertEquals(true, detail.thread.isLoaded)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/resume",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertTrue(transport.requests.single().body!!.contains("\"model\":\"gpt-5\""))
+        assertTrue(transport.requests.single().body!!.contains("\"sandboxMode\":\"danger-full-access\""))
+    }
+
+    @Test
     fun fetchThreadDetailUsesBeforeTurnIdAndParsesTotalTurnCount() {
         val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
         val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""

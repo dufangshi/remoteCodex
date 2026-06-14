@@ -310,12 +310,7 @@ private fun WorkspaceExplorerCard(
     modifier: Modifier = Modifier,
 ) {
     var expandedPaths by remember(workspace.nodes) {
-        mutableStateOf(
-            workspace.nodes
-                .filter { it.kind == WorkspaceNodeKind.Directory && it.expanded }
-                .map { it.path }
-                .toSet(),
-        )
+        mutableStateOf(emptySet<String>())
     }
     val visibleNodes = remember(workspace.nodes, expandedPaths) {
         workspace.nodes.filterVisibleWorkspaceNodes(expandedPaths)

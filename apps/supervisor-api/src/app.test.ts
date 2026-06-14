@@ -6563,6 +6563,75 @@ describe('supervisor api', () => {
     });
   });
 
+  it('resumes an unloaded supervisor thread before accepting a new prompt', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.3-codex',
+        approvalMode: 'yolo',
+        title: 'Resume Before Prompt'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'First prompt'
+      }
+    });
+    expect(firstPromptResponse.statusCode).toBe(200);
+
+    fakeCodexManager.completeTurn(
+      createdThread.providerSessionId,
+      firstPromptResponse.json().activeTurnId,
+      'completed',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeCodexManager.loadedThreadIds.delete(createdThread.providerSessionId);
+    updateThreadRecord(app.services.database.db, createdThread.id, {
+      status: 'not_loaded',
+      providerTurnId: null,
+    });
+
+    const unloadedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(unloadedDetailResponse.statusCode).toBe(200);
+    expect(unloadedDetailResponse.json().thread.isLoaded).toBe(false);
+
+    const secondPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Second prompt after reload'
+      }
+    });
+
+    expect(secondPromptResponse.statusCode).toBe(200);
+    expect(secondPromptResponse.json()).toMatchObject({
+      id: createdThread.id,
+      status: 'running',
+    });
+    expect(fakeCodexManager.resumeThreadCalls.at(-1)).toMatchObject({
+      threadId: createdThread.providerSessionId,
+    });
+    expect(fakeCodexManager.startTurnCalls.at(-1)?.prompt).toBe('Second prompt after reload');
+  });
+
   it('preserves a saved reasoning effort when a disconnected thread is resumed', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

@@ -873,19 +873,17 @@ export class ThreadService {
     input: SendThreadPromptInput,
     options: SendPromptOptions = {},
   ): Promise<ThreadDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
+    let record = getThreadRecordById(this.db, localThreadId);
     if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
       });
     }
-    const providerSessionId = this.requireProviderSessionId(record);
-
     await this.importCoordinator.assertImportedThreadReadyForPrompt({
       source: record.source,
       provider: record.provider,
-      providerSessionId,
+      providerSessionId: this.requireProviderSessionId(record),
       listLoadedProviderSessionIds: (provider) =>
         this.listLoadedProviderSessionIds(provider),
     });
@@ -896,6 +894,24 @@ export class ThreadService {
         message: 'Connect this thread before sending a new prompt.'
       });
     }
+
+    if (this.providerForRecord(record) === 'codex') {
+      const providerSessionId = this.requireProviderSessionId(record);
+      const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
+      if (!loadedIds.has(providerSessionId)) {
+        await this.ensureThreadLoadedForProviderOperation(record);
+        record = getThreadRecordById(this.db, localThreadId)!;
+        const resumedProviderSessionId = this.requireProviderSessionId(record);
+        const refreshedLoadedIds = await this.listLoadedProviderSessionIds(record.provider);
+        if (!refreshedLoadedIds.has(resumedProviderSessionId)) {
+          throw new HttpError(409, {
+            code: 'conflict',
+            message: 'Connect this thread before sending a new prompt.',
+          });
+        }
+      }
+    }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     const prompt = input.prompt.trim();
     const displayPrompt = options.displayPrompt?.trim() || prompt;

@@ -32,6 +32,7 @@ import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.api.ForkThreadRequest
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
+import com.remotecodex.android.api.ResumeThreadRequest
 import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
@@ -184,6 +185,38 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Could not read selected attachment." }
     }
 
+    suspend fun ensureThreadLoadedForPrompt(): Result<Unit> {
+        val currentState = threadProjectionState ?: return Result.success(Unit)
+        val currentDetail = currentState.detail
+        if (currentDetail.thread.isLoaded && currentDetail.thread.status != "not_loaded") {
+            return Result.success(Unit)
+        }
+
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                client.resumeThread(
+                    threadId,
+                    ResumeThreadRequest(
+                        model = currentDetail.thread.model,
+                        sandboxMode = currentDetail.thread.sandboxMode,
+                    ),
+                )
+            }
+        }.map { resumedDetail ->
+            val reconciledState = threadProjectionState?.reconcileWithDetail(resumedDetail)
+                ?: ThreadProjectionState(detail = resumedDetail)
+            threadProjectionState = reconciledState
+            detail = detail?.let { current ->
+                buildProjectedThreadPreview(
+                    current = current,
+                    state = reconciledState,
+                    optimisticPrompt = optimisticPromptTurn,
+                    optimisticSteers = optimisticSteers,
+                )
+            }
+        }
+    }
+
     LaunchedEffect(threadId, refreshNonce) {
         loading = detail == null
         error = null
@@ -276,6 +309,13 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingPrompt) {
         val prompt = pendingPrompt ?: return@LaunchedEffect
+        ensureThreadLoadedForPrompt()
+            .onFailure { throwable ->
+                error = throwable.message ?: "Connect this thread before sending a prompt."
+                pendingPrompt = null
+                submittingPrompt = false
+                return@LaunchedEffect
+            }
         val shouldSteer = threadProjectionState?.detail?.thread?.status.equals("running", ignoreCase = true)
         val optimistic = if (shouldSteer) null else createOptimisticPromptTurn(prompt, threadProjectionState?.detail)
         val optimisticSteer = if (shouldSteer) createOptimisticSteer(prompt) else null
@@ -366,6 +406,13 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingPromptRequest) {
         val promptRequest = pendingPromptRequest ?: return@LaunchedEffect
+        ensureThreadLoadedForPrompt()
+            .onFailure { throwable ->
+                error = throwable.message ?: "Connect this thread before sending a prompt."
+                pendingPromptRequest = null
+                submittingPrompt = false
+                return@LaunchedEffect
+            }
         val shouldSteer = threadProjectionState?.detail?.thread?.status.equals("running", ignoreCase = true)
         val optimistic = if (shouldSteer) null else createOptimisticPromptTurn(promptRequest.prompt, threadProjectionState?.detail)
         val optimisticSteer = if (shouldSteer) createOptimisticSteer(promptRequest.prompt) else null

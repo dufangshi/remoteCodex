@@ -83,6 +83,12 @@ export class FakeCodexManager extends EventEmitter {
     developerInstructions?: string | null;
     serviceTier?: 'fast' | 'flex' | null;
   }> = [];
+  resumeThreadCalls: Array<{
+    threadId: string;
+    model?: string | null;
+    sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
+    serviceTier?: 'fast' | 'flex' | null;
+  }> = [];
 
   async start() {
     this.startCalls += 1;
@@ -194,6 +200,7 @@ export class FakeCodexManager extends EventEmitter {
   }
 
   async resumeThread(input: { threadId: string; model?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {
+    this.resumeThreadCalls.push(input);
     const thread = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     if (thread.turns.length === 0) {
       throw new JsonRpcClientError(`no rollout found for thread id ${input.threadId}`, 'remote_error', {

@@ -36,10 +36,12 @@ class WorkspacePanelTest {
             }
         }
 
-        composeRule.onNodeWithText("download-me").assertExists()
-        composeRule.onNodeWithText("a.txt").assertExists()
+        composeRule.onNodeWithText("remote-codex-android-e2e").assertExists()
+        composeRule.onNodeWithText("download-me").assertDoesNotExist()
+        composeRule.onNodeWithText("a.txt").assertDoesNotExist()
 
-        composeRule.onNodeWithText("download-me").performClick()
+        composeRule.onNodeWithText("remote-codex-android-e2e").performClick()
+        composeRule.onNodeWithText("download-me").assertExists()
         composeRule.onNodeWithText("a.txt").assertDoesNotExist()
 
         composeRule.onNodeWithText("download-me").performClick()
@@ -48,6 +50,10 @@ class WorkspacePanelTest {
             assertEquals("download-me/a.txt", selectedPath)
         }
 
+        composeRule.onNodeWithText("download-me").performClick()
+        composeRule.onNodeWithText("a.txt").assertDoesNotExist()
+
+        composeRule.onNodeWithText("download-me").performClick()
         composeRule.onNodeWithContentDescription("Download download-me").performClick()
         composeRule.runOnIdle {
             assertEquals("download-me", downloadedPath)

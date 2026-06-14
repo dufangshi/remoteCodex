@@ -80,7 +80,9 @@ fun SupervisorConnectionSetupScreen(
     modifier: Modifier = Modifier,
 ) {
     var mode by remember(initialConfig) { mutableStateOf(initialConfig?.mode ?: SupervisorConnectionMode.Local) }
-    var baseUrl by remember(initialConfig) { mutableStateOf(initialConfig?.normalizedBaseUrl ?: defaultUrlForMode(mode)) }
+    var baseUrl by remember(initialConfig) {
+        mutableStateOf(initialConfig?.normalizedBaseUrl ?: initialUrlForMode(mode))
+    }
     var route by remember(initialRoute, initialConfig) { mutableStateOf(initialRoute) }
     var authMode by remember { mutableStateOf(RelayAuthMode.SignIn) }
     var email by remember { mutableStateOf("") }
@@ -297,7 +299,7 @@ fun SupervisorConnectionSetupScreen(
                                 selected = option == mode,
                                 onClick = {
                                     mode = option
-                                    baseUrl = defaultUrlForMode(option)
+                                    baseUrl = initialUrlForMode(option)
                                     relayPortal = null
                                     createdDevice = null
                                     errorMessage = null
@@ -313,6 +315,7 @@ fun SupervisorConnectionSetupScreen(
                             onValueChange = { baseUrl = it },
                             contentDescription = "Supervisor URL",
                             keyboardType = KeyboardType.Uri,
+                            placeholder = if (mode == SupervisorConnectionMode.Relay) null else defaultUrlForMode(mode),
                         )
                     }
                     GraphButton(
@@ -1103,6 +1106,7 @@ private fun ConnectionTextField(
     keyboardType: KeyboardType = KeyboardType.Text,
     password: Boolean = false,
     minLines: Int = 1,
+    placeholder: String? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -1113,6 +1117,7 @@ private fun ConnectionTextField(
         label = { Text(label) },
         minLines = minLines,
         maxLines = if (minLines > 1) 4 else 1,
+        placeholder = placeholder?.let { text -> { Text(text) } },
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         textStyle = MaterialTheme.typography.bodySmall.copy(color = ThreadColors.Foreground),
@@ -1128,6 +1133,10 @@ private fun ConnectionTextField(
             unfocusedLabelColor = ThreadColors.ForegroundMuted,
         ),
     )
+}
+
+private fun initialUrlForMode(mode: SupervisorConnectionMode): String {
+    return if (mode == SupervisorConnectionMode.Relay) "" else defaultUrlForMode(mode)
 }
 
 @Composable

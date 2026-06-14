@@ -466,6 +466,17 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun resumeThread(threadId: String, request: ResumeThreadRequest = ResumeThreadRequest()): SupervisorThreadDetail {
+        val body = JSONObject()
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        request.sandboxMode?.takeIf { it.isNotBlank() }?.let { body.put("sandboxMode", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/resume"),
+            method = "POST",
+            body = body.takeIf { it.length() > 0 }?.toString(),
+        ).toThreadDetail()
+    }
+
     fun updateThread(threadId: String, request: UpdateThreadRequest): SupervisorThreadSummary {
         val body = JSONObject()
             .put("title", request.title)
@@ -1001,6 +1012,7 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
         sandboxMode = optNullableString("sandboxMode"),
         updatedAt = optString("updatedAt"),
         summaryText = optNullableString("summaryText"),
+        isLoaded = if (has("isLoaded") && !isNull("isLoaded")) optBoolean("isLoaded") else optString("status") != "not_loaded",
     )
 }
 
