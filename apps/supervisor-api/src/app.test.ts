@@ -2196,6 +2196,32 @@ describe('supervisor api', () => {
     expect(downloadResponse.json().message).toContain('fewer than 300 files');
   });
 
+  it('rejects workspace folder downloads at the recursive byte-size limit', async () => {
+    const workspacePath = path.join(tempDir, 'large-bytes-workspace');
+    const folderPath = path.join(workspacePath, 'huge');
+    await fs.mkdir(folderPath, { recursive: true });
+    await fs.writeFile(path.join(folderPath, 'huge.bin'), '');
+    await fs.truncate(path.join(folderPath, 'huge.bin'), 100 * 1024 * 1024);
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('huge')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(400);
+    expect(downloadResponse.json().message).toContain('smaller than 100 MB');
+  });
+
   it('enforces artifact read and write scopes for worker artifact routes', async () => {
     await app.close();
     app = buildTestApp(fakeCodexManager, {

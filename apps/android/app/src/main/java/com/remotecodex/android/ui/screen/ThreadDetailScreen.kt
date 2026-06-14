@@ -804,7 +804,11 @@ fun ThreadDetailScreen(
             .onSuccess { download ->
                 workspaceActionMessage = "Downloaded ${download.filename} (${download.bytes.size} bytes)"
             }
-            .onFailure { throwable -> error = throwable.message ?: "Workspace download failed." }
+            .onFailure { throwable ->
+                val message = throwable.message ?: "Workspace download failed."
+                workspaceActionMessage = message
+                error = message
+            }
     }
 
     LaunchedEffect(pendingWorkspaceRawOpenPath) {

@@ -12,7 +12,6 @@ import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
-import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -25,7 +24,7 @@ class WorkspaceDetailScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun workspaceDetailShowsScopedThreadsFilesAndOpensThread() {
+    fun workspaceDetailShowsScopedThreadsAndOpensThread() {
         var openedThreadId: String? = null
 
         composeRule.setContent {
@@ -77,27 +76,6 @@ class WorkspaceDetailScreenTest {
                     ),
                     homeSnapshotLoading = false,
                     homeSnapshotError = null,
-                    initialTree = SupervisorWorkspaceTreeNode(
-                        name = "remoteCodex-main",
-                        path = "",
-                        kind = "directory",
-                        size = null,
-                        children = listOf(
-                            SupervisorWorkspaceTreeNode(
-                                name = "apps",
-                                path = "apps",
-                                kind = "directory",
-                                size = null,
-                            ),
-                            SupervisorWorkspaceTreeNode(
-                                name = "README.md",
-                                path = "README.md",
-                                kind = "file",
-                                size = 512,
-                            ),
-                        ),
-                    ),
-                    loadTreeOnStart = false,
                     onBackToHome = {},
                     onOpenThread = { openedThreadId = it },
                     onRefreshHomeSnapshot = {},
@@ -105,7 +83,7 @@ class WorkspaceDetailScreenTest {
             }
         }
 
-        composeRule.onAllNodesWithText("remoteCodex-main").assertCountEquals(3)
+        composeRule.onAllNodesWithText("remoteCodex-main").assertCountEquals(2)
         composeRule.onAllNodesWithText("/home/u/dev/remoteCodex-main").assertCountEquals(2)
         composeRule.onNodeWithText("1 threads").assertExists()
         composeRule.onNodeWithText("1 running").assertExists()
@@ -113,9 +91,7 @@ class WorkspaceDetailScreenTest {
         composeRule.onNodeWithText("Threads").assertExists()
         composeRule.onNodeWithText("Android native thread client").assertExists()
         composeRule.onNodeWithText("Other workspace thread").assertDoesNotExist()
-        composeRule.onNodeWithText("Files").assertExists()
-        composeRule.onNodeWithContentDescription("Workspace file apps").assertExists()
-        composeRule.onNodeWithContentDescription("Workspace file README.md").assertExists()
+        composeRule.onNodeWithText("Files").assertDoesNotExist()
 
         composeRule.onNodeWithContentDescription("Open workspace thread Android native thread client").performClick()
         assertEquals("thread-1", openedThreadId)

@@ -309,6 +309,18 @@ private fun WorkspaceExplorerCard(
     onUploadNote: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    var expandedPaths by remember(workspace.nodes) {
+        mutableStateOf(
+            workspace.nodes
+                .filter { it.kind == WorkspaceNodeKind.Directory && it.expanded }
+                .map { it.path }
+                .toSet(),
+        )
+    }
+    val visibleNodes = remember(workspace.nodes, expandedPaths) {
+        workspace.nodes.filterVisibleWorkspaceNodes(expandedPaths)
+    }
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -355,16 +367,53 @@ private fun WorkspaceExplorerCard(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             )
         } else {
-            workspace.nodes.take(10).forEach { node ->
-                WorkspaceRow(
-                    node = node,
-                    onClick = node.path
-                        .takeIf { it.isNotBlank() && node.kind != WorkspaceNodeKind.Directory }
-                        ?.let { path -> onSelectFile?.let { selectFile -> { selectFile(path) } } },
-                    onDownload = onDownloadFile?.let { downloadFile -> { downloadFile(node.path) } },
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                visibleNodes.forEach { node ->
+                    val displayedNode = if (node.kind == WorkspaceNodeKind.Directory) {
+                        node.copy(expanded = node.path in expandedPaths)
+                    } else {
+                        node
+                    }
+                    WorkspaceRow(
+                        node = displayedNode,
+                        onClick = when (node.kind) {
+                            WorkspaceNodeKind.Directory -> {
+                                {
+                                    expandedPaths = if (node.path in expandedPaths) {
+                                        expandedPaths - node.path
+                                    } else {
+                                        expandedPaths + node.path
+                                    }
+                                }
+                            }
+                            else -> node.path
+                                .takeIf { it.isNotBlank() }
+                                ?.let { path -> onSelectFile?.let { selectFile -> { selectFile(path) } } }
+                        },
+                        onDownload = onDownloadFile?.let { downloadFile -> { downloadFile(node.path) } },
+                    )
+                }
             }
         }
+    }
+}
+
+private fun List<WorkspaceNodePreview>.filterVisibleWorkspaceNodes(
+    expandedPaths: Set<String>,
+): List<WorkspaceNodePreview> {
+    val collapsedDepths = mutableListOf<Int>()
+    return filter { node ->
+        collapsedDepths.removeAll { it >= node.depth }
+        val hidden = collapsedDepths.any { it < node.depth }
+        if (!hidden && node.kind == WorkspaceNodeKind.Directory && node.path !in expandedPaths) {
+            collapsedDepths += node.depth
+        }
+        !hidden
     }
 }
 
