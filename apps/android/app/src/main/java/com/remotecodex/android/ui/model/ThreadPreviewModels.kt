@@ -823,6 +823,7 @@ data class WorkspaceFilePreview(
     val sizeBytes: Long? = null,
     val nextOffset: Long? = null,
     val truncated: Boolean = truncatedLabel != null,
+    val loading: Boolean = false,
 )
 
 data class ArtifactPreview(

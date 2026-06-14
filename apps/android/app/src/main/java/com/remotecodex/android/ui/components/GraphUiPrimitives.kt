@@ -92,6 +92,7 @@ enum class GraphActionIcon {
     Delete,
     Open,
     Package,
+    Settings,
 }
 
 enum class GraphSelectionTone {
@@ -575,6 +576,22 @@ private fun GraphActionGlyph(
                 line(0.50f, 0.82f, 0.78f, 0.66f)
                 line(0.78f, 0.66f, 0.78f, 0.36f)
                 line(0.50f, 0.52f, 0.50f, 0.82f)
+            }
+            GraphActionIcon.Settings -> {
+                drawCircle(
+                    color = color,
+                    radius = size.width * 0.16f,
+                    center = Offset(size.width * 0.50f, size.height * 0.50f),
+                    style = stroke,
+                )
+                line(0.50f, 0.14f, 0.50f, 0.25f)
+                line(0.50f, 0.75f, 0.50f, 0.86f)
+                line(0.14f, 0.50f, 0.25f, 0.50f)
+                line(0.75f, 0.50f, 0.86f, 0.50f)
+                line(0.25f, 0.25f, 0.33f, 0.33f)
+                line(0.67f, 0.67f, 0.75f, 0.75f)
+                line(0.75f, 0.25f, 0.67f, 0.33f)
+                line(0.33f, 0.67f, 0.25f, 0.75f)
             }
         }
     }

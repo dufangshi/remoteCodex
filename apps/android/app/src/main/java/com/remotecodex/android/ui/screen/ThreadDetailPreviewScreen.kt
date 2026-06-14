@@ -1,7 +1,6 @@
 package com.remotecodex.android.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -42,7 +41,6 @@ import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
-import com.remotecodex.android.ui.components.AppShellNavigationPanel
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
 import com.remotecodex.android.ui.components.GraphChatMainShell
 import com.remotecodex.android.ui.components.GraphChatMobileScrim
@@ -133,7 +131,6 @@ fun ThreadDetailSurface(
     onCopyWorkspaceRawFile: ((String) -> Unit)? = null,
     onSaveWorkspaceFile: ((String, String) -> Unit)? = null,
     onUploadWorkspaceNote: (() -> Unit)? = null,
-    onReturnToWorkspace: (() -> Unit)? = null,
     workspaceSaveBusy: Boolean = false,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
@@ -157,7 +154,6 @@ fun ThreadDetailSurface(
         rooms = rooms,
     )
     var selectedView by remember { mutableStateOf(ThreadSurfaceView.Chat) }
-    var appNavOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var roomsOpen by remember { mutableStateOf(false) }
     var threadActionDialog by remember { mutableStateOf<ThreadActionDialog?>(null) }
@@ -210,17 +206,7 @@ fun ThreadDetailSurface(
                                 }
                             },
                             shellEnabled = AndroidFeatureFlags.ShellEnabled,
-                            onOpenAppNav = { appNavOpen = true },
                             onOpenRooms = { roomsOpen = true },
-                            onOpenSettings = { settingsOpen = true },
-                            onOpenThreadAction = { threadActionDialog = it },
-                            onReturnToWorkspace = onReturnToWorkspace ?: { selectedView = ThreadSurfaceView.Workspace },
-                            onCreateThreadShortcut = {
-                                threadActionRoom = null
-                                threadActionDialog = ThreadActionDialog.Create
-                            },
-                            themeMode = themeMode,
-                            darkThemeActive = darkThemeActive,
                         )
                     }
                     GraphChatSplitRegion(modifier = Modifier.weight(1f)) {
@@ -311,16 +297,24 @@ fun ThreadDetailSurface(
                 mobileOpen = roomsOpen,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .fillMaxWidth(if (showCollapsedRoomsRail) 0.40f else 0.86f),
+                    .fillMaxWidth(if (showCollapsedRoomsRail) 0.32f else 0.69f),
             ) {
                 ThreadRoomsPanel(
                     workspaceLabel = displayedDetail.workspacePreview.rootLabel,
                     rooms = displayedDetail.rooms,
-                    onClose = { roomsOpen = false },
                     onCreateThread = {
                         roomsOpen = false
                         threadActionRoom = null
                         threadActionDialog = ThreadActionDialog.Create
+                    },
+                    onOpenSettings = {
+                        roomsOpen = false
+                        settingsOpen = true
+                    },
+                    onExportThread = {
+                        roomsOpen = false
+                        threadActionRoom = null
+                        threadActionDialog = ThreadActionDialog.Export
                     },
                     copiedSessionRoomId = copiedSessionRoomId,
                     onRenameThread = { room ->
@@ -337,26 +331,6 @@ fun ThreadDetailSurface(
                         threadActionDialog = ThreadActionDialog.Delete
                     },
                     modifier = Modifier.fillMaxSize(),
-                )
-            }
-            if (appNavOpen) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(ThreadColors.Primary.copy(alpha = 0.30f))
-                        .clickable { appNavOpen = false },
-                )
-                AppShellNavigationPanel(
-                    appShell = appShell,
-                    onOpenSettings = {
-                        appNavOpen = false
-                        settingsOpen = true
-                    },
-                    onClose = { appNavOpen = false },
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .navigationBarsPadding()
-                        .fillMaxWidth(0.86f),
                 )
             }
             if (settingsOpen) {

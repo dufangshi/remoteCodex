@@ -51,17 +51,9 @@ fun ThreadTopBar(
     selectedView: ThreadSurfaceView,
     onViewSelected: (ThreadSurfaceView) -> Unit,
     shellEnabled: Boolean = false,
-    onOpenAppNav: () -> Unit,
     onOpenRooms: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenThreadAction: (ThreadActionDialog) -> Unit,
-    onReturnToWorkspace: () -> Unit,
-    onCreateThreadShortcut: () -> Unit,
-    themeMode: ThemeMode,
-    darkThemeActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var actionsOpen by remember { mutableStateOf(false) }
     var detailsOpen by remember { mutableStateOf(false) }
     val activeRoom = detail.rooms.firstOrNull { it.active } ?: detail.rooms.firstOrNull()
     val sessionLabel = activeRoom?.sessionId ?: detail.runtime
@@ -79,8 +71,8 @@ fun ThreadTopBar(
         ) {
             TopBarIconButton(
                 icon = TopBarIcon.Menu,
-                contentDescription = if (actionsOpen) "Close thread menu" else "Open thread menu",
-                onClick = { actionsOpen = !actionsOpen },
+                contentDescription = "Open threads",
+                onClick = onOpenRooms,
                 modifier = Modifier.padding(top = 7.dp),
             )
             Column(modifier = Modifier.weight(1f)) {
@@ -99,36 +91,6 @@ fun ThreadTopBar(
                     onClick = { detailsOpen = !detailsOpen },
                 )
             }
-            ThemeModeStatusButton(
-                themeMode = themeMode,
-                darkThemeActive = darkThemeActive,
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(top = 7.dp),
-            )
-        }
-        if (actionsOpen) {
-            ThreadActionMenu(
-                onOpenAppNav = {
-                    actionsOpen = false
-                    onOpenAppNav()
-                },
-                onOpenRooms = {
-                    actionsOpen = false
-                    onOpenRooms()
-                },
-                onReturnToWorkspace = {
-                    actionsOpen = false
-                    onReturnToWorkspace()
-                },
-                onCreateThreadShortcut = {
-                    actionsOpen = false
-                    onCreateThreadShortcut()
-                },
-                onOpenThreadAction = { action ->
-                    actionsOpen = false
-                    onOpenThreadAction(action)
-                },
-            )
         }
         if (detailsOpen) {
             ThreadTopBarDetails(

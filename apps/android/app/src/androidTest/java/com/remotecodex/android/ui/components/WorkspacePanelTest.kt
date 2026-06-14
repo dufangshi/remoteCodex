@@ -1,5 +1,8 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -37,10 +40,6 @@ class WorkspacePanelTest {
         }
 
         composeRule.onNodeWithText("remote-codex-android-e2e").assertExists()
-        composeRule.onNodeWithText("download-me").assertDoesNotExist()
-        composeRule.onNodeWithText("a.txt").assertDoesNotExist()
-
-        composeRule.onNodeWithText("remote-codex-android-e2e").performClick()
         composeRule.onNodeWithText("download-me").assertExists()
         composeRule.onNodeWithText("a.txt").assertDoesNotExist()
 
@@ -58,6 +57,40 @@ class WorkspacePanelTest {
         composeRule.runOnIdle {
             assertEquals("download-me", downloadedPath)
         }
+    }
+
+    @Test
+    fun explorerKeepsExpandedFoldersWhenPreviewChanges() {
+        var workspace by mutableStateOf(sampleWorkspace())
+
+        composeRule.setContent {
+            RemoteCodexTheme(dark = false) {
+                WorkspacePanel(
+                    workspace = workspace,
+                    onSelectFile = { path ->
+                        workspace = workspace.copy(
+                            nodes = workspace.nodes.map { node -> node.copy(selected = node.path == path) },
+                            selectedFile = WorkspaceFilePreview(
+                                title = path,
+                                language = "text",
+                                sizeLabel = "5 bytes",
+                                truncatedLabel = null,
+                                content = "hello",
+                                path = path,
+                                sizeBytes = 5,
+                            ),
+                        )
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("download-me").performClick()
+        composeRule.onNodeWithText("a.txt").assertExists().performClick()
+
+        composeRule.onNodeWithText("download-me").assertExists()
+        composeRule.onNodeWithText("a.txt").assertExists()
+        composeRule.onNodeWithText("b.txt").assertExists()
     }
 }
 

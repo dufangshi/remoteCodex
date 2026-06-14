@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
 import com.remotecodex.android.ui.model.WorkspaceNodePreview
+import com.remotecodex.android.ui.model.WorkspaceFilePreview
 import com.remotecodex.android.ui.model.WorkspacePreview
 import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeRole
 import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeState
@@ -216,7 +218,6 @@ private fun WorkspaceBrowserSurface(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        WorkspaceSummaryStrip(workspace = workspace, modifier = Modifier.fillMaxWidth())
         GraphResizablePanelGroup(modifier = Modifier.weight(1f)) {
             GraphResizablePanel(weight = 1f) {
                 WorkspaceExplorerCard(
@@ -265,42 +266,6 @@ private fun ToolUsageSurface(
 }
 
 @Composable
-private fun WorkspaceSummaryStrip(
-    workspace: WorkspacePreview,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(ThreadColors.Panel)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = workspace.rootLabel,
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = workspace.statusMessage ?: workspace.selectedFile.title,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        MetadataPill(label = "${workspace.nodes.size} nodes")
-        MetadataPill(label = "${workspace.toolEvents.size} calls")
-    }
-}
-
-@Composable
 private fun WorkspaceExplorerCard(
     workspace: WorkspacePreview,
     onOpenGarbage: () -> Unit,
@@ -309,8 +274,19 @@ private fun WorkspaceExplorerCard(
     onUploadNote: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    var expandedPaths by remember(workspace.nodes) {
-        mutableStateOf(emptySet<String>())
+    var expandedPaths by remember(workspace.rootLabel) {
+        mutableStateOf(defaultExpandedWorkspacePaths(workspace.nodes))
+    }
+    LaunchedEffect(workspace.nodes) {
+        val directoryPaths = workspace.nodes
+            .filter { it.kind == WorkspaceNodeKind.Directory }
+            .map { it.path }
+            .toSet()
+        val nextExpandedPaths = expandedPaths
+            .filterTo(mutableSetOf()) { it in directoryPaths } + defaultExpandedWorkspacePaths(workspace.nodes)
+        if (nextExpandedPaths != expandedPaths) {
+            expandedPaths = nextExpandedPaths
+        }
     }
     val visibleNodes = remember(workspace.nodes, expandedPaths) {
         workspace.nodes.filterVisibleWorkspaceNodes(expandedPaths)
@@ -396,6 +372,14 @@ private fun WorkspaceExplorerCard(
             }
         }
     }
+}
+
+private fun defaultExpandedWorkspacePaths(nodes: List<WorkspaceNodePreview>): Set<String> {
+    return nodes
+        .asSequence()
+        .filter { node -> node.kind == WorkspaceNodeKind.Directory && node.depth == 0 }
+        .map { node -> node.path }
+        .toSet()
 }
 
 private fun List<WorkspaceNodePreview>.filterVisibleWorkspaceNodes(
@@ -1022,7 +1006,14 @@ private fun WorkspaceViewerCard(
                 )
             }
         }
-        if (editable) {
+        if (selectedFile.loading) {
+            WorkspaceFileLoadingPreview(
+                selectedFile = selectedFile,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            )
+        } else if (editable) {
             OutlinedTextField(
                 value = draft,
                 onValueChange = { next -> draft = next },
@@ -1089,6 +1080,48 @@ private fun WorkspaceViewerCard(
                     maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceFileLoadingPreview(
+    selectedFile: WorkspaceFilePreview,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(ThreadColors.CodeBackground)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RunningDots(color = ThreadColors.Info, dotSize = 5.dp, spacing = 4.dp)
+            Text(
+                text = "Loading preview",
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text(
+            text = selectedFile.path.ifBlank { selectedFile.title },
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        repeat(5) { index ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (index % 3 == 0) 0.86f else if (index % 3 == 1) 0.64f else 0.74f)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(ThreadColors.SurfaceStrong.copy(alpha = 0.72f)),
+            )
         }
     }
 }

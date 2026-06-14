@@ -189,10 +189,6 @@ class MainActivity : ComponentActivity() {
                                             settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(nextThreadId))
                                             connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.ThreadDetail(nextThreadId))
                                         },
-                                        onOpenWorkspace = { workspaceId ->
-                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.WorkspaceDetail(workspaceId))
-                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.WorkspaceDetail(workspaceId))
-                                        },
                                         onBackToHome = {
                                             settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
                                             connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)

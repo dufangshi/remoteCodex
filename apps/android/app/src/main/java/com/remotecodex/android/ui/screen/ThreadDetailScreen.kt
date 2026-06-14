@@ -65,6 +65,8 @@ import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.model.TimelineSteerPreview
+import com.remotecodex.android.ui.model.WorkspaceFilePreview
+import com.remotecodex.android.ui.model.WorkspaceNodeKind
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
 import com.remotecodex.android.ui.presentation.buildHistoryDetailPreview
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
@@ -96,7 +98,6 @@ fun ThreadDetailScreen(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onOpenThread: (String) -> Unit,
-    onOpenWorkspace: (String) -> Unit,
     onBackToHome: () -> Unit,
     onThreadDeleted: () -> Unit = onBackToHome,
 ) {
@@ -1156,7 +1157,10 @@ fun ThreadDetailScreen(
             requestId = resolvingRequestId,
             selectedOptionLabel = resolvingRequestOptionLabel,
         )
-        withPendingRequestBusy.copy(
+        val withWorkspaceLoading = pendingWorkspaceFilePath
+            ?.let { path -> withPendingRequestBusy.withLoadingWorkspaceFile(path) }
+            ?: withPendingRequestBusy
+        withWorkspaceLoading.copy(
             timelineAuxiliary = withPendingRequestBusy.timelineAuxiliary.copy(
                 loadingEarlier = loadingEarlier,
             ),
@@ -1234,6 +1238,7 @@ fun ThreadDetailScreen(
             onSendShellControl = if (AndroidFeatureFlags.ShellEnabled) sendActiveShellInput else null,
             onClearShell = if (AndroidFeatureFlags.ShellEnabled) clearActiveShell else null,
             onSelectWorkspaceFile = { path ->
+                selectedWorkspaceFilePath = path
                 pendingWorkspaceFilePath = path
             },
             onLoadMoreWorkspacePreview = {
@@ -1251,14 +1256,6 @@ fun ThreadDetailScreen(
             onSaveWorkspaceFile = { path, content ->
                 if (!workspaceSaveBusy) {
                     pendingWorkspaceSave = PendingWorkspaceFileSave(path = path, content = content)
-                }
-            },
-            onReturnToWorkspace = {
-                val workspaceId = threadProjectionState?.detail?.workspace?.id
-                if (workspaceId.isNullOrBlank()) {
-                    onBackToHome()
-                } else {
-                    onOpenWorkspace(workspaceId)
                 }
             },
             onUploadWorkspaceNote = {
@@ -1442,6 +1439,30 @@ private fun shortClockLabel(value: String): String {
             .withZone(java.time.ZoneId.systemDefault())
             .format(Instant.parse(value))
     }.getOrDefault("")
+}
+
+private fun ThreadDetailPreview.withLoadingWorkspaceFile(path: String): ThreadDetailPreview {
+    val title = path.split('/').filter { it.isNotBlank() }.lastOrNull() ?: path
+    return copy(
+        workspacePreview = workspacePreview.copy(
+            selectedFile = WorkspaceFilePreview(
+                title = title,
+                language = "loading",
+                sizeLabel = "preview",
+                truncatedLabel = null,
+                content = "",
+                path = path,
+                loading = true,
+            ),
+            nodes = workspacePreview.nodes.map { node ->
+                if (node.kind == WorkspaceNodeKind.File) {
+                    node.copy(selected = node.path == path)
+                } else {
+                    node.copy(selected = false)
+                }
+            },
+        ),
+    )
 }
 
 private fun ThreadDetailPreview.withPendingRequestBusy(
