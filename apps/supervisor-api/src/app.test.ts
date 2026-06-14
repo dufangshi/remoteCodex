@@ -5803,6 +5803,92 @@ describe('supervisor api', () => {
     expect(savedFiles[0]).toMatch(/^notes-[a-z0-9]{8}\.txt$/);
   });
 
+  it('handles mixed photo and file prompt attachments in one local prompt request', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Mixed Attachment Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const manifest = [
+      {
+        clientId: 'photo-1',
+        kind: 'photo',
+        originalName: 'screen.png',
+        placeholder: '[PHOTO screen.png]'
+      },
+      {
+        clientId: 'file-1',
+        kind: 'file',
+        originalName: 'notes.txt',
+        placeholder: '[FILE notes.txt]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Use the image [PHOTO screen.png] and file [FILE notes.txt].',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: 'screen.png',
+          contentType: 'image/png',
+          content: Buffer.from('fake-png')
+        },
+        {
+          fieldName: 'attachments',
+          fileName: 'notes.txt',
+          contentType: 'text/plain',
+          content: Buffer.from('hello from file')
+        }
+      ]
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
+    const latestPrompt =
+      (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
+    expect(latestPrompt).toContain('[PHOTO ./.temp/threads/');
+    expect(latestPrompt).toContain('/screen-');
+    expect(latestPrompt).toContain('.png]');
+    expect(latestPrompt).toContain('[FILE ./.temp/threads/');
+    expect(latestPrompt).toContain('/notes-');
+    expect(latestPrompt).toContain('.txt]');
+
+    const attachmentDir = path.join(tempDir, 'workspace', '.temp', 'threads', createdThread.id);
+    const savedFiles = await fs.readdir(attachmentDir);
+    expect(savedFiles.sort()).toEqual([
+      expect.stringMatching(/^notes-[a-z0-9]{8}\.txt$/),
+      expect.stringMatching(/^screen-[a-z0-9]{8}\.png$/),
+    ]);
+  });
+
   it('accepts mobile photo uploads even when the browser sends an empty original file name', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

@@ -200,7 +200,7 @@ describe('CodexAppServerManager', () => {
   it('forwards structured image input when starting a turn', async () => {
     const expectedInput = [
       { type: 'text', text: 'Inspect this ', text_elements: [] },
-      { type: 'local_image', path: '/tmp/workspace/photo.png' },
+      { type: 'localImage', path: '/tmp/workspace/photo.png' },
       { type: 'text', text: ' and summarize.', text_elements: [] },
     ];
     const script = [

@@ -46,11 +46,31 @@ describe('CodexRuntimeAdapter', () => {
       input: [
         { type: 'text', text: 'Inspect this ', text_elements: [] },
         {
-          type: 'local_image',
+          type: 'localImage',
           path: '/tmp/workspace/.temp/threads/thread-1/photo.png',
         },
         { type: 'text', text: ' then summarize.', text_elements: [] },
       ],
     });
+  });
+
+  it('keeps mobile photo extensions as structured local image input', async () => {
+    const manager = new FakeCodexManager();
+    const adapter = new CodexRuntimeAdapter(manager as never);
+
+    await adapter.startTurn({
+      providerSessionId: 'thread-1',
+      prompt: 'Inspect [PHOTO ./.temp/threads/thread-1/photo.heic].',
+      workspacePath: '/tmp/workspace',
+    });
+
+    expect(manager.startTurnInput?.input).toEqual([
+      { type: 'text', text: 'Inspect ', text_elements: [] },
+      {
+        type: 'localImage',
+        path: '/tmp/workspace/.temp/threads/thread-1/photo.heic',
+      },
+      { type: 'text', text: '.', text_elements: [] },
+    ]);
   });
 });

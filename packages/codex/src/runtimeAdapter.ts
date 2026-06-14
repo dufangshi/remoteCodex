@@ -59,13 +59,6 @@ import {
 } from './index';
 
 const promptPhotoTokenPattern = /\[PHOTO\s+([^\]]+)\]/g;
-const PROMPT_IMAGE_EXTENSIONS = new Set([
-  '.gif',
-  '.jpeg',
-  '.jpg',
-  '.png',
-  '.webp',
-]);
 
 function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefined) {
   if (!assetPath) {
@@ -103,11 +96,8 @@ function codexUserInputFromPrompt(
     }
 
     const resolvedPath = resolvePromptAssetPath(assetPath, cwd);
-    if (
-      resolvedPath &&
-      PROMPT_IMAGE_EXTENSIONS.has(path.extname(resolvedPath).toLowerCase())
-    ) {
-      input.push({ type: 'local_image', path: resolvedPath });
+    if (resolvedPath) {
+      input.push({ type: 'localImage', path: resolvedPath });
       includedImage = true;
     } else {
       input.push({ type: 'text', text: token, text_elements: [] });

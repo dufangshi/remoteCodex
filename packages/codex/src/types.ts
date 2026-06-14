@@ -341,7 +341,7 @@ export type CodexUserInput =
       text_elements: [];
     }
   | {
-      type: 'local_image';
+      type: 'localImage';
       path: string;
     };
 
