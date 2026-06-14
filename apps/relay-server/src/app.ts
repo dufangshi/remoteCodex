@@ -151,7 +151,9 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
       return;
     }
     const body = updateAccountSchema.parse(request.body ?? {});
-    return store.updateAccount(user.id, body);
+    return store.updateAccount(user.id, {
+      ...(body.username !== undefined ? { username: body.username } : {}),
+    });
   });
 
   app.patch('/relay/account/password', async (request, reply) => {
@@ -550,7 +552,7 @@ async function forwardRelayHttp(input: {
         input.reply.header(name, value);
       }
     }
-    input.reply.status(response.statusCode).send(response.body);
+    input.reply.status(response.statusCode).send(relayResponseBody(response));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Relay request failed.';
     input.reply.status(message.includes('timed out') ? 504 : 503).send({
@@ -558,6 +560,13 @@ async function forwardRelayHttp(input: {
       message,
     } satisfies ApiErrorShape);
   }
+}
+
+function relayResponseBody(response: { body: string; bodyEncoding?: 'utf8' | 'base64' }) {
+  if (response.bodyEncoding === 'base64') {
+    return Buffer.from(response.body, 'base64');
+  }
+  return response.body;
 }
 
 function connectRelayWebsocket(

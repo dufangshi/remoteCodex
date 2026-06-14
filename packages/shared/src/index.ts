@@ -218,6 +218,7 @@ export interface RelayHttpResponsePayload {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
+  bodyEncoding?: 'utf8' | 'base64';
 }
 
 export interface AgentRuntimeStatusDto {

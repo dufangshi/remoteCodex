@@ -752,6 +752,29 @@ describe('supervisor api', () => {
     await relayApp.close();
   });
 
+  it('base64-encodes binary relayed HTTP responses', async () => {
+    const relayApp = Fastify({ logger: false });
+    const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x20]);
+    relayApp.get('/download.pdf', async (_request, reply) => {
+      reply.type('application/pdf').send(pdfBytes);
+    });
+    await relayApp.ready();
+
+    const response = await createRelayRequestHandler(relayApp)({
+      method: 'GET',
+      path: '/download.pdf',
+      headers: {},
+      body: null,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(response.bodyEncoding).toBe('base64');
+    expect(Buffer.from(response.body, 'base64')).toEqual(pdfBytes);
+
+    await relayApp.close();
+  });
+
   it('accepts relayed HTTP requests in relay mode without supervisor admin auth', async () => {
     await app.close();
     const relayTunnelClient = {

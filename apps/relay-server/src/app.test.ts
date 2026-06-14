@@ -691,6 +691,58 @@ describe('relay server', () => {
     });
   });
 
+  it('preserves binary relayed HTTP responses from pending tunnel requests', async () => {
+    const broker = new RelayRequestBroker(1000);
+    const sent: string[] = [];
+    const responsePromise = broker.forward(
+      {
+        send: (message) => {
+          sent.push(message);
+        },
+      },
+      {
+        type: 'relay.request',
+        timestamp: '2026-06-10T00:00:00.000Z',
+        requestId: 'request-binary',
+        payload: {
+          method: 'GET',
+          path: '/api/threads/thread-1/exports/pdf',
+          headers: {},
+          body: null,
+        },
+      },
+    );
+
+    expect(JSON.parse(sent[0]!)).toMatchObject({
+      type: 'relay.request',
+      requestId: 'request-binary',
+      payload: {
+        path: '/api/threads/thread-1/exports/pdf',
+      },
+    });
+
+    const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x20]);
+    expect(
+      broker.accept({
+        type: 'relay.response',
+        timestamp: '2026-06-10T00:00:01.000Z',
+        requestId: 'request-binary',
+        payload: {
+          statusCode: 200,
+          headers: {
+            'content-type': 'application/pdf',
+          },
+          body: pdfBytes.toString('base64'),
+          bodyEncoding: 'base64',
+        },
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    expect(response.bodyEncoding).toBe('base64');
+    expect(Buffer.from(response.body, 'base64')).toEqual(pdfBytes);
+  });
+
   it('rejects pending relay requests when the supervisor does not answer', async () => {
     vi.useFakeTimers();
     const broker = new RelayRequestBroker(30_000);
