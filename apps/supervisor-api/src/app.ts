@@ -584,6 +584,12 @@ export function createRelayRequestHandler(app: FastifyInstance) {
   return async function handleRelayRequest(
     request: RelayHttpRequestPayload,
   ): Promise<RelayHttpResponsePayload> {
+    const payload =
+      request.body === null
+        ? undefined
+        : request.bodyEncoding === 'base64'
+          ? Buffer.from(request.body, 'base64')
+          : request.body;
     const response = await app.inject({
       method: request.method as any,
       url: request.path,
@@ -591,7 +597,7 @@ export function createRelayRequestHandler(app: FastifyInstance) {
         ...request.headers,
         [RELAY_FORWARD_HEADER]: '1',
       },
-      ...(request.body !== null ? { payload: request.body } : {}),
+      ...(payload !== undefined ? { payload } : {}),
     });
 
     return {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import type { RelayAdminSummaryDto } from '../../../../packages/shared/src/index';
+import { RelayUserMenu } from '../components/RelayUserMenu';
 import {
   ApiError,
   enableRelayMode,
@@ -80,6 +81,7 @@ export function RelayAdminPage() {
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
+      <RelayUserMenu />
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
         <header className="flex flex-col gap-3 border-b border-[var(--theme-border)] pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>

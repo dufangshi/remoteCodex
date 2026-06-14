@@ -304,6 +304,46 @@ export class RelayStore {
     return this.publicUser({ ...user, enabled });
   }
 
+  updateAccount(userId: string, input: { username?: string }) {
+    const user = this.requireUser(userId);
+    const username =
+      input.username !== undefined ? normalizeUsername(input.username) : user.username;
+    if (username.length < 3) {
+      throw new RelayStoreError(400, 'bad_request', 'Username must be at least 3 characters.');
+    }
+    const existingUsername = this.getUserByUsername(username);
+    if (existingUsername && existingUsername.id !== user.id) {
+      throw new RelayStoreError(409, 'conflict', 'A user with that username already exists.');
+    }
+    this.sqlite
+      .prepare('UPDATE relay_users SET username = ? WHERE id = ?')
+      .run(username, user.id);
+    return this.publicUser({ ...user, username });
+  }
+
+  updatePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string },
+  ) {
+    const user = this.requireUser(userId);
+    if (!verifySecret(input.currentPassword, user.passwordSalt, user.passwordHash)) {
+      throw new RelayStoreError(403, 'forbidden', 'Current password is incorrect.');
+    }
+    if (input.newPassword.length < 8) {
+      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+    }
+    const passwordSalt = crypto.randomBytes(16).toString('base64url');
+    const passwordHash = hashSecret(input.newPassword, passwordSalt);
+    this.sqlite
+      .prepare('UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?')
+      .run(passwordSalt, passwordHash, user.id);
+    return this.publicUser({
+      ...user,
+      passwordSalt,
+      passwordHash,
+    });
+  }
+
   emptySession(): RelaySessionDto {
     return {
       authenticated: false,

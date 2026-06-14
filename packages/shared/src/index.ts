@@ -211,6 +211,7 @@ export interface RelayHttpRequestPayload {
   path: string;
   headers: Record<string, string>;
   body: string | null;
+  bodyEncoding?: 'utf8' | 'base64';
 }
 
 export interface RelayHttpResponsePayload {

@@ -104,9 +104,13 @@ describe('relay server', () => {
       accept: 'application/json, text/plain',
     });
 
-    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toBe(
-      '{"absPath":"/repo","label":"Android E2E"}',
-    );
+    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toEqual({
+      body: '{"absPath":"/repo","label":"Android E2E"}',
+    });
+    expect(relayRequestBody(Buffer.from([0, 1, 255]))).toEqual({
+      body: 'AAH/',
+      bodyEncoding: 'base64',
+    });
   });
 
   it('registers users and lets them create relay devices', async () => {
@@ -224,6 +228,67 @@ describe('relay server', () => {
       email: 'invited@example.test',
       username: 'invited',
     });
+
+    await app.close();
+  });
+
+  it('lets relay users update username and password', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'account@example.test',
+        username: 'account',
+        password: 'password123',
+      },
+    });
+    const token = registerResponse.json().token;
+
+    const accountResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/account',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { username: 'renamed' },
+    });
+    expect(accountResponse.statusCode).toBe(200);
+    expect(accountResponse.json()).toMatchObject({
+      username: 'renamed',
+      email: 'account@example.test',
+    });
+
+    const passwordResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/account/password',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentPassword: 'password123',
+        newPassword: 'new-password-123',
+      },
+    });
+    expect(passwordResponse.statusCode).toBe(200);
+
+    const oldLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'renamed',
+        password: 'password123',
+      },
+    });
+    expect(oldLoginResponse.statusCode).toBe(401);
+
+    const newLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'renamed',
+        password: 'new-password-123',
+      },
+    });
+    expect(newLoginResponse.statusCode).toBe(200);
 
     await app.close();
   });

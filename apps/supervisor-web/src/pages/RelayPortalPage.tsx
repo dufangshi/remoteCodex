@@ -21,6 +21,7 @@ import {
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
 } from '../lib/api';
+import { RelayUserMenu } from '../components/RelayUserMenu';
 
 type AuthMode = 'login' | 'register';
 
@@ -511,6 +512,7 @@ function ShareForm({
 function RelayFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
+      <RelayUserMenu />
       <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center">
         {children}
       </div>

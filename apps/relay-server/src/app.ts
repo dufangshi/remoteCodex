@@ -69,9 +69,19 @@ const createShareSchema = z.object({
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
 });
+const updateAccountSchema = z.object({
+  username: z.string().trim().min(3).optional(),
+});
+const updatePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
 
 export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   const app = Fastify({ logger: false });
+  app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
+    done(null, body);
+  });
   const store = RelayStore.fromDataDir(
     config.dataDir,
     config.sessionSecret,
@@ -133,6 +143,24 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   app.post('/relay/auth/logout', async (_request, reply) => {
     clearRelayCookie(reply);
     return store.emptySession();
+  });
+
+  app.patch('/relay/account', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const body = updateAccountSchema.parse(request.body ?? {});
+    return store.updateAccount(user.id, body);
+  });
+
+  app.patch('/relay/account/password', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const body = updatePasswordSchema.parse(request.body ?? {});
+    return store.updatePassword(user.id, body);
   });
 
   app.get('/relay/portal', async (request, reply) => {
@@ -502,6 +530,7 @@ async function forwardRelayHttp(input: {
 
   try {
     const requestId = randomUUID();
+    const requestBody = relayRequestBody(input.request.body);
     const response = await supervisor.requestBroker.forward(supervisor.socket, {
       type: 'relay.request',
       timestamp: new Date().toISOString(),
@@ -511,7 +540,8 @@ async function forwardRelayHttp(input: {
         method: input.request.method,
         path: input.targetPath,
         headers: relayRequestHeaders(input.request.headers),
-        body: relayRequestBody(input.request.body),
+        body: requestBody.body,
+        ...(requestBody.bodyEncoding ? { bodyEncoding: requestBody.bodyEncoding } : {}),
       },
     });
 
@@ -797,20 +827,26 @@ function shouldForwardSocketEvent(
   return 'threadId' in event && event.threadId === threadId;
 }
 
-export function relayRequestBody(body: unknown) {
+export function relayRequestBody(body: unknown): {
+  body: string | null;
+  bodyEncoding?: 'base64';
+} {
   if (body === undefined || body === null) {
-    return null;
+    return { body: null };
   }
 
   if (typeof body === 'string') {
-    return body;
+    return { body };
   }
 
   if (Buffer.isBuffer(body)) {
-    return body.toString('utf8');
+    return {
+      body: body.toString('base64'),
+      bodyEncoding: 'base64',
+    };
   }
 
-  return JSON.stringify(body);
+  return { body: JSON.stringify(body) };
 }
 
 export function relayRequestHeaders(headers: Record<string, string | string[] | undefined>) {

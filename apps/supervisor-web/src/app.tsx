@@ -27,15 +27,17 @@ import {
   AppShellNavigationMenu,
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
+import { RelayUserMenu } from './components/RelayUserMenu';
 import { ControlPlanePage } from './pages/ControlPlanePage';
 import {
   ControlPlaneAuthGuard,
   ControlPlaneLoginPage,
 } from './pages/ControlPlaneLoginPage';
 import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
-import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
+import { RelayDevicesPage } from './pages/RelayDevicesPage';
 import { RelayPortalPage } from './pages/RelayPortalPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -63,7 +65,7 @@ function controlPlaneDefaultEnabled() {
 }
 
 function RootPage() {
-  return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <LandingPage />;
+  return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <Navigate to="/workspaces" replace />;
 }
 
 function RoutePluginProvider({ children }: { children: ReactNode }) {
@@ -181,6 +183,7 @@ function AppShell({
             : 'min-h-screen'
         }`}
       >
+        <RelayUserMenu />
         {!usesInlineTopbar && !ownsNavigationShell && (
           <div className="fixed left-4 top-4 z-50">
             <AppShellMenuButton />
@@ -385,6 +388,15 @@ function RelayGate({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+function SupervisorAccessGate({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  if (location.pathname.startsWith('/control-plane')) {
+    return children;
+  }
+
+  return relayModeActive() ? <RelayGate>{children}</RelayGate> : <AuthGate>{children}</AuthGate>;
+}
+
 function SupervisorRoutes({
   themeMode,
   setThemeMode,
@@ -396,7 +408,7 @@ function SupervisorRoutes({
 }) {
   return (
     <Routes>
-      <Route path="/" element={relayModeActive() ? <RelayPortalPage /> : <LandingPage />} />
+      <Route path="/" element={<Navigate to="/workspaces" replace />} />
       <Route
         element={
           <AppShell
@@ -408,6 +420,8 @@ function SupervisorRoutes({
       >
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+        <Route path="/relay-account" element={<RelayAccountPage />} />
+        <Route path="/relay-devices" element={<RelayDevicesPage />} />
         <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
         <Route
           path="/control-plane"
@@ -492,23 +506,13 @@ export function App() {
             <Route
               path="/*"
               element={
-                relayModeActive() ? (
-                  <RelayGate>
-                    <SupervisorRoutes
-                      themeMode={themeMode}
-                      setThemeMode={setThemeMode}
-                      effectiveTheme={effectiveTheme}
-                    />
-                  </RelayGate>
-                ) : (
-                  <AuthGate>
-                    <SupervisorRoutes
-                      themeMode={themeMode}
-                      setThemeMode={setThemeMode}
-                      effectiveTheme={effectiveTheme}
-                    />
-                  </AuthGate>
-                )
+                <SupervisorAccessGate>
+                  <SupervisorRoutes
+                    themeMode={themeMode}
+                    setThemeMode={setThemeMode}
+                    effectiveTheme={effectiveTheme}
+                  />
+                </SupervisorAccessGate>
               }
             />
           </Routes>

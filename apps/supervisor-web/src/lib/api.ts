@@ -1213,6 +1213,23 @@ export function deleteRelayDevice(deviceId: string) {
   });
 }
 
+export function updateRelayAccount(input: { username?: string }) {
+  return request<RelayUserDto>('/relay/account', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateRelayPassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  return request<RelayUserDto>('/relay/account/password', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
 export function createRelayShare(input: {
   targetUsername: string;
   deviceId: string;

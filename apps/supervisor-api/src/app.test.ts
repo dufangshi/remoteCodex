@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
+import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -724,6 +725,31 @@ describe('supervisor api', () => {
       version: '0.1.0-test',
     });
     expect(response.headers['content-type']).toContain('application/json');
+  });
+
+  it('decodes base64 relayed HTTP request bodies before Fastify inject', async () => {
+    const relayApp = Fastify({ logger: false });
+    relayApp.post('/echo', async (request) => ({
+      contentType: request.headers['content-type'],
+      body: request.body,
+    }));
+    await relayApp.ready();
+
+    const response = await createRelayRequestHandler(relayApp)({
+      method: 'POST',
+      path: '/echo',
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify({ ok: true }), 'utf8').toString('base64'),
+      bodyEncoding: 'base64',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      contentType: 'application/json',
+      body: { ok: true },
+    });
+
+    await relayApp.close();
   });
 
   it('accepts relayed HTTP requests in relay mode without supervisor admin auth', async () => {
