@@ -72,6 +72,16 @@ function mapTurn(record: any): CodexTurnRecord {
   };
 }
 
+function textOnlyUserInput(prompt: string): NonNullable<TurnStartInput['input']> {
+  return [
+    {
+      type: 'text',
+      text: prompt,
+      text_elements: []
+    }
+  ];
+}
+
 function mapModel(record: any): CodexModelRecord {
   return {
     id: record.id,
@@ -452,13 +462,7 @@ export class CodexAppServerManager extends EventEmitter {
     await this.ensureReady();
     const response = await this.client!.request<{ turn: any }>('turn/start', {
       threadId: input.threadId,
-      input: [
-        {
-          type: 'text',
-          text: input.prompt,
-          text_elements: []
-        }
-      ],
+      input: input.input ?? textOnlyUserInput(input.prompt),
       model: input.model ?? null,
       serviceTier:
         input.serviceTier === undefined ? undefined : input.serviceTier,
@@ -483,13 +487,7 @@ export class CodexAppServerManager extends EventEmitter {
     const response = await this.client!.request<{ turn?: any }>('turn/steer', {
       threadId: input.threadId,
       expectedTurnId: input.turnId,
-      input: [
-        {
-          type: 'text',
-          text: input.prompt,
-          text_elements: []
-        }
-      ]
+      input: input.input ?? textOnlyUserInput(input.prompt)
     });
     return response.turn ? mapTurn(response.turn) : null;
   }

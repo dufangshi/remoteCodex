@@ -563,6 +563,7 @@ export interface ThreadDto {
 
 export interface ThreadHistoryItemDto {
   id: string;
+  createdAt?: string | null;
   kind:
     | 'userMessage'
     | 'agentMessage'

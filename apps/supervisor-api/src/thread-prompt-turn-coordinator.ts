@@ -198,6 +198,7 @@ export class ThreadPromptTurnCoordinator {
           providerSessionId: record.providerSessionId,
           providerTurnId: steerTurnId,
           prompt: input.prompt,
+          workspacePath: input.workspacePath,
         });
 
         updateThreadRecord(this.db, localThreadId, {

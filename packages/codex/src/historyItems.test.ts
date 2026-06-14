@@ -84,6 +84,39 @@ describe('codex history item persistence policy', () => {
     });
   });
 
+  it('preserves per-item timestamps when mapping Codex turn history', () => {
+    const turn = codexTurnToAgentTurn({
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'user-1',
+          type: 'userMessage',
+          text: 'start',
+          createdAt: '2026-06-13T22:00:01.123Z',
+        },
+        {
+          id: 'agent-1',
+          type: 'agentMessage',
+          text: 'done',
+          completedAt: '2026-06-13T22:00:08.456Z',
+        },
+      ],
+    });
+
+    expect(turn.items).toMatchObject([
+      {
+        id: 'user-1',
+        createdAt: '2026-06-13T22:00:01.123Z',
+      },
+      {
+        id: 'agent-1',
+        createdAt: '2026-06-13T22:00:08.456Z',
+      },
+    ]);
+  });
+
   it('keeps MCP tool result text extractable for plugin artifacts', () => {
     const artifactText = [
       'Created a 3D molecule artifact for Methane.',

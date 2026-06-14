@@ -55,6 +55,7 @@ import type {
   ThreadEventEnvelope,
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
+  WorkspaceFileDto,
   ThreadShellStateDto,
   RenameProviderHostConfigArchiveInput,
   UpdateShellInput,
@@ -1467,6 +1468,19 @@ export function uploadWorkspaceFile(workspaceId: string, input: { file: File }) 
     {
       method: 'POST',
       body: formData,
+    },
+  );
+}
+
+export function writeWorkspaceFile(
+  workspaceId: string,
+  input: { path: string; content: string },
+) {
+  return request<WorkspaceFileDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(input),
     },
   );
 }

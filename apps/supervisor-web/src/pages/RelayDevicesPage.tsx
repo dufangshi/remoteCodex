@@ -30,6 +30,7 @@ export function RelayDevicesPage() {
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
   const [deviceName, setDeviceName] = useState('');
   const [createdDevice, setCreatedDevice] = useState<RelayCreateDeviceResultDto | null>(null);
+  const [copiedDeviceId, setCopiedDeviceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +88,20 @@ export function RelayDevicesPage() {
     setSelectedRelayDeviceId(device.id);
     setSelectedRelayThreadId(null);
     navigate('/workspaces');
+  }
+
+  async function copySupervisorSetup(device: RelayDeviceDto) {
+    const token =
+      createdDevice?.device.id === device.id ? createdDevice.token : null;
+    try {
+      await navigator.clipboard?.writeText(relaySupervisorCommand(token));
+      setCopiedDeviceId(device.id);
+      window.setTimeout(() => {
+        setCopiedDeviceId((current) => (current === device.id ? null : current));
+      }, 1600);
+    } catch {
+      // Clipboard access can be unavailable in non-secure contexts.
+    }
   }
 
   return (
@@ -172,10 +187,13 @@ export function RelayDevicesPage() {
                 {portal.devices.map((device) => (
                   <DeviceRow
                     busy={busy === device.id}
+                    copiedSetup={copiedDeviceId === device.id}
                     device={device}
                     key={device.id}
                     onConnect={() => connectDevice(device)}
+                    onCopySetup={() => void copySupervisorSetup(device)}
                     onDelete={() => void removeDevice(device)}
+                    setupTokenAvailable={createdDevice?.device.id === device.id}
                   />
                 ))}
               </div>
@@ -194,13 +212,19 @@ export function RelayDevicesPage() {
 function DeviceRow({
   device,
   busy,
+  copiedSetup,
   onConnect,
+  onCopySetup,
   onDelete,
+  setupTokenAvailable,
 }: {
   device: RelayDeviceDto;
   busy: boolean;
+  copiedSetup: boolean;
   onConnect: () => void;
+  onCopySetup: () => void;
   onDelete: () => void;
+  setupTokenAvailable: boolean;
 }) {
   return (
     <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
@@ -224,6 +248,19 @@ function DeviceRow({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            className="relay-button-secondary inline-flex items-center gap-2"
+            onClick={onCopySetup}
+            title={
+              setupTokenAvailable
+                ? 'Copy relay supervisor setup command'
+                : 'Copy setup command with a token placeholder. Existing device tokens are not shown again.'
+            }
+            type="button"
+          >
+            <Copy className="h-4 w-4" />
+            {copiedSetup ? 'Copied' : 'Copy setup'}
+          </button>
           <button
             className="relay-button-primary inline-flex items-center gap-2"
             disabled={!device.connected}
@@ -309,9 +346,21 @@ function Notice({
   );
 }
 
-function relaySupervisorCommand(token: string) {
+function relaySupervisorCommand(token: string | null) {
   const relayUrl = relayWebsocketBaseUrl();
-  return `REMOTE_CODEX_RELAY_SERVER_URL=${relayUrl} REMOTE_CODEX_RELAY_AGENT_TOKEN=${token} remote-codex relay-supervisor`;
+  return [
+    `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
+    `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token ?? '<device-token>')} \\`,
+    'remote-codex relay-supervisor',
+  ].join('\n');
+}
+
+function shellQuote(value: string) {
+  if (/^[A-Za-z0-9_./:@%+=,~-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function relayWebsocketBaseUrl() {

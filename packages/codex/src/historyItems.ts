@@ -46,6 +46,51 @@ function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function isoTimestampOrNull(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const epochMs = value < 10_000_000_000 ? value * 1000 : value;
+    return new Date(epochMs).toISOString();
+  }
+
+  const text = stringOrNull(value);
+  if (!text) {
+    return null;
+  }
+
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function codexItemCreatedAt(item: CodexTurnItem) {
+  const candidates = [
+    item.createdAt,
+    item.created_at,
+    item.startedAt,
+    item.started_at,
+    item.completedAt,
+    item.completed_at,
+  ];
+
+  for (const candidate of candidates) {
+    const timestamp = isoTimestampOrNull(candidate);
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+
+  return parseUuidV7Timestamp(item.id);
+}
+
+function withCodexItemTimestamp<T extends ThreadHistoryItemDto>(
+  item: CodexTurnItem,
+  historyItem: T,
+): T {
+  return {
+    ...historyItem,
+    createdAt: historyItem.createdAt ?? codexItemCreatedAt(item),
+  };
+}
+
 function numberOrNull(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -1319,7 +1364,7 @@ export function liveCodexItemToHistoryItem(
   item: CodexTurnItem,
   phase: 'started' | 'completed',
 ): ThreadHistoryItemDto | null {
-  const historyItem = itemToHistoryItem(item);
+  const historyItem = withCodexItemTimestamp(item, itemToHistoryItem(item));
 
   if (
     historyItem.kind !== 'commandExecution' &&
@@ -1365,7 +1410,9 @@ export function codexTurnToAgentTurn(turn: CodexTurnRecord): AgentTurn {
     rawTurnId: turn.id,
     status: turn.status,
     error: turn.error,
-    items: turn.items.map((item) => itemToHistoryItem(item)),
+    items: turn.items.map((item) =>
+      withCodexItemTimestamp(item, itemToHistoryItem(item)),
+    ),
     rawTurn: turn,
   };
 }

@@ -197,6 +197,58 @@ describe('CodexAppServerManager', () => {
     await manager.stop();
   });
 
+  it('forwards structured image input when starting a turn', async () => {
+    const expectedInput = [
+      { type: 'text', text: 'Inspect this ', text_elements: [] },
+      { type: 'local_image', path: '/tmp/workspace/photo.png' },
+      { type: 'text', text: ' and summarize.', text_elements: [] },
+    ];
+    const script = [
+      "const readline=require('node:readline');",
+      "const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      `const expectedInput=${JSON.stringify(expectedInput)};`,
+      "rl.on('line',(line)=>{",
+      " const msg=JSON.parse(line);",
+      " if(msg.method==='initialize'){",
+      "  process.stdout.write(JSON.stringify({id:msg.id,result:{userAgent:'fake',codexHome:'/tmp',platformFamily:'unix',platformOs:'linux'}})+'\\n');",
+      " } else if(msg.method==='turn/start'){",
+      "  if(JSON.stringify(msg.params?.input)===JSON.stringify(expectedInput)){",
+      "   process.stdout.write(JSON.stringify({id:msg.id,result:{turn:{id:'turn-1',status:'completed',items:[]}}})+'\\n');",
+      "  } else {",
+      "   process.stdout.write(JSON.stringify({id:msg.id,error:{code:-32600,message:'bad start input',data:msg.params}})+'\\n');",
+      "  }",
+      " }",
+      "});"
+    ].join('');
+
+    const manager = new CodexAppServerManager({
+      command: process.execPath,
+      startupTimeoutMs: 1000,
+      clientInfo: {
+        name: 'test',
+        title: 'test',
+        version: '0.1.0'
+      },
+      spawnProcess: (command) => {
+        return spawn(command, ['-e', script], { stdio: 'pipe' });
+      }
+    });
+
+    await manager.start();
+    const turn = await manager.startTurn({
+      threadId: 'thread-1',
+      prompt: 'Inspect this [PHOTO photo.png] and summarize.',
+      input: expectedInput,
+    });
+
+    expect(turn).toMatchObject({
+      id: 'turn-1',
+      status: 'completed',
+    });
+
+    await manager.stop();
+  });
+
   it('writes hook trust state through config batch writes', async () => {
     const requests: any[] = [];
     const script = [

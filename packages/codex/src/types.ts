@@ -318,6 +318,7 @@ export interface ThreadRollbackInput {
 export interface TurnStartInput {
   threadId: string;
   prompt: string;
+  input?: CodexUserInput[];
   developerInstructions?: string | null;
   model?: string | null;
   effort?: ReasoningEffort | null;
@@ -330,7 +331,19 @@ export interface TurnSteerInput {
   threadId: string;
   turnId: string;
   prompt: string;
+  input?: CodexUserInput[];
 }
+
+export type CodexUserInput =
+  | {
+      type: 'text';
+      text: string;
+      text_elements: [];
+    }
+  | {
+      type: 'local_image';
+      path: string;
+    };
 
 export interface ThreadCompactInput {
   threadId: string;

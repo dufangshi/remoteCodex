@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 
 import type {
   AgentModel,
@@ -56,6 +57,72 @@ import {
   JsonRpcClientError,
   supportsFastMode,
 } from './index';
+
+const promptPhotoTokenPattern = /\[PHOTO\s+([^\]]+)\]/g;
+const PROMPT_IMAGE_EXTENSIONS = new Set([
+  '.gif',
+  '.jpeg',
+  '.jpg',
+  '.png',
+  '.webp',
+]);
+
+function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefined) {
+  if (!assetPath) {
+    return null;
+  }
+  if (path.isAbsolute(assetPath)) {
+    return path.normalize(assetPath);
+  }
+  if (!cwd) {
+    return null;
+  }
+  return path.resolve(cwd, assetPath);
+}
+
+function codexUserInputFromPrompt(
+  prompt: string,
+  cwd: string | null | undefined,
+): TurnStartInput['input'] | undefined {
+  const matches = [...prompt.matchAll(promptPhotoTokenPattern)];
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  const input: NonNullable<TurnStartInput['input']> = [];
+  let cursor = 0;
+  let includedImage = false;
+
+  for (const match of matches) {
+    const token = match[0];
+    const assetPath = match[1]?.trim() ?? '';
+    const start = match.index ?? 0;
+    const precedingText = prompt.slice(cursor, start);
+    if (precedingText) {
+      input.push({ type: 'text', text: precedingText, text_elements: [] });
+    }
+
+    const resolvedPath = resolvePromptAssetPath(assetPath, cwd);
+    if (
+      resolvedPath &&
+      PROMPT_IMAGE_EXTENSIONS.has(path.extname(resolvedPath).toLowerCase())
+    ) {
+      input.push({ type: 'local_image', path: resolvedPath });
+      includedImage = true;
+    } else {
+      input.push({ type: 'text', text: token, text_elements: [] });
+    }
+
+    cursor = start + token.length;
+  }
+
+  const trailingText = prompt.slice(cursor);
+  if (trailingText) {
+    input.push({ type: 'text', text: trailingText, text_elements: [] });
+  }
+
+  return includedImage ? input : undefined;
+}
 
 export const codexCapabilities: AgentProviderCapabilities = {
   sessions: {
@@ -661,6 +728,13 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
       threadId: input.providerSessionId,
       prompt: input.prompt,
     };
+    const structuredInput = codexUserInputFromPrompt(
+      input.prompt,
+      input.workspacePath,
+    );
+    if (structuredInput) {
+      turnInput.input = structuredInput;
+    }
     if (input.developerInstructions !== undefined) {
       turnInput.developerInstructions = input.developerInstructions;
     }
@@ -689,11 +763,17 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   async sendInput(input: SendAgentInputInput): Promise<AgentTurn | null> {
-    const turn = await codexRuntimeCall(() => this.manager.steerTurn({
+    const structuredInput = codexUserInputFromPrompt(
+      input.prompt,
+      input.workspacePath,
+    );
+    const steerInput = {
       threadId: input.providerSessionId,
       turnId: input.providerTurnId,
       prompt: input.prompt,
-    }));
+      ...(structuredInput ? { input: structuredInput } : {}),
+    };
+    const turn = await codexRuntimeCall(() => this.manager.steerTurn(steerInput));
     return turn ? mapTurn(turn) : null;
   }
 

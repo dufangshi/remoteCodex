@@ -88,6 +88,7 @@ import {
   terminateShell,
   untrustThreadHook,
   uploadWorkspaceFile,
+  writeWorkspaceFile,
   downloadWorkspaceFile,
   buildWorkspaceRawFileUrl,
 } from '../lib/api';
@@ -3457,6 +3458,12 @@ export function ThreadDetailPage() {
         buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       uploadFile: (input) =>
         uploadWorkspaceFile(workspaceId, { file: input.file }),
+      writeFile: async (input) => {
+        await writeWorkspaceFile(workspaceId, {
+          path: input.path,
+          content: input.content,
+        });
+      },
       downloadNode: async (input) => {
         if (input.kind !== 'file') {
           return;

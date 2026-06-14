@@ -317,6 +317,7 @@ export class ThreadLiveStateStore {
           }
         : {
             id: input.itemId,
+            createdAt: new Date().toISOString(),
             kind: 'agentMessage',
             text: input.delta,
             sequence: input.sequence,
