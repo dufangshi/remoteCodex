@@ -526,16 +526,16 @@ private fun mergeTurnItems(
         }
         val protectCompleted = localItem.id in protectedItemIds
         localItem.shouldRetainAcrossRefresh(protectCompleted = protectCompleted) &&
-            !localItem.isSupersededByCompletedServerTurn(serverItems, serverTurnCompleted)
+            !localItem.isSupersededByMaterializedServerItem(serverItems, serverTurnCompleted)
     }
     return (mergedServerItems + localOnlyItems).sortBySequence()
 }
 
-private fun SupervisorThreadTurnItem.isSupersededByCompletedServerTurn(
+private fun SupervisorThreadTurnItem.isSupersededByMaterializedServerItem(
     serverItems: List<SupervisorThreadTurnItem>,
     serverTurnCompleted: Boolean,
 ): Boolean {
-    if (!serverTurnCompleted || kind != "agentMessage") {
+    if (kind != "agentMessage") {
         return false
     }
     val localSequence = sequence
@@ -545,7 +545,8 @@ private fun SupervisorThreadTurnItem.isSupersededByCompletedServerTurn(
             (
                 localSequence == null ||
                     serverItem.sequence == localSequence ||
-                    (serverItem.sequence != null && serverItem.sequence >= localSequence)
+                    (serverItem.sequence != null && serverItem.sequence >= localSequence) ||
+                    serverTurnCompleted
             )
     }
 }
@@ -630,8 +631,9 @@ private fun List<SupervisorThreadTurnItem>.sortBySequence(): List<SupervisorThre
     return mapIndexed { index, item -> index to item }
         .sortedWith(
             compareBy<Pair<Int, SupervisorThreadTurnItem>>(
-                { (_, item) -> if (item.kind == "userMessage") 0 else 1 },
-                { (_, item) -> item.sequence ?: Int.MAX_VALUE },
+                { (_, item) ->
+                    item.sequence ?: if (item.kind == "userMessage") Int.MIN_VALUE else Int.MAX_VALUE
+                },
                 { (index, _) -> index },
             ),
         )

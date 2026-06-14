@@ -203,6 +203,13 @@ fun ThreadTimeline(
                 EphemeralUserNoteCard(text = note)
             }
         }
+        item(key = "timeline-tail-anchor") {
+            androidx.compose.foundation.layout.Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 1.dp),
+            )
+        }
     }
 }
 

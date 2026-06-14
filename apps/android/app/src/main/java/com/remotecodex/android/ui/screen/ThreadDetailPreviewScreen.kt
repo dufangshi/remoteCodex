@@ -437,8 +437,9 @@ private fun androidx.compose.foundation.lazy.LazyListState.isTailVisible(): Bool
     if (totalItems == 0) {
         return true
     }
-    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
-    return lastVisible >= totalItems - 2
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+    return lastVisible.index == totalItems - 1 &&
+        lastVisible.offset + lastVisible.size <= layoutInfo.viewportEndOffset + 24
 }
 
 private fun timelineLastIndex(detail: ThreadDetailPreview): Int {
@@ -477,5 +478,6 @@ private fun ThreadDetailPreview.timelineItemCount(): Int {
         (if (timelineAuxiliary.canLoadEarlier) 1 else 0) +
         turns.size +
         timelineAuxiliary.pendingSteers.size +
-        (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0)
+        (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0) +
+        1
 }

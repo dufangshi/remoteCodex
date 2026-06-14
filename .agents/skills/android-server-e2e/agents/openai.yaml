@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Server E2E"
+  short_description: "Run Android emulator server-mode E2E checks"
+  default_prompt: "Use $android-server-e2e to start server mode and run an authenticated Android emulator E2E smoke."

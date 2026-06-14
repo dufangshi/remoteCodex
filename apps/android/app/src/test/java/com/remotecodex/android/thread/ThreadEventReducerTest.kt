@@ -578,6 +578,94 @@ class ThreadEventReducerTest {
     }
 
     @Test
+    fun sequencedSteerUserMessageStaysAtItsEventPosition() {
+        val first = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "assistant-early",
+                        "kind": "agentMessage",
+                        "text": "Early assistant",
+                        "status": "completed",
+                        "sequence": 2
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val steer = reduceThreadEvent(
+            state = first.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "steer-1",
+                        "kind": "userMessage",
+                        "text": "Steer now",
+                        "sequence": 3
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(
+            listOf("item-0", "assistant-early", "steer-1"),
+            steer.detail.turns.single().items.map { item -> item.id },
+        )
+    }
+
+    @Test
+    fun runningRefreshDropsStreamingShardWhenMaterializedAssistantItemExists() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"streaming-shard","sequence":2,"delta":"p"}""",
+            ),
+        )
+
+        val runningRefresh = streaming.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T12:00:00.000Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-0",
+                                kind = "userMessage",
+                                text = "Start",
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "materialized-agent",
+                                kind = "agentMessage",
+                                text = "Partial materialized reply",
+                                status = "running",
+                                sequence = 2,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val items = runningRefresh.detail.turns.single().items
+        assertFalse(items.any { item -> item.id == "streaming-shard" })
+        assertEquals("Partial materialized reply", items.single { item -> item.id == "materialized-agent" }.text)
+    }
+
+    @Test
     fun outputDeltaForMissingTurnCreatesLocalRunningTurnAndRefreshes() {
         val result = reduceThreadEvent(
             detail = baseDetail(),

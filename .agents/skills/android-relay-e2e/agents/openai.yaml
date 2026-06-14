@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Relay E2E"
+  short_description: "Run Android emulator relay-mode E2E checks"
+  default_prompt: "Use $android-relay-e2e to start relay mode and run an Android emulator E2E with streaming and steering."
