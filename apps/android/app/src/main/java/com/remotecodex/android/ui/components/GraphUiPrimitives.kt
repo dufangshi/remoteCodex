@@ -97,6 +97,7 @@ enum class GraphActionIcon {
 enum class GraphSelectionTone {
     Success,
     Warning,
+    Info,
 }
 
 @Composable
@@ -207,10 +208,12 @@ fun GraphSelectionGlyph(
     val toneForeground = when (tone) {
         GraphSelectionTone.Success -> ThreadColors.Success
         GraphSelectionTone.Warning -> ThreadColors.Warning
+        GraphSelectionTone.Info -> ThreadColors.Info
     }
     val toneBackground = when (tone) {
         GraphSelectionTone.Success -> ThreadColors.SuccessSoft
         GraphSelectionTone.Warning -> ThreadColors.WarningSoft
+        GraphSelectionTone.Info -> ThreadColors.InfoSoft
     }
     val foreground = if (selected) toneForeground else ThreadColors.ForegroundMuted
     val background = if (selected) toneBackground else ThreadColors.SurfaceStrong

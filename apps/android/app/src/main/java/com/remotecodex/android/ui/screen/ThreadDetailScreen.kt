@@ -1541,6 +1541,9 @@ private fun SupervisorApiClient.fetchThreadDetailBundle(
     val skillsResult = runCatching { fetchThreadSkills(threadId) }
     val mcpServersResult = runCatching { fetchThreadMcpServers(threadId) }
     val hooksResult = runCatching { fetchThreadHooks(threadId) }
+    val modelOptions = runCatching {
+        listAgentModels(detail.thread.provider)
+    }.getOrNull()
     val preview = buildThreadDetailPreviewFromSupervisor(
         detail = detail,
         workspaceTree = tree,
@@ -1555,6 +1558,7 @@ private fun SupervisorApiClient.fetchThreadDetailBundle(
         mcpServersError = mcpServersResult.exceptionOrNull()?.message,
         hooks = hooksResult.getOrNull(),
         hooksError = hooksResult.exceptionOrNull()?.message,
+        modelOptions = modelOptions,
     )
     return ThreadDetailBundle(dto = detail, preview = preview)
 }

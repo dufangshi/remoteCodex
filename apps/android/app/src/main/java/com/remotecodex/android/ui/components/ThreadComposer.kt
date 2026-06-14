@@ -3685,8 +3685,8 @@ private fun AttachmentPanel(
                     stateDescription = panelState.actionCountLabel
                 }
                 .clip(RoundedCornerShape(16.dp))
-                .background(ThreadColors.CodeBackground)
-                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(16.dp))
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -3713,7 +3713,8 @@ private fun ModelPickerPanel(
 ) {
     CompactSettingsMenuSurface(
         title = "Model",
-        width = 192.dp,
+        width = 252.dp,
+        alignment = Alignment.End,
     ) {
         settingsState.modelDisabledReason?.let { reason ->
             ComposerMenuNotice(text = reason)
@@ -3741,7 +3742,8 @@ private fun EffortPickerPanel(
 ) {
     CompactSettingsMenuSurface(
         title = "Reasoning effort",
-        width = 160.dp,
+        width = 204.dp,
+        alignment = Alignment.End,
         stateDescription = settingsState.effortTitle,
     ) {
         effortOptions.forEach { option ->
@@ -3759,13 +3761,14 @@ private fun EffortPickerPanel(
 private fun CompactSettingsMenuSurface(
     title: String,
     width: androidx.compose.ui.unit.Dp,
+    alignment: Alignment.Horizontal = Alignment.Start,
     stateDescription: String? = null,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .wrapContentWidth(Alignment.Start),
+            .wrapContentWidth(alignment),
     ) {
         Column(
             modifier = Modifier
@@ -3775,8 +3778,8 @@ private fun CompactSettingsMenuSurface(
                     stateDescription?.let { this.stateDescription = it }
                 }
                 .clip(RoundedCornerShape(16.dp))
-                .background(ThreadColors.CodeBackground)
-                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(16.dp))
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -3838,8 +3841,8 @@ private fun ShellToolsPanel(
                     stateDescription = panelState.subtitle
                 }
                 .clip(RoundedCornerShape(16.dp))
-                .background(ThreadColors.CodeBackground)
-                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(16.dp))
                 .padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -3872,8 +3875,8 @@ private fun ComposerMenuSurface(
                 } ?: Modifier,
             )
             .clip(RoundedCornerShape(16.dp))
-            .background(ThreadColors.CodeBackground)
-            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(16.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -3885,7 +3888,7 @@ private fun ComposerMenuSurface(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = ThreadColors.CodeForeground,
+                    color = ThreadColors.Foreground,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -4138,8 +4141,12 @@ private fun SelectionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) ThreadColors.WarningSoft else ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .background(if (selected) ThreadColors.InfoSoft.copy(alpha = 0.46f) else ThreadColors.Surface)
+            .border(
+                1.dp,
+                if (selected) ThreadColors.Info.copy(alpha = 0.34f) else ThreadColors.Border,
+                RoundedCornerShape(12.dp),
+            )
             .clickable(onClick = onClick)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4147,20 +4154,24 @@ private fun SelectionRow(
     ) {
         GraphSelectionGlyph(
             selected = selected,
-            tone = GraphSelectionTone.Warning,
+            tone = GraphSelectionTone.Info,
             contentDescription = if (selected) "$label selected" else "$label available",
         )
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            color = if (selected) ThreadColors.Warning else ThreadColors.Foreground,
+            color = if (selected) ThreadColors.Info else ThreadColors.Foreground,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = detail,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

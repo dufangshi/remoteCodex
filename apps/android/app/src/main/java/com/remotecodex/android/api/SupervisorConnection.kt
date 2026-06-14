@@ -134,6 +134,7 @@ data class SupervisorWorkspaceSummary(
 data class SupervisorThreadSummary(
     val id: String,
     val workspaceId: String,
+    val provider: String = "codex",
     val title: String,
     val status: String,
     val model: String?,

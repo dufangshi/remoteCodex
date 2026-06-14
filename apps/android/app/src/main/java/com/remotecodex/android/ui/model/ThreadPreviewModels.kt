@@ -664,8 +664,10 @@ data class ComposerReasoningEffortOptionPreview(
 )
 
 val defaultComposerModelOptions = listOf(
+    ComposerModelOptionPreview(model = "gpt-5.5", defaultReasoningEffort = "medium"),
     ComposerModelOptionPreview(model = "gpt-5.4", defaultReasoningEffort = "medium"),
     ComposerModelOptionPreview(model = "gpt-5-codex", defaultReasoningEffort = "high"),
+    ComposerModelOptionPreview(model = "gpt-5", defaultReasoningEffort = "medium"),
     ComposerModelOptionPreview(model = "gpt-4.1", defaultReasoningEffort = "low"),
 )
 
@@ -673,6 +675,7 @@ val defaultComposerReasoningEffortOptions = listOf(
     ComposerReasoningEffortOptionPreview(reasoningEffort = "low"),
     ComposerReasoningEffortOptionPreview(reasoningEffort = "medium"),
     ComposerReasoningEffortOptionPreview(reasoningEffort = "high"),
+    ComposerReasoningEffortOptionPreview(reasoningEffort = "xhigh"),
 )
 
 data class ComposerContextPreview(

@@ -2305,6 +2305,9 @@ fun formatReasoningEffortLabel(value: String?): String {
     if (normalized.isEmpty()) {
         return "Auto"
     }
+    if (normalized.equals("xhigh", ignoreCase = true)) {
+        return "XHigh"
+    }
     return normalized.replaceFirstChar { char ->
         if (char.isLowerCase()) char.titlecase() else char.toString()
     }

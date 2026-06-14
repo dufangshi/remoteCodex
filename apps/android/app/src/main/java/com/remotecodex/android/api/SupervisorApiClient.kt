@@ -1003,6 +1003,7 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
     return SupervisorThreadSummary(
         id = optString("id"),
         workspaceId = optString("workspaceId"),
+        provider = optString("provider", "codex"),
         title = optString("title"),
         status = optString("status"),
         model = optNullableString("model"),

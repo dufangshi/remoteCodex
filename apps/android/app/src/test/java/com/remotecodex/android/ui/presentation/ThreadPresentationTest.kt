@@ -1616,12 +1616,19 @@ class ThreadPresentationTest {
                     detail = "current",
                     selected = true,
                 ),
+                ComposerSelectionOptionState(
+                    value = "xhigh",
+                    label = "XHigh",
+                    detail = "available",
+                    selected = false,
+                ),
             ),
             buildComposerReasoningEffortOptions(
                 currentEffort = "medium",
                 options = listOf(
                     ComposerReasoningEffortOptionPreview(reasoningEffort = "low"),
                     ComposerReasoningEffortOptionPreview(reasoningEffort = "medium"),
+                    ComposerReasoningEffortOptionPreview(reasoningEffort = "xhigh"),
                 ),
             ),
         )
