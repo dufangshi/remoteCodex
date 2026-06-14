@@ -117,6 +117,7 @@ fun SupervisorHomeScreen(
     var runtimeConfig by remember(supervisorConnection) { mutableStateOf(initialRuntimeConfig) }
     var workspaceSettings by remember(supervisorConnection) { mutableStateOf(initialWorkspaceSettings) }
     var agentBackends by remember(supervisorConnection) { mutableStateOf(initialAgentBackends) }
+    var sessionUsername by remember(supervisorConnection) { mutableStateOf<String?>(null) }
     var backendSettingsLoading by remember { mutableStateOf(false) }
     var backendSettingsSaving by remember { mutableStateOf(false) }
     var backendSettingsError by remember { mutableStateOf<String?>(null) }
@@ -129,6 +130,11 @@ fun SupervisorHomeScreen(
     LaunchedEffect(initialRuntimeConfig, initialWorkspaceSettings) {
         initialRuntimeConfig?.let { runtimeConfig = it }
         initialWorkspaceSettings?.let { workspaceSettings = it }
+    }
+    LaunchedEffect(supervisorConnection) {
+        sessionUsername = withContext(Dispatchers.IO) {
+            runCatching { client.fetchAuthSession().username }.getOrNull()
+        }
     }
     LaunchedEffect(initialAgentBackends) {
         if (initialAgentBackends != null) {
@@ -363,6 +369,7 @@ fun SupervisorHomeScreen(
                 HomeHeader(
                     productName = appShell.productName,
                     connection = supervisorConnection,
+                    username = sessionUsername,
                     loading = homeSnapshotLoading,
                     error = homeSnapshotError,
                     onOpenSettings = { settingsOpen = true },
@@ -638,6 +645,7 @@ fun SupervisorHomeScreen(
 private fun HomeHeader(
     productName: String,
     connection: SupervisorConnectionConfig,
+    username: String?,
     loading: Boolean,
     error: String?,
     onOpenSettings: () -> Unit,
@@ -648,16 +656,6 @@ private fun HomeHeader(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = productName.take(1),
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(ThreadColors.Primary)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            color = ThreadColors.PrimaryForeground,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
                 text = productName,
@@ -690,15 +688,43 @@ private fun HomeHeader(
                 contentDescription = "Open settings",
                 onClick = onOpenSettings,
             )
-            GraphButton(
-                label = "Connection",
-                variant = GraphButtonVariant.Secondary,
-                size = GraphButtonSize.Small,
+            AccountAvatarButton(
+                label = accountInitials(username ?: connection.mode.label),
                 contentDescription = "Open connection settings",
                 onClick = onChangeConnection,
             )
         }
     }
+}
+
+@Composable
+private fun AccountAvatarButton(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(ThreadColors.Primary)
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.PrimaryForeground,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+private fun accountInitials(value: String): String {
+    val letters = value.trim().filter { it.isLetterOrDigit() }.take(2)
+    return letters.ifBlank { "RC" }.uppercase()
 }
 
 @Composable

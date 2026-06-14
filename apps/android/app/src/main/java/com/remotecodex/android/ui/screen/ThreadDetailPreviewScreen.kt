@@ -131,7 +131,10 @@ fun ThreadDetailSurface(
     onDownloadWorkspaceFile: ((String) -> Unit)? = null,
     onOpenWorkspaceRawFile: ((String) -> Unit)? = null,
     onCopyWorkspaceRawFile: ((String) -> Unit)? = null,
+    onSaveWorkspaceFile: ((String, String) -> Unit)? = null,
     onUploadWorkspaceNote: (() -> Unit)? = null,
+    onReturnToWorkspace: (() -> Unit)? = null,
+    workspaceSaveBusy: Boolean = false,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onLoadEarlier: (() -> Unit)? = null,
@@ -211,7 +214,7 @@ fun ThreadDetailSurface(
                             onOpenRooms = { roomsOpen = true },
                             onOpenSettings = { settingsOpen = true },
                             onOpenThreadAction = { threadActionDialog = it },
-                            onReturnToWorkspace = { selectedView = ThreadSurfaceView.Workspace },
+                            onReturnToWorkspace = onReturnToWorkspace ?: { selectedView = ThreadSurfaceView.Workspace },
                             onCreateThreadShortcut = {
                                 threadActionRoom = null
                                 threadActionDialog = ThreadActionDialog.Create
@@ -245,7 +248,9 @@ fun ThreadDetailSurface(
                                 onDownloadFile = onDownloadWorkspaceFile,
                                 onOpenRawFile = onOpenWorkspaceRawFile,
                                 onCopyRawFile = onCopyWorkspaceRawFile,
+                                onSaveFile = onSaveWorkspaceFile,
                                 onUploadNote = onUploadWorkspaceNote,
+                                saveBusy = workspaceSaveBusy,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Shell -> {

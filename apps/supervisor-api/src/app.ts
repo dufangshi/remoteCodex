@@ -64,7 +64,8 @@ import { RelayTunnelClient } from './relay-tunnel-client';
 type WebsocketLike = {
   readyState: number;
   send: (message: string) => void;
-  on(event: 'message', handler: (message: Buffer) => void): void;
+  close: (code?: number, reason?: string) => void;
+  on(event: 'message', handler: (message: Buffer | ArrayBuffer | string) => void): void;
   on(event: 'close', handler: () => void): void;
 };
 
@@ -355,9 +356,10 @@ export function buildApp(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket, request) => {
+        const supervisorSocket = socket as WebsocketLike;
         const session = authService.verifyRequest(request);
         if (!session.authenticated) {
-          socket.close(1008, 'Authentication is required.');
+          supervisorSocket.close(1008, 'Authentication is required.');
           return;
         }
 
@@ -366,17 +368,17 @@ export function buildApp(
           eventBus,
           backendPluginHost,
           send(message) {
-            if (socket.readyState === 1) {
-              socket.send(JSON.stringify(message));
+            if (supervisorSocket.readyState === 1) {
+              supervisorSocket.send(JSON.stringify(message));
             }
           },
         });
 
-        socket.on('message', async (rawMessage: Buffer) => {
+        supervisorSocket.on('message', async (rawMessage) => {
           await supervisorSession.handleMessage(rawMessage.toString());
         });
 
-        socket.on('close', () => {
+        supervisorSocket.on('close', () => {
           supervisorSession.close();
         });
       },

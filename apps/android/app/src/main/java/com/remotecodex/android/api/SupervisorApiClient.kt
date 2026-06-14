@@ -225,6 +225,18 @@ class SupervisorApiClient(
         )
     }
 
+    fun writeWorkspaceFile(workspaceId: String, path: String, content: String): SupervisorWorkspaceFile {
+        val body = JSONObject()
+            .put("path", path)
+            .put("content", content)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files"),
+            method = "PUT",
+            body = body,
+        ).toWorkspaceFile()
+    }
+
     fun downloadWorkspaceFile(workspaceId: String, path: String): SupervisorFileDownload {
         val query = buildQuery("path" to path)
         return requestDownload(
@@ -863,6 +875,15 @@ private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview 
         size = optLong("size", 0L),
         truncated = optBoolean("truncated", false),
         nextOffset = optLong("nextOffset", 0L),
+    )
+}
+
+private fun JSONObject.toWorkspaceFile(): SupervisorWorkspaceFile {
+    return SupervisorWorkspaceFile(
+        path = optString("path"),
+        name = optString("name"),
+        kind = optString("kind"),
+        size = optLong("size", 0L),
     )
 }
 

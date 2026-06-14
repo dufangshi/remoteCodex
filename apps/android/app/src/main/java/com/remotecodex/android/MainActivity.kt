@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,6 +20,7 @@ import com.remotecodex.android.settings.AppSettingsRepository
 import com.remotecodex.android.settings.SavedAppRoute
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.screen.ConnectionSetupRoute
+import com.remotecodex.android.ui.screen.SupervisorAccountPanel
 import com.remotecodex.android.ui.screen.SupervisorConnectionSetupScreen
 import com.remotecodex.android.ui.screen.SupervisorHomeScreen
 import com.remotecodex.android.ui.screen.ThreadDetailScreen
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
             var homeSnapshotLoading by remember { mutableStateOf(false) }
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
             var homeSnapshotRefreshNonce by remember { mutableIntStateOf(0) }
+            var accountPanelOpen by remember { mutableStateOf(false) }
             val darkThemeActive = when (themeMode) {
                 ThemeMode.System -> systemDark
                 ThemeMode.Light -> false
@@ -68,173 +71,188 @@ class MainActivity : ComponentActivity() {
             }
             RemoteCodexTheme(dark = darkThemeActive) {
                 val connection = supervisorConnection
-                when (val route = connectionRoute) {
-                    ConnectionRoute.ModeSelect,
-                    ConnectionRoute.ServerAuth,
-                    ConnectionRoute.RelayAuth,
-                    ConnectionRoute.RelayDevices,
-                    is ConnectionRoute.ConnectionSettings,
-                    -> {
-                    SupervisorConnectionSetupScreen(
-                        initialConfig = connection,
-                        initialRoute = when (route) {
-                            ConnectionRoute.ModeSelect -> ConnectionSetupRoute.ModeSelect
-                            ConnectionRoute.ServerAuth -> ConnectionSetupRoute.ServerAuth
-                            ConnectionRoute.RelayAuth -> ConnectionSetupRoute.RelayAuth
-                            ConnectionRoute.RelayDevices -> ConnectionSetupRoute.RelayDevices
-                            is ConnectionRoute.ConnectionSettings -> ConnectionSetupRoute.ConnectionSettings
-                            is ConnectionRoute.Workspace -> ConnectionSetupRoute.ModeSelect
-                        },
-                        onConnectionReady = { config: SupervisorConnectionConfig, _ ->
-                            settingsRepository.writeSupervisorConnection(config)
-                            supervisorConnection = config
-                            connectionRoute = ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
-                        },
-                        onConnectionStateSaved = { config ->
-                            settingsRepository.writeSupervisorConnection(config)
-                            supervisorConnection = config
-                            connectionRoute = initialConnectionRoute(config, settingsRepository)
-                        },
-                        onBack = {
-                            connectionRoute = when (route) {
-                                is ConnectionRoute.ConnectionSettings -> ConnectionRoute.Workspace(route.previousRoute)
-                                ConnectionRoute.RelayDevices -> {
-                                    val selected = supervisorConnection?.relayDeviceId
-                                    if (selected.isNullOrBlank()) ConnectionRoute.RelayAuth else ConnectionRoute.Workspace(
-                                        settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute(),
+                Box {
+                    when (val route = connectionRoute) {
+                        ConnectionRoute.ModeSelect,
+                        ConnectionRoute.ServerAuth,
+                        ConnectionRoute.RelayAuth,
+                        ConnectionRoute.RelayDevices,
+                        -> {
+                            SupervisorConnectionSetupScreen(
+                                initialConfig = connection,
+                                initialRoute = when (route) {
+                                    ConnectionRoute.ModeSelect -> ConnectionSetupRoute.ModeSelect
+                                    ConnectionRoute.ServerAuth -> ConnectionSetupRoute.ServerAuth
+                                    ConnectionRoute.RelayAuth -> ConnectionSetupRoute.RelayAuth
+                                    ConnectionRoute.RelayDevices -> ConnectionSetupRoute.RelayDevices
+                                    is ConnectionRoute.Workspace -> ConnectionSetupRoute.ModeSelect
+                                },
+                                onConnectionReady = { config: SupervisorConnectionConfig, _ ->
+                                    settingsRepository.writeSupervisorConnection(config)
+                                    supervisorConnection = config
+                                    connectionRoute = ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
+                                },
+                                onConnectionStateSaved = { config ->
+                                    settingsRepository.writeSupervisorConnection(config)
+                                    supervisorConnection = config
+                                    connectionRoute = initialConnectionRoute(config, settingsRepository)
+                                },
+                                onBack = {
+                                    connectionRoute = when (route) {
+                                        ConnectionRoute.RelayDevices -> {
+                                            val selected = supervisorConnection?.relayDeviceId
+                                            if (selected.isNullOrBlank()) ConnectionRoute.RelayAuth else ConnectionRoute.Workspace(
+                                                settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute(),
+                                            )
+                                        }
+                                        ConnectionRoute.ServerAuth,
+                                        ConnectionRoute.RelayAuth,
+                                        -> ConnectionRoute.ModeSelect
+                                        ConnectionRoute.ModeSelect -> ConnectionRoute.ModeSelect
+                                        is ConnectionRoute.Workspace -> route
+                                    }
+                                },
+                                onRelayDeviceSelectionCleared = {
+                                    val current = supervisorConnection ?: return@SupervisorConnectionSetupScreen
+                                    val next = current.copy(relayDeviceId = null)
+                                    settingsRepository.writeSupervisorConnection(next)
+                                    supervisorConnection = next
+                                },
+                            )
+                        }
+                        is ConnectionRoute.Workspace -> {
+                            if (connection == null) {
+                                connectionRoute = ConnectionRoute.ModeSelect
+                            } else {
+                                when (route.connectedRoute) {
+                                    ConnectedRoute.Home -> SupervisorHomeScreen(
+                                        supervisorConnection = connection,
+                                        homeSnapshot = homeSnapshot,
+                                        homeSnapshotLoading = homeSnapshotLoading,
+                                        homeSnapshotError = homeSnapshotError,
+                                        themeMode = themeMode,
+                                        darkThemeActive = darkThemeActive,
+                                        onThemeModeSelected = { nextMode ->
+                                            themeMode = nextMode
+                                            settingsRepository.writeThemeMode(nextMode)
+                                        },
+                                        onOpenThread = { threadId ->
+                                            val nextRoute = threadId?.let(ConnectedRoute::ThreadDetail)
+                                                ?: ConnectedRoute.ThreadPreview
+                                            if (nextRoute is ConnectedRoute.ThreadDetail) {
+                                                settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(nextRoute.threadId))
+                                            }
+                                            connectionRoute = ConnectionRoute.Workspace(nextRoute)
+                                        },
+                                        onOpenWorkspace = { workspaceId ->
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.WorkspaceDetail(workspaceId))
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.WorkspaceDetail(workspaceId))
+                                        },
+                                        onRefreshHomeSnapshot = {
+                                            homeSnapshotRefreshNonce += 1
+                                        },
+                                        onChangeConnection = {
+                                            accountPanelOpen = true
+                                        },
+                                    )
+                                    ConnectedRoute.ThreadPreview -> ThreadDetailPreviewScreen(
+                                        themeMode = themeMode,
+                                        darkThemeActive = darkThemeActive,
+                                        supervisorConnection = connection,
+                                        homeSnapshot = homeSnapshot,
+                                        homeSnapshotLoading = homeSnapshotLoading,
+                                        homeSnapshotError = homeSnapshotError,
+                                        onThemeModeSelected = { nextMode ->
+                                            themeMode = nextMode
+                                            settingsRepository.writeThemeMode(nextMode)
+                                        },
+                                        onChangeConnection = {
+                                            accountPanelOpen = true
+                                        },
+                                    )
+                                    is ConnectedRoute.ThreadDetail -> ThreadDetailScreen(
+                                        threadId = route.connectedRoute.threadId,
+                                        themeMode = themeMode,
+                                        darkThemeActive = darkThemeActive,
+                                        supervisorConnection = connection,
+                                        homeSnapshot = homeSnapshot,
+                                        homeSnapshotLoading = homeSnapshotLoading,
+                                        homeSnapshotError = homeSnapshotError,
+                                        onThemeModeSelected = { nextMode ->
+                                            themeMode = nextMode
+                                            settingsRepository.writeThemeMode(nextMode)
+                                        },
+                                        onChangeConnection = {
+                                            accountPanelOpen = true
+                                        },
+                                        onOpenThread = { nextThreadId ->
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(nextThreadId))
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.ThreadDetail(nextThreadId))
+                                        },
+                                        onOpenWorkspace = { workspaceId ->
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.WorkspaceDetail(workspaceId))
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.WorkspaceDetail(workspaceId))
+                                        },
+                                        onBackToHome = {
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
+                                        },
+                                        onThreadDeleted = {
+                                            homeSnapshotRefreshNonce += 1
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
+                                        },
+                                    )
+                                    is ConnectedRoute.WorkspaceDetail -> WorkspaceDetailScreen(
+                                        workspaceId = route.connectedRoute.workspaceId,
+                                        supervisorConnection = connection,
+                                        homeSnapshot = homeSnapshot,
+                                        homeSnapshotLoading = homeSnapshotLoading,
+                                        homeSnapshotError = homeSnapshotError,
+                                        onBackToHome = {
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
+                                        },
+                                        onOpenThread = { threadId ->
+                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(threadId))
+                                            connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.ThreadDetail(threadId))
+                                        },
+                                        onRefreshHomeSnapshot = {
+                                            homeSnapshotRefreshNonce += 1
+                                        },
                                     )
                                 }
-                                ConnectionRoute.ServerAuth,
-                                ConnectionRoute.RelayAuth,
-                                -> ConnectionRoute.ModeSelect
-                                ConnectionRoute.ModeSelect -> ConnectionRoute.ModeSelect
-                                is ConnectionRoute.Workspace -> route
-                            }
-                        },
-                        onDisconnect = {
-                            settingsRepository.clearSupervisorConnection()
-                            homeSnapshot = null
-                            homeSnapshotError = null
-                            homeSnapshotLoading = false
-                            supervisorConnection = null
-                            connectionRoute = ConnectionRoute.ModeSelect
-                        },
-                        onChangeAccount = {
-                            settingsRepository.clearAuthToken()
-                            val current = supervisorConnection
-                            supervisorConnection = current?.copy(authToken = null, relayDeviceId = null)
-                            connectionRoute = ConnectionRoute.RelayAuth
-                        },
-                        onRelayDeviceSelectionCleared = {
-                            val current = supervisorConnection ?: return@SupervisorConnectionSetupScreen
-                            val next = current.copy(relayDeviceId = null)
-                            settingsRepository.writeSupervisorConnection(next)
-                            supervisorConnection = next
-                        },
-                        onChangeMode = {
-                            connectionRoute = ConnectionRoute.ModeSelect
-                        },
-                    )
-                    }
-                    is ConnectionRoute.Workspace -> {
-                        if (connection == null) {
-                            connectionRoute = ConnectionRoute.ModeSelect
-                        } else {
-                            when (route.connectedRoute) {
-                                ConnectedRoute.Home -> SupervisorHomeScreen(
-                                    supervisorConnection = connection,
-                                    homeSnapshot = homeSnapshot,
-                                    homeSnapshotLoading = homeSnapshotLoading,
-                                    homeSnapshotError = homeSnapshotError,
-                                    themeMode = themeMode,
-                                    darkThemeActive = darkThemeActive,
-                                    onThemeModeSelected = { nextMode ->
-                                        themeMode = nextMode
-                                        settingsRepository.writeThemeMode(nextMode)
-                                    },
-                                    onOpenThread = { threadId ->
-                                        val nextRoute = threadId?.let(ConnectedRoute::ThreadDetail)
-                                            ?: ConnectedRoute.ThreadPreview
-                                        if (nextRoute is ConnectedRoute.ThreadDetail) {
-                                            settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(nextRoute.threadId))
-                                        }
-                                        connectionRoute = ConnectionRoute.Workspace(nextRoute)
-                                    },
-                                    onOpenWorkspace = { workspaceId ->
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.WorkspaceDetail(workspaceId))
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.WorkspaceDetail(workspaceId))
-                                    },
-                                    onRefreshHomeSnapshot = {
-                                        homeSnapshotRefreshNonce += 1
-                                    },
-                                    onChangeConnection = {
-                                        connectionRoute = ConnectionRoute.ConnectionSettings(route.connectedRoute)
-                                    },
-                                )
-                                ConnectedRoute.ThreadPreview -> ThreadDetailPreviewScreen(
-                                    themeMode = themeMode,
-                                    darkThemeActive = darkThemeActive,
-                                    supervisorConnection = connection,
-                                    homeSnapshot = homeSnapshot,
-                                    homeSnapshotLoading = homeSnapshotLoading,
-                                    homeSnapshotError = homeSnapshotError,
-                                    onThemeModeSelected = { nextMode ->
-                                        themeMode = nextMode
-                                        settingsRepository.writeThemeMode(nextMode)
-                                    },
-                                    onChangeConnection = {
-                                        connectionRoute = ConnectionRoute.ConnectionSettings(route.connectedRoute)
-                                    },
-                                )
-                                is ConnectedRoute.ThreadDetail -> ThreadDetailScreen(
-                                    threadId = route.connectedRoute.threadId,
-                                    themeMode = themeMode,
-                                    darkThemeActive = darkThemeActive,
-                                    supervisorConnection = connection,
-                                    homeSnapshot = homeSnapshot,
-                                    homeSnapshotLoading = homeSnapshotLoading,
-                                    homeSnapshotError = homeSnapshotError,
-                                    onThemeModeSelected = { nextMode ->
-                                        themeMode = nextMode
-                                        settingsRepository.writeThemeMode(nextMode)
-                                    },
-                                    onChangeConnection = {
-                                        connectionRoute = ConnectionRoute.ConnectionSettings(route.connectedRoute)
-                                    },
-                                    onOpenThread = { nextThreadId ->
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(nextThreadId))
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.ThreadDetail(nextThreadId))
-                                    },
-                                    onBackToHome = {
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
-                                    },
-                                    onThreadDeleted = {
-                                        homeSnapshotRefreshNonce += 1
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
-                                    },
-                                )
-                                is ConnectedRoute.WorkspaceDetail -> WorkspaceDetailScreen(
-                                    workspaceId = route.connectedRoute.workspaceId,
-                                    supervisorConnection = connection,
-                                    homeSnapshot = homeSnapshot,
-                                    homeSnapshotLoading = homeSnapshotLoading,
-                                    homeSnapshotError = homeSnapshotError,
-                                    onBackToHome = {
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.Home)
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
-                                    },
-                                    onOpenThread = { threadId ->
-                                        settingsRepository.writeLastRoute(connection, SavedAppRoute.ThreadDetail(threadId))
-                                        connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.ThreadDetail(threadId))
-                                    },
-                                    onRefreshHomeSnapshot = {
-                                        homeSnapshotRefreshNonce += 1
-                                    },
-                                )
                             }
                         }
+                    }
+                    val activeConnection = supervisorConnection
+                    if (accountPanelOpen && activeConnection != null) {
+                        SupervisorAccountPanel(
+                            config = activeConnection,
+                            onClose = { accountPanelOpen = false },
+                            onDisconnect = {
+                                settingsRepository.clearSupervisorConnection()
+                                homeSnapshot = null
+                                homeSnapshotError = null
+                                homeSnapshotLoading = false
+                                supervisorConnection = null
+                                connectionRoute = ConnectionRoute.ModeSelect
+                            },
+                            onManageDevices = {
+                                connectionRoute = ConnectionRoute.RelayDevices
+                            },
+                            onChangeAccount = {
+                                settingsRepository.clearAuthToken()
+                                supervisorConnection = activeConnection.copy(authToken = null, relayDeviceId = null)
+                                connectionRoute = ConnectionRoute.RelayAuth
+                            },
+                            onReauthenticate = {
+                                connectionRoute = ConnectionRoute.ServerAuth
+                            },
+                            onChangeMode = {
+                                connectionRoute = ConnectionRoute.ModeSelect
+                            },
+                        )
                     }
                 }
             }
@@ -247,7 +265,6 @@ private sealed interface ConnectionRoute {
     data object ServerAuth : ConnectionRoute
     data object RelayAuth : ConnectionRoute
     data object RelayDevices : ConnectionRoute
-    data class ConnectionSettings(val previousRoute: ConnectedRoute) : ConnectionRoute
     data class Workspace(val connectedRoute: ConnectedRoute) : ConnectionRoute
 }
 

@@ -2136,6 +2136,66 @@ describe('supervisor api', () => {
     });
   });
 
+  it('downloads workspace folders as temporary zip archives', async () => {
+    const workspacePath = path.join(tempDir, 'zip-workspace');
+    await fs.mkdir(path.join(workspacePath, 'src', 'nested'), { recursive: true });
+    await fs.writeFile(path.join(workspacePath, 'src', 'index.ts'), 'console.log("zip");');
+    await fs.writeFile(path.join(workspacePath, 'src', 'nested', 'note.txt'), 'nested note');
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('src')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(200);
+    expect(downloadResponse.headers['content-type']).toContain('application/zip');
+    expect(downloadResponse.headers['content-disposition']).toContain('src.zip');
+    const body = downloadResponse.rawPayload;
+    expect(body.readUInt32LE(0)).toBe(0x04034b50);
+    expect(body.includes(Buffer.from('src/index.ts'))).toBe(true);
+    expect(body.includes(Buffer.from('src/nested/note.txt'))).toBe(true);
+    expect(body.includes(Buffer.from('console.log("zip");'))).toBe(true);
+  });
+
+  it('rejects workspace folder downloads at the recursive file-count limit', async () => {
+    const workspacePath = path.join(tempDir, 'large-folder-workspace');
+    const folderPath = path.join(workspacePath, 'many');
+    await fs.mkdir(folderPath, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        fs.writeFile(path.join(folderPath, `file-${index}.txt`), `${index}`),
+      ),
+    );
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('many')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(400);
+    expect(downloadResponse.json().message).toContain('fewer than 300 files');
+  });
+
   it('enforces artifact read and write scopes for worker artifact routes', async () => {
     await app.close();
     app = buildTestApp(fakeCodexManager, {

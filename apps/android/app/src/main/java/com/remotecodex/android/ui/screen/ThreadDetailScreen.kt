@@ -95,6 +95,7 @@ fun ThreadDetailScreen(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onOpenThread: (String) -> Unit,
+    onOpenWorkspace: (String) -> Unit,
     onBackToHome: () -> Unit,
     onThreadDeleted: () -> Unit = onBackToHome,
 ) {
@@ -127,6 +128,8 @@ fun ThreadDetailScreen(
     var pendingWorkspaceDownloadPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceRawOpenPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceRawCopyPath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceSave by remember(threadId) { mutableStateOf<PendingWorkspaceFileSave?>(null) }
+    var workspaceSaveBusy by remember(threadId) { mutableStateOf(false) }
     var pendingWorkspaceUploadNote by remember(threadId) { mutableStateOf(false) }
     var pendingWorkspaceUploadFile by remember(threadId) { mutableStateOf<UploadWorkspaceFileRequest?>(null) }
     var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
@@ -850,6 +853,37 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Workspace raw copy failed." }
     }
 
+    LaunchedEffect(pendingWorkspaceSave) {
+        val saveRequest = pendingWorkspaceSave ?: return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        workspaceSaveBusy = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                val file = client.writeWorkspaceFile(
+                    workspaceId = threadDetail.workspace.id,
+                    path = saveRequest.path,
+                    content = saveRequest.content,
+                )
+                val preview = client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = file.path.ifBlank { saveRequest.path },
+                )
+                file to preview
+            }
+        }
+        pendingWorkspaceSave = null
+        workspaceSaveBusy = false
+        result
+            .onSuccess { (file, preview) ->
+                detail = preview
+                selectedWorkspaceFilePath = file.path.ifBlank { saveRequest.path }
+                workspaceActionMessage = "Saved ${file.name.ifBlank { saveRequest.path.substringAfterLast('/') }}"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace file save failed." }
+    }
+
     LaunchedEffect(pendingWorkspaceUploadNote) {
         if (!pendingWorkspaceUploadNote) return@LaunchedEffect
         error = null
@@ -1163,6 +1197,19 @@ fun ThreadDetailScreen(
             onCopyWorkspaceRawFile = { path ->
                 pendingWorkspaceRawCopyPath = path
             },
+            onSaveWorkspaceFile = { path, content ->
+                if (!workspaceSaveBusy) {
+                    pendingWorkspaceSave = PendingWorkspaceFileSave(path = path, content = content)
+                }
+            },
+            onReturnToWorkspace = {
+                val workspaceId = threadProjectionState?.detail?.workspace?.id
+                if (workspaceId.isNullOrBlank()) {
+                    onBackToHome()
+                } else {
+                    onOpenWorkspace(workspaceId)
+                }
+            },
             onUploadWorkspaceNote = {
                 workspaceUploadPicker.launch(arrayOf("*/*"))
             },
@@ -1215,6 +1262,7 @@ fun ThreadDetailScreen(
                 }
             },
             submittingPrompt = submittingPrompt,
+            workspaceSaveBusy = workspaceSaveBusy,
             threadActionBusy = threadActionBusy,
             threadActionError = threadActionError,
         )
@@ -1243,6 +1291,11 @@ private data class PendingRequestResponse(
     val request: PendingRequestPreview,
     val answers: Map<String, List<String>>,
     val selectedOptionLabel: String? = null,
+)
+
+private data class PendingWorkspaceFileSave(
+    val path: String,
+    val content: String,
 )
 
 private data class OptimisticSteer(

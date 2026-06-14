@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.AuthLoginResult
@@ -63,6 +65,7 @@ import com.remotecodex.android.ui.components.GraphDialogOverlay
 import com.remotecodex.android.ui.components.GraphSelectionGlyph
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -73,10 +76,7 @@ fun SupervisorConnectionSetupScreen(
     onConnectionReady: (SupervisorConnectionConfig, SupervisorConnectionCheck) -> Unit,
     onConnectionStateSaved: (SupervisorConnectionConfig) -> Unit = {},
     onBack: () -> Unit = {},
-    onDisconnect: () -> Unit = {},
-    onChangeAccount: () -> Unit = {},
     onRelayDeviceSelectionCleared: () -> Unit = {},
-    onChangeMode: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var mode by remember(initialConfig) { mutableStateOf(initialConfig?.mode ?: SupervisorConnectionMode.Local) }
@@ -209,9 +209,50 @@ fun SupervisorConnectionSetupScreen(
         }
     }
 
+    fun validateRelayEndpointThenContinue() {
+        busy = true
+        errorMessage = null
+        statusMessage = "Checking relay URL..."
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    SupervisorApiClient(
+                        buildBaseConfig(token = null).copy(
+                            mode = SupervisorConnectionMode.Relay,
+                            authToken = null,
+                            relayDeviceId = null,
+                        ),
+                    ).fetchHealth()
+                }
+            }
+            busy = false
+            result
+                .onSuccess {
+                    statusMessage = null
+                    route = ConnectionSetupRoute.RelayAuth
+                }
+                .onFailure { error ->
+                    statusMessage = null
+                    errorMessage = userFacingConnectionError(error)
+                }
+        }
+    }
+
     androidx.compose.runtime.LaunchedEffect(route, authToken) {
         if (route == ConnectionSetupRoute.RelayDevices && authToken.isNotBlank() && relayPortal == null && !busy) {
             loadRelayPortal(authToken)
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(route, authToken) {
+        if (route != ConnectionSetupRoute.RelayDevices || authToken.isBlank()) {
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(5_000)
+            if (!busy) {
+                loadRelayPortal(authToken)
+            }
         }
     }
 
@@ -242,7 +283,6 @@ fun SupervisorConnectionSetupScreen(
                     ConnectionSetupRoute.ServerAuth -> "Sign in to a direct supervisor server."
                     ConnectionSetupRoute.RelayAuth -> "Sign in or create a relay account."
                     ConnectionSetupRoute.RelayDevices -> "Select, create, or revoke relay backend devices."
-                    ConnectionSetupRoute.ConnectionSettings -> "Manage the current connection without losing saved state."
                 },
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodyMedium,
@@ -289,7 +329,10 @@ fun SupervisorConnectionSetupScreen(
                                     ConnectionSetupRoute.ModeSelect
                                 }
                                 SupervisorConnectionMode.Server -> ConnectionSetupRoute.ServerAuth
-                                SupervisorConnectionMode.Relay -> ConnectionSetupRoute.RelayAuth
+                                SupervisorConnectionMode.Relay -> {
+                                    validateRelayEndpointThenContinue()
+                                    ConnectionSetupRoute.ModeSelect
+                                }
                             }
                         },
                     )
@@ -345,22 +388,6 @@ fun SupervisorConnectionSetupScreen(
                             contentDescription = "Relay URL",
                             keyboardType = KeyboardType.Uri,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            GraphButton(
-                                label = "Sign in",
-                                variant = if (authMode == RelayAuthMode.SignIn) GraphButtonVariant.Default else GraphButtonVariant.Outline,
-                                size = GraphButtonSize.Small,
-                                contentDescription = "Use relay sign in",
-                                onClick = { authMode = RelayAuthMode.SignIn },
-                            )
-                            GraphButton(
-                                label = "Register",
-                                variant = if (authMode == RelayAuthMode.Register) GraphButtonVariant.Default else GraphButtonVariant.Outline,
-                                size = GraphButtonSize.Small,
-                                contentDescription = "Use relay registration",
-                                onClick = { authMode = RelayAuthMode.Register },
-                            )
-                        }
                         if (authMode == RelayAuthMode.Register) {
                             ConnectionTextField(
                                 label = "Email",
@@ -399,6 +426,22 @@ fun SupervisorConnectionSetupScreen(
                                 size = GraphButtonSize.Default,
                                 contentDescription = "Authenticate relay account",
                                 onClick = { relayLoginOrRegister(authMode == RelayAuthMode.Register) },
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            UnderlinedConnectionAction(
+                                label = if (authMode == RelayAuthMode.Register) "Sign in" else "Register",
+                                contentDescription = if (authMode == RelayAuthMode.Register) {
+                                    "Use relay sign in"
+                                } else {
+                                    "Use relay registration"
+                                },
+                                onClick = {
+                                    authMode = if (authMode == RelayAuthMode.Register) {
+                                        RelayAuthMode.SignIn
+                                    } else {
+                                        RelayAuthMode.Register
+                                    }
+                                },
                             )
                         }
                     }
@@ -458,7 +501,6 @@ fun SupervisorConnectionSetupScreen(
                             contentDescription = "Back to relay account",
                             onClick = {
                                 if (
-                                    initialRoute == ConnectionSetupRoute.ConnectionSettings ||
                                     initialRoute == ConnectionSetupRoute.RelayDevices
                                 ) {
                                     onBack()
@@ -474,73 +516,6 @@ fun SupervisorConnectionSetupScreen(
                             size = GraphButtonSize.Default,
                             contentDescription = "Connect selected relay device",
                             onClick = { connectCurrent() },
-                        )
-                    }
-                }
-                ConnectionSetupRoute.ConnectionSettings -> {
-                    ConnectionPanel(title = "Connection", detail = mode.label) {
-                        ConnectionSettingText(label = "URL", value = baseUrl)
-                        if (mode == SupervisorConnectionMode.Relay) {
-                            ConnectionSettingText(label = "Device", value = relayDeviceId.ifBlank { "No device selected" })
-                            GraphButton(
-                                label = "Manage devices",
-                                enabled = authToken.isNotBlank(),
-                                variant = GraphButtonVariant.Secondary,
-                                size = GraphButtonSize.Default,
-                                contentDescription = "Manage relay devices",
-                                onClick = { route = ConnectionSetupRoute.RelayDevices },
-                            )
-                            GraphButton(
-                                label = "Change account",
-                                enabled = !busy,
-                                variant = GraphButtonVariant.Outline,
-                                size = GraphButtonSize.Default,
-                                contentDescription = "Change relay account",
-                                onClick = {
-                                    authToken = ""
-                                    relayDeviceId = ""
-                                    relayPortal = null
-                                    createdDevice = null
-                                    onChangeAccount()
-                                    route = ConnectionSetupRoute.RelayAuth
-                                },
-                            )
-                        } else if (mode == SupervisorConnectionMode.Server) {
-                            GraphButton(
-                                label = "Re-authenticate",
-                                enabled = !busy,
-                                variant = GraphButtonVariant.Secondary,
-                                size = GraphButtonSize.Default,
-                                contentDescription = "Re-authenticate server",
-                                onClick = { route = ConnectionSetupRoute.ServerAuth },
-                            )
-                        }
-                        GraphButton(
-                            label = "Change mode",
-                            enabled = !busy,
-                            variant = GraphButtonVariant.Outline,
-                            size = GraphButtonSize.Default,
-                            contentDescription = "Change connection mode",
-                            onClick = {
-                                onChangeMode()
-                                route = ConnectionSetupRoute.ModeSelect
-                            },
-                        )
-                        GraphButton(
-                            label = "Disconnect",
-                            enabled = !busy,
-                            variant = GraphButtonVariant.Destructive,
-                            size = GraphButtonSize.Default,
-                            contentDescription = "Disconnect supervisor",
-                            onClick = onDisconnect,
-                        )
-                        GraphButton(
-                            label = "Back",
-                            enabled = !busy,
-                            variant = GraphButtonVariant.Outline,
-                            size = GraphButtonSize.Default,
-                            contentDescription = "Back to workspace",
-                            onClick = onBack,
                         )
                     }
                 }
@@ -612,12 +587,110 @@ fun SupervisorConnectionSetupScreen(
     }
 }
 
+@Composable
+fun SupervisorAccountPanel(
+    config: SupervisorConnectionConfig,
+    onClose: () -> Unit,
+    onDisconnect: () -> Unit,
+    onManageDevices: () -> Unit,
+    onChangeAccount: () -> Unit,
+    onReauthenticate: () -> Unit,
+    onChangeMode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GraphDialogOverlay(onDismiss = onClose, modifier = modifier) {
+        GraphDialogFrame(
+            title = "Supervisor account",
+            subtitle = "${config.mode.label} / ${config.normalizedBaseUrl}",
+            onClose = onClose,
+            footer = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    GraphButton(
+                        label = "Change mode",
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Change connection mode",
+                        onClick = {
+                            onClose()
+                            onChangeMode()
+                        },
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    GraphButton(
+                        label = "Disconnect",
+                        variant = GraphButtonVariant.Destructive,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Disconnect supervisor",
+                        onClick = {
+                            onClose()
+                            onDisconnect()
+                        },
+                    )
+                }
+            },
+        ) {
+            ConnectionSettingText(label = "URL", value = config.normalizedBaseUrl)
+            when (config.mode) {
+                SupervisorConnectionMode.Relay -> {
+                    ConnectionSettingText(
+                        label = "Device",
+                        value = config.relayDeviceId?.takeIf { it.isNotBlank() } ?: "No device selected",
+                    )
+                    GraphButton(
+                        label = "Manage devices",
+                        enabled = !config.authToken.isNullOrBlank(),
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Manage relay devices",
+                        onClick = {
+                            onClose()
+                            onManageDevices()
+                        },
+                    )
+                    GraphButton(
+                        label = "Change account",
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Change relay account",
+                        onClick = {
+                            onClose()
+                            onChangeAccount()
+                        },
+                    )
+                }
+                SupervisorConnectionMode.Server -> {
+                    GraphButton(
+                        label = "Re-authenticate",
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Re-authenticate server",
+                        onClick = {
+                            onClose()
+                            onReauthenticate()
+                        },
+                    )
+                }
+                SupervisorConnectionMode.Local -> {
+                    Text(
+                        text = "Local supervisor access does not require an account token.",
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
 enum class ConnectionSetupRoute {
     ModeSelect,
     ServerAuth,
     RelayAuth,
     RelayDevices,
-    ConnectionSettings,
 }
 
 private enum class RelayAuthMode {
@@ -676,7 +749,7 @@ private fun RelayDevicesPanel(
     onCreateDevice: () -> Unit,
 ) {
     ConnectionPanel(
-        title = "Relay devices",
+        title = "Device management",
         detail = "Create a backend device, copy the one-time token to the private machine, then select the connected device.",
     ) {
         if (devices.isEmpty()) {
@@ -871,6 +944,12 @@ private fun RelayDeviceTokenNotice(result: RelayCreateDeviceResult, relayBaseUrl
         )
         Text(
             text = result.token,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .semantics { contentDescription = "Copy relay supervisor command from token" }
+                .clickable { clipboard.setText(AnnotatedString(command)) }
+                .padding(6.dp),
             color = ThreadColors.Foreground,
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
@@ -888,13 +967,6 @@ private fun RelayDeviceTokenNotice(result: RelayCreateDeviceResult, relayBaseUrl
             fontFamily = FontFamily.Monospace,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GraphButton(
-                label = "Copy token",
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Copy relay device token",
-                onClick = { clipboard.setText(AnnotatedString(result.token)) },
-            )
             GraphButton(
                 label = "Copy command",
                 variant = GraphButtonVariant.Outline,
@@ -933,7 +1005,6 @@ private fun ConnectionPanel(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            GraphBadge(label = "Setup", variant = GraphBadgeVariant.Outline)
         }
         Text(
             text = detail,
@@ -942,6 +1013,27 @@ private fun ConnectionPanel(
         )
         content()
     }
+}
+
+@Composable
+private fun UnderlinedConnectionAction(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        color = ThreadColors.Primary,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        textDecoration = TextDecoration.Underline,
+        maxLines = 1,
+    )
 }
 
 @Composable

@@ -226,6 +226,13 @@ data class SupervisorWorkspaceFilePreview(
     val nextOffset: Long,
 )
 
+data class SupervisorWorkspaceFile(
+    val path: String,
+    val name: String,
+    val kind: String,
+    val size: Long,
+)
+
 data class SupervisorShellSession(
     val id: String,
     val threadId: String,

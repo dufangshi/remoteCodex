@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
@@ -130,6 +132,8 @@ const workspacePreviewQuerySchema = z.object({
 
 const PREVIEW_DEFAULT_LIMIT_BYTES = 50_000;
 const WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const WORKSPACE_FOLDER_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024;
+const WORKSPACE_FOLDER_DOWNLOAD_MAX_FILES = 300;
 const WORKSPACE_TREE_IGNORED_NAMES = new Set([
   '.git',
   'node_modules',
@@ -425,6 +429,161 @@ function contentTypeForPath(filePath: string) {
   }
 }
 
+interface WorkspaceFolderZipEntry {
+  absPath: string;
+  archivePath: string;
+  size: number;
+  updatedAt: Date;
+}
+
+async function collectFolderZipEntries(rootPath: string, folderPath: string) {
+  const folderName = path.basename(folderPath) || 'workspace-folder';
+  const entries: WorkspaceFolderZipEntry[] = [];
+  let totalBytes = 0;
+  const pending = [folderPath];
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const children = await fs.readdir(current, { withFileTypes: true });
+    for (const child of children) {
+      const childPath = await resolveWorkspaceItemPath(rootPath, path.relative(rootPath, path.join(current, child.name)));
+      if (child.isDirectory()) {
+        pending.push(childPath);
+        continue;
+      }
+      if (!child.isFile()) {
+        continue;
+      }
+
+      const stats = await fs.stat(childPath);
+      totalBytes += stats.size;
+      entries.push({
+        absPath: childPath,
+        archivePath: `${folderName}/${relativeWorkspacePath(folderPath, childPath)}`,
+        size: stats.size,
+        updatedAt: stats.mtime,
+      });
+
+      if (entries.length >= WORKSPACE_FOLDER_DOWNLOAD_MAX_FILES) {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message: 'Folder downloads must contain fewer than 300 files.',
+        });
+      }
+
+      if (totalBytes >= WORKSPACE_FOLDER_DOWNLOAD_MAX_BYTES) {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message: 'Folder downloads must be smaller than 100 MB.',
+        });
+      }
+    }
+  }
+
+  return entries.sort((left, right) => left.archivePath.localeCompare(right.archivePath));
+}
+
+const crc32Table = new Uint32Array(256);
+for (let index = 0; index < 256; index += 1) {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+  }
+  crc32Table[index] = value >>> 0;
+}
+
+function crc32(buffer: Buffer) {
+  let value = 0xffffffff;
+  for (const byte of buffer) {
+    value = crc32Table[(value ^ byte) & 0xff]! ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zipDosDateTime(updatedAt: Date) {
+  const year = Math.max(1980, updatedAt.getFullYear());
+  const dosTime =
+    (updatedAt.getHours() << 11) |
+    (updatedAt.getMinutes() << 5) |
+    Math.floor(updatedAt.getSeconds() / 2);
+  const dosDate =
+    ((year - 1980) << 9) |
+    ((updatedAt.getMonth() + 1) << 5) |
+    updatedAt.getDate();
+  return { dosDate, dosTime };
+}
+
+async function createFolderZipFile(rootPath: string, folderPath: string) {
+  const entries = await collectFolderZipEntries(rootPath, folderPath);
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const data = await fs.readFile(entry.absPath);
+    const name = Buffer.from(entry.archivePath.split(path.sep).join('/'), 'utf8');
+    const checksum = crc32(data);
+    const { dosDate, dosTime } = zipDosDateTime(entry.updatedAt);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(dosTime, 10);
+    localHeader.writeUInt16LE(dosDate, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, name, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(dosTime, 12);
+    centralHeader.writeUInt16LE(dosDate, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, name);
+    offset += localHeader.length + name.length + data.length;
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(0x06054b50, 0);
+  endRecord.writeUInt16LE(0, 4);
+  endRecord.writeUInt16LE(0, 6);
+  endRecord.writeUInt16LE(entries.length, 8);
+  endRecord.writeUInt16LE(entries.length, 10);
+  endRecord.writeUInt32LE(centralSize, 12);
+  endRecord.writeUInt32LE(offset, 16);
+  endRecord.writeUInt16LE(0, 20);
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-folder-download-'));
+  const zipPath = path.join(tempDir, `${path.basename(folderPath) || 'workspace-folder'}.zip`);
+  await fs.writeFile(zipPath, Buffer.concat([...localParts, ...centralParts, endRecord]));
+  return { zipPath, tempDir };
+}
+
+function cleanupTemporaryZip(zipPath: string, tempDir: string) {
+  return async () => {
+    await fs.rm(zipPath, { force: true }).catch(() => undefined);
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  };
+}
+
 function sanitizeUploadFilename(filename: string | undefined) {
   const baseName = path.basename(filename?.trim() || 'upload');
   if (!baseName || baseName === '.' || baseName === '..') {
@@ -635,10 +794,25 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const itemPath = await resolveWorkspaceItemPath(rootPath, query.path);
     const stats = await fs.stat(itemPath);
 
+    if (stats.isDirectory()) {
+      const { zipPath, tempDir } = await createFolderZipFile(rootPath, itemPath);
+      const filename = `${path.basename(itemPath) || 'workspace-folder'}.zip`;
+      const cleanup = cleanupTemporaryZip(zipPath, tempDir);
+      reply.raw.once('finish', () => void cleanup());
+      reply.raw.once('close', () => void cleanup());
+      reply
+        .header('content-type', 'application/zip')
+        .header(
+          'content-disposition',
+          `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+        );
+      return reply.send(createReadStream(zipPath));
+    }
+
     if (!stats.isFile()) {
       throw new HttpError(400, {
         code: 'bad_request',
-        message: 'Only file downloads are supported from this endpoint.'
+        message: 'Only file and folder downloads are supported from this endpoint.'
       });
     }
 

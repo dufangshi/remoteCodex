@@ -105,12 +105,6 @@ fun ThreadTopBar(
                 onClick = onOpenSettings,
                 modifier = Modifier.padding(top = 7.dp),
             )
-            TopBarIconButton(
-                icon = TopBarIcon.Settings,
-                contentDescription = "Open settings",
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(top = 7.dp),
-            )
         }
         if (actionsOpen) {
             ThreadActionMenu(
