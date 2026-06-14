@@ -217,4 +217,17 @@ describe('loadRuntimeConfig', () => {
       command: 'opencode-custom',
     });
   });
+
+  it('prefers relay supervisor host and port over generic fallbacks', () => {
+    const config = loadRuntimeConfig({
+      NODE_ENV: 'test',
+      HOST: '0.0.0.0',
+      PORT: '9999',
+      REMOTE_CODEX_RELAY_SUPERVISOR_HOST: '127.0.0.1',
+      REMOTE_CODEX_RELAY_SUPERVISOR_PORT: '8787',
+    });
+
+    expect(config.host).toBe('127.0.0.1');
+    expect(config.port).toBe(8787);
+  });
 });

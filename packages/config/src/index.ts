@@ -86,6 +86,8 @@ const envSchema = z.object({
   REMOTE_CODEX_MODE: z.enum(['local', 'server', 'relay']).optional(),
   HOST: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().optional(),
+  REMOTE_CODEX_RELAY_SUPERVISOR_HOST: z.string().min(1).optional(),
+  REMOTE_CODEX_RELAY_SUPERVISOR_PORT: z.coerce.number().int().positive().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
   DISABLE_REQUEST_LOGGING: z.string().optional(),
   REMOTE_CODEX_MANAGEMENT_ROUTES_ENABLED: z.string().optional(),
@@ -137,6 +139,10 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ...env,
     WORKSPACE_ROOT: optionalNonEmpty(env.WORKSPACE_ROOT),
     DATABASE_URL: optionalNonEmpty(env.DATABASE_URL),
+    HOST: optionalNonEmpty(env.HOST),
+    PORT: optionalNonEmpty(env.PORT),
+    REMOTE_CODEX_RELAY_SUPERVISOR_HOST: optionalNonEmpty(env.REMOTE_CODEX_RELAY_SUPERVISOR_HOST),
+    REMOTE_CODEX_RELAY_SUPERVISOR_PORT: optionalNonEmpty(env.REMOTE_CODEX_RELAY_SUPERVISOR_PORT),
     REMOTE_CODEX_ADMIN_USERNAME: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_USERNAME),
     REMOTE_CODEX_ADMIN_PASSWORD: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_PASSWORD),
     REMOTE_CODEX_SESSION_SECRET: optionalNonEmpty(env.REMOTE_CODEX_SESSION_SECRET),
@@ -209,9 +215,11 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     runtimeRole,
     sandboxId: parsed.REMOTE_CODEX_SANDBOX_ID ?? null,
     userId: parsed.REMOTE_CODEX_USER_ID ?? null,
-    host: parsed.HOST ?? (runtimeRole === 'worker' ? '0.0.0.0' : '127.0.0.1'),
+    host: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_HOST ??
+      parsed.HOST ??
+      (runtimeRole === 'worker' ? '0.0.0.0' : '127.0.0.1'),
     mode,
-    port: parsed.PORT ?? 8787,
+    port: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_PORT ?? parsed.PORT ?? 8787,
     logLevel: parsed.LOG_LEVEL ?? (nodeEnv === 'production' ? 'warn' : 'info'),
     disableRequestLogging,
     managementRoutesEnabled: parseBoolean(

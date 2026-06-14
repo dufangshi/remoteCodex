@@ -2,6 +2,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import readline from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +16,9 @@ const relayDistEntry = path.join(packageRoot, 'apps', 'relay-server', 'dist', 'i
 const relaySourceEntry = path.join(packageRoot, 'apps', 'relay-server', 'src', 'index.ts');
 const supervisorDistEntry = path.join(packageRoot, 'apps', 'supervisor-api', 'dist', 'index.js');
 const supervisorSourceEntry = path.join(packageRoot, 'apps', 'supervisor-api', 'src', 'index.ts');
+const relaySupervisorConfigPath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG
+  ? path.resolve(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG)
+  : path.join(os.homedir(), '.remote-codex', 'relay-supervisor.json');
 const sourceCheckout =
   fs.existsSync(path.join(packageRoot, 'pnpm-workspace.yaml')) &&
   fs.existsSync(path.join(packageRoot, 'scripts', 'service-restart.mjs'));
@@ -50,7 +56,7 @@ if (command === 'version') {
 if (command === 'relay') {
   runRelayServer();
 } else if (command === 'relay-supervisor') {
-  runRelaySupervisor();
+  await runRelaySupervisor();
 } else if (!['start', 'stop', 'status'].includes(command)) {
   printHelp();
   process.exit(command ? 1 : 0);
@@ -88,8 +94,8 @@ function runRelayServer() {
       ['REMOTE_CODEX_RELAY_SESSION_SECRET', 'Relay session signing secret, at least 16 characters. Defaults to the admin password if omitted.'],
       ['REMOTE_CODEX_RELAY_DATA_DIR', 'Persistent relay user/device/share store. Defaults to .local/relay-server.'],
       ['REMOTE_CODEX_RELAY_REGISTRATION_ENABLED', 'true/false. Use false when only admins should create users.'],
-      ['HOST', 'Relay listen host. Use 0.0.0.0 on a public server. Default 0.0.0.0.'],
-      ['PORT', 'Relay listen port. Default 8788.'],
+      ['REMOTE_CODEX_RELAY_HOST', 'Relay listen host. Use 0.0.0.0 on a public server. Default 0.0.0.0. Falls back to HOST.'],
+      ['REMOTE_CODEX_RELAY_PORT', 'Relay listen port. Default 8788. Falls back to PORT.'],
     ],
     example: [
       'REMOTE_CODEX_ADMIN_USERNAME=admin \\',
@@ -97,8 +103,14 @@ function runRelayServer() {
       'REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters \\',
       'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay \\',
       'REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=false \\',
-      'HOST=0.0.0.0 PORT=8788 \\',
+      'REMOTE_CODEX_RELAY_HOST=0.0.0.0 REMOTE_CODEX_RELAY_PORT=8788 \\',
       'remote-codex relay',
+    ],
+    effective: () => [
+      [
+        'Relay listen address',
+        `${envValue(['REMOTE_CODEX_RELAY_HOST', 'HOST'], '0.0.0.0')}:${envValue(['REMOTE_CODEX_RELAY_PORT', 'PORT'], '8788')}`,
+      ],
     ],
     validate: () => {
       const issues = [];
@@ -150,7 +162,7 @@ function runRelayServer() {
     }
 
     if (code && code !== 0) {
-      console.error(`remote-codex relay exited with code ${code}. Check the relay port, HOST/PORT, and environment values above.`);
+      console.error(`remote-codex relay exited with code ${code}. Check REMOTE_CODEX_RELAY_HOST/REMOTE_CODEX_RELAY_PORT and environment values above.`);
     }
     process.exit(code ?? 1);
   });
@@ -161,32 +173,40 @@ function runRelayServer() {
   });
 }
 
-function runRelaySupervisor() {
+async function runRelaySupervisor() {
+  if (process.argv[3] === 'reset') {
+    resetRelaySupervisorConfig();
+    return;
+  }
+  await ensureRelaySupervisorConfig();
   const guidance = {
     commandName: 'remote-codex relay-supervisor',
     description: 'Run the private-machine supervisor backend that connects outward to a public relay.',
     required: [
-      ['REMOTE_CODEX_ADMIN_USERNAME', 'Private supervisor admin username. Required because relay mode enables local API auth.'],
-      ['REMOTE_CODEX_ADMIN_PASSWORD', 'Private supervisor admin password. Required because relay mode enables local API auth.'],
-      ['REMOTE_CODEX_SESSION_SECRET', 'Private supervisor session signing secret, at least 16 characters.'],
+      ['REMOTE_CODEX_ADMIN_USERNAME', 'Private supervisor admin username. Defaults to a saved local value.'],
+      ['REMOTE_CODEX_ADMIN_PASSWORD', 'Private supervisor admin password. Defaults to a saved generated value.'],
+      ['REMOTE_CODEX_SESSION_SECRET', 'Private supervisor session signing secret. Defaults to a saved generated value.'],
       ['REMOTE_CODEX_RELAY_SERVER_URL', 'Public relay websocket base URL, for example ws://host:8788 or wss://relay.example.com.'],
       ['REMOTE_CODEX_RELAY_AGENT_TOKEN', 'Device token created in the relay portal. This is not the relay admin password.'],
     ],
     recommended: [
-      ['HOST', 'Private supervisor listen host. Default 127.0.0.1.'],
-      ['PORT', 'Private supervisor listen port. Default 8787.'],
+      ['REMOTE_CODEX_RELAY_SUPERVISOR_HOST', 'Private supervisor listen host. Default 127.0.0.1. Falls back to HOST.'],
+      ['REMOTE_CODEX_RELAY_SUPERVISOR_PORT', 'Private supervisor listen port. Default 8787. Falls back to PORT.'],
       ['DATABASE_URL', 'SQLite database path. Set this when running a separate backend beside another Remote Codex.'],
       ['WORKSPACE_ROOT', 'Root directory that workspace paths must live under. Default is your home directory.'],
       ['CODEX_HOME', 'Codex config directory. Default ~/.codex.'],
     ],
     example: [
-      'REMOTE_CODEX_ADMIN_USERNAME=admin \\',
-      'REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally \\',
-      'REMOTE_CODEX_SESSION_SECRET=at-least-16-characters \\',
-      'REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com \\',
-      'REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal \\',
-      'HOST=127.0.0.1 PORT=8787 \\',
       'remote-codex relay-supervisor',
+      '# or reset saved interactive configuration:',
+      'remote-codex relay-supervisor reset',
+    ],
+    effective: () => [
+      [
+        'Private supervisor listen address',
+        `${envValue(['REMOTE_CODEX_RELAY_SUPERVISOR_HOST', 'HOST'], '127.0.0.1')}:${envValue(['REMOTE_CODEX_RELAY_SUPERVISOR_PORT', 'PORT'], '8787')}`,
+      ],
+      ['Relay server URL', envValue(['REMOTE_CODEX_RELAY_SERVER_URL'], 'missing')],
     ],
     validate: () => {
       const issues = [];
@@ -247,7 +267,7 @@ function runRelaySupervisor() {
     }
 
     if (code && code !== 0) {
-      console.error(`remote-codex relay-supervisor exited with code ${code}. Check the relay server URL, device token, local PORT, and environment values above.`);
+      console.error(`remote-codex relay-supervisor exited with code ${code}. Check the relay server URL, device token, local REMOTE_CODEX_RELAY_SUPERVISOR_PORT, and environment values above.`);
     }
     process.exit(code ?? 1);
   });
@@ -256,6 +276,114 @@ function runRelaySupervisor() {
     console.error(`Failed to run remote-codex relay-supervisor: ${error.message}`);
     process.exit(1);
   });
+}
+
+async function ensureRelaySupervisorConfig() {
+  const existing = readRelaySupervisorConfig();
+  const generated = {
+    REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+    REMOTE_CODEX_ADMIN_PASSWORD: randomSecret(24),
+    REMOTE_CODEX_SESSION_SECRET: randomSecret(32),
+    DATABASE_URL: path.join(os.homedir(), '.remote-codex', 'relay-supervisor.sqlite'),
+  };
+  const config = { ...generated, ...existing };
+  for (const [name, value] of Object.entries(config)) {
+    if (!nonEmptyEnv(name) && typeof value === 'string' && value.trim().length > 0) {
+      process.env[name] = value;
+    }
+  }
+
+  const needsRelayUrl = !nonEmptyEnv('REMOTE_CODEX_RELAY_SERVER_URL');
+  const needsAgentToken = !nonEmptyEnv('REMOTE_CODEX_RELAY_AGENT_TOKEN');
+  if (!needsRelayUrl && !needsAgentToken) {
+    return;
+  }
+  if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    return;
+  }
+
+  console.error('remote-codex relay-supervisor needs relay connection details.');
+  console.error(`Answers will be saved to ${relaySupervisorConfigPath}.`);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    if (needsRelayUrl) {
+      process.env.REMOTE_CODEX_RELAY_SERVER_URL = await promptRelaySupervisorValue(
+        rl,
+        'Relay websocket URL (ws:// or wss://): ',
+        (value) => value.startsWith('ws://') || value.startsWith('wss://'),
+        'Relay websocket URL must start with ws:// or wss://.',
+      );
+    }
+    if (needsAgentToken) {
+      process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN = await promptRelaySupervisorValue(
+        rl,
+        'Relay device token: ',
+        (value) => value.length > 0,
+        'Relay device token must not be empty.',
+      );
+    }
+  } finally {
+    rl.close();
+  }
+
+  writeRelaySupervisorConfig({
+    ...config,
+    REMOTE_CODEX_RELAY_SERVER_URL: process.env.REMOTE_CODEX_RELAY_SERVER_URL,
+    REMOTE_CODEX_RELAY_AGENT_TOKEN: process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN,
+    REMOTE_CODEX_ADMIN_USERNAME: process.env.REMOTE_CODEX_ADMIN_USERNAME,
+    REMOTE_CODEX_ADMIN_PASSWORD: process.env.REMOTE_CODEX_ADMIN_PASSWORD,
+    REMOTE_CODEX_SESSION_SECRET: process.env.REMOTE_CODEX_SESSION_SECRET,
+    DATABASE_URL: process.env.DATABASE_URL,
+  });
+}
+
+async function promptRelaySupervisorValue(rl, prompt, validate, invalidMessage) {
+  while (true) {
+    const value = (await rl.question(prompt)).trim();
+    if (validate(value)) {
+      return value;
+    }
+    console.error(invalidMessage);
+  }
+}
+
+function readRelaySupervisorConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(relaySupervisorConfigPath, 'utf8'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.error(`Ignoring invalid relay-supervisor config at ${relaySupervisorConfigPath}: ${error.message}`);
+    }
+    return {};
+  }
+}
+
+function writeRelaySupervisorConfig(config) {
+  fs.mkdirSync(path.dirname(relaySupervisorConfigPath), { recursive: true });
+  fs.writeFileSync(relaySupervisorConfigPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  try {
+    fs.chmodSync(relaySupervisorConfigPath, 0o600);
+  } catch {
+    // Best-effort on filesystems that do not support chmod.
+  }
+}
+
+function resetRelaySupervisorConfig() {
+  try {
+    fs.unlinkSync(relaySupervisorConfigPath);
+    console.log(`Deleted relay-supervisor config: ${relaySupervisorConfigPath}`);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      console.log(`No relay-supervisor config found at ${relaySupervisorConfigPath}`);
+      return;
+    }
+    console.error(`Failed to delete relay-supervisor config: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+function randomSecret(bytes) {
+  return crypto.randomBytes(bytes).toString('base64url');
 }
 
 function validateRequiredEnv(input) {
@@ -306,24 +434,97 @@ function printEnvSummary(input) {
   console.error(`${input.commandName} configuration:`);
   console.error(input.description);
   console.error('');
+  const effective = input.effective?.() ?? [];
+  if (effective.length > 0) {
+    console.error('Effective values:');
+    for (const [label, value] of effective) {
+      console.error(`  ${label}: ${value}`);
+    }
+    console.error('');
+  }
   console.error('Required:');
   for (const [name, description] of input.required) {
-    console.error(`  ${name}: ${nonEmptyEnv(name) ? 'set' : 'missing'}`);
+    console.error(`  ${name}: ${envStatusLabel(name, 'missing')}`);
     console.error(`    ${description}`);
   }
   if (input.recommended.length > 0) {
     console.error('');
     console.error('Recommended / optional:');
     for (const [name, description] of input.recommended) {
-      console.error(`  ${name}: ${nonEmptyEnv(name) ? 'set' : 'default/unset'}`);
+      console.error(`  ${name}: ${envStatusLabel(name, 'unset')}`);
       console.error(`    ${description}`);
     }
   }
   console.error('');
 }
 
+function envStatusLabel(name, missingLabel) {
+  const directValue = cleanEnvValue(name);
+  if (directValue) {
+    return isSensitiveEnvName(name) ? 'set' : `set: ${directValue}`;
+  }
+
+  const fallback = envFallbackFor(name);
+  if (fallback) {
+    for (const fallbackName of fallback.names) {
+      const fallbackValue = cleanEnvValue(fallbackName);
+      if (fallbackValue) {
+        return isSensitiveEnvName(name) ? `fallback from ${fallbackName}` : `fallback from ${fallbackName}: ${fallbackValue}`;
+      }
+    }
+
+    if (fallback.defaultValue) {
+      return `default: ${fallback.defaultValue}`;
+    }
+  }
+
+  return missingLabel;
+}
+
+function envFallbackFor(name) {
+  switch (name) {
+    case 'REMOTE_CODEX_RELAY_DATA_DIR':
+      return { names: [], defaultValue: '.local/relay-server' };
+    case 'REMOTE_CODEX_RELAY_HOST':
+      return { names: ['HOST'], defaultValue: '0.0.0.0' };
+    case 'REMOTE_CODEX_RELAY_PORT':
+      return { names: ['PORT'], defaultValue: '8788' };
+    case 'REMOTE_CODEX_RELAY_SUPERVISOR_HOST':
+      return { names: ['HOST'], defaultValue: '127.0.0.1' };
+    case 'REMOTE_CODEX_RELAY_SUPERVISOR_PORT':
+      return { names: ['PORT'], defaultValue: '8787' };
+    case 'DATABASE_URL':
+      return { names: [], defaultValue: `sqlite://${path.join('.local', 'remote-codex-relay-supervisor.sqlite')}` };
+    case 'WORKSPACE_ROOT':
+      return { names: [], defaultValue: os.homedir() };
+    case 'CODEX_HOME':
+      return { names: [], defaultValue: path.join(os.homedir(), '.codex') };
+    default:
+      return null;
+  }
+}
+
+function cleanEnvValue(name) {
+  const value = process.env[name];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isSensitiveEnvName(name) {
+  return /PASSWORD|SECRET|TOKEN/i.test(name);
+}
+
 function nonEmptyEnv(name) {
   return typeof process.env[name] === 'string' && process.env[name].trim().length > 0;
+}
+
+function envValue(names, defaultValue) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return defaultValue;
 }
 
 function relayServerEnv() {
@@ -331,6 +532,8 @@ function relayServerEnv() {
   for (const name of [
     'HOST',
     'PORT',
+    'REMOTE_CODEX_RELAY_HOST',
+    'REMOTE_CODEX_RELAY_PORT',
     'REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN',
     'REMOTE_CODEX_RELAY_CLIENT_TOKEN',
     'REMOTE_CODEX_ADMIN_EMAIL',
@@ -555,10 +758,11 @@ Recommended environment:
     Persistent user/device/share store. Default .local/relay-server.
   REMOTE_CODEX_RELAY_REGISTRATION_ENABLED
     true/false. Default true. Use false when only admins should create users.
-  HOST
+  REMOTE_CODEX_RELAY_HOST
     Relay listen host. Default 0.0.0.0. Use 0.0.0.0 on a public server.
-  PORT
-    Relay listen port. Default 8788.
+    Falls back to HOST for legacy scripts.
+  REMOTE_CODEX_RELAY_PORT
+    Relay listen port. Default 8788. Falls back to PORT for legacy scripts.
   REMOTE_CODEX_ADMIN_EMAIL
     Optional seeded admin email. Defaults to <username>@relay.local.
   REMOTE_CODEX_RELAY_WEB_DIST_DIR
@@ -574,7 +778,7 @@ Example:
   REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters \\
   REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay \\
   REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=false \\
-  HOST=0.0.0.0 PORT=8788 \\
+  REMOTE_CODEX_RELAY_HOST=0.0.0.0 REMOTE_CODEX_RELAY_PORT=8788 \\
   remote-codex relay
 
 After start:
@@ -602,28 +806,41 @@ public internet; it connects outward to a public relay server.
 
 Usage:
   remote-codex relay-supervisor
+  remote-codex relay-supervisor reset
 
 This command automatically sets for the child supervisor:
   REMOTE_CODEX_MODE=relay
 
-Required environment:
-  REMOTE_CODEX_ADMIN_USERNAME
-    Private supervisor admin username. Required because relay mode enables API auth.
-  REMOTE_CODEX_ADMIN_PASSWORD
-    Private supervisor admin password.
-  REMOTE_CODEX_SESSION_SECRET
-    Private supervisor session signing secret. Must be at least 16 characters.
+Interactive setup:
+  When REMOTE_CODEX_RELAY_SERVER_URL or REMOTE_CODEX_RELAY_AGENT_TOKEN is
+  missing and stdin is interactive, the command asks for those values and saves
+  them to:
+    ${relaySupervisorConfigPath}
+
+  The saved config also includes generated local supervisor auth/session values
+  so the normal first-run path only asks for relay URL and device token.
+
+  Use "remote-codex relay-supervisor reset" to delete the saved config.
+
+Environment overrides:
   REMOTE_CODEX_RELAY_SERVER_URL
     Public relay websocket base URL. Use ws://host:port for plain relay ports or
     wss://relay.example.com behind TLS.
   REMOTE_CODEX_RELAY_AGENT_TOKEN
     Device token created in the relay portal. This is not the relay admin password.
+  REMOTE_CODEX_ADMIN_USERNAME
+    Private supervisor admin username. Defaults to saved "admin".
+  REMOTE_CODEX_ADMIN_PASSWORD
+    Private supervisor admin password. Defaults to a saved generated value.
+  REMOTE_CODEX_SESSION_SECRET
+    Private supervisor session signing secret. Defaults to a saved generated value.
 
 Recommended environment:
-  HOST
+  REMOTE_CODEX_RELAY_SUPERVISOR_HOST
     Private supervisor listen host. Default 127.0.0.1.
-  PORT
-    Private supervisor listen port. Default 8787.
+    Falls back to HOST for legacy scripts.
+  REMOTE_CODEX_RELAY_SUPERVISOR_PORT
+    Private supervisor listen port. Default 8787. Falls back to PORT for legacy scripts.
   DATABASE_URL
     SQLite database path. Set this when running beside another Remote Codex.
   WORKSPACE_ROOT
@@ -636,18 +853,16 @@ Recommended environment:
     Comma-separated provider ids, for example codex,claude.
 
 Example:
-  REMOTE_CODEX_ADMIN_USERNAME=admin \\
-  REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally \\
-  REMOTE_CODEX_SESSION_SECRET=at-least-16-characters \\
+  remote-codex relay-supervisor
+
+Non-interactive example:
   REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com \\
   REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal \\
-  HOST=127.0.0.1 PORT=8787 \\
-  DATABASE_URL=$HOME/.remote-codex/relay-supervisor.sqlite \\
   remote-codex relay-supervisor
 
 When running a separate test backend beside an existing Remote Codex service,
 set separate values for:
-  PORT
+  REMOTE_CODEX_RELAY_SUPERVISOR_PORT
   DATABASE_URL
   WORKSPACE_ROOT
 
