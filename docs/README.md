@@ -32,6 +32,8 @@ Recommended reading order:
 25. [ElAgenteHarness Code Review And Integration Plan](./elagente-harness-code-review-and-integration-plan.zh.md)
 26. [Android Client Architecture](./android-client-architecture.md)
 27. [Android Connection Flow And State Restoration](./android-connection-flow.md)
+28. [iOS Native App Implementation Plan](./ios-native-app-implementation-plan.zh.md)
+29. [iOS Local Toolchain](./ios-local-toolchain.md)
 
 Use the Chinese implementation task checklist as the primary step-by-step task
 board for new Remote Codex side work. Pick one unchecked item, satisfy its

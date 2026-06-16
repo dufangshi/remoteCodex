@@ -12,6 +12,7 @@ import {
 import { ClaudeRuntimeAdapter } from '../../../packages/claude/src/index';
 import { OpenCodeRuntimeAdapter } from '../../../packages/opencode/src/index';
 import type { RuntimeConfig } from '../../../packages/config/src/index';
+import { E2EFakeRuntime, isE2EFakeRuntimeEnabled } from './e2e-fake-runtime';
 
 export type ProviderHostHomes = Partial<Record<AgentProviderId, string>>;
 
@@ -55,6 +56,11 @@ export function createAgentRuntimeBootstrap(config: RuntimeConfig): AgentRuntime
   if (opencodeConfig.enabled) {
     runtimes.push(createOpenCodeRuntime(config));
     providerHostHomes.opencode = opencodeConfig.home;
+  }
+
+  if (isE2EFakeRuntimeEnabled()) {
+    runtimes.push(new E2EFakeRuntime());
+    providerHostHomes.claude = claudeConfig.home;
   }
 
   return {
