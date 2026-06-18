@@ -1,11 +1,11 @@
 {
   "name": "remote-codex",
-  "version": "0.11.4",
+  "version": "0.11.12",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "remote-codex": "./bin/remote-codex.mjs"
+    "remote-codex": "bin/remote-codex.mjs"
   },
   "files": [
     "bin/",

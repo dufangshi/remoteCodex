@@ -21,6 +21,8 @@ function testConfig(
     dataDir: `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`,
     sessionSecret: 'test-relay-session-secret',
     registrationEnabled: true,
+    registrationEnabledConfigured: false,
+    registrationPassword: null,
     webDistDir: null,
     ...overrides,
   };
@@ -102,9 +104,13 @@ describe('relay server', () => {
       accept: 'application/json, text/plain',
     });
 
-    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toBe(
-      '{"absPath":"/repo","label":"Android E2E"}',
-    );
+    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toEqual({
+      body: '{"absPath":"/repo","label":"Android E2E"}',
+    });
+    expect(relayRequestBody(Buffer.from([0, 1, 255]))).toEqual({
+      body: 'AAH/',
+      bodyEncoding: 'base64',
+    });
   });
 
   it('registers users and lets them create relay devices', async () => {
@@ -174,6 +180,151 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('requires the configured registration password when registering users', async () => {
+    const app = buildRelayServer(
+      testConfig({ registrationPassword: 'invite-password-123' }),
+    );
+    await app.ready();
+
+    const missingPasswordResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'missing@example.test',
+        username: 'missing',
+        password: 'password123',
+      },
+    });
+    expect(missingPasswordResponse.statusCode).toBe(403);
+    expect(missingPasswordResponse.json()).toEqual({
+      code: 'forbidden',
+      message: 'Invalid registration password.',
+    });
+
+    const wrongPasswordResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'wrong@example.test',
+        username: 'wrongpw',
+        password: 'password123',
+        registrationPassword: 'wrong-password',
+      },
+    });
+    expect(wrongPasswordResponse.statusCode).toBe(403);
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'invited@example.test',
+        username: 'invited',
+        password: 'password123',
+        registrationPassword: 'invite-password-123',
+      },
+    });
+    expect(registerResponse.statusCode).toBe(200);
+    expect(registerResponse.json().session.user).toMatchObject({
+      email: 'invited@example.test',
+      username: 'invited',
+    });
+
+    await app.close();
+  });
+
+  it('lets relay users update username and password', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'account@example.test',
+        username: 'account',
+        password: 'password123',
+      },
+    });
+    const token = registerResponse.json().token;
+
+    const accountResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/account',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { username: 'renamed' },
+    });
+    expect(accountResponse.statusCode).toBe(200);
+    expect(accountResponse.json()).toMatchObject({
+      username: 'renamed',
+      email: 'account@example.test',
+    });
+
+    const passwordResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/account/password',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentPassword: 'password123',
+        newPassword: 'new-password-123',
+      },
+    });
+    expect(passwordResponse.statusCode).toBe(200);
+
+    const oldLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'renamed',
+        password: 'password123',
+      },
+    });
+    expect(oldLoginResponse.statusCode).toBe(401);
+
+    const newLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'renamed',
+        password: 'new-password-123',
+      },
+    });
+    expect(newLoginResponse.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it('accepts relay session tokens from websocket-compatible query parameters', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'admin',
+        password: 'password123',
+      },
+    });
+    const token = loginResponse.json().token;
+
+    for (const queryName of ['relaySession', 'token']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/relay/auth/session?${queryName}=${encodeURIComponent(token)}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        authenticated: true,
+        user: {
+          username: 'admin',
+        },
+      });
+    }
+
+    await app.close();
+  });
+
   it('lets admin disable registration', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();
@@ -217,6 +368,37 @@ describe('relay server', () => {
     expect(registerResponse.statusCode).toBe(403);
 
     await app.close();
+  });
+
+  it('lets explicit config override a persisted registration setting on restart', async () => {
+    const dataDir = `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`;
+    const firstApp = buildRelayServer(
+      testConfig({ dataDir, registrationEnabled: false }),
+    );
+    await firstApp.ready();
+    await firstApp.close();
+
+    const restartedApp = buildRelayServer(
+      testConfig({
+        dataDir,
+        registrationEnabled: true,
+        registrationEnabledConfigured: true,
+      }),
+    );
+    await restartedApp.ready();
+
+    const registerResponse = await restartedApp.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'enabled@example.test',
+        username: 'enabled',
+        password: 'password123',
+      },
+    });
+    expect(registerResponse.statusCode).toBe(200);
+
+    await restartedApp.close();
   });
 
   it('shares a device thread with another username', async () => {
@@ -379,6 +561,50 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('routes device health checks through the selected relay device', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'dev@example.test',
+        username: 'devuser',
+        password: 'password123',
+      },
+    });
+    const token = registerResponse.json().token;
+
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        name: 'Android workstation',
+      },
+    });
+    const deviceId = deviceResponse.json().device.id;
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/healthz`,
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      code: 'service_unavailable',
+      message: 'No supervisor is connected for this device.',
+    });
+
+    await app.close();
+  });
+
   it('serves the relay frontend with relay bootstrap config', async () => {
     const distDir = `/tmp/remote-codex-relay-web-${crypto.randomUUID()}`;
     await fs.mkdir(path.join(distDir, 'assets'), { recursive: true });
@@ -463,6 +689,58 @@ describe('relay server', () => {
       },
       body: JSON.stringify({ version: 'from-home' }),
     });
+  });
+
+  it('preserves binary relayed HTTP responses from pending tunnel requests', async () => {
+    const broker = new RelayRequestBroker(1000);
+    const sent: string[] = [];
+    const responsePromise = broker.forward(
+      {
+        send: (message) => {
+          sent.push(message);
+        },
+      },
+      {
+        type: 'relay.request',
+        timestamp: '2026-06-10T00:00:00.000Z',
+        requestId: 'request-binary',
+        payload: {
+          method: 'GET',
+          path: '/api/threads/thread-1/exports/pdf',
+          headers: {},
+          body: null,
+        },
+      },
+    );
+
+    expect(JSON.parse(sent[0]!)).toMatchObject({
+      type: 'relay.request',
+      requestId: 'request-binary',
+      payload: {
+        path: '/api/threads/thread-1/exports/pdf',
+      },
+    });
+
+    const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x20]);
+    expect(
+      broker.accept({
+        type: 'relay.response',
+        timestamp: '2026-06-10T00:00:01.000Z',
+        requestId: 'request-binary',
+        payload: {
+          statusCode: 200,
+          headers: {
+            'content-type': 'application/pdf',
+          },
+          body: pdfBytes.toString('base64'),
+          bodyEncoding: 'base64',
+        },
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    expect(response.bodyEncoding).toBe('base64');
+    expect(Buffer.from(response.body, 'base64')).toEqual(pdfBytes);
   });
 
   it('rejects pending relay requests when the supervisor does not answer', async () => {

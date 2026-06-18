@@ -1,0 +1,148 @@
+name: Relay Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: relay-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  RELAY_CONTAINER_NAME: remote-codex-relay
+  RELAY_HOST_PORT: '8798'
+
+jobs:
+  build-and-push:
+    name: Build and push relay image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      image_sha: ${{ steps.image.outputs.image_sha }}
+      image_latest: ${{ steps.image.outputs.image_latest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tags
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_base="$(printf '%s/%s-relay' "${REGISTRY}" "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "image_sha=${image_base}:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "image_latest=${image_base}:latest" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push relay
+        uses: docker/build-push-action@v5
+        env:
+          REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
+        with:
+          context: .
+          file: Dockerfile.relay
+          push: true
+          secret-envs: |
+            remote_codex_thread_ui_deploy_key=REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64
+          tags: |
+            ${{ steps.image.outputs.image_latest }}
+            ${{ steps.image.outputs.image_sha }}
+
+  deploy:
+    name: Deploy relay over SSH
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy relay container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          timeout: 60m
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+
+            image="${{ needs.build-and-push.outputs.image_sha }}"
+            container="${{ env.RELAY_CONTAINER_NAME }}"
+            host_port="${{ env.RELAY_HOST_PORT }}"
+            data_volume="${{ env.RELAY_CONTAINER_NAME }}-data"
+
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker pull "${image}"
+
+            old_relay_pids="$(
+              ps -eo pid=,args= \
+                | awk '($0 ~ /node .*remote-codex relay/ || $0 ~ /node .*apps\/relay-server\/dist\/index.js/) && $0 !~ /awk/ { print $1 }'
+            )"
+            if [ -n "${old_relay_pids}" ]; then
+              echo "Stopping existing remote-codex relay processes: ${old_relay_pids}"
+              kill ${old_relay_pids} 2>/dev/null || true
+              sleep 2
+              for pid in ${old_relay_pids}; do
+                if kill -0 "${pid}" 2>/dev/null; then
+                  kill -9 "${pid}" 2>/dev/null || true
+                fi
+              done
+            fi
+
+            docker rm -f "${container}" 2>/dev/null || true
+
+            relay_ids="$(docker ps -aq --filter "label=app=remote-codex-relay" || true)"
+            if [ -n "${relay_ids}" ]; then
+              docker rm -f ${relay_ids}
+            fi
+
+            docker volume create "${data_volume}" >/dev/null
+
+            docker run -d \
+              --name "${container}" \
+              --label app=remote-codex-relay \
+              --restart unless-stopped \
+              -p "0.0.0.0:${host_port}:8788" \
+              -v "${data_volume}:/var/lib/remote-codex-relay" \
+              -e REMOTE_CODEX_RELAY_HOST=0.0.0.0 \
+              -e REMOTE_CODEX_RELAY_PORT=8788 \
+              -e HOST=0.0.0.0 \
+              -e PORT=8788 \
+              -e REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay \
+              -e REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true \
+              -e REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD="${{ secrets.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD }}" \
+              -e REMOTE_CODEX_ADMIN_USERNAME="${{ secrets.REMOTE_CODEX_RELAY_ADMIN_USERNAME }}" \
+              -e REMOTE_CODEX_ADMIN_PASSWORD="${{ secrets.REMOTE_CODEX_RELAY_ADMIN_PASSWORD }}" \
+              -e REMOTE_CODEX_RELAY_SESSION_SECRET="${{ secrets.REMOTE_CODEX_RELAY_SESSION_SECRET }}" \
+              "${image}"
+
+            for attempt in $(seq 1 45); do
+              health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null || true)"
+              if [ "${health}" = "healthy" ] || [ "${health}" = "running" ]; then
+                docker ps --filter "name=^/${container}$"
+                exit 0
+              fi
+              docker logs --tail 50 "${container}" || true
+              sleep 2
+            done
+
+            docker logs --tail 200 "${container}" || true
+            exit 1

@@ -291,10 +291,10 @@ fun AppShellSettingsPanel(
                             error = homeSnapshotError,
                         )
                         GraphButton(
-                            label = "Change connection",
+                            label = "Connection settings",
                             variant = GraphButtonVariant.Secondary,
                             size = GraphButtonSize.Default,
-                            contentDescription = "Change supervisor connection",
+                            contentDescription = "Open supervisor connection settings",
                             onClick = onChangeConnection,
                         )
                     }

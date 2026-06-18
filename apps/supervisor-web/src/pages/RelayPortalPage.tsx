@@ -21,6 +21,7 @@ import {
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
 } from '../lib/api';
+import { RelayUserMenu } from '../components/RelayUserMenu';
 
 type AuthMode = 'login' | 'register';
 
@@ -315,6 +316,7 @@ function RelayAuthPanel({
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [registrationPassword, setRegistrationPassword] = useState('');
   const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
 
@@ -326,7 +328,7 @@ function RelayAuthPanel({
       if (mode === 'login') {
         await relayLogin({ identifier, password });
       } else {
-        await relayRegister({ email, username, password });
+        await relayRegister({ email, username, password, registrationPassword });
       }
       await onAuthenticated();
     } catch (caught) {
@@ -356,6 +358,13 @@ function RelayAuthPanel({
           <>
             <RelayInput autoComplete="email" label="Email" onChange={setEmail} value={email} />
             <RelayInput autoComplete="username" label="Username" onChange={setUsername} value={username} />
+            <RelayInput
+              autoComplete="one-time-code"
+              label="Registration password"
+              onChange={setRegistrationPassword}
+              type="password"
+              value={registrationPassword}
+            />
           </>
         )}
         <RelayInput
@@ -503,6 +512,7 @@ function ShareForm({
 function RelayFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
+      <RelayUserMenu />
       <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center">
         {children}
       </div>

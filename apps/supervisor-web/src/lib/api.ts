@@ -55,6 +55,7 @@ import type {
   ThreadEventEnvelope,
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
+  WorkspaceFileDto,
   ThreadShellStateDto,
   RenameProviderHostConfigArchiveInput,
   UpdateShellInput,
@@ -1175,6 +1176,7 @@ export async function relayRegister(input: {
   email: string;
   username: string;
   password: string;
+  registrationPassword?: string;
 }) {
   enableRelayMode();
   const result = await request<RelayRegisterResultDto>('/relay/auth/register', {
@@ -1209,6 +1211,23 @@ export function createRelayDevice(input: { name: string }) {
 export function deleteRelayDevice(deviceId: string) {
   return request<{ id: string }>(`/relay/devices/${encodeURIComponent(deviceId)}`, {
     method: 'DELETE',
+  });
+}
+
+export function updateRelayAccount(input: { username?: string }) {
+  return request<RelayUserDto>('/relay/account', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateRelayPassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  return request<RelayUserDto>('/relay/account/password', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
   });
 }
 
@@ -1453,6 +1472,19 @@ export function uploadWorkspaceFile(workspaceId: string, input: { file: File }) 
   );
 }
 
+export function writeWorkspaceFile(
+  workspaceId: string,
+  input: { path: string; content: string },
+) {
+  return request<WorkspaceFileDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export function fetchThreads() {
   return request<ThreadDto[]>('/api/threads');
 }
@@ -1566,10 +1598,13 @@ export function createThread(input: CreateThreadInput) {
   });
 }
 
-export function importThread(sessionId: ImportThreadInput['sessionId']) {
+export function importThread(input: ImportThreadInput | ImportThreadInput['sessionId']) {
+  const body = typeof input === 'string'
+    ? { sessionId: input }
+    : input;
   return request<ThreadDetailDto>('/api/threads/import', {
     method: 'POST',
-    body: JSON.stringify({ sessionId })
+    body: JSON.stringify(body)
   });
 }
 

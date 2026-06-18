@@ -101,6 +101,7 @@ const interruptSchema = z.object({
 
 const importThreadSchema = z.object({
   sessionId: z.string().min(1),
+  provider: agentBackendIdSchema.optional(),
 });
 
 const resumeThreadSchema = z.object({
@@ -411,8 +412,12 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/threads/import', async (request) => {
-    const body = importThreadSchema.parse(request.body) satisfies ImportThreadInput;
-    return app.services.threadService.importThread(body.sessionId);
+    const body = importThreadSchema.parse(request.body);
+    const input: ImportThreadInput = {
+      sessionId: body.sessionId,
+      ...(body.provider ? { provider: body.provider } : {}),
+    };
+    return app.services.threadService.importThread(input);
   });
 
   app.get('/api/threads/:id', async (request) => {

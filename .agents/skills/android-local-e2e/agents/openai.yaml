@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Local E2E"
+  short_description: "Run Android emulator local-mode E2E checks"
+  default_prompt: "Use $android-local-e2e to compile/install the Android app and run a local-mode emulator E2E smoke."

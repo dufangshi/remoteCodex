@@ -13,6 +13,7 @@ import com.remotecodex.android.api.SupervisorThreadSkills
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
+import com.remotecodex.android.api.SupervisorModelOption
 import com.remotecodex.android.api.SupervisorWorkspaceFilePreview
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
@@ -32,9 +33,11 @@ import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
 import com.remotecodex.android.ui.model.ComposerMcpServerPreview
 import com.remotecodex.android.ui.model.ComposerMcpToolPreview
+import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
+import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
 import com.remotecodex.android.ui.model.ComposerSkillPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
@@ -63,6 +66,8 @@ import com.remotecodex.android.ui.model.WorkspaceFilePreview
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
 import com.remotecodex.android.ui.model.WorkspaceNodePreview
 import com.remotecodex.android.ui.model.WorkspacePreview
+import com.remotecodex.android.ui.model.defaultComposerModelOptions
+import com.remotecodex.android.ui.model.defaultComposerReasoningEffortOptions
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -83,6 +88,7 @@ fun buildThreadDetailPreviewFromSupervisor(
     mcpServersError: String? = null,
     hooks: SupervisorThreadHooks? = null,
     hooksError: String? = null,
+    modelOptions: List<SupervisorModelOption>? = null,
     now: Instant = Instant.now(),
 ): ThreadDetailPreview {
     val workspaceLabel = detail.workspace.label.ifBlank { basename(detail.workspace.absPath) }
@@ -180,6 +186,8 @@ fun buildThreadDetailPreviewFromSupervisor(
             fastMode = detail.thread.fastMode,
             planModeActive = detail.thread.collaborationMode == "plan",
             workspaceModeLabel = detail.thread.sandboxMode ?: "workspace write",
+            modelOptions = modelOptions.toComposerModelOptions(detail.thread.model),
+            reasoningEffortOptions = modelOptions.toComposerReasoningEffortOptions(detail.thread.model),
             forkTurnOptions = buildForkTurnOptionsPreview(forkTurns, forkTurnsError),
             skillsPanel = buildSkillsPanelPreview(skills, skillsError),
             mcpPanel = buildMcpPanelPreview(mcpServers, mcpServersError),
@@ -194,6 +202,47 @@ fun buildThreadDetailPreviewFromSupervisor(
             ),
         ),
     )
+}
+
+private fun List<SupervisorModelOption>?.toComposerModelOptions(
+    currentModel: String?,
+): List<ComposerModelOptionPreview> {
+    val mapped = this
+        ?.filterNot { it.hidden }
+        ?.map { option ->
+            ComposerModelOptionPreview(
+                model = option.model,
+                defaultReasoningEffort = option.defaultReasoningEffort,
+            )
+        }
+        .orEmpty()
+    if (mapped.isEmpty()) {
+        return defaultComposerModelOptions
+    }
+    return if (mapped.any { it.model == currentModel } || currentModel.isNullOrBlank()) {
+        mapped
+    } else {
+        listOf(ComposerModelOptionPreview(model = currentModel, defaultReasoningEffort = null)) + mapped
+    }
+}
+
+private fun List<SupervisorModelOption>?.toComposerReasoningEffortOptions(
+    currentModel: String?,
+): List<ComposerReasoningEffortOptionPreview> {
+    val efforts = this
+        ?.firstOrNull { it.model == currentModel }
+        ?.supportedReasoningEfforts
+        ?.mapNotNull { effort ->
+            effort.reasoningEffort.takeIf { it.isNotBlank() }
+        }
+        ?.distinct()
+        .orEmpty()
+    if (efforts.isEmpty()) {
+        return defaultComposerReasoningEffortOptions
+    }
+    return efforts.map { effort ->
+        ComposerReasoningEffortOptionPreview(reasoningEffort = effort)
+    }
 }
 
 private fun buildSkillsPanelPreview(
@@ -511,11 +560,21 @@ private fun SupervisorThreadTurnItem.toMessagePreview(startedAt: String?): Messa
     }
     return MessagePreview(
         author = author,
-        status = null,
+        status = if (author == MessageAuthor.Assistant && status.isRunningStatus()) {
+            ThreadStatus.Running
+        } else {
+            null
+        },
         timeLabel = startedAt?.let(::shortTimeLabel).orEmpty(),
         text = text,
         richText = text,
     )
+}
+
+private fun String?.isRunningStatus(): Boolean {
+    return equals("running", ignoreCase = true) ||
+        equals("started", ignoreCase = true) ||
+        equals("in_progress", ignoreCase = true)
 }
 
 private fun SupervisorThreadTurnItem.toHistoryItemPreview(): HistoryItemPreview? {

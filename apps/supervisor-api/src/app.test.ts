@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
+import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -724,6 +725,54 @@ describe('supervisor api', () => {
       version: '0.1.0-test',
     });
     expect(response.headers['content-type']).toContain('application/json');
+  });
+
+  it('decodes base64 relayed HTTP request bodies before Fastify inject', async () => {
+    const relayApp = Fastify({ logger: false });
+    relayApp.post('/echo', async (request) => ({
+      contentType: request.headers['content-type'],
+      body: request.body,
+    }));
+    await relayApp.ready();
+
+    const response = await createRelayRequestHandler(relayApp)({
+      method: 'POST',
+      path: '/echo',
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.from(JSON.stringify({ ok: true }), 'utf8').toString('base64'),
+      bodyEncoding: 'base64',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      contentType: 'application/json',
+      body: { ok: true },
+    });
+
+    await relayApp.close();
+  });
+
+  it('base64-encodes binary relayed HTTP responses', async () => {
+    const relayApp = Fastify({ logger: false });
+    const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x20]);
+    relayApp.get('/download.pdf', async (_request, reply) => {
+      reply.type('application/pdf').send(pdfBytes);
+    });
+    await relayApp.ready();
+
+    const response = await createRelayRequestHandler(relayApp)({
+      method: 'GET',
+      path: '/download.pdf',
+      headers: {},
+      body: null,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(response.bodyEncoding).toBe('base64');
+    expect(Buffer.from(response.body, 'base64')).toEqual(pdfBytes);
+
+    await relayApp.close();
   });
 
   it('accepts relayed HTTP requests in relay mode without supervisor admin auth', async () => {
@@ -2108,6 +2157,92 @@ describe('supervisor api', () => {
     await expect(fs.stat(path.join(tempDir, 'workspace', 'moved.txt'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('downloads workspace folders as temporary zip archives', async () => {
+    const workspacePath = path.join(tempDir, 'zip-workspace');
+    await fs.mkdir(path.join(workspacePath, 'src', 'nested'), { recursive: true });
+    await fs.writeFile(path.join(workspacePath, 'src', 'index.ts'), 'console.log("zip");');
+    await fs.writeFile(path.join(workspacePath, 'src', 'nested', 'note.txt'), 'nested note');
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('src')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(200);
+    expect(downloadResponse.headers['content-type']).toContain('application/zip');
+    expect(downloadResponse.headers['content-disposition']).toContain('src.zip');
+    const body = downloadResponse.rawPayload;
+    expect(body.readUInt32LE(0)).toBe(0x04034b50);
+    expect(body.includes(Buffer.from('src/index.ts'))).toBe(true);
+    expect(body.includes(Buffer.from('src/nested/note.txt'))).toBe(true);
+    expect(body.includes(Buffer.from('console.log("zip");'))).toBe(true);
+  });
+
+  it('rejects workspace folder downloads at the recursive file-count limit', async () => {
+    const workspacePath = path.join(tempDir, 'large-folder-workspace');
+    const folderPath = path.join(workspacePath, 'many');
+    await fs.mkdir(folderPath, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        fs.writeFile(path.join(folderPath, `file-${index}.txt`), `${index}`),
+      ),
+    );
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('many')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(400);
+    expect(downloadResponse.json().message).toContain('fewer than 300 files');
+  });
+
+  it('rejects workspace folder downloads at the recursive byte-size limit', async () => {
+    const workspacePath = path.join(tempDir, 'large-bytes-workspace');
+    const folderPath = path.join(workspacePath, 'huge');
+    await fs.mkdir(folderPath, { recursive: true });
+    await fs.writeFile(path.join(folderPath, 'huge.bin'), '');
+    await fs.truncate(path.join(folderPath, 'huge.bin'), 100 * 1024 * 1024);
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent('huge')}`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(400);
+    expect(downloadResponse.json().message).toContain('smaller than 100 MB');
   });
 
   it('enforces artifact read and write scopes for worker artifact routes', async () => {
@@ -5776,6 +5911,92 @@ describe('supervisor api', () => {
     expect(savedFiles[0]).toMatch(/^notes-[a-z0-9]{8}\.txt$/);
   });
 
+  it('handles mixed photo and file prompt attachments in one local prompt request', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Mixed Attachment Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const manifest = [
+      {
+        clientId: 'photo-1',
+        kind: 'photo',
+        originalName: 'screen.png',
+        placeholder: '[PHOTO screen.png]'
+      },
+      {
+        clientId: 'file-1',
+        kind: 'file',
+        originalName: 'notes.txt',
+        placeholder: '[FILE notes.txt]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Use the image [PHOTO screen.png] and file [FILE notes.txt].',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: 'screen.png',
+          contentType: 'image/png',
+          content: Buffer.from('fake-png')
+        },
+        {
+          fieldName: 'attachments',
+          fileName: 'notes.txt',
+          contentType: 'text/plain',
+          content: Buffer.from('hello from file')
+        }
+      ]
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
+    const latestPrompt =
+      (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
+    expect(latestPrompt).toContain('[PHOTO ./.temp/threads/');
+    expect(latestPrompt).toContain('/screen-');
+    expect(latestPrompt).toContain('.png]');
+    expect(latestPrompt).toContain('[FILE ./.temp/threads/');
+    expect(latestPrompt).toContain('/notes-');
+    expect(latestPrompt).toContain('.txt]');
+
+    const attachmentDir = path.join(tempDir, 'workspace', '.temp', 'threads', createdThread.id);
+    const savedFiles = await fs.readdir(attachmentDir);
+    expect(savedFiles.sort()).toEqual([
+      expect.stringMatching(/^notes-[a-z0-9]{8}\.txt$/),
+      expect.stringMatching(/^screen-[a-z0-9]{8}\.png$/),
+    ]);
+  });
+
   it('accepts mobile photo uploads even when the browser sends an empty original file name', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -6341,6 +6562,75 @@ describe('supervisor api', () => {
     });
   });
 
+  it('resumes an unloaded supervisor thread before accepting a new prompt', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.3-codex',
+        approvalMode: 'yolo',
+        title: 'Resume Before Prompt'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'First prompt'
+      }
+    });
+    expect(firstPromptResponse.statusCode).toBe(200);
+
+    fakeCodexManager.completeTurn(
+      createdThread.providerSessionId,
+      firstPromptResponse.json().activeTurnId,
+      'completed',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeCodexManager.loadedThreadIds.delete(createdThread.providerSessionId);
+    updateThreadRecord(app.services.database.db, createdThread.id, {
+      status: 'not_loaded',
+      providerTurnId: null,
+    });
+
+    const unloadedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(unloadedDetailResponse.statusCode).toBe(200);
+    expect(unloadedDetailResponse.json().thread.isLoaded).toBe(false);
+
+    const secondPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Second prompt after reload'
+      }
+    });
+
+    expect(secondPromptResponse.statusCode).toBe(200);
+    expect(secondPromptResponse.json()).toMatchObject({
+      id: createdThread.id,
+      status: 'running',
+    });
+    expect(fakeCodexManager.resumeThreadCalls.at(-1)).toMatchObject({
+      threadId: createdThread.providerSessionId,
+    });
+    expect(fakeCodexManager.startTurnCalls.at(-1)?.prompt).toBe('Second prompt after reload');
+  });
+
   it('preserves a saved reasoning effort when a disconnected thread is resumed', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -6486,6 +6776,85 @@ describe('supervisor api', () => {
           ]
         }
       ]
+    });
+  });
+
+  it('imports a Claude runtime session when a provider is selected', async () => {
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    const importedWorkspace = path.join(tempDir, 'imported-claude-project');
+    await fs.mkdir(importedWorkspace);
+    const expectedWorkspacePath = await fs.realpath(importedWorkspace);
+    fakeClaudeRuntime.sessions.set('claude-session-import-1', {
+      provider: 'claude',
+      providerSessionId: 'claude-session-import-1',
+      cwd: importedWorkspace,
+      title: 'Imported Claude session',
+      preview: 'Claude import preview',
+      createdAt: '2026-06-12T10:00:00.000Z',
+      updatedAt: '2026-06-12T10:01:00.000Z',
+      status: 'idle',
+      turns: [
+        {
+          providerTurnId: 'claude-import-turn-1',
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'claude-import-user-1',
+              kind: 'userMessage',
+              text: 'import from claude',
+            },
+            {
+              id: 'claude-import-agent-1',
+              kind: 'agentMessage',
+              text: 'claude imported reply',
+            },
+          ],
+          rawTurn: null,
+        },
+      ],
+      rawSession: null,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/import',
+      payload: {
+        provider: 'claude',
+        sessionId: 'claude-session-import-1',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      thread: {
+        provider: 'claude',
+        providerSessionId: 'claude-session-import-1',
+        source: 'supervisor',
+        title: 'Imported Claude session',
+        isLoaded: false,
+      },
+      workspace: {
+        absPath: expectedWorkspacePath,
+        label: 'imported-claude-project',
+      },
+      turns: [
+        {
+          id: 'claude-import-turn-1',
+          status: 'completed',
+          items: [
+            {
+              kind: 'userMessage',
+              text: 'import from claude',
+            },
+            {
+              kind: 'agentMessage',
+              text: 'claude imported reply',
+            },
+          ],
+        },
+      ],
     });
   });
 

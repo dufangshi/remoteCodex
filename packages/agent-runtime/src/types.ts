@@ -269,6 +269,7 @@ export interface SendAgentInputInput {
   providerSessionId: string;
   providerTurnId: string;
   prompt: string;
+  workspacePath?: string | null;
 }
 
 export interface InterruptAgentTurnInput {

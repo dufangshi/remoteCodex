@@ -148,6 +148,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.2.0
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
       fastify:
         specifier: ^5.2.1
         version: 5.8.5
@@ -200,6 +203,9 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
+      '@remote-codex/plugin-xyz-viewer':
+        specifier: file:../../../remote-codex-thread-ui/packages/plugin-xyz-viewer
+        version: file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
@@ -218,6 +224,9 @@ importers:
 
   apps/supervisor-web:
     dependencies:
+      3dmol:
+        specifier: ^2.5.2
+        version: 2.5.5
       '@remote-codex/plugin-runtime':
         specifier: workspace:*
         version: link:../../packages/plugin-runtime
@@ -225,20 +234,23 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-terminal
       '@remote-codex/plugin-xyz-viewer':
-        specifier: workspace:*
-        version: link:../../packages/plugin-xyz-viewer
+        specifier: file:../../../remote-codex-thread-ui/packages/plugin-xyz-viewer
+        version: file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@remote-codex/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@remote-codex/thread-ui':
         specifier: file:../../../remote-codex-thread-ui/packages/thread-ui
-        version: file:../remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/plugin-xyz-viewer@packages+plugin-xyz-viewer)(@remote-codex/shared@packages+shared)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: file:../remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/plugin-xyz-viewer@file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@remote-codex/shared@packages+shared)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@streamdown/code':
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.7)
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
+      lucide-react:
+        specifier: ^0.544.0
+        version: 0.544.0(react@19.2.7)
       react:
         specifier: ^19.1.0
         version: 19.2.7
@@ -301,28 +313,6 @@ importers:
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.20)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(tsx@4.22.4)
 
   packages/plugin-terminal:
-    devDependencies:
-      tsup:
-        specifier: ^8.4.0
-        version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  packages/plugin-xyz-viewer:
-    dependencies:
-      3dmol:
-        specifier: ^2.5.2
-        version: 2.5.5
-      lucide-react:
-        specifier: ^0.544.0
-        version: 0.544.0(react@19.2.7)
-      react:
-        specifier: ^19.1.0
-        version: 19.2.7
-      react-dom:
-        specifier: ^19.1.0
-        version: 19.2.7(react@19.2.7)
     devDependencies:
       tsup:
         specifier: ^8.4.0
@@ -1429,6 +1419,12 @@ packages:
 
   '@radix-ui/rect@1.1.2':
     resolution: {integrity: sha512-xnXE7wG13PI+cxieVssYXlQJuYVRhH9NBoxt3KNwzghDIA69GMm7d4wXRouHIYjE+KvS6U/MsMO73NdS2MH9ZA==}
+
+  '@remote-codex/plugin-xyz-viewer@file:../remote-codex-thread-ui/packages/plugin-xyz-viewer':
+    resolution: {directory: ../remote-codex-thread-ui/packages/plugin-xyz-viewer, type: directory}
+    peerDependencies:
+      react: ^19.1.0
+      react-dom: ^19.1.0
 
   '@remote-codex/thread-ui@file:../remote-codex-thread-ui/packages/thread-ui':
     resolution: {directory: ../remote-codex-thread-ui/packages/thread-ui, type: directory}
@@ -5801,7 +5797,14 @@ snapshots:
 
   '@radix-ui/rect@1.1.2': {}
 
-  '@remote-codex/thread-ui@file:../remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/plugin-xyz-viewer@packages+plugin-xyz-viewer)(@remote-codex/shared@packages+shared)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@remote-codex/plugin-xyz-viewer@file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      3dmol: 2.5.5
+      lucide-react: 0.544.0(react@19.2.7)
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+
+  '@remote-codex/thread-ui@file:../remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/plugin-xyz-viewer@file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@remote-codex/shared@packages+shared)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       3dmol: 2.5.5
       '@radix-ui/react-accordion': 1.2.13(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -5812,7 +5815,7 @@ snapshots:
       '@radix-ui/react-tooltip': 1.2.9(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@remote-codex/plugin-runtime': link:packages/plugin-runtime
       '@remote-codex/plugin-terminal': link:packages/plugin-terminal
-      '@remote-codex/plugin-xyz-viewer': link:packages/plugin-xyz-viewer
+      '@remote-codex/plugin-xyz-viewer': file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@remote-codex/shared': link:packages/shared
       '@xterm/addon-fit': 0.11.0
       '@xyflow/react': 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

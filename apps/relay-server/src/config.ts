@@ -14,12 +14,16 @@ export interface RelayServerConfig {
   dataDir: string;
   sessionSecret: string;
   registrationEnabled: boolean;
+  registrationEnabledConfigured: boolean;
+  registrationPassword: string | null;
   webDistDir: string | null;
 }
 
 const envSchema = z.object({
   HOST: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().optional(),
+  REMOTE_CODEX_RELAY_HOST: z.string().min(1).optional(),
+  REMOTE_CODEX_RELAY_PORT: z.coerce.number().int().positive().optional(),
   REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_RELAY_CLIENT_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_ADMIN_USERNAME: z.string().min(3),
@@ -28,6 +32,7 @@ const envSchema = z.object({
   REMOTE_CODEX_RELAY_DATA_DIR: z.string().min(1).optional(),
   REMOTE_CODEX_RELAY_SESSION_SECRET: z.string().min(16).optional(),
   REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: z.string().optional(),
+  REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: z.string().min(8).optional(),
   REMOTE_CODEX_RELAY_WEB_DIST_DIR: z.string().min(1).optional(),
 });
 
@@ -41,6 +46,8 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ...env,
     HOST: optionalNonEmpty(env.HOST),
     PORT: optionalNonEmpty(env.PORT),
+    REMOTE_CODEX_RELAY_HOST: optionalNonEmpty(env.REMOTE_CODEX_RELAY_HOST),
+    REMOTE_CODEX_RELAY_PORT: optionalNonEmpty(env.REMOTE_CODEX_RELAY_PORT),
     REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN,
     ),
@@ -55,6 +62,9 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED,
     ),
+    REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD,
+    ),
     REMOTE_CODEX_RELAY_WEB_DIST_DIR: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_WEB_DIST_DIR,
     ),
@@ -66,8 +76,8 @@ export function loadRelayServerConfig(
 ): RelayServerConfig {
   const parsed = envSchema.parse(normalizeOptionalEnv(env));
   return {
-    host: parsed.HOST ?? '0.0.0.0',
-    port: parsed.PORT ?? 8788,
+    host: parsed.REMOTE_CODEX_RELAY_HOST ?? parsed.HOST ?? '0.0.0.0',
+    port: parsed.REMOTE_CODEX_RELAY_PORT ?? parsed.PORT ?? 8788,
     supervisorToken: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN ?? null,
     clientToken: parsed.REMOTE_CODEX_RELAY_CLIENT_TOKEN ?? null,
     adminUsername: parsed.REMOTE_CODEX_ADMIN_USERNAME,
@@ -85,6 +95,9 @@ export function loadRelayServerConfig(
         : ['1', 'true', 'yes', 'on'].includes(
             parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED.toLowerCase(),
           ),
+    registrationEnabledConfigured:
+      parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED !== undefined,
+    registrationPassword: parsed.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD ?? null,
     webDistDir: parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? defaultRelayWebDistDir(),
   };
 }

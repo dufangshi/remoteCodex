@@ -1,7 +1,7 @@
 import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import type { WorkspaceDto } from '@remote-codex/shared';
+import type { RuntimeConfigDto, WorkspaceDto } from '@remote-codex/shared';
 import {
   AppShellMenuButton,
   AppShellNavigationMenu,
@@ -11,6 +11,7 @@ import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
 import {
   deleteWorkspace,
+  fetchRuntimeConfig,
   fetchWorkspaces,
   updateWorkspace,
   updateWorkspaceFavorite,
@@ -72,6 +73,8 @@ export function WorkspacesPage() {
   const navigate = useNavigate();
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigDto | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
@@ -95,6 +98,16 @@ export function WorkspacesPage() {
 
   useEffect(() => {
     void loadWorkspaces();
+    fetchRuntimeConfig()
+      .then((config) => {
+        setRuntimeConfig(config);
+        setRuntimeError(null);
+      })
+      .catch((caught) => {
+        setRuntimeError(
+          caught instanceof Error ? caught.message : 'Unable to load supervisor config.',
+        );
+      });
   }, []);
 
   async function handleFavorite(workspace: WorkspaceDto) {
@@ -220,31 +233,33 @@ export function WorkspacesPage() {
         </div>
       </div>
 
-      {loading && (
-        <div className="host-empty-state rounded-[1.6rem] border px-6 py-12 text-center">
-          Loading workspace registry...
-        </div>
-      )}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <section className="min-w-0 space-y-4">
+          {loading && (
+            <div className="host-empty-state rounded-[1.6rem] border px-6 py-12 text-center">
+              Loading workspace registry...
+            </div>
+          )}
 
-      {error && (
-        <div className="host-error rounded-[1.4rem] border px-4 py-4">
-          {error}
-        </div>
-      )}
+          {error && (
+            <div className="host-error rounded-[1.4rem] border px-4 py-4">
+              {error}
+            </div>
+          )}
 
-      {!loading && !error && workspaces.length === 0 && (
-        <div className="host-empty-state rounded-[1.6rem] border border-dashed px-6 py-12 text-center">
-          <p className="host-page-title text-lg font-medium">No workspaces yet</p>
-          <p className="host-muted mt-2 text-sm">
-            Add a local directory inside the configured workspace root to start building the
-            registry.
-          </p>
-        </div>
-      )}
+          {!loading && !error && workspaces.length === 0 && (
+            <div className="host-empty-state rounded-[1.6rem] border border-dashed px-6 py-12 text-center">
+              <p className="host-page-title text-lg font-medium">No workspaces yet</p>
+              <p className="host-muted mt-2 text-sm">
+                Add a local directory inside the configured workspace root to start building the
+                registry.
+              </p>
+            </div>
+          )}
 
-      {!loading && sortedWorkspaces.length > 0 && (
-        <div className="space-y-2 overflow-x-hidden">
-          {sortedWorkspaces.map((workspace) => (
+          {!loading && sortedWorkspaces.length > 0 && (
+            <div className="space-y-2 overflow-x-hidden">
+              {sortedWorkspaces.map((workspace) => (
             <article
               key={workspace.id}
               role="link"
@@ -330,9 +345,17 @@ export function WorkspacesPage() {
                 </div>
               </div>
             </article>
-          ))}
-        </div>
-      )}
+              ))}
+            </div>
+          )}
+        </section>
+
+        <WorkspaceRuntimeSidebar
+          config={runtimeConfig}
+          error={runtimeError}
+          workspaceCount={workspaces.length}
+        />
+      </div>
 
       <RenameDialog
         open={editingWorkspaceId !== null}
@@ -367,6 +390,60 @@ export function WorkspacesPage() {
         }}
         onConfirm={() => void handleDeleteWorkspace()}
       />
+    </div>
+  );
+}
+
+function WorkspaceRuntimeSidebar({
+  config,
+  error,
+  workspaceCount,
+}: {
+  config: RuntimeConfigDto | null;
+  error: string | null;
+  workspaceCount: number;
+}) {
+  return (
+    <aside className="space-y-3 xl:sticky xl:top-[calc(env(safe-area-inset-top)+4.25rem)] xl:self-start">
+      <section className="rounded-[1.2rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+          Supervisor
+        </p>
+        <dl className="mt-4 space-y-3">
+          <RuntimeFact label="Workspace root" value={config?.workspaceRoot ?? 'Loading...'} />
+          <RuntimeFact
+            label="Environment"
+            value={
+              config
+                ? `${config.environment} · ${config.host}:${config.port}`
+                : error ?? 'Loading...'
+            }
+          />
+          <RuntimeFact
+            label="Version"
+            value={config ? `${config.appName} ${config.appVersion}` : 'Loading...'}
+          />
+          <RuntimeFact label="Workspaces" value={String(workspaceCount)} />
+        </dl>
+      </section>
+      {error ? (
+        <section className="rounded-[1.2rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
+          Runtime metadata is unavailable. Workspace actions may still work if a relay device is connected.
+        </section>
+      ) : null}
+    </aside>
+  );
+}
+
+function RuntimeFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+        {label}
+      </dt>
+      <dd className="mt-1 break-words font-mono text-xs leading-5 text-[var(--theme-fg)]">
+        {value}
+      </dd>
     </div>
   );
 }

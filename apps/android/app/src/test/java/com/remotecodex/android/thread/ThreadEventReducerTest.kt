@@ -302,6 +302,219 @@ class ThreadEventReducerTest {
     }
 
     @Test
+    fun itemCompletedDoesNotTruncateLongerStreamingText() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":1,"delta":"partial reply with more text"}""",
+            ),
+        )
+
+        val completed = reduceThreadEvent(
+            state = streaming.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "item-1",
+                        "kind": "agentMessage",
+                        "text": "partial",
+                        "status": "completed"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        val item = completed.detail.turns.single().items.single { it.id == "item-1" }
+        assertEquals("partial reply with more text", item.text)
+        assertEquals("completed", item.status)
+    }
+
+    @Test
+    fun reconcileWithIncompleteRefreshKeepsStreamingItemsUntilServerCatchesUp() {
+        val started = reduceThreadEvent(
+            detail = baseDetail(turns = emptyList()),
+            event = event(
+                type = "thread.turn.started",
+                payload = """{"turnId":"turn-2"}""",
+            ),
+        )
+        val streaming = reduceThreadEvent(
+            state = started.state,
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-2","itemId":"item-1","sequence":1,"delta":"partial reply"}""",
+            ),
+        )
+
+        val incompleteRefresh = streaming.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-2",
+                        startedAt = "2026-06-11T12:00:10.000Z",
+                        status = "completed",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = emptyList(),
+                    ),
+                ),
+            ),
+        )
+
+        val turn = incompleteRefresh.detail.turns.single()
+        assertEquals("completed", turn.status)
+        assertEquals("partial reply", turn.items.single { item -> item.id == "item-1" }.text)
+    }
+
+    @Test
+    fun reconcileWithIncompleteRefreshKeepsCompletedStreamingItem() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":1,"delta":"complete reply"}""",
+            ),
+        )
+        val completed = reduceThreadEvent(
+            state = streaming.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "item-1",
+                        "kind": "agentMessage",
+                        "text": "complete reply",
+                        "status": "completed"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        val incompleteRefresh = completed.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T12:00:00.000Z",
+                        status = "completed",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-0",
+                                kind = "userMessage",
+                                text = "Start",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val item = incompleteRefresh.detail.turns.single().items.single { item -> item.id == "item-1" }
+        assertEquals("complete reply", item.text)
+        assertEquals("completed", item.status)
+    }
+
+    @Test
+    fun reconcilePrefersLongerLocalStreamingTextOverShorterServerSnapshot() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":1,"delta":"partial reply with more text"}""",
+            ),
+        )
+
+        val shortRefresh = streaming.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T12:00:00.000Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-0",
+                                kind = "userMessage",
+                                text = "Start",
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "item-1",
+                                kind = "agentMessage",
+                                text = "partial",
+                                status = "running",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            "partial reply with more text",
+            shortRefresh.detail.turns.single().items.single { item -> item.id == "item-1" }.text,
+        )
+    }
+
+    @Test
+    fun reconcileDropsCompletedStreamingShardWhenServerHasMaterializedAgentMessage() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"streaming-item","sequence":2,"delta":"-"}""",
+            ),
+        )
+
+        val completedRefresh = streaming.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T12:00:00.000Z",
+                        status = "completed",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-0",
+                                kind = "userMessage",
+                                text = "Start",
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "materialized-agent",
+                                kind = "agentMessage",
+                                text = "Final materialized reply",
+                                status = "completed",
+                                sequence = 2,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val items = completedRefresh.detail.turns.single().items
+        assertFalse(items.any { item -> item.id == "streaming-item" })
+        assertEquals("Final materialized reply", items.single { item -> item.id == "materialized-agent" }.text)
+    }
+
+    @Test
     fun duplicateEventEnvelopeIsIgnoredAndLastCursorIsTracked() {
         val event = event(
             type = "thread.turn.started",
@@ -359,13 +572,101 @@ class ThreadEventReducerTest {
         )
 
         assertEquals(
-            listOf("item-early", "item-late", "item-0"),
+            listOf("item-0", "item-early", "item-late"),
             second.detail.turns.single().items.map { item -> item.id },
         )
     }
 
     @Test
-    fun outputDeltaForMissingTurnFallsBackToRefresh() {
+    fun sequencedSteerUserMessageStaysAtItsEventPosition() {
+        val first = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "assistant-early",
+                        "kind": "agentMessage",
+                        "text": "Early assistant",
+                        "status": "completed",
+                        "sequence": 2
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val steer = reduceThreadEvent(
+            state = first.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "steer-1",
+                        "kind": "userMessage",
+                        "text": "Steer now",
+                        "sequence": 3
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(
+            listOf("item-0", "assistant-early", "steer-1"),
+            steer.detail.turns.single().items.map { item -> item.id },
+        )
+    }
+
+    @Test
+    fun runningRefreshDropsStreamingShardWhenMaterializedAssistantItemExists() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"streaming-shard","sequence":2,"delta":"p"}""",
+            ),
+        )
+
+        val runningRefresh = streaming.state.reconcileWithDetail(
+            baseDetail(
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T12:00:00.000Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem(
+                                id = "item-0",
+                                kind = "userMessage",
+                                text = "Start",
+                            ),
+                            SupervisorThreadTurnItem(
+                                id = "materialized-agent",
+                                kind = "agentMessage",
+                                text = "Partial materialized reply",
+                                status = "running",
+                                sequence = 2,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val items = runningRefresh.detail.turns.single().items
+        assertFalse(items.any { item -> item.id == "streaming-shard" })
+        assertEquals("Partial materialized reply", items.single { item -> item.id == "materialized-agent" }.text)
+    }
+
+    @Test
+    fun outputDeltaForMissingTurnCreatesLocalRunningTurnAndRefreshes() {
         val result = reduceThreadEvent(
             detail = baseDetail(),
             event = event(
@@ -375,7 +676,10 @@ class ThreadEventReducerTest {
         )
 
         assertTrue(result.needsRefresh)
-        assertEquals(baseDetail().turns, result.detail.turns)
+        assertEquals(2, result.detail.turns.size)
+        val turn = result.detail.turns.single { it.id == "missing" }
+        assertEquals("running", turn.status)
+        assertEquals("hello", turn.items.single().text)
     }
 
     @Test

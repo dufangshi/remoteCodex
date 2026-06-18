@@ -299,6 +299,7 @@ export function AppShellNavigationMenu({
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isWorkspacesRoute = location.pathname === '/workspaces';
+  const isImportRoute = location.pathname === '/threads/import';
 
   useEffect(() => {
     if (!shellNav?.navOpen) {
@@ -377,6 +378,21 @@ export function AppShellNavigationMenu({
           className={menuItemClassName(isWorkspacesRoute)}
         >
           Workspaces
+        </button>
+        <button
+          type="button"
+          disabled={isImportRoute}
+          onClick={() => {
+            if (isImportRoute) {
+              return;
+            }
+
+            shellNav.closeNav();
+            navigate('/threads/import');
+          }}
+          className={menuItemClassName(isImportRoute)}
+        >
+          Import Session
         </button>
         <button
           type="button"

@@ -1,7 +1,7 @@
 # 从 ElAgenteHarness 唤醒 Agent Session:调查报告与 Phase 1 计划
 
-日期:2026-06-12
-状态:Phase 1(thread-level wakeup)实施中,见文末实施章节。
+日期:2026-06-12;更新:2026-06-17
+状态:Phase 1(thread-level wakeup)代码已落地并完成本地/EKS staging 验证;当前分支已合入 2026-06-17 最新 main,仍需重跑 merge 后验证并完成部署收口,见文末实施章节。
 范围:ElAgenteHarness(含 inact 子模块)与 remoteCodex 双侧代码。
 
 ## 背景与目标
@@ -323,6 +323,34 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
     worker(无害,reconcile 为 no-op);SSO 重新登录后需:推送镜像 →
     `rollout restart` → 再跑一轮 submit/cancel 验证 ack → 清理
     `purpose=wakeup-e2e` 的测试资源(两个 Deployment/Service,含 NLB)。
+- 🔄 **main merge 收口中**(2026-06-17):
+  - `origin/main` 已前进到 `769d5d8` 后合入本分支。冲突集中在
+    `apps/supervisor-api/src/app.ts`:main 扩展 websocket message
+    类型并重命名 supervisor socket 局部变量,本分支新增
+    `/api/hooks/*`、`/api/harness/wakeup`、`/api/harness/job-watches`
+    的 worker/product auth 豁免与 `HarnessWakeupService` 接入。
+  - 合并策略:保留 main 的 websocket `Buffer | ArrayBuffer | string`
+    处理与 relay/web 改动,同时保留 wakeup 的 hook 透传鉴权、loopback
+    watch/wakeup 路由豁免、service decoration 和 DB/config 变更。
+  - 合并后必须重跑:
+    `pnpm --filter @remote-codex/supervisor-api typecheck`,
+    `pnpm --filter @remote-codex/supervisor-api test`,
+    `pnpm --filter @remote-codex/sandbox-router typecheck`,
+    `pnpm --filter @remote-codex/sandbox-router test`,
+    `pnpm --filter @remote-codex/config typecheck`,
+    `pnpm --filter @remote-codex/config test`,
+    `pnpm --filter @remote-codex/db typecheck`,
+    以及本地 opt-in e2e
+    `RUN_HARNESS_WAKEUP_E2E=1 pnpm --filter @remote-codex/supervisor-api exec vitest run src/harness-wakeup-local-e2e.test.ts`。
+  - 当前本机验证结果:`sandbox-router`、`config`、`db` typecheck 已通过;
+    `supervisor-api` typecheck 阻塞在最新 main 的外部 file dependency
+    `@remote-codex/plugin-xyz-viewer`。`apps/supervisor-api/package.json`
+    指向 `../../../remote-codex-thread-ui/packages/plugin-xyz-viewer`,
+    但本机缺少兄弟仓库,且按 `Dockerfile.worker` 的
+    `https://github.com/dufangshi/remote-codex-thread-ui.git` clone 返回
+    repository not found/无权限。拿到该私有仓库访问权限并重新
+    `pnpm install --frozen-lockfile` 后,需补跑上述 `supervisor-api`
+    typecheck/test 和 opt-in e2e。
 
 ### 过程中发现的环境事实(影响后续部署)
 

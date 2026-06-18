@@ -88,6 +88,7 @@ import {
   terminateShell,
   untrustThreadHook,
   uploadWorkspaceFile,
+  writeWorkspaceFile,
   downloadWorkspaceFile,
   buildWorkspaceRawFileUrl,
 } from '../lib/api';
@@ -122,6 +123,15 @@ const SUPERVISOR_HEALTHCHECK_INTERVAL_MS = 2_000;
 const SUPERVISOR_CONNECTION_STALE_MS = 5_500;
 const ACTIVE_THREAD_REFRESH_INTERVAL_MS = 3_000;
 const SOCKET_CONNECTING = 0;
+
+type ThreadWorkspaceAdapterWithWrite = ThreadWorkspaceAdapter & {
+  writeFile?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+    path: string;
+    content: string;
+  }) => Promise<void> | void;
+};
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
 const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
@@ -3439,7 +3449,7 @@ export function ThreadDetailPage() {
         : '',
     [detail?.thread.id, getThreadImageAssetUrl],
   );
-  const workspaceAdapter = useMemo<ThreadWorkspaceAdapter | null>(() => {
+  const workspaceAdapter = useMemo<ThreadWorkspaceAdapterWithWrite | null>(() => {
     const workspaceId = detail?.workspace.id ?? null;
     if (!workspaceId) {
       return null;
@@ -3457,21 +3467,35 @@ export function ThreadDetailPage() {
         buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       uploadFile: (input) =>
         uploadWorkspaceFile(workspaceId, { file: input.file }),
-      downloadNode: async (input) => {
-        if (input.kind !== 'file') {
-          return;
-        }
-        const result = await downloadWorkspaceFile(workspaceId, {
+      writeFile: async (input) => {
+        await writeWorkspaceFile(workspaceId, {
           path: input.path,
+          content: input.content,
         });
-        const url = URL.createObjectURL(result.blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = result.filename;
-        document.body.append(anchor);
-        anchor.click();
-        anchor.remove();
-        URL.revokeObjectURL(url);
+      },
+      downloadNode: async (input) => {
+        setError(null);
+        try {
+          const result = await downloadWorkspaceFile(workspaceId, {
+            path: input.path,
+          });
+          const url = URL.createObjectURL(result.blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = result.filename;
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          URL.revokeObjectURL(url);
+        } catch (caught) {
+          setError(
+            caught instanceof ApiError
+              ? caught.payload.message
+              : caught instanceof Error
+                ? caught.message
+                : 'Workspace download failed.',
+          );
+        }
       },
     };
   }, [detail?.workspace.id]);

@@ -42,6 +42,24 @@ describe('WorkspacesPage', () => {
         }
 
         if (
+          url.endsWith('/api/config/runtime') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              appName: 'Remote Codex Supervisor',
+              appVersion: '0.1.0',
+              mode: 'local',
+              host: '127.0.0.1',
+              port: 8787,
+              workspaceRoot: '/Users/test',
+              environment: 'test',
+            }),
+          });
+        }
+
+        if (
           url.endsWith('/api/workspaces/workspace-1') &&
           init?.method === 'PATCH'
         ) {
@@ -192,7 +210,15 @@ describe('WorkspacesPage', () => {
       target: { value: 'Renamed Workspace' },
     });
 
-    expect(vi.mocked(fetch).mock.calls).toHaveLength(1);
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(
+          ([input, init]) =>
+            String(input).endsWith('/api/workspaces/workspace-1') &&
+            init?.method === 'PATCH',
+        ),
+    ).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: /Save/i }));
 

@@ -36,12 +36,29 @@ class SupervisorApiClient(
         return json.toRelayLoginResult()
     }
 
+    fun relayRegister(email: String, username: String, password: String): RelayLoginResult {
+        val body = JSONObject()
+            .put("email", email)
+            .put("username", username)
+            .put("password", password)
+            .toString()
+        val json = requestJson("/relay/auth/register", method = "POST", body = body)
+        return json.toRelayLoginResult()
+    }
+
     fun fetchHealth(): SupervisorHealth {
         val path = when (config.mode) {
             SupervisorConnectionMode.Local,
             SupervisorConnectionMode.Server,
             -> "/healthz"
-            SupervisorConnectionMode.Relay -> "/healthz"
+            SupervisorConnectionMode.Relay -> {
+                val deviceId = config.relayDeviceId?.trim().orEmpty()
+                if (deviceId.isNotEmpty()) {
+                    "/relay/devices/${urlEncodePathSegment(deviceId)}/healthz"
+                } else {
+                    "/healthz"
+                }
+            }
         }
         return requestJson(path).toSupervisorHealth()
     }
@@ -113,11 +130,23 @@ class SupervisorApiClient(
             .put("approvalMode", request.approvalMode)
         request.title?.takeIf { it.isNotBlank() }?.let { body.put("title", it) }
         request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        request.reasoningEffort?.takeIf { it.isNotBlank() }?.let { body.put("reasoningEffort", it) }
         return requestJson(
             config.restPath("/api/threads/start"),
             method = "POST",
             body = body.toString(),
         ).toThreadSummary()
+    }
+
+    fun importThread(request: ImportSupervisorThreadRequest): SupervisorThreadDetail {
+        val body = JSONObject()
+            .put("sessionId", request.sessionId)
+        request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        return requestJson(
+            config.restPath("/api/threads/import"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadDetail()
     }
 
     fun fetchHomeSnapshot(): SupervisorHomeSnapshot {
@@ -154,6 +183,12 @@ class SupervisorApiClient(
         }
     }
 
+    fun listAgentModels(provider: String): List<SupervisorModelOption> {
+        return requestArray(
+            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/models"),
+        ).map { item -> item.toModelOption() }
+    }
+
     fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
         val query = buildQuery("path" to path)
         return requestJson(
@@ -188,6 +223,18 @@ class SupervisorApiClient(
             contentType = response.contentType,
             bytes = response.bytes,
         )
+    }
+
+    fun writeWorkspaceFile(workspaceId: String, path: String, content: String): SupervisorWorkspaceFile {
+        val body = JSONObject()
+            .put("path", path)
+            .put("content", content)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files"),
+            method = "PUT",
+            body = body,
+        ).toWorkspaceFile()
     }
 
     fun downloadWorkspaceFile(workspaceId: String, path: String): SupervisorFileDownload {
@@ -417,6 +464,17 @@ class SupervisorApiClient(
             method = "POST",
             body = body.toString(),
         ).toThreadSummary()
+    }
+
+    fun resumeThread(threadId: String, request: ResumeThreadRequest = ResumeThreadRequest()): SupervisorThreadDetail {
+        val body = JSONObject()
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        request.sandboxMode?.takeIf { it.isNotBlank() }?.let { body.put("sandboxMode", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/resume"),
+            method = "POST",
+            body = body.takeIf { it.length() > 0 }?.toString(),
+        ).toThreadDetail()
     }
 
     fun updateThread(threadId: String, request: UpdateThreadRequest): SupervisorThreadSummary {
@@ -786,6 +844,26 @@ private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
     )
 }
 
+private fun JSONObject.toModelOption(): SupervisorModelOption {
+    val effortsJson = optJSONArray("supportedReasoningEfforts") ?: org.json.JSONArray()
+    return SupervisorModelOption(
+        id = optString("id"),
+        model = optString("model"),
+        displayName = optString("displayName", optString("model")),
+        description = optString("description"),
+        isDefault = optBoolean("isDefault", false),
+        hidden = optBoolean("hidden", false),
+        supportedReasoningEfforts = List(effortsJson.length()) { index ->
+            val item = effortsJson.getJSONObject(index)
+            SupervisorReasoningEffortOption(
+                reasoningEffort = item.optString("reasoningEffort"),
+                description = item.optNullableString("description"),
+            )
+        },
+        defaultReasoningEffort = optNullableString("defaultReasoningEffort"),
+    )
+}
+
 private fun JSONObject.toWorkspaceTreeNode(): SupervisorWorkspaceTreeNode {
     val childrenJson = optJSONArray("children") ?: org.json.JSONArray()
     return SupervisorWorkspaceTreeNode(
@@ -808,6 +886,15 @@ private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview 
         size = optLong("size", 0L),
         truncated = optBoolean("truncated", false),
         nextOffset = optLong("nextOffset", 0L),
+    )
+}
+
+private fun JSONObject.toWorkspaceFile(): SupervisorWorkspaceFile {
+    return SupervisorWorkspaceFile(
+        path = optString("path"),
+        name = optString("name"),
+        kind = optString("kind"),
+        size = optLong("size", 0L),
     )
 }
 
@@ -916,6 +1003,7 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
     return SupervisorThreadSummary(
         id = optString("id"),
         workspaceId = optString("workspaceId"),
+        provider = optString("provider", "codex"),
         title = optString("title"),
         status = optString("status"),
         model = optNullableString("model"),
@@ -925,6 +1013,7 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
         sandboxMode = optNullableString("sandboxMode"),
         updatedAt = optString("updatedAt"),
         summaryText = optNullableString("summaryText"),
+        isLoaded = if (has("isLoaded") && !isNull("isLoaded")) optBoolean("isLoaded") else optString("status") != "not_loaded",
     )
 }
 

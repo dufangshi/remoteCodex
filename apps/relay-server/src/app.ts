@@ -55,6 +55,7 @@ const registerSchema = z.object({
   email: z.string().trim().email(),
   username: z.string().trim().min(3),
   password: z.string().min(8),
+  registrationPassword: z.string().optional(),
 });
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -68,14 +69,27 @@ const createShareSchema = z.object({
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
 });
+const updateAccountSchema = z.object({
+  username: z.string().trim().min(3).optional(),
+});
+const updatePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
 
 export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   const app = Fastify({ logger: false });
+  app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
+    done(null, body);
+  });
   const store = RelayStore.fromDataDir(
     config.dataDir,
     config.sessionSecret,
     config.registrationEnabled,
   );
+  if (config.registrationEnabledConfigured) {
+    store.setRegistrationEnabled(config.registrationEnabled);
+  }
   store.seedAdmin({
     username: config.adminUsername,
     email: config.adminEmail,
@@ -103,7 +117,18 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
 
   app.post('/relay/auth/register', async (request, reply) => {
     const body = registerSchema.parse(request.body ?? {});
-    const result = store.register(body);
+    if (
+      config.registrationPassword &&
+      body.registrationPassword !== config.registrationPassword
+    ) {
+      reply.status(403).send({
+        code: 'forbidden',
+        message: 'Invalid registration password.',
+      } satisfies ApiErrorShape);
+      return;
+    }
+    const { registrationPassword: _registrationPassword, ...registerInput } = body;
+    const result = store.register(registerInput);
     attachRelayCookie(reply, result.token);
     return result;
   });
@@ -118,6 +143,26 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   app.post('/relay/auth/logout', async (_request, reply) => {
     clearRelayCookie(reply);
     return store.emptySession();
+  });
+
+  app.patch('/relay/account', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const body = updateAccountSchema.parse(request.body ?? {});
+    return store.updateAccount(user.id, {
+      ...(body.username !== undefined ? { username: body.username } : {}),
+    });
+  });
+
+  app.patch('/relay/account/password', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const body = updatePasswordSchema.parse(request.body ?? {});
+    return store.updatePassword(user.id, body);
   });
 
   app.get('/relay/portal', async (request, reply) => {
@@ -212,6 +257,23 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
       user,
       deviceId,
       targetPath,
+    });
+  });
+
+  app.get('/relay/devices/:deviceId/healthz', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const { deviceId } = z.object({ deviceId: z.string().uuid() }).parse(request.params);
+    await forwardRelayHttp({
+      request,
+      reply,
+      state,
+      store,
+      user,
+      deviceId,
+      targetPath: '/healthz',
     });
   });
 
@@ -470,6 +532,7 @@ async function forwardRelayHttp(input: {
 
   try {
     const requestId = randomUUID();
+    const requestBody = relayRequestBody(input.request.body);
     const response = await supervisor.requestBroker.forward(supervisor.socket, {
       type: 'relay.request',
       timestamp: new Date().toISOString(),
@@ -479,7 +542,8 @@ async function forwardRelayHttp(input: {
         method: input.request.method,
         path: input.targetPath,
         headers: relayRequestHeaders(input.request.headers),
-        body: relayRequestBody(input.request.body),
+        body: requestBody.body,
+        ...(requestBody.bodyEncoding ? { bodyEncoding: requestBody.bodyEncoding } : {}),
       },
     });
 
@@ -488,7 +552,7 @@ async function forwardRelayHttp(input: {
         input.reply.header(name, value);
       }
     }
-    input.reply.status(response.statusCode).send(response.body);
+    input.reply.status(response.statusCode).send(relayResponseBody(response));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Relay request failed.';
     input.reply.status(message.includes('timed out') ? 504 : 503).send({
@@ -496,6 +560,13 @@ async function forwardRelayHttp(input: {
       message,
     } satisfies ApiErrorShape);
   }
+}
+
+function relayResponseBody(response: { body: string; bodyEncoding?: 'utf8' | 'base64' }) {
+  if (response.bodyEncoding === 'base64') {
+    return Buffer.from(response.body, 'base64');
+  }
+  return response.body;
 }
 
 function connectRelayWebsocket(
@@ -660,6 +731,7 @@ function readRelaySessionToken(request: FastifyRequest) {
   return (
     bearerToken(request.headers.authorization) ??
     queryToken(request.query, 'relaySession') ??
+    queryToken(request.query, 'token') ??
     readCookie(request.headers.cookie, RELAY_COOKIE_NAME)
   );
 }
@@ -764,20 +836,26 @@ function shouldForwardSocketEvent(
   return 'threadId' in event && event.threadId === threadId;
 }
 
-export function relayRequestBody(body: unknown) {
+export function relayRequestBody(body: unknown): {
+  body: string | null;
+  bodyEncoding?: 'base64';
+} {
   if (body === undefined || body === null) {
-    return null;
+    return { body: null };
   }
 
   if (typeof body === 'string') {
-    return body;
+    return { body };
   }
 
   if (Buffer.isBuffer(body)) {
-    return body.toString('utf8');
+    return {
+      body: body.toString('base64'),
+      bodyEncoding: 'base64',
+    };
   }
 
-  return JSON.stringify(body);
+  return { body: JSON.stringify(body) };
 }
 
 export function relayRequestHeaders(headers: Record<string, string | string[] | undefined>) {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -50,17 +51,9 @@ fun ThreadTopBar(
     selectedView: ThreadSurfaceView,
     onViewSelected: (ThreadSurfaceView) -> Unit,
     shellEnabled: Boolean = false,
-    onOpenAppNav: () -> Unit,
     onOpenRooms: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenThreadAction: (ThreadActionDialog) -> Unit,
-    onReturnToWorkspace: () -> Unit,
-    onCreateThreadShortcut: () -> Unit,
-    themeMode: ThemeMode,
-    darkThemeActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var actionsOpen by remember { mutableStateOf(false) }
     var detailsOpen by remember { mutableStateOf(false) }
     val activeRoom = detail.rooms.firstOrNull { it.active } ?: detail.rooms.firstOrNull()
     val sessionLabel = activeRoom?.sessionId ?: detail.runtime
@@ -78,8 +71,8 @@ fun ThreadTopBar(
         ) {
             TopBarIconButton(
                 icon = TopBarIcon.Menu,
-                contentDescription = "Open app navigation",
-                onClick = onOpenAppNav,
+                contentDescription = "Open threads",
+                onClick = onOpenRooms,
                 modifier = Modifier.padding(top = 7.dp),
             )
             Column(modifier = Modifier.weight(1f)) {
@@ -98,26 +91,6 @@ fun ThreadTopBar(
                     onClick = { detailsOpen = !detailsOpen },
                 )
             }
-            ThemeModeStatusButton(
-                themeMode = themeMode,
-                darkThemeActive = darkThemeActive,
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(top = 7.dp),
-            )
-            TopBarIconButton(
-                icon = TopBarIcon.Settings,
-                contentDescription = "Open settings",
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(top = 7.dp),
-            )
-        }
-        if (actionsOpen) {
-            ThreadActionMenu(
-                onOpenThreadAction = { action ->
-                    actionsOpen = false
-                    onOpenThreadAction(action)
-                },
-            )
         }
         if (detailsOpen) {
             ThreadTopBarDetails(
@@ -151,44 +124,6 @@ fun ThreadTopBar(
                     modifier = Modifier.weight(1f),
                 )
             }
-        }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            MetadataPill(label = detail.usage)
-            TopBarActionPill(
-                label = "Workspace",
-                icon = TopBarIcon.ArrowLeft,
-                contentDescription = "Back to workspace",
-                onClick = onReturnToWorkspace,
-            )
-            TopBarActionPill(
-                label = "New",
-                icon = TopBarIcon.Plus,
-                contentDescription = "Create new chat",
-                onClick = onCreateThreadShortcut,
-            )
-            TopBarActionPill(
-                label = "Actions",
-                icon = TopBarIcon.Actions,
-                contentDescription = if (actionsOpen) "Close thread actions" else "Open thread actions",
-                onClick = { actionsOpen = !actionsOpen },
-            )
-            TopBarActionPill(
-                label = "Threads",
-                icon = TopBarIcon.Threads,
-                contentDescription = "Open thread list",
-                onClick = onOpenRooms,
-            )
-            Text(
-                text = detail.items,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -569,11 +504,16 @@ private enum class TopBarIcon {
     DarkTheme,
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThreadActionMenu(
+    onOpenAppNav: () -> Unit,
+    onOpenRooms: () -> Unit,
+    onReturnToWorkspace: () -> Unit,
+    onCreateThreadShortcut: () -> Unit,
     onOpenThreadAction: (ThreadActionDialog) -> Unit,
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(11.dp))
@@ -581,25 +521,42 @@ private fun ThreadActionMenu(
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(11.dp))
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        ActionMenuButton(
+            label = "App",
+            icon = TopBarIcon.Menu,
+            onClick = onOpenAppNav,
+        )
+        ActionMenuButton(
+            label = "Threads",
+            icon = TopBarIcon.Threads,
+            onClick = onOpenRooms,
+        )
+        ActionMenuButton(
+            label = "Workspace",
+            icon = TopBarIcon.ArrowLeft,
+            onClick = onReturnToWorkspace,
+        )
+        ActionMenuButton(
+            label = "New",
+            icon = TopBarIcon.Plus,
+            onClick = onCreateThreadShortcut,
+        )
         ActionMenuButton(
             label = "Rename",
             icon = TopBarIcon.Rename,
             onClick = { onOpenThreadAction(ThreadActionDialog.Rename) },
-            modifier = Modifier.weight(1f),
         )
         ActionMenuButton(
             label = "Export",
             icon = TopBarIcon.Export,
             onClick = { onOpenThreadAction(ThreadActionDialog.Export) },
-            modifier = Modifier.weight(1f),
         )
         ActionMenuButton(
             label = "Delete",
             icon = TopBarIcon.Delete,
             onClick = { onOpenThreadAction(ThreadActionDialog.Delete) },
-            modifier = Modifier.weight(1f),
             danger = true,
         )
     }
@@ -617,6 +574,7 @@ private fun ActionMenuButton(
     Row(
         modifier = modifier
             .height(36.dp)
+            .widthIn(min = 96.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (danger) ThreadColors.DangerSoft else ThreadColors.SurfaceStrong)
             .border(

@@ -23,7 +23,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +44,6 @@ import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
-import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.ui.components.GraphActionIcon
 import com.remotecodex.android.ui.components.GraphBadge
 import com.remotecodex.android.ui.components.GraphBadgeVariant
@@ -69,33 +67,14 @@ fun WorkspaceDetailScreen(
     onOpenThread: (String) -> Unit,
     onRefreshHomeSnapshot: () -> Unit,
     modifier: Modifier = Modifier,
-    initialTree: SupervisorWorkspaceTreeNode? = null,
-    loadTreeOnStart: Boolean = true,
 ) {
     val client = remember(supervisorConnection) { SupervisorApiClient(supervisorConnection) }
     val coroutineScope = rememberCoroutineScope()
-    var tree by remember(workspaceId, supervisorConnection, initialTree) { mutableStateOf(initialTree) }
-    var treeLoading by remember(workspaceId, supervisorConnection) { mutableStateOf(false) }
-    var treeError by remember(workspaceId, supervisorConnection) { mutableStateOf<String?>(null) }
     var actionBusy by remember { mutableStateOf<String?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var startExpanded by rememberSaveable(workspaceId) { mutableStateOf(false) }
     var titleDraft by rememberSaveable(workspaceId) { mutableStateOf("") }
     var modelDraft by rememberSaveable(workspaceId) { mutableStateOf(DefaultWorkspaceThreadModel) }
-
-    fun loadTree() {
-        treeLoading = true
-        treeError = null
-        coroutineScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { client.fetchWorkspaceTree(workspaceId) }
-            }
-            treeLoading = false
-            result
-                .onSuccess { tree = it }
-                .onFailure { error -> treeError = error.message ?: "Workspace file tree failed." }
-        }
-    }
 
     fun runAction(label: String, action: suspend () -> Unit) {
         actionBusy = label
@@ -108,12 +87,6 @@ fun WorkspaceDetailScreen(
             result
                 .onSuccess { onRefreshHomeSnapshot() }
                 .onFailure { error -> actionError = error.message ?: "$label failed." }
-        }
-    }
-
-    LaunchedEffect(workspaceId, supervisorConnection) {
-        if (loadTreeOnStart) {
-            loadTree()
         }
     }
 
@@ -143,7 +116,6 @@ fun WorkspaceDetailScreen(
                 onBack = onBackToHome,
                 onRefresh = {
                     onRefreshHomeSnapshot()
-                    loadTree()
                 },
             )
         }
@@ -252,15 +224,6 @@ fun WorkspaceDetailScreen(
                 threads = workspaceThreads,
                 loading = homeSnapshotLoading,
                 onOpenThread = onOpenThread,
-            )
-        }
-
-        item {
-            WorkspaceFilesSection(
-                tree = tree,
-                loading = treeLoading,
-                error = treeError,
-                onRefresh = ::loadTree,
             )
         }
     }
@@ -530,61 +493,6 @@ private fun WorkspaceThreadsSection(
                     contentDescription = "Open workspace thread ${thread.title}",
                     onClick = { onOpenThread(thread.id) },
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WorkspaceFilesSection(
-    tree: SupervisorWorkspaceTreeNode?,
-    loading: Boolean,
-    error: String?,
-    onRefresh: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        WorkspaceSectionHeader(
-            title = "Files",
-            detail = when {
-                loading -> "Loading tree..."
-                tree != null -> tree.path.ifBlank { tree.name.ifBlank { "Workspace root" } }
-                else -> "Workspace root"
-            },
-            actionLabel = "Reload",
-            onAction = onRefresh,
-        )
-        when {
-            error != null -> WorkspaceInfoRow(
-                title = "File tree failed",
-                detail = error,
-                meta = "error",
-                contentDescription = "Workspace file tree failed",
-                danger = true,
-            )
-            loading && tree == null -> WorkspaceInfoRow(
-                title = "Loading files",
-                detail = "Reading the supervisor workspace tree.",
-                meta = "files",
-                contentDescription = "Workspace file tree loading",
-            )
-            tree == null -> WorkspaceInfoRow(
-                title = "No file tree loaded",
-                detail = "Refresh to read the workspace root from the supervisor.",
-                meta = "files",
-                contentDescription = "Workspace file tree empty",
-            )
-            else -> {
-                tree.children
-                    .sortedWith(compareBy<SupervisorWorkspaceTreeNode> { it.kind != "directory" }.thenBy { it.name.lowercase() })
-                    .take(8)
-                    .forEach { node ->
-                        WorkspaceInfoRow(
-                            title = node.name.ifBlank { node.path },
-                            detail = node.path.ifBlank { node.kind },
-                            meta = node.kind.ifBlank { "file" },
-                            contentDescription = "Workspace file ${node.path.ifBlank { node.name }}",
-                        )
-                    }
             }
         }
     }

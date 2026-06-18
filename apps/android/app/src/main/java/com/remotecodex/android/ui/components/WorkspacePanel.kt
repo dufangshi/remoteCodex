@@ -21,8 +21,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +55,7 @@ import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
 import com.remotecodex.android.ui.model.WorkspaceNodePreview
+import com.remotecodex.android.ui.model.WorkspaceFilePreview
 import com.remotecodex.android.ui.model.WorkspacePreview
 import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeRole
 import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeState
@@ -65,6 +69,8 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
+private const val WORKSPACE_TEXT_EDIT_MAX_BYTES = 250_000
+
 @Composable
 fun WorkspacePanel(
     workspace: WorkspacePreview,
@@ -73,10 +79,12 @@ fun WorkspacePanel(
     onDownloadFile: ((String) -> Unit)? = null,
     onOpenRawFile: ((String) -> Unit)? = null,
     onCopyRawFile: ((String) -> Unit)? = null,
+    onSaveFile: ((String, String) -> Unit)? = null,
     onUploadNote: (() -> Unit)? = null,
+    saveBusy: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    var selectedTab by remember { mutableStateOf(WorkspaceTab.Workspace) }
+    var selectedTab by remember { mutableStateOf(WorkspaceTab.Explorer) }
     var garbageDialogOpen by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
@@ -94,7 +102,7 @@ fun WorkspacePanel(
                 modifier = Modifier.fillMaxWidth(),
             )
             when (selectedTab) {
-                WorkspaceTab.Workspace -> WorkspaceBrowserSurface(
+                WorkspaceTab.Explorer -> WorkspaceBrowserSurface(
                     workspace = workspace,
                     onOpenGarbage = { garbageDialogOpen = true },
                     onSelectFile = onSelectFile,
@@ -103,19 +111,8 @@ fun WorkspacePanel(
                     onLoadMorePreview = onLoadMorePreview,
                     onOpenRawFile = onOpenRawFile,
                     onCopyRawFile = onCopyRawFile,
-                    modifier = Modifier.weight(1f),
-                )
-                WorkspaceTab.Tools -> ToolUsageSurface(
-                    events = workspace.toolEvents,
-                    modifier = Modifier.weight(1f),
-                )
-                WorkspaceTab.Guide -> WorkspaceGuideSurface(modifier = Modifier.weight(1f))
-                WorkspaceTab.Graph -> WorkspaceGraphSurface(
-                    workspace = workspace,
-                    modifier = Modifier.weight(1f),
-                )
-                WorkspaceTab.Extensions -> WorkspaceExtensionsSurface(
-                    workspace = workspace,
+                    onSaveFile = onSaveFile,
+                    saveBusy = saveBusy,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -213,15 +210,16 @@ private fun WorkspaceBrowserSurface(
     onUploadNote: (() -> Unit)?,
     onOpenRawFile: ((String) -> Unit)?,
     onCopyRawFile: ((String) -> Unit)?,
+    onSaveFile: ((String, String) -> Unit)?,
+    saveBusy: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        WorkspaceSummaryStrip(workspace = workspace, modifier = Modifier.fillMaxWidth())
         GraphResizablePanelGroup(modifier = Modifier.weight(1f)) {
-            GraphResizablePanel {
+            GraphResizablePanel(weight = 1f) {
                 WorkspaceExplorerCard(
                     workspace = workspace,
                     onOpenGarbage = onOpenGarbage,
@@ -232,10 +230,6 @@ private fun WorkspaceBrowserSurface(
                 )
             }
             GraphResizableHandle()
-            GraphResizablePanel {
-                ArtifactPreviewCard(artifact = workspace.artifact, modifier = Modifier.fillMaxWidth())
-            }
-            GraphResizableHandle()
             GraphResizablePanel(weight = 1f) {
                 WorkspaceViewerCard(
                     workspace = workspace,
@@ -243,6 +237,8 @@ private fun WorkspaceBrowserSurface(
                     onDownloadFile = onDownloadFile,
                     onOpenRawFile = onOpenRawFile,
                     onCopyRawFile = onCopyRawFile,
+                    onSaveFile = onSaveFile,
+                    saveBusy = saveBusy,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -270,42 +266,6 @@ private fun ToolUsageSurface(
 }
 
 @Composable
-private fun WorkspaceSummaryStrip(
-    workspace: WorkspacePreview,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(ThreadColors.Panel)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = workspace.rootLabel,
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = workspace.statusMessage ?: workspace.selectedFile.title,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        MetadataPill(label = "${workspace.nodes.size} nodes")
-        MetadataPill(label = "${workspace.toolEvents.size} calls")
-    }
-}
-
-@Composable
 private fun WorkspaceExplorerCard(
     workspace: WorkspacePreview,
     onOpenGarbage: () -> Unit,
@@ -314,6 +274,24 @@ private fun WorkspaceExplorerCard(
     onUploadNote: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    var expandedPaths by remember(workspace.rootLabel) {
+        mutableStateOf(defaultExpandedWorkspacePaths(workspace.nodes))
+    }
+    LaunchedEffect(workspace.nodes) {
+        val directoryPaths = workspace.nodes
+            .filter { it.kind == WorkspaceNodeKind.Directory }
+            .map { it.path }
+            .toSet()
+        val nextExpandedPaths = expandedPaths
+            .filterTo(mutableSetOf()) { it in directoryPaths } + defaultExpandedWorkspacePaths(workspace.nodes)
+        if (nextExpandedPaths != expandedPaths) {
+            expandedPaths = nextExpandedPaths
+        }
+    }
+    val visibleNodes = remember(workspace.nodes, expandedPaths) {
+        workspace.nodes.filterVisibleWorkspaceNodes(expandedPaths)
+    }
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -347,7 +325,7 @@ private fun WorkspaceExplorerCard(
             ActionChip(label = "Refresh", icon = WorkspaceActionIcon.Refresh)
         }
         Text(
-            text = "Workspace",
+            text = "Explorer",
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp),
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
@@ -360,22 +338,61 @@ private fun WorkspaceExplorerCard(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             )
         } else {
-            workspace.nodes.take(10).forEach { node ->
-                WorkspaceRow(
-                    node = node,
-                    onClick = if (node.kind == WorkspaceNodeKind.File) {
-                        onSelectFile?.let { selectFile -> { selectFile(node.path) } }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                visibleNodes.forEach { node ->
+                    val displayedNode = if (node.kind == WorkspaceNodeKind.Directory) {
+                        node.copy(expanded = node.path in expandedPaths)
                     } else {
-                        null
-                    },
-                    onDownload = if (node.kind == WorkspaceNodeKind.File) {
-                        onDownloadFile?.let { downloadFile -> { downloadFile(node.path) } }
-                    } else {
-                        null
-                    },
-                )
+                        node
+                    }
+                    WorkspaceRow(
+                        node = displayedNode,
+                        onClick = when (node.kind) {
+                            WorkspaceNodeKind.Directory -> {
+                                {
+                                    expandedPaths = if (node.path in expandedPaths) {
+                                        expandedPaths - node.path
+                                    } else {
+                                        expandedPaths + node.path
+                                    }
+                                }
+                            }
+                            else -> node.path
+                                .takeIf { it.isNotBlank() }
+                                ?.let { path -> onSelectFile?.let { selectFile -> { selectFile(path) } } }
+                        },
+                        onDownload = onDownloadFile?.let { downloadFile -> { downloadFile(node.path) } },
+                    )
+                }
             }
         }
+    }
+}
+
+private fun defaultExpandedWorkspacePaths(nodes: List<WorkspaceNodePreview>): Set<String> {
+    return nodes
+        .asSequence()
+        .filter { node -> node.kind == WorkspaceNodeKind.Directory && node.depth == 0 }
+        .map { node -> node.path }
+        .toSet()
+}
+
+private fun List<WorkspaceNodePreview>.filterVisibleWorkspaceNodes(
+    expandedPaths: Set<String>,
+): List<WorkspaceNodePreview> {
+    val collapsedDepths = mutableListOf<Int>()
+    return filter { node ->
+        collapsedDepths.removeAll { it >= node.depth }
+        val hidden = collapsedDepths.any { it < node.depth }
+        if (!hidden && node.kind == WorkspaceNodeKind.Directory && node.path !in expandedPaths) {
+            collapsedDepths += node.depth
+        }
+        !hidden
     }
 }
 
@@ -855,10 +872,19 @@ private fun WorkspaceViewerCard(
     onDownloadFile: ((String) -> Unit)?,
     onOpenRawFile: ((String) -> Unit)?,
     onCopyRawFile: ((String) -> Unit)?,
+    onSaveFile: ((String, String) -> Unit)?,
+    saveBusy: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val selectedFile = workspace.selectedFile
     val fileMetaLabel = "${selectedFile.language} | ${selectedFile.sizeLabel}"
+    var draft by remember(selectedFile.path, selectedFile.content) { mutableStateOf(selectedFile.content) }
+    val fileBytes = selectedFile.sizeBytes ?: selectedFile.content.toByteArray(Charsets.UTF_8).size.toLong()
+    val editable = selectedFile.path.isNotBlank() &&
+        !selectedFile.truncated &&
+        fileBytes <= WORKSPACE_TEXT_EDIT_MAX_BYTES &&
+        selectedFile.language.lowercase() != "binary"
+    val dirty = draft != selectedFile.content
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -886,6 +912,24 @@ private fun WorkspaceViewerCard(
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            ActionChip(
+                label = "Save",
+                icon = WorkspaceActionIcon.Open,
+                onClick = if (editable && dirty && !saveBusy) {
+                    { onSaveFile?.invoke(selectedFile.path, draft) }
+                } else {
+                    null
+                },
+            )
+            ActionChip(
+                label = "Revert",
+                icon = WorkspaceActionIcon.Refresh,
+                onClick = if (editable && dirty && !saveBusy) {
+                    { draft = selectedFile.content }
+                } else {
+                    null
+                },
             )
             ActionChip(
                 label = "Copy",
@@ -940,20 +984,78 @@ private fun WorkspaceViewerCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (!editable && selectedFile.path.isNotBlank()) {
+                Text(
+                    text = if (selectedFile.truncated) {
+                        "read only until fully loaded"
+                    } else {
+                        "read only"
+                    },
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else if (dirty) {
+                Text(
+                    text = "unsaved",
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
         }
-        Text(
-            text = selectedFile.content,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .verticalScroll(rememberScrollState())
-                .background(ThreadColors.CodeBackground)
-                .padding(12.dp),
-            color = ThreadColors.CodeForeground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
+        if (selectedFile.loading) {
+            WorkspaceFileLoadingPreview(
+                selectedFile = selectedFile,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            )
+        } else if (editable) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { next -> draft = next },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Edit ${selectedFile.title}" },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = ThreadColors.CodeForeground,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                enabled = !saveBusy,
+                minLines = 10,
+                singleLine = false,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ThreadColors.CodeForeground,
+                    unfocusedTextColor = ThreadColors.CodeForeground,
+                    disabledTextColor = ThreadColors.CodeForeground,
+                    focusedContainerColor = ThreadColors.CodeBackground,
+                    unfocusedContainerColor = ThreadColors.CodeBackground,
+                    disabledContainerColor = ThreadColors.CodeBackground,
+                    focusedBorderColor = ThreadColors.BorderStrong,
+                    unfocusedBorderColor = ThreadColors.Border.copy(alpha = 0.72f),
+                    disabledBorderColor = ThreadColors.Border.copy(alpha = 0.5f),
+                    cursorColor = ThreadColors.Primary,
+                ),
+            )
+        } else {
+            Text(
+                text = selectedFile.content,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .verticalScroll(rememberScrollState())
+                    .background(ThreadColors.CodeBackground)
+                    .padding(12.dp),
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         if (selectedFile.truncatedLabel != null) {
             Row(
                 modifier = Modifier
@@ -978,6 +1080,48 @@ private fun WorkspaceViewerCard(
                     maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceFileLoadingPreview(
+    selectedFile: WorkspaceFilePreview,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(ThreadColors.CodeBackground)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RunningDots(color = ThreadColors.Info, dotSize = 5.dp, spacing = 4.dp)
+            Text(
+                text = "Loading preview",
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text(
+            text = selectedFile.path.ifBlank { selectedFile.title },
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        repeat(5) { index ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (index % 3 == 0) 0.86f else if (index % 3 == 1) 0.64f else 0.74f)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(ThreadColors.SurfaceStrong.copy(alpha = 0.72f)),
+            )
         }
     }
 }
@@ -1804,11 +1948,7 @@ private fun GraphEmptyGarbageDialogPreview(
 }
 
 private enum class WorkspaceTab(val label: String) {
-    Workspace("Workspace"),
-    Tools("Tool Usage"),
-    Guide("Guide"),
-    Graph("Graph"),
-    Extensions("Extensions"),
+    Explorer("Explorer"),
 }
 
 private enum class WorkspaceActionIcon {

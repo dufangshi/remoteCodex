@@ -11,6 +11,8 @@ import com.remotecodex.android.api.SupervisorAgentMcpServer
 import com.remotecodex.android.api.SupervisorAgentMcpTool
 import com.remotecodex.android.api.SupervisorAgentSkill
 import com.remotecodex.android.api.SupervisorAgentSkillError
+import com.remotecodex.android.api.SupervisorModelOption
+import com.remotecodex.android.api.SupervisorReasoningEffortOption
 import com.remotecodex.android.api.SupervisorThreadExportTurnOption
 import com.remotecodex.android.api.SupervisorThreadExportTurns
 import com.remotecodex.android.api.SupervisorThreadHooks
@@ -33,6 +35,150 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThreadDetailMapperTest {
+    @Test
+    fun mapsThreadModelOptionsFromSupervisorAgentModels() {
+        val preview = buildThreadDetailPreviewFromSupervisor(
+            detail = SupervisorThreadDetail(
+                thread = SupervisorThreadSummary(
+                    id = "thread-1",
+                    workspaceId = "workspace-1",
+                    provider = "codex",
+                    title = "Android API",
+                    status = "completed",
+                    model = "gpt-5.5",
+                    reasoningEffort = "medium",
+                    fastMode = false,
+                    collaborationMode = "default",
+                    sandboxMode = "workspace-write",
+                    updatedAt = "2026-06-11T18:59:00Z",
+                    summaryText = null,
+                ),
+                workspace = SupervisorWorkspaceSummary(
+                    id = "workspace-1",
+                    label = "repo",
+                    absPath = "/repo",
+                    isFavorite = false,
+                    lastOpenedAt = null,
+                ),
+                turns = emptyList(),
+                turnCount = 0,
+                totalTurnCount = 0,
+                pendingRequests = emptyList(),
+                answeredRequestNotes = emptyList(),
+                liveItemCount = 0,
+                goalStatus = null,
+                goalObjective = null,
+            ),
+            modelOptions = listOf(
+                SupervisorModelOption(
+                    id = "gpt-5.5",
+                    model = "gpt-5.5",
+                    displayName = "GPT-5.5",
+                    description = "Flagship",
+                    isDefault = true,
+                    hidden = false,
+                    defaultReasoningEffort = "medium",
+                    supportedReasoningEfforts = listOf(
+                        SupervisorReasoningEffortOption("low", "Fast"),
+                        SupervisorReasoningEffortOption("medium", "Balanced"),
+                        SupervisorReasoningEffortOption("high", "Deep"),
+                        SupervisorReasoningEffortOption("xhigh", "Maximum"),
+                    ),
+                ),
+                SupervisorModelOption(
+                    id = "gpt-5-codex",
+                    model = "gpt-5-codex",
+                    displayName = "GPT-5 Codex",
+                    description = "Coding",
+                    isDefault = false,
+                    hidden = false,
+                    defaultReasoningEffort = "high",
+                    supportedReasoningEfforts = listOf(
+                        SupervisorReasoningEffortOption("medium", "Balanced"),
+                        SupervisorReasoningEffortOption("high", "Deep"),
+                    ),
+                ),
+                SupervisorModelOption(
+                    id = "internal",
+                    model = "internal",
+                    displayName = "Internal",
+                    description = "Hidden",
+                    isDefault = false,
+                    hidden = true,
+                    defaultReasoningEffort = null,
+                    supportedReasoningEfforts = emptyList(),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("gpt-5.5", "gpt-5-codex"), preview.composer.modelOptions.map { it.model })
+        assertEquals("medium", preview.composer.modelOptions.first().defaultReasoningEffort)
+        assertEquals(
+            listOf("low", "medium", "high", "xhigh"),
+            preview.composer.reasoningEffortOptions.map { it.reasoningEffort },
+        )
+    }
+
+    @Test
+    fun mapsRunningAssistantPlaceholderAsRunningMessage() {
+        val preview = buildThreadDetailPreviewFromSupervisor(
+            detail = SupervisorThreadDetail(
+                thread = SupervisorThreadSummary(
+                    id = "thread-1",
+                    workspaceId = "workspace-1",
+                    title = "Android API",
+                    status = "running",
+                    model = "gpt-5",
+                    reasoningEffort = "medium",
+                    fastMode = false,
+                    collaborationMode = "default",
+                    sandboxMode = "workspace-write",
+                    updatedAt = "2026-06-11T18:59:00Z",
+                    summaryText = null,
+                ),
+                workspace = SupervisorWorkspaceSummary(
+                    id = "workspace-1",
+                    label = "remoteCodex-main",
+                    absPath = "/home/u/dev/remoteCodex-main",
+                    isFavorite = false,
+                    lastOpenedAt = null,
+                ),
+                turns = listOf(
+                    SupervisorThreadTurn(
+                        id = "turn-1",
+                        startedAt = "2026-06-11T18:58:00Z",
+                        status = "running",
+                        error = null,
+                        model = "gpt-5",
+                        tokenUsage = null,
+                        items = listOf(
+                            SupervisorThreadTurnItem("item-user", "userMessage", "Continue"),
+                            SupervisorThreadTurnItem(
+                                id = "item-agent-placeholder",
+                                kind = "agentMessage",
+                                text = "",
+                                status = "running",
+                            ),
+                        ),
+                    ),
+                ),
+                turnCount = 1,
+                totalTurnCount = 1,
+                pendingRequests = emptyList(),
+                answeredRequestNotes = emptyList(),
+                liveItemCount = 1,
+                goalStatus = null,
+                goalObjective = null,
+            ),
+        )
+
+        val messages = preview.turns.single().messages
+        assertEquals(MessageAuthor.User, messages[0].author)
+        assertEquals(MessageAuthor.Assistant, messages[1].author)
+        assertEquals(ThreadStatus.Running, messages[1].status)
+        assertEquals("", messages[1].text)
+    }
+
     @Test
     fun mapsSupervisorDetailIntoNativeThreadPreview() {
         val preview = buildThreadDetailPreviewFromSupervisor(

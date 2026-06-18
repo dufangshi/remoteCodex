@@ -11,6 +11,7 @@ import {
 } from '../../../packages/agent-runtime/src/index';
 import type {
   ApprovalMode,
+  AgentBackendIdDto,
   CreateThreadInput,
   CollaborationModeDto,
   ReasoningEffortDto,
@@ -20,6 +21,9 @@ import type {
   ThreadSourceDto,
   ThreadTurnDto,
   UpdateThreadSettingsInput,
+} from '../../../packages/shared/src/index';
+import {
+  normalizeAgentBackendId,
 } from '../../../packages/shared/src/index';
 import {
   ensureFastModeSupported,
@@ -119,7 +123,7 @@ export interface ThreadLocalSessionLookup {
   } | null>;
   findImportSession(
     sessionId: string,
-    input: { fastMode: boolean },
+    input: { fastMode: boolean; provider?: string | null },
   ): Promise<LocalImportSessionResult | null>;
 }
 
@@ -195,10 +199,47 @@ export class ThreadSessionCoordinator {
     return this.localSessionLookup.findSession(providerSessionId);
   }
 
-  async resolveLocalImportSession(sessionId: string): Promise<LocalImportSessionResult | null> {
-    return this.localSessionLookup.findImportSession(sessionId, {
+  async resolveLocalImportSession(input: {
+    provider: string | null | undefined;
+    sessionId: string;
+  }): Promise<LocalImportSessionResult | null> {
+    const provider = normalizeAgentBackendId(input.provider) ?? 'codex';
+    if (provider !== 'codex') {
+      return this.resolveRuntimeImportSession(provider, input.sessionId);
+    }
+
+    return this.localSessionLookup.findImportSession(input.sessionId, {
       fastMode: this.performanceModeSettings.readFastMode(),
+      provider,
     });
+  }
+
+  private async resolveRuntimeImportSession(
+    provider: AgentBackendIdDto,
+    sessionId: string,
+  ): Promise<LocalImportSessionResult | null> {
+    try {
+      const session = await this.providerRuntime
+        .runtimeForProvider(provider)
+        .readSession(sessionId);
+      if (!session.cwd) {
+        return null;
+      }
+      return {
+        provider,
+        source: 'supervisor',
+        sessionId,
+        cwd: session.cwd,
+        title: session.title?.trim() || session.preview?.trim() || 'Untitled imported session',
+        model: null,
+        summaryText: session.preview,
+        fastMode: this.providerRuntime.runtimeSupportsFastMode(provider)
+          ? this.performanceModeSettings.readFastMode()
+          : false,
+      };
+    } catch {
+      return null;
+    }
   }
 
   async readRemoteSession(input: {

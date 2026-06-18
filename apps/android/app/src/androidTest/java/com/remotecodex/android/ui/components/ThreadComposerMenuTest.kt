@@ -43,7 +43,9 @@ class ThreadComposerMenuTest {
         assertNotNull(device.findObject(By.text("Context window")))
         assertNotNull(device.findObject(By.text("85.2k left")))
         assertNotNull(device.findObject(By.text("85.2k left · 67% context left")))
+        assertNotNull(device.findObject(By.text("gpt-5.5")))
         assertNotNull(device.findObject(By.text("gpt-5-codex")))
+        assertNotNull(device.findObject(By.text("gpt-5")))
         assertNotNull(device.findObject(By.desc("gpt-5.4 selected")))
         assertNotNull(device.findObject(By.desc("gpt-5-codex available")))
     }
@@ -80,8 +82,10 @@ class ThreadComposerMenuTest {
         assertNotNull(device.findObject(By.text("Effort budget")))
         assertNotNull(device.findObject(By.text("Select reasoning effort")))
         assertNotNull(device.findObject(By.text("High")))
+        assertNotNull(device.findObject(By.text("XHigh")))
         assertNotNull(device.findObject(By.desc("Medium selected")))
         assertNotNull(device.findObject(By.desc("High available")))
+        assertNotNull(device.findObject(By.desc("XHigh available")))
     }
 
     @Test

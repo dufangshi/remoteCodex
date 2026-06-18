@@ -211,12 +211,14 @@ export interface RelayHttpRequestPayload {
   path: string;
   headers: Record<string, string>;
   body: string | null;
+  bodyEncoding?: 'utf8' | 'base64';
 }
 
 export interface RelayHttpResponsePayload {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
+  bodyEncoding?: 'utf8' | 'base64';
 }
 
 export interface AgentRuntimeStatusDto {
@@ -562,6 +564,7 @@ export interface ThreadDto {
 
 export interface ThreadHistoryItemDto {
   id: string;
+  createdAt?: string | null;
   kind:
     | 'userMessage'
     | 'agentMessage'
@@ -1121,6 +1124,7 @@ export interface UpdateThreadInput {
 
 export interface ImportThreadInput {
   sessionId: string;
+  provider?: AgentBackendIdDto;
 }
 
 export interface SendThreadPromptInput {

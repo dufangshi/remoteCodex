@@ -1,9 +1,62 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@remote-codex/thread-ui', () => ({
-  PluginProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('@remote-codex/thread-ui', async () => {
+  const React = await import('react');
+  const AppShellNavContext = React.createContext<unknown>(null);
+
+  return {
+    AppShellNavContext,
+    ConfirmDialog: ({
+      children,
+      confirmLabel = 'Confirm',
+      onConfirm,
+      open,
+      title,
+    }: {
+      children?: React.ReactNode;
+      confirmLabel?: string;
+      onConfirm?: () => void;
+      open?: boolean;
+      title?: string;
+    }) =>
+      open ? (
+        <div role="dialog" aria-label={title}>
+          {children}
+          <button type="button" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      ) : null,
+    LongTextDialog: ({
+      title,
+      value,
+    }: {
+      title?: string;
+      value?: string | null;
+    }) =>
+      value ? (
+        <div role="dialog" aria-label={title}>
+          {value}
+        </div>
+      ) : null,
+    AppShellMenuButton: () => <button type="button">Open Navigation</button>,
+    AppShellNavigationMenu: ({ children }: { children?: React.ReactNode }) => (
+      <nav>{children}</nav>
+    ),
+    PluginProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    ThreadDetailSurface: () => (
+      <div data-testid="thread-detail-surface">Sandbox is not running</div>
+    ),
+    formatLongTimestamp: (value: string) => value,
+    threadStatusLabel: (value: string) => value,
+    useAppShellNav: () => React.useContext(AppShellNavContext),
+    usePlugins: () => ({
+      plugins: [],
+      renderArtifact: () => null,
+    }),
+  };
+});
 
 import { App } from './app';
 
@@ -13,9 +66,10 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
     window.localStorage.clear();
     vi.unstubAllGlobals();
+    vi.stubGlobal('fetch', vi.fn());
   });
 
-  it('renders the landing page without login in local mode', async () => {
+  it('redirects the root page to workspaces in local mode', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -30,6 +84,10 @@ describe('App', () => {
             authRequired: false,
           }),
         })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [],
+        })
         .mockResolvedValue({
           ok: true,
           json: async () => ({
@@ -39,14 +97,14 @@ describe('App', () => {
             host: '127.0.0.1',
             port: 8787,
             workspaceRoot: '/Users/test',
-            environment: 'development'
-          })
-        })
+            environment: 'development',
+          }),
+        }),
     );
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Bring your local workspaces/i)).toBeInTheDocument();
+      expect(screen.getByText('No workspaces yet')).toBeInTheDocument();
       expect(screen.getByText('/Users/test')).toBeInTheDocument();
     });
   });

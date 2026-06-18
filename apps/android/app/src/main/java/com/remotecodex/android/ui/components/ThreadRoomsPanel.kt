@@ -43,8 +43,9 @@ import com.remotecodex.android.ui.theme.ThreadColors
 fun ThreadRoomsPanel(
     workspaceLabel: String,
     rooms: List<ThreadRoomPreview>,
-    onClose: () -> Unit,
     onCreateThread: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onExportThread: () -> Unit,
     copiedSessionRoomId: String?,
     onRenameThread: (ThreadRoomPreview) -> Unit,
     onCopySessionId: (ThreadRoomPreview) -> Unit,
@@ -91,11 +92,18 @@ fun ThreadRoomsPanel(
                 )
             }
             GraphIconButton(
-                icon = GraphActionIcon.Cancel,
-                contentDescription = "Close thread rooms",
+                icon = GraphActionIcon.Export,
+                contentDescription = "Export thread",
                 variant = GraphButtonVariant.Outline,
                 size = GraphButtonSize.Default,
-                onClick = onClose,
+                onClick = onExportThread,
+            )
+            GraphIconButton(
+                icon = GraphActionIcon.Settings,
+                contentDescription = "Open settings",
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Default,
+                onClick = onOpenSettings,
             )
         }
 

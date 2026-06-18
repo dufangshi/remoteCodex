@@ -557,11 +557,12 @@ class ThreadPresentationTest {
     fun buildsComposerActionStateForInterruptibleChat() {
         assertEquals(
             ComposerActionState(
-                primaryLabel = "Stop Current Turn",
-                primaryKind = ComposerPrimaryActionKind.Stop,
+                primaryLabel = "Send",
+                primaryKind = ComposerPrimaryActionKind.Send,
                 interruptLabel = "Stop Current Turn",
-                showInterrupt = false,
+                showInterrupt = true,
                 sendEnabled = true,
+                sending = true,
             ),
             buildComposerActionState(
                 threadConnected = true,
@@ -581,6 +582,7 @@ class ThreadPresentationTest {
                 interruptLabel = "Stop Current Turn",
                 showInterrupt = false,
                 sendEnabled = true,
+                sending = true,
             ),
             buildComposerActionState(
                 threadConnected = false,
@@ -600,6 +602,7 @@ class ThreadPresentationTest {
                 interruptLabel = "Send Ctrl-C",
                 showInterrupt = true,
                 sendEnabled = false,
+                sending = false,
             ),
             buildComposerActionState(
                 threadConnected = true,
@@ -1613,12 +1616,19 @@ class ThreadPresentationTest {
                     detail = "current",
                     selected = true,
                 ),
+                ComposerSelectionOptionState(
+                    value = "xhigh",
+                    label = "XHigh",
+                    detail = "available",
+                    selected = false,
+                ),
             ),
             buildComposerReasoningEffortOptions(
                 currentEffort = "medium",
                 options = listOf(
                     ComposerReasoningEffortOptionPreview(reasoningEffort = "low"),
                     ComposerReasoningEffortOptionPreview(reasoningEffort = "medium"),
+                    ComposerReasoningEffortOptionPreview(reasoningEffort = "xhigh"),
                 ),
             ),
         )
@@ -2357,7 +2367,7 @@ class ThreadPresentationTest {
                 disabled = true,
                 canInterrupt = true,
                 interruptLabel = "Stop Current Turn",
-                sendButtonLabel = "Stop Current Turn",
+                sendButtonLabel = "Send",
                 sendDisabled = true,
                 attachmentChips = listOf(
                     ComposerPromptAttachmentState(
@@ -2398,10 +2408,10 @@ class ThreadPresentationTest {
                 ),
                 activeView = ComposerActiveView.Chat,
                 actionState = ComposerActionState(
-                    primaryLabel = "Stop Current Turn",
-                    primaryKind = ComposerPrimaryActionKind.Stop,
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
                     interruptLabel = "Stop Current Turn",
-                    showInterrupt = false,
+                    showInterrupt = true,
                     sendEnabled = true,
                 ),
                 busy = false,

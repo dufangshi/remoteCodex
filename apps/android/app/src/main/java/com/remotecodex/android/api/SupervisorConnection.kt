@@ -71,11 +71,8 @@ data class SupervisorConnectionConfig(
             .replaceFirst("https://", "wss://")
             .replaceFirst("http://", "ws://")
         val token = authToken?.trim().orEmpty()
-        return if (token.isEmpty()) {
-            "$wsBase$path"
-        } else {
-            "$wsBase$path?token=${urlEncodeQueryValue(token)}"
-        }
+        val queryName = if (mode == SupervisorConnectionMode.Relay) "relaySession" else "token"
+        return if (token.isEmpty()) "$wsBase$path" else "$wsBase$path?$queryName=${urlEncodeQueryValue(token)}"
     }
 }
 
@@ -137,6 +134,7 @@ data class SupervisorWorkspaceSummary(
 data class SupervisorThreadSummary(
     val id: String,
     val workspaceId: String,
+    val provider: String = "codex",
     val title: String,
     val status: String,
     val model: String?,
@@ -146,6 +144,7 @@ data class SupervisorThreadSummary(
     val sandboxMode: String?,
     val updatedAt: String,
     val summaryText: String?,
+    val isLoaded: Boolean = true,
 )
 
 data class SupervisorHomeSnapshot(
@@ -195,6 +194,22 @@ data class SupervisorAgentBackend(
     val buildRestart: Boolean,
 )
 
+data class SupervisorModelOption(
+    val id: String,
+    val model: String,
+    val displayName: String,
+    val description: String,
+    val isDefault: Boolean,
+    val hidden: Boolean,
+    val supportedReasoningEfforts: List<SupervisorReasoningEffortOption>,
+    val defaultReasoningEffort: String?,
+)
+
+data class SupervisorReasoningEffortOption(
+    val reasoningEffort: String,
+    val description: String?,
+)
+
 data class SupervisorWorkspaceTreeNode(
     val name: String,
     val path: String,
@@ -211,6 +226,13 @@ data class SupervisorWorkspaceFilePreview(
     val size: Long,
     val truncated: Boolean,
     val nextOffset: Long,
+)
+
+data class SupervisorWorkspaceFile(
+    val path: String,
+    val name: String,
+    val kind: String,
+    val size: Long,
 )
 
 data class SupervisorShellSession(
@@ -282,6 +304,12 @@ data class StartSupervisorThreadRequest(
     val title: String? = null,
     val model: String,
     val approvalMode: String = "yolo",
+    val provider: String? = null,
+    val reasoningEffort: String? = null,
+)
+
+data class ImportSupervisorThreadRequest(
+    val sessionId: String,
     val provider: String? = null,
 )
 
@@ -568,6 +596,11 @@ data class SendThreadPromptRequest(
     val clientRequestId: String? = null,
     val model: String? = null,
     val attachments: List<PromptAttachmentUploadRequest> = emptyList(),
+)
+
+data class ResumeThreadRequest(
+    val model: String? = null,
+    val sandboxMode: String? = null,
 )
 
 data class PromptAttachmentUploadRequest(

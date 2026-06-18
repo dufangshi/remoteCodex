@@ -66,7 +66,7 @@ type WebsocketLike = {
   readyState: number;
   send: (message: string) => void;
   close: (code?: number, reason?: string) => void;
-  on(event: 'message', handler: (message: Buffer) => void): void;
+  on(event: 'message', handler: (message: Buffer | ArrayBuffer | string) => void): void;
   on(event: 'close', handler: () => void): void;
 };
 
@@ -387,10 +387,10 @@ export function buildApp(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket, request) => {
-        const clientSocket = socket as WebsocketLike;
+        const supervisorSocket = socket as WebsocketLike;
         const session = authService.verifyRequest(request);
         if (!session.authenticated) {
-          clientSocket.close(1008, 'Authentication is required.');
+          supervisorSocket.close(1008, 'Authentication is required.');
           return;
         }
 
@@ -399,17 +399,17 @@ export function buildApp(
           eventBus,
           backendPluginHost,
           send(message) {
-            if (clientSocket.readyState === 1) {
-              clientSocket.send(JSON.stringify(message));
+            if (supervisorSocket.readyState === 1) {
+              supervisorSocket.send(JSON.stringify(message));
             }
           },
         });
 
-        clientSocket.on('message', async (rawMessage: Buffer) => {
+        supervisorSocket.on('message', async (rawMessage) => {
           await supervisorSession.handleMessage(rawMessage.toString());
         });
 
-        clientSocket.on('close', () => {
+        supervisorSocket.on('close', () => {
           supervisorSession.close();
         });
       },
@@ -617,6 +617,12 @@ export function createRelayRequestHandler(app: FastifyInstance) {
   return async function handleRelayRequest(
     request: RelayHttpRequestPayload,
   ): Promise<RelayHttpResponsePayload> {
+    const payload =
+      request.body === null
+        ? undefined
+        : request.bodyEncoding === 'base64'
+          ? Buffer.from(request.body, 'base64')
+          : request.body;
     const response = await app.inject({
       method: request.method as any,
       url: request.path,
@@ -624,15 +630,60 @@ export function createRelayRequestHandler(app: FastifyInstance) {
         ...request.headers,
         [RELAY_FORWARD_HEADER]: '1',
       },
-      ...(request.body !== null ? { payload: request.body } : {}),
+      ...(payload !== undefined ? { payload } : {}),
     });
+    const responseBody = relayResponseBody(response);
 
     return {
       statusCode: response.statusCode,
       headers: relayResponseHeaders(response.headers),
-      body: response.body,
+      body: responseBody.body,
+      ...(responseBody.bodyEncoding ? { bodyEncoding: responseBody.bodyEncoding } : {}),
     };
   };
+}
+
+function relayResponseBody(response: {
+  body: string;
+  headers: Record<string, string | string[] | number | undefined>;
+  rawPayload: Buffer;
+}): { body: string; bodyEncoding?: 'base64' } {
+  const contentType = responseHeader(response.headers, 'content-type');
+  if (isTextRelayResponse(contentType)) {
+    return { body: response.body };
+  }
+
+  return {
+    body: response.rawPayload.toString('base64'),
+    bodyEncoding: 'base64',
+  };
+}
+
+function responseHeader(
+  headers: Record<string, string | string[] | number | undefined>,
+  name: string,
+) {
+  const lowerName = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== lowerName || value === undefined) {
+      continue;
+    }
+    return Array.isArray(value) ? value.join(', ') : String(value);
+  }
+  return '';
+}
+
+function isTextRelayResponse(contentType: string) {
+  const lower = contentType.toLowerCase();
+  return (
+    lower.startsWith('text/') ||
+    lower.includes('application/json') ||
+    lower.includes('+json') ||
+    lower.includes('application/javascript') ||
+    lower.includes('application/xml') ||
+    lower.includes('+xml') ||
+    lower.includes('image/svg+xml')
+  );
 }
 
 export function createRelayClientConnectedHandler(eventBus: SupervisorEventBus) {

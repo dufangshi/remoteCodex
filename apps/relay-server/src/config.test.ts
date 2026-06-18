@@ -31,7 +31,7 @@ describe('relay server config', () => {
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
     } as any);
 
-    expect(config.webDistDir).toBe(distDir);
+    expect(fsSync.realpathSync(config.webDistDir!)).toBe(fsSync.realpathSync(distDir));
     expect(config.supervisorToken).toBeNull();
   });
 
@@ -47,10 +47,26 @@ describe('relay server config', () => {
     expect(config.webDistDir).toBe(configuredDist);
   });
 
+  it('prefers namespaced relay host and port over generic fallbacks', () => {
+    const config = loadRelayServerConfig({
+      HOST: '127.0.0.1',
+      PORT: '9999',
+      REMOTE_CODEX_RELAY_HOST: '0.0.0.0',
+      REMOTE_CODEX_RELAY_PORT: '8788',
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
+    } as any);
+
+    expect(config.host).toBe('0.0.0.0');
+    expect(config.port).toBe(8788);
+  });
+
   it('treats blank optional environment variables as unset', () => {
     const config = loadRelayServerConfig({
       HOST: '',
       PORT: '',
+      REMOTE_CODEX_RELAY_HOST: '',
+      REMOTE_CODEX_RELAY_PORT: '',
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
       REMOTE_CODEX_ADMIN_EMAIL: '',
@@ -59,6 +75,7 @@ describe('relay server config', () => {
       REMOTE_CODEX_RELAY_DATA_DIR: '',
       REMOTE_CODEX_RELAY_SESSION_SECRET: '',
       REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: '',
+      REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: '',
       REMOTE_CODEX_RELAY_WEB_DIST_DIR: '',
     } as any);
 
@@ -70,6 +87,21 @@ describe('relay server config', () => {
     expect(config.dataDir).toBe('.local/relay-server');
     expect(config.sessionSecret).toBe('password123');
     expect(config.registrationEnabled).toBe(true);
+    expect(config.registrationEnabledConfigured).toBe(false);
+    expect(config.registrationPassword).toBeNull();
+  });
+
+  it('loads explicit registration settings from namespaced environment variables', () => {
+    const config = loadRelayServerConfig({
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
+      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'false',
+      REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: 'invite-password-123',
+    } as any);
+
+    expect(config.registrationEnabled).toBe(false);
+    expect(config.registrationEnabledConfigured).toBe(true);
+    expect(config.registrationPassword).toBe('invite-password-123');
   });
 
   it('finds the repo web dist when the relay cwd is the relay package', () => {

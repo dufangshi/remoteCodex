@@ -8,6 +8,7 @@ coverage
 .env.*.local
 .npmrc
 *.log
+*.apk
 .temp/
 .tmp/
 .playwright-cli/*

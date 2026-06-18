@@ -1,6 +1,10 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-import puppeteer, { LaunchOptions } from 'puppeteer-core';
+import puppeteer from 'puppeteer-core';
 import { marked } from 'marked';
 
 import {
@@ -33,7 +37,9 @@ const EMBEDDED_CJK_FONT_CANDIDATES = [
   { path: '/mnt/c/Windows/Fonts/Deng.ttf', format: 'truetype', weight: 400 },
   { path: '/mnt/c/Windows/Fonts/msyh.ttc', format: 'truetype', weight: 400 },
 ];
-const PUPPETEER_CHANNEL = 'chrome';
+const PUPPETEER_CHANNEL = 'chrome' as const;
+const PDF_EXPORT_TIMEOUT_MS = 45_000;
+const MAX_CHROME_STDERR_CHARS = 4_000;
 let embeddedCjkFontCss: string | null = null;
 
 function escapeHtml(value: string) {
@@ -1197,43 +1203,122 @@ export async function renderThreadExportPdf(snapshot: ThreadPdfExportSnapshot) {
     );
   }
 
-  const browser = await launchPdfBrowser();
-
-  try {
-    const page = await browser.newPage();
-    await page.setContent(renderThreadExportHtml(snapshot), {
-      waitUntil: 'load',
-    });
-    return Buffer.from(
-      await page.pdf({
-        format: 'Letter',
-        printBackground: true,
-        preferCSSPageSize: true,
-      }),
-    );
-  } finally {
-    await browser.close();
-  }
+  return renderPdfWithChromeCli(renderThreadExportHtml(snapshot));
 }
 
-async function launchPdfBrowser() {
-  const launchOptions: LaunchOptions = {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--font-render-hinting=none'],
-  };
-
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-  } else {
-    launchOptions.channel = PUPPETEER_CHANNEL;
-  }
-
+function resolvePdfBrowserExecutablePath() {
   try {
-    return await puppeteer.launch(launchOptions);
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
+      ? process.env.PUPPETEER_EXECUTABLE_PATH
+      : puppeteer.executablePath(PUPPETEER_CHANNEL);
+
+    if (!fs.existsSync(executablePath)) {
+      throw new Error(`Browser executable was not found at ${executablePath}`);
+    }
+
+    return executablePath;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `PDF export requires a local Chrome installation. Install Google Chrome, or set PUPPETEER_EXECUTABLE_PATH to a Chromium-compatible browser executable. ${detail}`,
     );
   }
+}
+
+async function renderPdfWithChromeCli(html: string) {
+  const executablePath = resolvePdfBrowserExecutablePath();
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pdf-'));
+  const htmlPath = path.join(tempDir, 'thread-export.html');
+  const pdfPath = path.join(tempDir, 'thread-export.pdf');
+
+  try {
+    await fs.promises.writeFile(htmlPath, html, 'utf8');
+    await printHtmlToPdf({
+      executablePath,
+      htmlPath,
+      pdfPath,
+    });
+
+    const pdf = await fs.promises.readFile(pdfPath);
+    if (pdf.length === 0 || !pdf.subarray(0, 4).equals(Buffer.from('%PDF'))) {
+      throw new Error('Chrome did not produce a valid PDF file.');
+    }
+
+    return pdf;
+  } finally {
+    await fs.promises.rm(tempDir, { force: true, recursive: true });
+  }
+}
+
+async function printHtmlToPdf(input: {
+  executablePath: string;
+  htmlPath: string;
+  pdfPath: string;
+}) {
+  const args = [
+    '--headless',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--font-render-hinting=none',
+    '--no-pdf-header-footer',
+    '--print-to-pdf-no-header',
+    `--print-to-pdf=${input.pdfPath}`,
+    pathToFileURL(input.htmlPath).href,
+  ];
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(input.executablePath, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let settled = false;
+    let stderr = '';
+
+    const complete = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      child.kill('SIGTERM');
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      complete(new Error(`Chrome PDF export timed out after ${PDF_EXPORT_TIMEOUT_MS}ms.`));
+    }, PDF_EXPORT_TIMEOUT_MS);
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = truncateChromeStderr(`${stderr}${chunk.toString('utf8')}`);
+      if (stderr.includes('bytes written to file')) {
+        complete();
+      }
+    });
+    child.on('error', (error) => {
+      complete(error);
+    });
+    child.on('close', (code, signal) => {
+      if (code === 0) {
+        complete();
+        return;
+      }
+
+      const reason = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
+      const detail = stderr ? ` ${stderr}` : '';
+      complete(new Error(`Chrome PDF export failed with ${reason}.${detail}`));
+    });
+  });
+}
+
+function truncateChromeStderr(value: string) {
+  if (value.length <= MAX_CHROME_STDERR_CHARS) {
+    return value;
+  }
+
+  return value.slice(value.length - MAX_CHROME_STDERR_CHARS);
 }

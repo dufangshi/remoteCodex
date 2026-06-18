@@ -1,0 +1,83 @@
+# syntax=docker/dockerfile:1.7
+FROM node:22-bookworm-slim AS build
+
+ARG REMOTE_CODEX_THREAD_UI_REPO=https://github.com/dufangshi/remote-codex-thread-ui.git
+ARG REMOTE_CODEX_THREAD_UI_REF=main
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    openssh-client \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable
+
+WORKDIR /opt/remote-codex
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY scripts/setup-thread-ui-git-auth.sh ./scripts/setup-thread-ui-git-auth.sh
+COPY apps/relay-server ./apps/relay-server
+COPY apps/supervisor-web ./apps/supervisor-web
+COPY packages/plugin-runtime ./packages/plugin-runtime
+COPY packages/plugin-terminal ./packages/plugin-terminal
+COPY packages/shared ./packages/shared
+
+RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
+  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
+  bash ./scripts/setup-thread-ui-git-auth.sh \
+  && git clone --depth 1 --branch "${REMOTE_CODEX_THREAD_UI_REF}" "${REMOTE_CODEX_THREAD_UI_REPO}" /opt/remote-codex-thread-ui \
+  && pnpm --dir /opt/remote-codex-thread-ui install --frozen-lockfile \
+  && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/plugin-xyz-viewer build \
+  && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/thread-ui build \
+  && pnpm --filter @remote-codex/relay-server... --filter @remote-codex/supervisor-web... install --frozen-lockfile \
+  && pnpm --filter @remote-codex/relay-server build \
+  && pnpm --filter @remote-codex/plugin-runtime build \
+  && pnpm --filter @remote-codex/plugin-terminal build \
+  && pnpm --filter @remote-codex/shared build \
+  && pnpm --filter @remote-codex/supervisor-web build \
+  && bash ./scripts/setup-thread-ui-git-auth.sh --cleanup
+
+FROM node:22-bookworm-slim AS prod-deps
+
+RUN corepack enable
+
+WORKDIR /opt/remote-codex
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/relay-server ./apps/relay-server
+COPY packages/shared ./packages/shared
+
+RUN pnpm --filter @remote-codex/relay-server... install --prod --frozen-lockfile \
+  && pnpm store prune
+
+FROM node:22-bookworm-slim AS runtime
+
+ENV NODE_ENV=production \
+  HOST=0.0.0.0 \
+  PORT=8788 \
+  REMOTE_CODEX_RELAY_HOST=0.0.0.0 \
+  REMOTE_CODEX_RELAY_PORT=8788 \
+  REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay \
+  REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex/apps/supervisor-web/dist
+
+WORKDIR /opt/remote-codex
+
+COPY --from=prod-deps /opt/remote-codex ./
+COPY --from=build /opt/remote-codex/apps/relay-server/dist ./apps/relay-server/dist
+COPY --from=build /opt/remote-codex/apps/supervisor-web/dist ./apps/supervisor-web/dist
+
+RUN mkdir -p /var/lib/remote-codex-relay \
+  && chown -R node:node /var/lib/remote-codex-relay /opt/remote-codex
+
+USER node
+
+EXPOSE 8788
+VOLUME ["/var/lib/remote-codex-relay"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.REMOTE_CODEX_RELAY_PORT || '8788') + '/healthz').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+WORKDIR /opt/remote-codex/apps/relay-server
+
+CMD ["node", "dist/index.js"]

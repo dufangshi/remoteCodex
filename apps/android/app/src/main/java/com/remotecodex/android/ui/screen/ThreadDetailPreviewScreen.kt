@@ -1,7 +1,6 @@
 package com.remotecodex.android.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -42,7 +41,6 @@ import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
-import com.remotecodex.android.ui.components.AppShellNavigationPanel
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
 import com.remotecodex.android.ui.components.GraphChatMainShell
 import com.remotecodex.android.ui.components.GraphChatMobileScrim
@@ -63,7 +61,6 @@ import com.remotecodex.android.ui.components.ThreadTimeline
 import com.remotecodex.android.ui.components.ThreadSurfaceView
 import com.remotecodex.android.ui.components.ThreadTopBar
 import com.remotecodex.android.ui.components.WorkspacePanel
-import com.remotecodex.android.ui.presentation.buildGraphChatThreadUsageFooterState
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -132,7 +129,9 @@ fun ThreadDetailSurface(
     onDownloadWorkspaceFile: ((String) -> Unit)? = null,
     onOpenWorkspaceRawFile: ((String) -> Unit)? = null,
     onCopyWorkspaceRawFile: ((String) -> Unit)? = null,
+    onSaveWorkspaceFile: ((String, String) -> Unit)? = null,
     onUploadWorkspaceNote: (() -> Unit)? = null,
+    workspaceSaveBusy: Boolean = false,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onLoadEarlier: (() -> Unit)? = null,
@@ -155,7 +154,6 @@ fun ThreadDetailSurface(
         rooms = rooms,
     )
     var selectedView by remember { mutableStateOf(ThreadSurfaceView.Chat) }
-    var appNavOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var roomsOpen by remember { mutableStateOf(false) }
     var threadActionDialog by remember { mutableStateOf<ThreadActionDialog?>(null) }
@@ -208,17 +206,7 @@ fun ThreadDetailSurface(
                                 }
                             },
                             shellEnabled = AndroidFeatureFlags.ShellEnabled,
-                            onOpenAppNav = { appNavOpen = true },
                             onOpenRooms = { roomsOpen = true },
-                            onOpenSettings = { settingsOpen = true },
-                            onOpenThreadAction = { threadActionDialog = it },
-                            onReturnToWorkspace = { selectedView = ThreadSurfaceView.Workspace },
-                            onCreateThreadShortcut = {
-                                threadActionRoom = null
-                                threadActionDialog = ThreadActionDialog.Create
-                            },
-                            themeMode = themeMode,
-                            darkThemeActive = darkThemeActive,
                         )
                     }
                     GraphChatSplitRegion(modifier = Modifier.weight(1f)) {
@@ -246,7 +234,9 @@ fun ThreadDetailSurface(
                                 onDownloadFile = onDownloadWorkspaceFile,
                                 onOpenRawFile = onOpenWorkspaceRawFile,
                                 onCopyRawFile = onCopyWorkspaceRawFile,
+                                onSaveFile = onSaveWorkspaceFile,
                                 onUploadNote = onUploadWorkspaceNote,
+                                saveBusy = workspaceSaveBusy,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Shell -> {
@@ -307,16 +297,24 @@ fun ThreadDetailSurface(
                 mobileOpen = roomsOpen,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .fillMaxWidth(if (showCollapsedRoomsRail) 0.40f else 0.86f),
+                    .fillMaxWidth(if (showCollapsedRoomsRail) 0.32f else 0.69f),
             ) {
                 ThreadRoomsPanel(
                     workspaceLabel = displayedDetail.workspacePreview.rootLabel,
                     rooms = displayedDetail.rooms,
-                    onClose = { roomsOpen = false },
                     onCreateThread = {
                         roomsOpen = false
                         threadActionRoom = null
                         threadActionDialog = ThreadActionDialog.Create
+                    },
+                    onOpenSettings = {
+                        roomsOpen = false
+                        settingsOpen = true
+                    },
+                    onExportThread = {
+                        roomsOpen = false
+                        threadActionRoom = null
+                        threadActionDialog = ThreadActionDialog.Export
                     },
                     copiedSessionRoomId = copiedSessionRoomId,
                     onRenameThread = { room ->
@@ -333,26 +331,6 @@ fun ThreadDetailSurface(
                         threadActionDialog = ThreadActionDialog.Delete
                     },
                     modifier = Modifier.fillMaxSize(),
-                )
-            }
-            if (appNavOpen) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(ThreadColors.Primary.copy(alpha = 0.30f))
-                        .clickable { appNavOpen = false },
-                )
-                AppShellNavigationPanel(
-                    appShell = appShell,
-                    onOpenSettings = {
-                        appNavOpen = false
-                        settingsOpen = true
-                    },
-                    onClose = { appNavOpen = false },
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .navigationBarsPadding()
-                        .fillMaxWidth(0.86f),
                 )
             }
             if (settingsOpen) {
@@ -430,7 +408,6 @@ private fun ChatPreviewSurface(
             imageResolver = imageResolver,
             modifier = Modifier.weight(1f),
         )
-        ThreadUsageFooter(detail = detail)
     }
 }
 
@@ -439,8 +416,9 @@ private fun androidx.compose.foundation.lazy.LazyListState.isTailVisible(): Bool
     if (totalItems == 0) {
         return true
     }
-    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
-    return lastVisible >= totalItems - 2
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+    return lastVisible.index == totalItems - 1 &&
+        lastVisible.offset + lastVisible.size <= layoutInfo.viewportEndOffset + 24
 }
 
 private fun timelineLastIndex(detail: ThreadDetailPreview): Int {
@@ -479,36 +457,6 @@ private fun ThreadDetailPreview.timelineItemCount(): Int {
         (if (timelineAuxiliary.canLoadEarlier) 1 else 0) +
         turns.size +
         timelineAuxiliary.pendingSteers.size +
-        (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0)
-}
-
-@Composable
-private fun ThreadUsageFooter(detail: ThreadDetailPreview) {
-    val state = buildGraphChatThreadUsageFooterState(detail)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(ThreadColors.Panel)
-            .semantics { contentDescription = state.accessibilityLabel }
-            .padding(horizontal = 14.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = state.transcriptLabel,
-            modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = state.usageLabel,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+        (if (timelineAuxiliary.ephemeralUserNote != null) 1 else 0) +
+        1
 }

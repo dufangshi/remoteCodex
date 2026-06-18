@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.AuthLoginResult
@@ -63,17 +65,27 @@ import com.remotecodex.android.ui.components.GraphDialogOverlay
 import com.remotecodex.android.ui.components.GraphSelectionGlyph
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
 fun SupervisorConnectionSetupScreen(
     initialConfig: SupervisorConnectionConfig?,
+    initialRoute: ConnectionSetupRoute = ConnectionSetupRoute.ModeSelect,
     onConnectionReady: (SupervisorConnectionConfig, SupervisorConnectionCheck) -> Unit,
+    onConnectionStateSaved: (SupervisorConnectionConfig) -> Unit = {},
+    onBack: () -> Unit = {},
+    onRelayDeviceSelectionCleared: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var mode by remember(initialConfig) { mutableStateOf(initialConfig?.mode ?: SupervisorConnectionMode.Local) }
-    var baseUrl by remember(initialConfig) { mutableStateOf(initialConfig?.normalizedBaseUrl ?: defaultUrlForMode(mode)) }
+    var baseUrl by remember(initialConfig) {
+        mutableStateOf(initialConfig?.normalizedBaseUrl ?: initialUrlForMode(mode))
+    }
+    var route by remember(initialRoute, initialConfig) { mutableStateOf(initialRoute) }
+    var authMode by remember { mutableStateOf(RelayAuthMode.SignIn) }
+    var email by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var relayDeviceId by remember(initialConfig) { mutableStateOf(initialConfig?.relayDeviceId.orEmpty()) }
@@ -113,7 +125,6 @@ fun SupervisorConnectionSetupScreen(
             result
                 .onSuccess { portal ->
                     relayPortal = portal
-                    relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId)
                     statusMessage = if (portal.devices.isEmpty()) {
                         "Relay login succeeded. Register a device to connect a backend."
                     } else {
@@ -123,6 +134,127 @@ fun SupervisorConnectionSetupScreen(
                 .onFailure { error ->
                     errorMessage = userFacingConnectionError(error)
                 }
+        }
+    }
+
+    fun connectCurrent() {
+        busy = true
+        errorMessage = null
+        statusMessage = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    connectAndCheck(
+                        baseConfig = buildBaseConfig(),
+                        mode = mode,
+                        username = username,
+                        password = password,
+                    )
+                }
+            }
+            busy = false
+            result
+                .onSuccess { (config, check) ->
+                    statusMessage = "${check.sessionLabel}. ${check.healthLabel}."
+                    onConnectionReady(config, check)
+                }
+                .onFailure { error ->
+                    errorMessage = userFacingConnectionError(error)
+                }
+        }
+    }
+
+    fun relayLoginOrRegister(register: Boolean) {
+        busy = true
+        errorMessage = null
+        statusMessage = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val baseConfig = buildBaseConfig(token = null).copy(
+                        mode = SupervisorConnectionMode.Relay,
+                        relayDeviceId = null,
+                    )
+                    val token = if (register) {
+                        SupervisorApiClient(baseConfig).relayRegister(email, username, password).token
+                    } else {
+                        SupervisorApiClient(baseConfig).relayLogin(username, password).token
+                    }
+                    val portal = SupervisorApiClient(baseConfig.copy(authToken = token)).fetchRelayPortal()
+                    token to portal
+                }
+            }
+            busy = false
+            result
+                .onSuccess { (token, portal) ->
+                    authToken = token
+                    relayPortal = portal
+                    relayDeviceId = relayDeviceId.takeIf { current -> portal.devices.any { it.id == current } }.orEmpty()
+                    onConnectionStateSaved(
+                        SupervisorConnectionConfig(
+                            mode = SupervisorConnectionMode.Relay,
+                            baseUrl = baseUrl,
+                            authToken = token,
+                            relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
+                        ),
+                    )
+                    route = ConnectionSetupRoute.RelayDevices
+                    statusMessage = if (portal.devices.isEmpty()) {
+                        "Relay account ready. Register a backend device."
+                    } else {
+                        relayPortalStatusMessage(portal.devices, relayDeviceId)
+                    }
+                }
+                .onFailure { error ->
+                    errorMessage = userFacingConnectionError(error)
+                }
+        }
+    }
+
+    fun validateRelayEndpointThenContinue() {
+        busy = true
+        errorMessage = null
+        statusMessage = "Checking relay URL..."
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    SupervisorApiClient(
+                        buildBaseConfig(token = null).copy(
+                            mode = SupervisorConnectionMode.Relay,
+                            authToken = null,
+                            relayDeviceId = null,
+                        ),
+                    ).fetchHealth()
+                }
+            }
+            busy = false
+            result
+                .onSuccess {
+                    statusMessage = null
+                    route = ConnectionSetupRoute.RelayAuth
+                }
+                .onFailure { error ->
+                    statusMessage = null
+                    errorMessage = userFacingConnectionError(error)
+                }
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(route, authToken) {
+        if (route == ConnectionSetupRoute.RelayDevices && authToken.isNotBlank() && relayPortal == null && !busy) {
+            loadRelayPortal(authToken)
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(route, authToken) {
+        if (route != ConnectionSetupRoute.RelayDevices || authToken.isBlank()) {
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(5_000)
+            if (!busy) {
+                loadRelayPortal(authToken)
+            }
         }
     }
 
@@ -148,149 +280,248 @@ fun SupervisorConnectionSetupScreen(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Choose how this Android client reaches the supervisor. You can change this later in Settings.",
+                text = when (route) {
+                    ConnectionSetupRoute.ModeSelect -> "Choose how this Android client reaches the supervisor."
+                    ConnectionSetupRoute.ServerAuth -> "Sign in to a direct supervisor server."
+                    ConnectionSetupRoute.RelayAuth -> "Sign in or create a relay account."
+                    ConnectionSetupRoute.RelayDevices -> "Select, create, or revoke relay backend devices."
+                },
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            ConnectionPanel(title = "Mode", detail = mode.detail) {
-                SupervisorConnectionMode.entries.forEach { option ->
-                    ConnectionModeRow(
-                        mode = option,
-                        selected = option == mode,
+            when (route) {
+                ConnectionSetupRoute.ModeSelect -> {
+                    ConnectionPanel(title = "Mode", detail = mode.detail) {
+                        SupervisorConnectionMode.entries.forEach { option ->
+                            ConnectionModeRow(
+                                mode = option,
+                                selected = option == mode,
+                                onClick = {
+                                    mode = option
+                                    baseUrl = initialUrlForMode(option)
+                                    relayPortal = null
+                                    createdDevice = null
+                                    errorMessage = null
+                                    statusMessage = null
+                                },
+                            )
+                        }
+                    }
+                    ConnectionPanel(title = "Endpoint", detail = "Use http(s) for direct modes and relay server URL for relay mode.") {
+                        ConnectionTextField(
+                            label = "URL",
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it },
+                            contentDescription = "Supervisor URL",
+                            keyboardType = KeyboardType.Uri,
+                            placeholder = if (mode == SupervisorConnectionMode.Relay) null else defaultUrlForMode(mode),
+                        )
+                    }
+                    GraphButton(
+                        label = "Next",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Default,
+                        size = GraphButtonSize.Large,
+                        contentDescription = "Continue connection setup",
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            mode = option
-                            if (baseUrl.isBlank() || baseUrl == defaultUrlForMode(SupervisorConnectionMode.Local)) {
-                                baseUrl = defaultUrlForMode(option)
+                            route = when (mode) {
+                                SupervisorConnectionMode.Local -> {
+                                    connectCurrent()
+                                    ConnectionSetupRoute.ModeSelect
+                                }
+                                SupervisorConnectionMode.Server -> ConnectionSetupRoute.ServerAuth
+                                SupervisorConnectionMode.Relay -> {
+                                    validateRelayEndpointThenContinue()
+                                    ConnectionSetupRoute.ModeSelect
+                                }
                             }
-                            relayPortal = null
-                            createdDevice = null
-                            errorMessage = null
-                            statusMessage = null
                         },
                     )
                 }
-            }
-
-            ConnectionPanel(title = "Endpoint", detail = "Use http(s) for direct modes and relay server URL for relay mode.") {
-                ConnectionTextField(
-                    label = "URL",
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    contentDescription = "Supervisor URL",
-                    keyboardType = KeyboardType.Uri,
-                )
-            }
-
-            if (mode != SupervisorConnectionMode.Local) {
-                ConnectionPanel(
-                    title = if (mode == SupervisorConnectionMode.Relay) "Relay login" else "Supervisor login",
-                    detail = if (mode == SupervisorConnectionMode.Relay) "Use relay username or email." else "Use supervisor admin credentials.",
-                ) {
-                    ConnectionTextField(
-                        label = if (mode == SupervisorConnectionMode.Relay) "Identifier" else "Username",
-                        value = username,
-                        onValueChange = { username = it },
-                        contentDescription = "Login identifier",
-                    )
-                    ConnectionTextField(
-                        label = "Password",
-                        value = password,
-                        onValueChange = { password = it },
-                        contentDescription = "Login password",
-                        password = true,
-                    )
-                    if (mode == SupervisorConnectionMode.Relay) {
-                        GraphButton(
-                            label = if (busy) "Loading..." else "Log in / refresh devices",
-                            enabled = !busy,
-                            variant = GraphButtonVariant.Secondary,
-                            size = GraphButtonSize.Default,
-                            contentDescription = "Load relay devices",
-                            onClick = {
-                                busy = true
-                                errorMessage = null
-                                statusMessage = null
-                                scope.launch {
-                                    val result = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            val baseConfig = buildBaseConfig(token = null)
-                                            val token = if (authToken.isNotBlank()) {
-                                                authToken
-                                            } else {
-                                                SupervisorApiClient(baseConfig).relayLogin(username, password).token
-                                            }
-                                            val portal = SupervisorApiClient(baseConfig.copy(authToken = token)).fetchRelayPortal()
-                                            token to portal
-                                        }
+                ConnectionSetupRoute.ServerAuth -> {
+                    ConnectionPanel(title = "Server login", detail = "Use supervisor admin credentials.") {
+                        ConnectionTextField(
+                            label = "URL",
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it },
+                            contentDescription = "Server URL",
+                            keyboardType = KeyboardType.Uri,
+                        )
+                        ConnectionTextField(
+                            label = "Username",
+                            value = username,
+                            onValueChange = { username = it },
+                            contentDescription = "Server username",
+                        )
+                        ConnectionTextField(
+                            label = "Password",
+                            value = password,
+                            onValueChange = { password = it },
+                            contentDescription = "Server password",
+                            password = true,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GraphButton(
+                                label = "Back",
+                                enabled = !busy,
+                                variant = GraphButtonVariant.Outline,
+                                size = GraphButtonSize.Default,
+                                contentDescription = "Back to mode selection",
+                                onClick = { route = ConnectionSetupRoute.ModeSelect },
+                            )
+                            GraphButton(
+                                label = if (busy) "Signing in..." else "Sign in",
+                                enabled = !busy,
+                                variant = GraphButtonVariant.Default,
+                                size = GraphButtonSize.Default,
+                                contentDescription = "Sign in to server",
+                                onClick = { connectCurrent() },
+                            )
+                        }
+                    }
+                }
+                ConnectionSetupRoute.RelayAuth -> {
+                    ConnectionPanel(title = "Relay account", detail = "Use an existing relay account or register a new one.") {
+                        ConnectionTextField(
+                            label = "Relay URL",
+                            value = baseUrl,
+                            onValueChange = { baseUrl = it },
+                            contentDescription = "Relay URL",
+                            keyboardType = KeyboardType.Uri,
+                        )
+                        if (authMode == RelayAuthMode.Register) {
+                            ConnectionTextField(
+                                label = "Email",
+                                value = email,
+                                onValueChange = { email = it },
+                                contentDescription = "Relay registration email",
+                                keyboardType = KeyboardType.Email,
+                            )
+                        }
+                        ConnectionTextField(
+                            label = if (authMode == RelayAuthMode.Register) "Username" else "Identifier",
+                            value = username,
+                            onValueChange = { username = it },
+                            contentDescription = "Relay identifier",
+                        )
+                        ConnectionTextField(
+                            label = "Password",
+                            value = password,
+                            onValueChange = { password = it },
+                            contentDescription = "Relay password",
+                            password = true,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GraphButton(
+                                label = "Back",
+                                enabled = !busy,
+                                variant = GraphButtonVariant.Outline,
+                                size = GraphButtonSize.Default,
+                                contentDescription = "Back to mode selection",
+                                onClick = { route = ConnectionSetupRoute.ModeSelect },
+                            )
+                            GraphButton(
+                                label = if (busy) "Working..." else if (authMode == RelayAuthMode.Register) "Create account" else "Sign in",
+                                enabled = !busy,
+                                variant = GraphButtonVariant.Default,
+                                size = GraphButtonSize.Default,
+                                contentDescription = "Authenticate relay account",
+                                onClick = { relayLoginOrRegister(authMode == RelayAuthMode.Register) },
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            UnderlinedConnectionAction(
+                                label = if (authMode == RelayAuthMode.Register) "Sign in" else "Register",
+                                contentDescription = if (authMode == RelayAuthMode.Register) {
+                                    "Use relay sign in"
+                                } else {
+                                    "Use relay registration"
+                                },
+                                onClick = {
+                                    authMode = if (authMode == RelayAuthMode.Register) {
+                                        RelayAuthMode.SignIn
+                                    } else {
+                                        RelayAuthMode.Register
                                     }
-                                    busy = false
-                                    result
-                                        .onSuccess { (token, portal) ->
-                                            authToken = token
-                                            relayPortal = portal
-                                            relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId)
-                                            statusMessage = if (portal.devices.isEmpty()) {
-                                                "Relay login succeeded. Register a device to connect a backend."
-                                            } else {
-                                                relayPortalStatusMessage(portal.devices, relayDeviceId)
-                                            }
-                                        }
-                                        .onFailure { error ->
-                                            errorMessage = userFacingConnectionError(error)
-                                        }
+                                },
+                            )
+                        }
+                    }
+                }
+                ConnectionSetupRoute.RelayDevices -> {
+                    RelayDevicesPanel(
+                        devices = relayPortal?.devices.orEmpty(),
+                        selectedDeviceId = relayDeviceId,
+                        createdDevice = createdDevice,
+                        relayBaseUrl = baseUrl,
+                        newDeviceName = newDeviceName,
+                        busy = busy,
+                        onSelectDevice = { relayDeviceId = it },
+                        onNewDeviceNameChange = { newDeviceName = it },
+                        onRefresh = { loadRelayPortal() },
+                        onRevokeDevice = { revokeDeviceTarget = it },
+                        onCreateDevice = {
+                            val token = authToken
+                            if (token.isBlank()) {
+                                errorMessage = "Log in to the relay before creating a device."
+                                statusMessage = null
+                                route = ConnectionSetupRoute.RelayAuth
+                                return@RelayDevicesPanel
+                            }
+                            busy = true
+                            errorMessage = null
+                            statusMessage = null
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val client = SupervisorApiClient(buildBaseConfig(token))
+                                        val created = client.createRelayDevice(newDeviceName)
+                                        val portal = client.fetchRelayPortal()
+                                        created to portal
+                                    }
+                                }
+                                busy = false
+                                result
+                                    .onSuccess { (created, portal) ->
+                                        createdDevice = created
+                                        relayPortal = portal
+                                        relayDeviceId = created.device.id
+                                        statusMessage = "Device registered. Use the one-time token on the backend."
+                                    }
+                                    .onFailure { error ->
+                                        errorMessage = userFacingConnectionError(error)
+                                    }
+                            }
+                        },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        GraphButton(
+                            label = "Back",
+                            enabled = !busy,
+                            variant = GraphButtonVariant.Outline,
+                            size = GraphButtonSize.Default,
+                            contentDescription = "Back to relay account",
+                            onClick = {
+                                if (
+                                    initialRoute == ConnectionSetupRoute.RelayDevices
+                                ) {
+                                    onBack()
+                                } else {
+                                    route = ConnectionSetupRoute.RelayAuth
                                 }
                             },
                         )
+                        GraphButton(
+                            label = if (busy) "Connecting..." else "Connect",
+                            enabled = !busy && relayDeviceId.isNotBlank(),
+                            variant = GraphButtonVariant.Default,
+                            size = GraphButtonSize.Default,
+                            contentDescription = "Connect selected relay device",
+                            onClick = { connectCurrent() },
+                        )
                     }
                 }
-            }
-
-            if (mode == SupervisorConnectionMode.Relay) {
-                RelayDevicesPanel(
-                    devices = relayPortal?.devices.orEmpty(),
-                    selectedDeviceId = relayDeviceId,
-                    createdDevice = createdDevice,
-                    relayBaseUrl = baseUrl,
-                    newDeviceName = newDeviceName,
-                    busy = busy,
-                    onSelectDevice = { relayDeviceId = it },
-                    onNewDeviceNameChange = { newDeviceName = it },
-                    onRefresh = { loadRelayPortal() },
-                    onRevokeDevice = { revokeDeviceTarget = it },
-                    onCreateDevice = {
-                        val token = authToken
-                        if (token.isBlank()) {
-                            errorMessage = "Log in to the relay before creating a device."
-                            statusMessage = null
-                            return@RelayDevicesPanel
-                        }
-                        busy = true
-                        errorMessage = null
-                        statusMessage = null
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    val client = SupervisorApiClient(buildBaseConfig(token))
-                                    val created = client.createRelayDevice(newDeviceName)
-                                    val portal = client.fetchRelayPortal()
-                                    created to portal
-                                }
-                            }
-                            busy = false
-                            result
-                                .onSuccess { (created, portal) ->
-                                    createdDevice = created
-                                    relayPortal = portal
-                                    relayDeviceId = created.device.id
-                                    statusMessage = "Device registered. Use the one-time token on the backend."
-                                }
-                                .onFailure { error ->
-                                    errorMessage = userFacingConnectionError(error)
-                                }
-                        }
-                    },
-                )
             }
 
             revokeDeviceTarget?.let { target ->
@@ -327,7 +558,11 @@ fun SupervisorConnectionSetupScreen(
                                 .onSuccess { (revokedId, portal) ->
                                     revokeDeviceTarget = null
                                     relayPortal = portal
-                                    relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId.takeIf { it != revokedId }.orEmpty())
+                                    val revokedSelectedDevice = relayDeviceId == revokedId
+                                    relayDeviceId = relayDeviceId.takeIf { it != revokedId && portal.devices.any { device -> device.id == it } }.orEmpty()
+                                    if (revokedSelectedDevice) {
+                                        onRelayDeviceSelectionCleared()
+                                    }
                                     if (createdDevice?.device?.id == revokedId) {
                                         createdDevice = null
                                     }
@@ -351,43 +586,119 @@ fun SupervisorConnectionSetupScreen(
             errorMessage?.let { message ->
                 ConnectionStatus(message = message, error = true)
             }
-
-            GraphButton(
-                label = if (busy) "Connecting..." else "Connect",
-                enabled = !busy && (mode != SupervisorConnectionMode.Relay || relayDeviceId.isNotBlank()),
-                variant = GraphButtonVariant.Default,
-                size = GraphButtonSize.Large,
-                contentDescription = "Connect supervisor",
-                modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    busy = true
-                    errorMessage = null
-                    statusMessage = null
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            runCatching {
-                                connectAndCheck(
-                                    baseConfig = buildBaseConfig(),
-                                    mode = mode,
-                                    username = username,
-                                    password = password,
-                                )
-                            }
-                        }
-                        busy = false
-                        result
-                            .onSuccess { (config, check) ->
-                                statusMessage = "${check.sessionLabel}. ${check.healthLabel}."
-                                onConnectionReady(config, check)
-                            }
-                            .onFailure { error ->
-                                errorMessage = userFacingConnectionError(error)
-                            }
-                    }
-                },
-            )
         }
     }
+}
+
+@Composable
+fun SupervisorAccountPanel(
+    config: SupervisorConnectionConfig,
+    onClose: () -> Unit,
+    onDisconnect: () -> Unit,
+    onManageDevices: () -> Unit,
+    onChangeAccount: () -> Unit,
+    onReauthenticate: () -> Unit,
+    onChangeMode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GraphDialogOverlay(onDismiss = onClose, modifier = modifier) {
+        GraphDialogFrame(
+            title = "Supervisor account",
+            subtitle = "${config.mode.label} / ${config.normalizedBaseUrl}",
+            onClose = onClose,
+            footer = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    GraphButton(
+                        label = "Change mode",
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Change connection mode",
+                        onClick = {
+                            onClose()
+                            onChangeMode()
+                        },
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    GraphButton(
+                        label = "Disconnect",
+                        variant = GraphButtonVariant.Destructive,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Disconnect supervisor",
+                        onClick = {
+                            onClose()
+                            onDisconnect()
+                        },
+                    )
+                }
+            },
+        ) {
+            ConnectionSettingText(label = "URL", value = config.normalizedBaseUrl)
+            when (config.mode) {
+                SupervisorConnectionMode.Relay -> {
+                    ConnectionSettingText(
+                        label = "Device",
+                        value = config.relayDeviceId?.takeIf { it.isNotBlank() } ?: "No device selected",
+                    )
+                    GraphButton(
+                        label = "Manage devices",
+                        enabled = !config.authToken.isNullOrBlank(),
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Manage relay devices",
+                        onClick = {
+                            onClose()
+                            onManageDevices()
+                        },
+                    )
+                    GraphButton(
+                        label = "Change account",
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Change relay account",
+                        onClick = {
+                            onClose()
+                            onChangeAccount()
+                        },
+                    )
+                }
+                SupervisorConnectionMode.Server -> {
+                    GraphButton(
+                        label = "Re-authenticate",
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Default,
+                        contentDescription = "Re-authenticate server",
+                        onClick = {
+                            onClose()
+                            onReauthenticate()
+                        },
+                    )
+                }
+                SupervisorConnectionMode.Local -> {
+                    Text(
+                        text = "Local supervisor access does not require an account token.",
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+enum class ConnectionSetupRoute {
+    ModeSelect,
+    ServerAuth,
+    RelayAuth,
+    RelayDevices,
+}
+
+private enum class RelayAuthMode {
+    SignIn,
+    Register,
 }
 
 private fun connectAndCheck(
@@ -441,7 +752,7 @@ private fun RelayDevicesPanel(
     onCreateDevice: () -> Unit,
 ) {
     ConnectionPanel(
-        title = "Relay devices",
+        title = "Device management",
         detail = "Create a backend device, copy the one-time token to the private machine, then select the connected device.",
     ) {
         if (devices.isEmpty()) {
@@ -636,6 +947,12 @@ private fun RelayDeviceTokenNotice(result: RelayCreateDeviceResult, relayBaseUrl
         )
         Text(
             text = result.token,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .semantics { contentDescription = "Copy relay supervisor command from token" }
+                .clickable { clipboard.setText(AnnotatedString(command)) }
+                .padding(6.dp),
             color = ThreadColors.Foreground,
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
@@ -653,13 +970,6 @@ private fun RelayDeviceTokenNotice(result: RelayCreateDeviceResult, relayBaseUrl
             fontFamily = FontFamily.Monospace,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GraphButton(
-                label = "Copy token",
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Copy relay device token",
-                onClick = { clipboard.setText(AnnotatedString(result.token)) },
-            )
             GraphButton(
                 label = "Copy command",
                 variant = GraphButtonVariant.Outline,
@@ -698,7 +1008,6 @@ private fun ConnectionPanel(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            GraphBadge(label = "Setup", variant = GraphBadgeVariant.Outline)
         }
         Text(
             text = detail,
@@ -707,6 +1016,27 @@ private fun ConnectionPanel(
         )
         content()
     }
+}
+
+@Composable
+private fun UnderlinedConnectionAction(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        color = ThreadColors.Primary,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        textDecoration = TextDecoration.Underline,
+        maxLines = 1,
+    )
 }
 
 @Composable
@@ -749,6 +1079,25 @@ private fun ConnectionModeRow(
 }
 
 @Composable
+private fun ConnectionSettingText(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = value,
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun ConnectionTextField(
     label: String,
     value: String,
@@ -757,6 +1106,7 @@ private fun ConnectionTextField(
     keyboardType: KeyboardType = KeyboardType.Text,
     password: Boolean = false,
     minLines: Int = 1,
+    placeholder: String? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -767,6 +1117,7 @@ private fun ConnectionTextField(
         label = { Text(label) },
         minLines = minLines,
         maxLines = if (minLines > 1) 4 else 1,
+        placeholder = placeholder?.let { text -> { Text(text) } },
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         textStyle = MaterialTheme.typography.bodySmall.copy(color = ThreadColors.Foreground),
@@ -782,6 +1133,10 @@ private fun ConnectionTextField(
             unfocusedLabelColor = ThreadColors.ForegroundMuted,
         ),
     )
+}
+
+private fun initialUrlForMode(mode: SupervisorConnectionMode): String {
+    return if (mode == SupervisorConnectionMode.Relay) "" else defaultUrlForMode(mode)
 }
 
 @Composable
@@ -807,13 +1162,6 @@ private fun deviceStatusLine(device: RelayDeviceSummary): String {
     } else {
         "Last online: $lastSeen"
     }
-}
-
-private fun chooseRelayDeviceId(devices: List<RelayDeviceSummary>, currentDeviceId: String): String {
-    if (devices.any { it.id == currentDeviceId }) {
-        return currentDeviceId
-    }
-    return devices.firstOrNull { it.connected }?.id ?: devices.firstOrNull()?.id.orEmpty()
 }
 
 private fun relayPortalStatusMessage(devices: List<RelayDeviceSummary>, selectedDeviceId: String): String {

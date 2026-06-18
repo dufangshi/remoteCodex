@@ -31,7 +31,7 @@ class SupervisorConnectionTest {
             config.restPath("/api/threads"),
         )
         assertEquals(
-            "wss://relay.example.test/relay/devices/11111111-1111-4111-8111-111111111111/ws?token=relay-token",
+            "wss://relay.example.test/relay/devices/11111111-1111-4111-8111-111111111111/ws?relaySession=relay-token",
             config.websocketUrl(),
         )
     }
