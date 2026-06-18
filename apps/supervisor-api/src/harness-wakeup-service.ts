@@ -35,6 +35,11 @@ export interface HarnessWakeupCallbackInput {
   signature: string | null;
 }
 
+export type HarnessWakeupDisabledReason =
+  | 'missing_harness_base_url'
+  | 'missing_harness_key'
+  | 'missing_callback_base_url';
+
 export class HarnessWakeupService {
   private reconcileInFlight: Promise<void> | null = null;
   private reconcileQueued = false;
@@ -47,12 +52,37 @@ export class HarnessWakeupService {
     private readonly logger: FastifyBaseLogger,
   ) {}
 
+  private disabledReasonFor(keyPresent: boolean): HarnessWakeupDisabledReason | null {
+    if (!this.config.harnessBaseUrl) {
+      return 'missing_harness_base_url';
+    }
+    if (!keyPresent) {
+      return 'missing_harness_key';
+    }
+    if (!this.config.harnessWakeupCallbackBaseUrl) {
+      return 'missing_callback_base_url';
+    }
+    return null;
+  }
+
+  disabledReason(): HarnessWakeupDisabledReason | null {
+    return this.disabledReasonFor(this.harnessClient.configured().keyPresent);
+  }
+
+  status() {
+    const keyPresent = this.harnessClient.configured().keyPresent;
+    const reason = this.disabledReasonFor(keyPresent);
+    return {
+      enabled: reason === null,
+      reason,
+      harnessBaseUrl: this.config.harnessBaseUrl,
+      callbackBaseUrl: this.config.harnessWakeupCallbackBaseUrl,
+      keyPresent,
+    };
+  }
+
   enabled() {
-    return Boolean(
-      this.config.harnessEnabled &&
-      this.config.harnessWakeupCallbackBaseUrl &&
-      this.harnessClient.configured().keyPresent,
-    );
+    return this.disabledReason() === null;
   }
 
   private requireEnabled() {
@@ -112,13 +142,19 @@ export class HarnessWakeupService {
   }
 
   async getWakeupInfo() {
-    if (!this.enabled()) {
-      return { enabled: false as const };
+    const status = this.status();
+    if (!status.enabled) {
+      return {
+        ...status,
+        enabled: false as const,
+      };
     }
     const registration = await this.ensureRegistration();
     return {
+      ...status,
       enabled: true as const,
       notifyTo: registration.agentId,
+      registered: true,
     };
   }
 

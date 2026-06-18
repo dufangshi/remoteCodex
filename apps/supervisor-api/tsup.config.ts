@@ -5,7 +5,6 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   external: ['puppeteer-core'],
-  noExternal: ['@remote-codex/plugin-xyz-viewer'],
   dts: true,
   clean: true,
 });

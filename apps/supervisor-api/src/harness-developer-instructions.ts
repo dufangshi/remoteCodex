@@ -19,7 +19,7 @@ export function harnessDeveloperInstructions(config: RuntimeConfig) {
   if (config.harnessWakeupCallbackBaseUrl) {
     const supervisorBaseUrl = `http://127.0.0.1:${config.port}`;
     lines.push(
-      `For long-running compute jobs you do not need to stay running: first GET ${supervisorBaseUrl}/api/harness/wakeup and read "notifyTo"; submit the job with "notify_to" set to that value; then register POST ${supervisorBaseUrl}/api/harness/job-watches with JSON {"jobId": "<job id>"}. After that you may end your turn — this thread is woken with a new message when the job reaches a terminal status.`,
+      `For long-running compute jobs you do not need to stay running: first GET ${supervisorBaseUrl}/api/harness/wakeup and read "notifyTo"; submit the job with "notify_to" set to that value. If you submit directly to Harness rather than through the Remote Codex Harness invoke proxy, immediately register POST ${supervisorBaseUrl}/api/harness/job-watches with JSON {"jobId": "<job id>"}. After that you may end your turn; this thread is woken with a new message when the job reaches a terminal status.`,
     );
   }
   return lines.join(' ');

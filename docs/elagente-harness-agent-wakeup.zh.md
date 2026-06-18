@@ -323,7 +323,7 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
     worker(无害,reconcile 为 no-op);SSO 重新登录后需:推送镜像 →
     `rollout restart` → 再跑一轮 submit/cancel 验证 ack → 清理
     `purpose=wakeup-e2e` 的测试资源(两个 Deployment/Service,含 NLB)。
-- 🔄 **main merge 收口中**(2026-06-17):
+- ✅ **main merge 与本地版收口**(2026-06-17~2026-06-18):
   - `origin/main` 已前进到 `769d5d8` 后合入本分支。冲突集中在
     `apps/supervisor-api/src/app.ts`:main 扩展 websocket message
     类型并重命名 supervisor socket 局部变量,本分支新增
@@ -332,7 +332,7 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
   - 合并策略:保留 main 的 websocket `Buffer | ArrayBuffer | string`
     处理与 relay/web 改动,同时保留 wakeup 的 hook 透传鉴权、loopback
     watch/wakeup 路由豁免、service decoration 和 DB/config 变更。
-  - 合并后必须重跑:
+  - 合并后验证清单:
     `pnpm --filter @remote-codex/supervisor-api typecheck`,
     `pnpm --filter @remote-codex/supervisor-api test`,
     `pnpm --filter @remote-codex/sandbox-router typecheck`,
@@ -342,15 +342,32 @@ GET /compute/jobs/<id>/files/...), then continue the original task.
     `pnpm --filter @remote-codex/db typecheck`,
     以及本地 opt-in e2e
     `RUN_HARNESS_WAKEUP_E2E=1 pnpm --filter @remote-codex/supervisor-api exec vitest run src/harness-wakeup-local-e2e.test.ts`。
-  - 当前本机验证结果:`sandbox-router`、`config`、`db` typecheck 已通过;
-    `supervisor-api` typecheck 阻塞在最新 main 的外部 file dependency
-    `@remote-codex/plugin-xyz-viewer`。`apps/supervisor-api/package.json`
-    指向 `../../../remote-codex-thread-ui/packages/plugin-xyz-viewer`,
-    但本机缺少兄弟仓库,且按 `Dockerfile.worker` 的
-    `https://github.com/dufangshi/remote-codex-thread-ui.git` clone 返回
-    repository not found/无权限。拿到该私有仓库访问权限并重新
-    `pnpm install --frozen-lockfile` 后,需补跑上述 `supervisor-api`
-    typecheck/test 和 opt-in e2e。
+  - 2026-06-18 本地版补强:
+    - `supervisor-api` 后端不再直接依赖私有前端包
+      `@remote-codex/plugin-xyz-viewer`;内置 molecule plugin manifest
+      由 `apps/supervisor-api/src/plugins/xyz-viewer-plugin-manifest.ts`
+      提供。这样本地 Harness wakeup e2e 不需要克隆
+      `../remote-codex-thread-ui`。
+    - `GET /api/harness/wakeup` 成为本地可诊断状态入口。未配置时返回
+      `{enabled:false, reason, harnessBaseUrl, callbackBaseUrl, keyPresent}`,
+      reason 为 `missing_harness_base_url`、`missing_harness_key` 或
+      `missing_callback_base_url`;配置完整时返回 `notifyTo` 与
+      `registered:true`。
+    - developer instructions 明确本地最佳实践:先
+      `GET /api/harness/wakeup` 拿 `notifyTo`,提交 job 时带
+      `notify_to`;如果是直接 curl Harness 而非 Remote Codex invoke
+      proxy,必须立即 `POST /api/harness/job-watches` 绑定 job/thread。
+  - 2026-06-18 本机验证结果:
+    - ✅ `pnpm --filter @remote-codex/supervisor-api typecheck`
+    - ✅ `pnpm --filter @remote-codex/supervisor-api test -- src/harness-wakeup.test.ts`
+      (Vitest 当前仍运行 supervisor-api 全测试集合:223 passed,1 skipped)
+    - ✅ `RUN_HARNESS_WAKEUP_E2E=1 pnpm --filter @remote-codex/supervisor-api exec vitest run src/harness-wakeup-local-e2e.test.ts`
+      (真实本地 Harness → submit local backend job → notify callback →
+      thread wakeup → inbox ack)
+    - ✅ `pnpm --filter @remote-codex/sandbox-router test`
+    - ✅ `pnpm --filter @remote-codex/config test`
+    - ✅ `pnpm --filter @remote-codex/db typecheck`
+    - ✅ `pnpm --filter @remote-codex/supervisor-api build`
 
 ### 过程中发现的环境事实(影响后续部署)
 

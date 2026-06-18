@@ -160,7 +160,7 @@ describe('HarnessWakeupService', () => {
     );
   }
 
-  it('reports disabled when the callback base URL is missing', () => {
+  it('reports why wakeup is disabled when the callback base URL is missing', async () => {
     const service = new HarnessWakeupService(
       loadRuntimeConfig({
         NODE_ENV: 'test',
@@ -173,6 +173,53 @@ describe('HarnessWakeupService', () => {
       testLogger(),
     );
     expect(service.enabled()).toBe(false);
+    expect(service.status()).toMatchObject({
+      enabled: false,
+      reason: 'missing_callback_base_url',
+      harnessBaseUrl: 'https://harness.example',
+      callbackBaseUrl: null,
+      keyPresent: true,
+    });
+    await expect(service.getWakeupInfo()).resolves.toMatchObject({
+      enabled: false,
+      reason: 'missing_callback_base_url',
+    });
+  });
+
+  it('reports missing Harness base URL and missing key separately', () => {
+    const missingBase = new HarnessWakeupService(
+      loadRuntimeConfig({
+        NODE_ENV: 'test',
+        INACT_X_APP_KEY: 'harness-key',
+        REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL: CALLBACK_BASE_URL,
+      }),
+      database.db,
+      fakeHarnessClient(),
+      fakeThreadService(),
+      testLogger(),
+    );
+    expect(missingBase.status()).toMatchObject({
+      enabled: false,
+      reason: 'missing_harness_base_url',
+      keyPresent: true,
+    });
+
+    const missingKey = new HarnessWakeupService(
+      loadRuntimeConfig({
+        NODE_ENV: 'test',
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example',
+        REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL: CALLBACK_BASE_URL,
+      }),
+      database.db,
+      fakeHarnessClient({ configured: vi.fn(() => ({ keyPresent: false })) }),
+      fakeThreadService(),
+      testLogger(),
+    );
+    expect(missingKey.status()).toMatchObject({
+      enabled: false,
+      reason: 'missing_harness_key',
+      keyPresent: false,
+    });
   });
 
   it('registers the notify callback once and persists it', async () => {
@@ -489,6 +536,11 @@ describe('harness wakeup routes (worker mode)', () => {
     vi.spyOn(app.services.harnessWakeupService, 'getWakeupInfo').mockResolvedValue({
       enabled: true,
       notifyTo: '42',
+      registered: true,
+      reason: null,
+      harnessBaseUrl: 'https://harness.example',
+      callbackBaseUrl: CALLBACK_BASE_URL,
+      keyPresent: true,
     });
     const response = await app.inject({
       method: 'GET',
@@ -496,7 +548,55 @@ describe('harness wakeup routes (worker mode)', () => {
       remoteAddress: '127.0.0.1',
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ enabled: true, notifyTo: '42' });
+    expect(response.json()).toMatchObject({
+      enabled: true,
+      notifyTo: '42',
+      registered: true,
+      reason: null,
+      callbackBaseUrl: CALLBACK_BASE_URL,
+      keyPresent: true,
+    });
+  });
+
+  it('reports local wakeup configuration gaps from the wakeup route', async () => {
+    const localTempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-wakeup-local-route-'));
+    const codexHome = path.join(localTempDir, 'codex-home');
+    await fs.mkdir(codexHome, { recursive: true });
+    const localApp = buildApp({
+      env: {
+        NODE_ENV: 'test',
+        DATABASE_URL: path.join(localTempDir, 'test.sqlite'),
+        WORKSPACE_ROOT: localTempDir,
+        CODEX_HOME: codexHome,
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example',
+        INACT_X_APP_KEY: 'harness-key',
+      },
+      runtimeBootstrap: {
+        agentRuntimes: new AgentRuntimeRegistry([
+          new CodexRuntimeAdapter(new FakeCodexManager() as never),
+        ]),
+        localCodexSessionStore: new LocalCodexSessionStore(codexHome),
+        codexManagement: new CodexManagementService(codexHome),
+        providerHostHomes: { codex: codexHome },
+      },
+    });
+    try {
+      const response = await localApp.inject({
+        method: 'GET',
+        url: '/api/harness/wakeup',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        enabled: false,
+        reason: 'missing_callback_base_url',
+        harnessBaseUrl: 'https://harness.example',
+        callbackBaseUrl: null,
+        keyPresent: true,
+      });
+    } finally {
+      await localApp.close();
+      await fs.rm(localTempDir, { recursive: true, force: true });
+    }
   });
 
   it('rejects non-loopback wakeup route access without a worker token', async () => {

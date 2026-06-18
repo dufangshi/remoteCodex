@@ -203,9 +203,6 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
-      '@remote-codex/plugin-xyz-viewer':
-        specifier: file:../../../remote-codex-thread-ui/packages/plugin-xyz-viewer
-        version: file:../remote-codex-thread-ui/packages/plugin-xyz-viewer(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
