@@ -4887,8 +4887,7 @@ describe('supervisor api', () => {
         expect.objectContaining({
           id: 'mcp-1',
           kind: 'toolCall',
-          detailText: null,
-          hasDeferredDetail: true,
+          detailText: expect.stringContaining('```remote-codex-artifact'),
         }),
         expect.objectContaining({
           kind: 'artifact',

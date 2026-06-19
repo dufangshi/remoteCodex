@@ -480,3 +480,32 @@ export const controlAuditLogs = sqliteTable('control_audit_logs', {
   metadataJson: text('metadata_json').notNull(),
   createdAt: text('created_at').notNull(),
 });
+
+export const harnessNotifyRegistrations = sqliteTable('harness_notify_registrations', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull(),
+  hookToken: text('hook_token').notNull(),
+  secret: text('secret').notNull(),
+  callbackUrl: text('callback_url').notNull(),
+  registeredAt: text('registered_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const harnessJobWatches = sqliteTable(
+  'harness_job_watches',
+  {
+    id: text('id').primaryKey(),
+    jobId: text('job_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    title: text('title'),
+    status: text('status').notNull().default('pending'),
+    lastJobStatus: text('last_job_status'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    deliveredAt: text('delivered_at'),
+  },
+  (table) => ({
+    jobIdUnique: uniqueIndex('harness_job_watches_job_id_idx').on(table.jobId),
+  }),
+);

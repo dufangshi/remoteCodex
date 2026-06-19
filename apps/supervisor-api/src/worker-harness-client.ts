@@ -5,6 +5,9 @@ export type HarnessModule = 'estructural' | 'quntur' | 'farmaco';
 const HARNESS_MODULES: HarnessModule[] = ['estructural', 'quntur', 'farmaco'];
 const HARNESS_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const HARNESS_RUN_ID_PATTERN = /^[a-zA-Z0-9_.-]+$/;
+const HARNESS_JOB_ID_PATTERN = /^[a-zA-Z0-9_.:-]+$/;
+const HARNESS_NOTIFICATION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+export const HARNESS_TERMINAL_JOB_STATUSES = new Set(['done', 'failed', 'cancelled']);
 const MOLECULE_ARTIFACT_TYPES = new Set(['xyz', 'extxyz', 'pdb', 'cif']);
 
 interface HarnessPayloadResult {
@@ -172,6 +175,54 @@ function normalizeArtifact(module: HarnessModule, runId: string, value: unknown)
   };
 }
 
+function parseTomlScalar(raw: string) {
+  const value = raw.trim();
+  if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
+export function parseTomlLines(text: string) {
+  const record: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const match = /^([A-Za-z0-9_]+)\s*=\s*(.+)$/.exec(line.trim());
+    if (match && !(match[1]! in record)) {
+      record[match[1]!] = parseTomlScalar(match[2]!);
+    }
+  }
+  return record;
+}
+
+export function parseTomlBlocks(text: string, blockName: string) {
+  const marker = `[[${blockName}]]`;
+  const blocks: Array<Record<string, string>> = [];
+  let current: string[] | null = null;
+  for (const line of text.split('\n')) {
+    if (line.trim() === marker) {
+      if (current) {
+        blocks.push(parseTomlLines(current.join('\n')));
+      }
+      current = [];
+      continue;
+    }
+    if (line.trim().startsWith('[[') && current) {
+      blocks.push(parseTomlLines(current.join('\n')));
+      current = null;
+      continue;
+    }
+    current?.push(line);
+  }
+  if (current) {
+    blocks.push(parseTomlLines(current.join('\n')));
+  }
+  return blocks;
+}
+
 function normalizeRuns(module: HarnessModule, result: HarnessPayloadResult) {
   const runs = payloadItems(result.payload, ['runs', 'items', 'results']).map((item) => normalizeRun(module, item)).filter(Boolean);
   return { runs };
@@ -223,6 +274,64 @@ export class WorkerHarnessClient {
 
   async me() {
     return this.fetchText('/members/.me');
+  }
+
+  async whoami() {
+    const { text } = await this.fetchText('/members/.me');
+    const record = parseTomlLines(text);
+    const agentId = record.id?.trim();
+    if (!agentId) {
+      throw new Error('ElAgenteHarness /members/.me response did not include an id.');
+    }
+    return { agentId };
+  }
+
+  async registerNotifyCallback(input: { agentId: string; callback: string; secret: string }) {
+    return this.fetchPayload('/notify/register', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent_id: input.agentId,
+        callback: input.callback,
+        secret: input.secret,
+      }),
+    });
+  }
+
+  async getComputeJob(jobId: string) {
+    const id = this.requireJobId(jobId);
+    const { text } = await this.fetchText(`/compute/jobs/${encodeURIComponent(id)}`);
+    const record = parseTomlLines(text);
+    const status = record.status?.trim() ?? null;
+    return {
+      jobId: record.id?.trim() ?? id,
+      status,
+      terminal: status !== null && HARNESS_TERMINAL_JOB_STATUSES.has(status),
+      title: record.title?.trim() || null,
+      reason: record.reason?.trim() || null,
+      raw: record,
+    };
+  }
+
+  async listUnreadNotifications() {
+    const { text } = await this.fetchText('/notify/inbox');
+    return parseTomlBlocks(text, 'notifications')
+      .filter((entry) => entry.id?.trim())
+      .map((entry) => ({
+        id: entry.id!.trim(),
+        from: entry.from?.trim() ?? '',
+        message: entry.message ?? '',
+      }));
+  }
+
+  async markNotificationRead(notificationId: string) {
+    const id = notificationId.trim();
+    if (!HARNESS_NOTIFICATION_ID_PATTERN.test(id)) {
+      throw new Error(`Unsupported Harness notification id: ${notificationId}`);
+    }
+    return this.fetchText(`/notify/inbox/${encodeURIComponent(id)}`);
   }
 
   async home() {
@@ -297,6 +406,14 @@ export class WorkerHarnessClient {
     const normalized = toolName.trim();
     if (!HARNESS_TOOL_NAME_PATTERN.test(normalized)) {
       throw new Error(`Unsupported Harness tool name: ${toolName}`);
+    }
+    return normalized;
+  }
+
+  private requireJobId(jobId: string) {
+    const normalized = jobId.trim();
+    if (!HARNESS_JOB_ID_PATTERN.test(normalized)) {
+      throw new Error(`Unsupported Harness job id: ${jobId}`);
     }
     return normalized;
   }

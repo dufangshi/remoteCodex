@@ -29,7 +29,7 @@ class RouterHttpError extends Error {
 }
 
 export interface SandboxEndpointResolver {
-  resolve(input: { sandboxId: string; routeToken: RouteTokenPayload }): Promise<{
+  resolve(input: { sandboxId: string; userId: string | null }): Promise<{
     workerBaseUrl: string | null;
   }>;
 }
@@ -51,9 +51,12 @@ class StaticSandboxEndpointResolver implements SandboxEndpointResolver {
 class ControlPlaneSandboxEndpointResolver implements SandboxEndpointResolver {
   constructor(private readonly config: SandboxRouterConfig) {}
 
-  async resolve(input: { sandboxId: string; routeToken: RouteTokenPayload }) {
+  async resolve(input: { sandboxId: string; userId: string | null }) {
     if (!this.config.controlPlaneBaseUrl || !this.config.controlPlaneServiceToken) {
       return new StaticSandboxEndpointResolver(this.config).resolve(input);
+    }
+    if (!input.userId) {
+      return { workerBaseUrl: null };
     }
 
     const base = this.config.controlPlaneBaseUrl.endsWith('/')
@@ -63,7 +66,7 @@ class ControlPlaneSandboxEndpointResolver implements SandboxEndpointResolver {
       `api/internal/sandboxes/${encodeURIComponent(input.sandboxId)}/endpoint`,
       base,
     );
-    url.searchParams.set('userId', input.routeToken.sub);
+    url.searchParams.set('userId', input.userId);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -87,7 +90,7 @@ class ControlPlaneSandboxEndpointResolver implements SandboxEndpointResolver {
       userId: z.string().min(1),
       workerBaseUrl: z.string().url(),
     }).parse(await response.json());
-    if (body.sandboxId !== input.sandboxId || body.userId !== input.routeToken.sub) {
+    if (body.sandboxId !== input.sandboxId || body.userId !== input.userId) {
       throw new RouterHttpError(
         502,
         'sandbox_registry_mismatch',
@@ -147,7 +150,13 @@ class FixedWindowRateLimiter {
 }
 
 export interface SandboxRouterAuditEvent {
-  action: 'proxy.forwarded' | 'proxy.denied' | 'proxy.failed';
+  action:
+    | 'proxy.forwarded'
+    | 'proxy.denied'
+    | 'proxy.failed'
+    | 'hook.forwarded'
+    | 'hook.denied'
+    | 'hook.failed';
   userId: string | null;
   sandboxId: string | null;
   routeTokenId: string | null;
@@ -372,7 +381,7 @@ async function proxyRequest(request: FastifyRequest) {
   const { config, endpointResolver } = request.server.services;
   const endpoint = await endpointResolver.resolve({
     sandboxId: payload.sandbox_id,
-    routeToken: payload,
+    userId: payload.sub,
   });
   if (!endpoint.workerBaseUrl) {
     auditRoute(request, {
@@ -456,6 +465,126 @@ async function proxyRequest(request: FastifyRequest) {
   }
 }
 
+const HOOK_FORWARD_PATH_PREFIX = 'api/hooks/';
+
+async function hookProxyRequest(request: FastifyRequest) {
+  const params = parseProxyParams(request.params);
+  const hookPath = params['*'] ?? '';
+  const query = z.object({ u: z.string().min(1).optional() }).parse(request.query);
+  const userId = query.u ?? null;
+  const { config, endpointResolver, rateLimiter } = request.server.services;
+
+  const denied = (statusCode: number, code: string, message: string) => {
+    auditRoute(request, {
+      action: 'hook.denied',
+      userId,
+      sandboxId: params.sandboxId,
+      routeTokenId: null,
+      method: request.method,
+      path: hookPath,
+      statusCode,
+      code,
+    });
+    return new RouterHttpError(statusCode, code, message);
+  };
+
+  if (!hookPath) {
+    throw denied(404, 'not_found', 'Hook path is required.');
+  }
+  const rate = rateLimiter.consume(`hook:${params.sandboxId}`);
+  if (!rate.allowed) {
+    throw denied(429, 'rate_limited', 'Too many sandbox hook requests.');
+  }
+  if (config.controlPlaneBaseUrl && config.controlPlaneServiceToken && !userId) {
+    throw denied(400, 'missing_user', 'Hook callbacks require the u query parameter.');
+  }
+
+  const endpoint = await endpointResolver.resolve({
+    sandboxId: params.sandboxId,
+    userId,
+  });
+  if (!endpoint.workerBaseUrl) {
+    auditRoute(request, {
+      action: 'hook.failed',
+      userId,
+      sandboxId: params.sandboxId,
+      routeTokenId: null,
+      method: request.method,
+      path: hookPath,
+      statusCode: 502,
+      code: 'worker_unavailable',
+    });
+    throw new RouterHttpError(502, 'worker_unavailable', 'Sandbox worker endpoint is unavailable.');
+  }
+
+  const body = Buffer.isBuffer(request.body)
+    ? request.body
+    : Buffer.from(typeof request.body === 'string' ? request.body : '');
+  if (body.byteLength > config.maxRequestBytes) {
+    throw denied(
+      413,
+      'request_too_large',
+      `Request body exceeds the sandbox router limit of ${config.maxRequestBytes} bytes.`,
+    );
+  }
+
+  // The worker authenticates hook callbacks itself (URL token + HMAC over the
+  // raw body), so no worker token or identity envelope is injected and the
+  // body bytes are forwarded untouched.
+  const headers = copyForwardHeaders(request);
+  const url = buildWorkerUrl(
+    endpoint.workerBaseUrl,
+    `${HOOK_FORWARD_PATH_PREFIX}${hookPath}`,
+    request,
+  );
+  url.searchParams.delete('u');
+
+  const bodyBytes = new Uint8Array(body.byteLength);
+  bodyBytes.set(body);
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), config.upstreamTimeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: bodyBytes,
+      signal: abortController.signal,
+    });
+    auditRoute(request, {
+      action: 'hook.forwarded',
+      userId,
+      sandboxId: params.sandboxId,
+      routeTokenId: null,
+      method: request.method,
+      path: hookPath,
+      statusCode: response.status,
+      workerStatusCode: response.status,
+    });
+    return response;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      auditRoute(request, {
+        action: 'hook.failed',
+        userId,
+        sandboxId: params.sandboxId,
+        routeTokenId: null,
+        method: request.method,
+        path: hookPath,
+        statusCode: 504,
+        code: 'worker_timeout',
+      });
+      throw new RouterHttpError(
+        504,
+        'worker_timeout',
+        'Sandbox worker did not respond before the router timeout.',
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function websocketProxyContext(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
   try {
@@ -480,7 +609,7 @@ async function websocketProxyContext(request: FastifyRequest) {
   const { config, endpointResolver } = request.server.services;
   const endpoint = await endpointResolver.resolve({
     sandboxId: payload.sandbox_id,
-    routeToken: payload,
+    userId: payload.sub,
   });
   if (!endpoint.workerBaseUrl) {
     auditRoute(request, {
@@ -642,6 +771,29 @@ export function buildSandboxRouterApp(options: {
         closeBoth(error instanceof RouterHttpError ? 1008 : 1011, 'websocket proxy setup failed');
       });
   };
+
+  app.register(async (hookApp) => {
+    hookApp.addContentTypeParser(
+      ['application/json', 'text/plain'],
+      { parseAs: 'buffer' },
+      (_request, body, done) => done(null, body),
+    );
+    hookApp.addContentTypeParser(
+      '*',
+      { parseAs: 'buffer' },
+      (_request, body, done) => done(null, body),
+    );
+    hookApp.route({
+      method: 'POST',
+      url: '/api/sandboxes/:sandboxId/hooks/*',
+      handler: async (request, reply) => {
+        const response = await hookProxyRequest(request);
+        reply.status(response.status);
+        copyResponseHeaders(response, reply);
+        return reply.send(Buffer.from(await response.arrayBuffer()));
+      },
+    });
+  });
 
   app.register(async (realtimeApp) => {
     await realtimeApp.register(websocket);

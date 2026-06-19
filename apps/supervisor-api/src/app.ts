@@ -57,6 +57,7 @@ import {
 } from './plugins/terminal-plugin-backend';
 import { WorkerIdentityError } from './worker-identity';
 import { WorkerHarnessClient } from './worker-harness-client';
+import { HarnessWakeupService } from './harness-wakeup-service';
 import { WorkerControlPlaneSyncClient } from './worker-control-plane-sync';
 import { AuthService, unauthorizedPayload } from './auth';
 import { RelayTunnelClient } from './relay-tunnel-client';
@@ -76,6 +77,15 @@ type WebsocketRouteOptions = RouteOptions & {
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const WORKER_AUTH_EXEMPT_PATHS = new Set(['/healthz', '/readyz']);
+const WORKER_AUTH_HOOK_PATH_PREFIX = '/api/hooks/';
+const WORKER_AUTH_LOOPBACK_PATHS = new Set([
+  '/api/harness/wakeup',
+  '/api/harness/job-watches',
+]);
+
+function isLoopbackAddress(ip: string | undefined) {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
 const RELAY_FORWARD_HEADER = 'x-remote-codex-relay-forwarded';
 export const SUPERVISOR_LOG_REDACTION_PATHS = [
   'req.headers.authorization',
@@ -119,6 +129,7 @@ export interface AppServices {
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
   harnessClient: WorkerHarnessClient;
+  harnessWakeupService: HarnessWakeupService;
   controlPlaneSyncClient: Pick<WorkerControlPlaneSyncClient, 'checkpointSession' | 'recordHarnessUsageEvent'> &
     Partial<Pick<WorkerControlPlaneSyncClient, 'checkHarnessQuota'>>;
   authService: AuthService;
@@ -253,10 +264,13 @@ export function buildApp(
   });
 
   app.addHook('onRequest', async (request) => {
+    const requestPath = request.url.split('?')[0] ?? request.url;
     if (
       config.runtimeRole !== 'worker' ||
       !config.workerAuthToken ||
-      WORKER_AUTH_EXEMPT_PATHS.has(request.url.split('?')[0] ?? request.url)
+      WORKER_AUTH_EXEMPT_PATHS.has(requestPath) ||
+      requestPath.startsWith(WORKER_AUTH_HOOK_PATH_PREFIX) ||
+      (WORKER_AUTH_LOOPBACK_PATHS.has(requestPath) && isLoopbackAddress(request.ip))
     ) {
       return;
     }
@@ -296,6 +310,14 @@ export function buildApp(
       : null;
   relayTunnelClient?.validateConfig();
 
+  const harnessWakeupService = new HarnessWakeupService(
+    config,
+    database.db,
+    harnessClient,
+    threadService,
+    app.log,
+  );
+
   app.decorate('services', {
     config,
     database,
@@ -308,6 +330,7 @@ export function buildApp(
     pluginRegistry,
     pluginService,
     harnessClient,
+    harnessWakeupService,
     controlPlaneSyncClient,
     authService,
     relayTunnelClient,
@@ -330,6 +353,14 @@ export function buildApp(
       requestPath === '/api/auth/logout' ||
       requestPath === '/api/auth/session'
     ) {
+      return;
+    }
+
+    if (requestPath.startsWith(WORKER_AUTH_HOOK_PATH_PREFIX)) {
+      return;
+    }
+
+    if (WORKER_AUTH_LOOPBACK_PATHS.has(requestPath) && isLoopbackAddress(request.ip)) {
       return;
     }
 

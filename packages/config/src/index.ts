@@ -60,6 +60,7 @@ export interface RuntimeConfig {
   harnessBaseUrl: string | null;
   harnessEnabled: boolean;
   chemistryToolsEnabled: boolean;
+  harnessWakeupCallbackBaseUrl: string | null;
   workerRuntimeManifestPath: string | null;
   appName: string;
   appVersion: string;
@@ -101,6 +102,7 @@ const envSchema = z.object({
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
   INACT_X_APP_KEY: z.string().min(1).optional(),
   REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: z.string().optional(),
+  REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL: z.string().url().optional(),
   REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: z.string().min(1).optional(),
   APP_NAME: z.string().min(1).optional(),
   APP_VERSION: z.string().min(1).optional(),
@@ -239,6 +241,8 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
     harnessEnabled: Boolean(parsed.ELAGENTE_HARNESS_BASE_URL && parsed.INACT_X_APP_KEY),
     chemistryToolsEnabled: parseBoolean(parsed.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED, false),
+    harnessWakeupCallbackBaseUrl:
+      parsed.REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL?.replace(/\/+$/, '') ?? null,
     workerRuntimeManifestPath: parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST
       ? path.resolve(parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST)
       : runtimeRole === 'worker'
