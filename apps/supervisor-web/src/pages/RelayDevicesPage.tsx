@@ -13,11 +13,8 @@ import {
   deleteRelayDevice,
   enableRelayMode,
   fetchRelayPortal,
-  forgetRelayDeviceToken,
-  readRelayDeviceToken,
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
-  storeRelayDeviceToken,
 } from '../lib/api';
 
 function errorMessage(caught: unknown, fallback: string) {
@@ -61,7 +58,6 @@ export function RelayDevicesPage() {
     setError(null);
     try {
       const result = await createRelayDevice({ name: deviceName });
-      storeRelayDeviceToken(result.device.id, result.token);
       setCreatedDevice(result);
       setDeviceName('');
       await load();
@@ -77,7 +73,6 @@ export function RelayDevicesPage() {
     setError(null);
     try {
       await deleteRelayDevice(device.id);
-      forgetRelayDeviceToken(device.id);
       if (createdDevice?.device.id === device.id) {
         setCreatedDevice(null);
       }
@@ -96,9 +91,9 @@ export function RelayDevicesPage() {
   }
 
   async function copySupervisorSetup(device: RelayDeviceDto) {
-    const token = readRelayDeviceToken(device.id);
+    const token = device.token;
     if (!token) {
-      setError('This device token is not available in this browser. Create a new device token if it was not saved.');
+      setError('This device token is not available. Create a new device token for devices created before token storage was enabled.');
       return;
     }
 
@@ -202,7 +197,7 @@ export function RelayDevicesPage() {
                     onConnect={() => connectDevice(device)}
                     onCopySetup={() => void copySupervisorSetup(device)}
                     onDelete={() => void removeDevice(device)}
-                    setupTokenAvailable={Boolean(readRelayDeviceToken(device.id))}
+                    setupTokenAvailable={Boolean(device.token)}
                   />
                 ))}
               </div>
@@ -263,7 +258,7 @@ function DeviceRow({
             title={
               setupTokenAvailable
                 ? 'Copy relay supervisor setup command'
-                : 'Device token is not available in this browser. Create a new device token if it was not saved.'
+                : 'Device token is not available. Create a new device token for devices created before token storage was enabled.'
             }
             disabled={!setupTokenAvailable}
             type="button"
@@ -293,7 +288,7 @@ function DeviceRow({
       </div>
       {!setupTokenAvailable ? (
         <p className="mt-3 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
-          Token not available in this browser. Existing device tokens are not shown by the relay again.
+          Token not available for this device. Create a new device token to copy a ready-to-run setup command.
         </p>
       ) : null}
     </article>

@@ -17,17 +17,14 @@ import {
   fetchProviderHostFile,
   importThread,
   buildAndRestartService,
-  forgetRelayDeviceToken,
   login,
   renameProviderHostConfigArchive,
   restartAgentBackend,
-  readRelayDeviceToken,
   loginControlPlanePasswordAccount,
   registerControlPlanePasswordAccount,
   resumeControlPlaneSession,
   resumeThread,
   sendThreadPrompt,
-  storeRelayDeviceToken,
   terminateShell,
   updateProviderHostFile,
 } from './api';
@@ -80,19 +77,6 @@ describe('api request helper', () => {
     const call = vi.mocked(fetch).mock.calls.at(-1);
     expect(call?.[0]).toBe('/api/auth/login');
     expect(call?.[1]?.credentials).toBe('same-origin');
-  });
-
-  it('stores relay device tokens by device id in local browser storage', () => {
-    storeRelayDeviceToken('device-1', 'rcd_secret_1');
-    storeRelayDeviceToken('device-2', 'rcd_secret_2');
-
-    expect(readRelayDeviceToken('device-1')).toBe('rcd_secret_1');
-    expect(readRelayDeviceToken('device-2')).toBe('rcd_secret_2');
-
-    forgetRelayDeviceToken('device-1');
-
-    expect(readRelayDeviceToken('device-1')).toBeNull();
-    expect(readRelayDeviceToken('device-2')).toBe('rcd_secret_2');
   });
 
   it('does not force a JSON content type for body-less post requests', async () => {

@@ -86,7 +86,6 @@ const RELAY_TOKEN_STORAGE_KEY = 'remote-codex-relay-token';
 const RELAY_MODE_STORAGE_KEY = 'remote-codex-relay-mode';
 const RELAY_DEVICE_STORAGE_KEY = 'remote-codex-relay-device-id';
 const RELAY_THREAD_STORAGE_KEY = 'remote-codex-relay-thread-id';
-const RELAY_DEVICE_TOKENS_STORAGE_KEY = 'remote-codex-relay-device-tokens';
 
 declare global {
   interface Window {
@@ -195,74 +194,6 @@ export function setSelectedRelayThreadId(threadId: string | null) {
     return;
   }
   window.localStorage.removeItem(RELAY_THREAD_STORAGE_KEY);
-}
-
-function readRelayDeviceTokenMap() {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  const raw = window.localStorage.getItem(RELAY_DEVICE_TOKENS_STORAGE_KEY);
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] =>
-        typeof entry[0] === 'string' && typeof entry[1] === 'string' && Boolean(entry[1]),
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function writeRelayDeviceTokenMap(tokens: Record<string, string>) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const entries = Object.entries(tokens).filter(([, token]) => Boolean(token));
-  if (!entries.length) {
-    window.localStorage.removeItem(RELAY_DEVICE_TOKENS_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(RELAY_DEVICE_TOKENS_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
-}
-
-export function storeRelayDeviceToken(deviceId: string, token: string) {
-  if (!deviceId || !token) {
-    return;
-  }
-
-  writeRelayDeviceTokenMap({
-    ...readRelayDeviceTokenMap(),
-    [deviceId]: token,
-  });
-}
-
-export function readRelayDeviceToken(deviceId: string) {
-  if (!deviceId) {
-    return null;
-  }
-
-  return readRelayDeviceTokenMap()[deviceId] ?? null;
-}
-
-export function forgetRelayDeviceToken(deviceId: string) {
-  if (!deviceId) {
-    return;
-  }
-
-  const tokens = readRelayDeviceTokenMap();
-  delete tokens[deviceId];
-  writeRelayDeviceTokenMap(tokens);
 }
 
 function apiPath(path: string) {

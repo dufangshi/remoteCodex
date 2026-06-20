@@ -24,6 +24,7 @@ interface StoredDevice {
   id: string;
   ownerUserId: string;
   name: string;
+  token: string | null;
   tokenHash: string;
   tokenPreview: string;
   createdAt: string;
@@ -142,6 +143,7 @@ export class RelayStore {
       id: crypto.randomUUID(),
       ownerUserId: user.id,
       name: input.name.trim() || 'Remote Codex device',
+      token,
       tokenHash: sha256(token),
       tokenPreview: previewToken(token),
       createdAt: new Date().toISOString(),
@@ -357,6 +359,7 @@ export class RelayStore {
       id: device.id,
       ownerUserId: device.ownerUserId,
       name: device.name,
+      token: device.token,
       tokenPreview: device.tokenPreview,
       connected: Boolean(status?.connected),
       connectedAt: status?.connectedAt ?? null,
@@ -399,6 +402,7 @@ export class RelayStore {
         id TEXT PRIMARY KEY,
         owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
+        token TEXT,
         token_hash TEXT NOT NULL UNIQUE,
         token_preview TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -424,6 +428,15 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_shares_target_idx ON relay_shares(target_user_id);
       CREATE INDEX IF NOT EXISTS relay_shares_device_thread_idx ON relay_shares(device_id, thread_id);
     `);
+    this.ensureColumn('relay_devices', 'token', 'TEXT');
+  }
+
+  private ensureColumn(table: string, column: string, definition: string) {
+    const columns = this.sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (columns.some((existing) => existing.name === column)) {
+      return;
+    }
+    this.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   private importLegacyJson(legacyJsonPath?: string) {
@@ -614,14 +627,15 @@ export class RelayStore {
       .prepare(
         `
           INSERT INTO relay_devices (
-            id, owner_user_id, name, token_hash, token_preview, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?)
+            id, owner_user_id, name, token, token_hash, token_preview, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
         device.id,
         device.ownerUserId,
         device.name,
+        device.token ?? null,
         device.tokenHash,
         device.tokenPreview,
         device.createdAt,
@@ -727,6 +741,7 @@ export class RelayStore {
       id: row.id,
       ownerUserId: row.owner_user_id,
       name: row.name,
+      token: row.token ?? null,
       tokenHash: row.token_hash,
       tokenPreview: row.token_preview,
       createdAt: row.created_at,
@@ -766,6 +781,7 @@ interface DeviceRow {
   id: string;
   owner_user_id: string;
   name: string;
+  token: string | null;
   token_hash: string;
   token_preview: string;
   created_at: string;

@@ -151,6 +151,7 @@ describe('relay server', () => {
     const deviceBody = deviceResponse.json();
     expect(deviceBody.device).toMatchObject({
       name: 'Home workstation',
+      token: deviceBody.token,
       connected: false,
     });
     expect(deviceBody.token).toMatch(/^rcd_/);
@@ -171,6 +172,7 @@ describe('relay server', () => {
       devices: [
         {
           name: 'Home workstation',
+          token: deviceBody.token,
         },
       ],
       sharedWithMe: [],

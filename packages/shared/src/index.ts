@@ -103,6 +103,7 @@ export interface RelayDeviceDto {
   id: string;
   ownerUserId: string;
   name: string;
+  token: string | null;
   tokenPreview: string;
   connected: boolean;
   connectedAt: string | null;

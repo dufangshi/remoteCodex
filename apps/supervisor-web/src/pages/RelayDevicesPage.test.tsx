@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { storeRelayDeviceToken } from '../lib/api';
 import { RelayDevicesPage } from './RelayDevicesPage';
 
 const baseUser = {
@@ -14,11 +13,12 @@ const baseUser = {
   createdAt: '2026-06-18T00:00:00.000Z',
 };
 
-function device(input: { id: string; name: string; connected?: boolean }) {
+function device(input: { id: string; name: string; connected?: boolean; token?: string | null }) {
   return {
     id: input.id,
     ownerUserId: 'user-1',
     name: input.name,
+    token: input.token ?? null,
     tokenPreview: 'rcd_see...last',
     connected: input.connected ?? false,
     connectedAt: input.connected ? '2026-06-18T00:00:00.000Z' : null,
@@ -76,9 +76,8 @@ describe('RelayDevicesPage', () => {
     });
   });
 
-  it('copies a real supervisor command when the device token is cached locally', async () => {
-    storeRelayDeviceToken('device-1', 'rcd_real_device_token');
-    renderPage([device({ id: 'device-1', name: 'MacBook Pro' })]);
+  it('copies a real supervisor command when the relay returns the device token', async () => {
+    renderPage([device({ id: 'device-1', name: 'MacBook Pro', token: 'rcd_real_device_token' })]);
 
     await screen.findByText('MacBook Pro');
 
@@ -94,7 +93,7 @@ describe('RelayDevicesPage', () => {
     );
   });
 
-  it('caches the newly created device token for later setup copies', async () => {
+  it('uses the newly created relay-stored device token for later setup copies', async () => {
     const devices: ReturnType<typeof device>[] = [];
     vi.stubGlobal(
       'fetch',
@@ -112,7 +111,11 @@ describe('RelayDevicesPage', () => {
           });
         }
         if (url === '/relay/devices' && init?.method === 'POST') {
-          const created = device({ id: 'device-created', name: 'Studio Mac' });
+          const created = device({
+            id: 'device-created',
+            name: 'Studio Mac',
+            token: 'rcd_created_device_token',
+          });
           devices.push(created);
           return Promise.resolve({
             ok: true,
@@ -158,14 +161,14 @@ describe('RelayDevicesPage', () => {
     });
   });
 
-  it('does not copy a placeholder command when the token was not saved locally', async () => {
+  it('does not copy a placeholder command when a legacy device has no stored token', async () => {
     renderPage([device({ id: 'device-1', name: 'MacBook Pro' })]);
 
     await screen.findByText('MacBook Pro');
 
     expect(screen.getByRole('button', { name: 'Copy setup' })).toBeDisabled();
     expect(
-      screen.getByText('Token not available in this browser. Existing device tokens are not shown by the relay again.'),
+      screen.getByText('Token not available for this device. Create a new device token to copy a ready-to-run setup command.'),
     ).toBeInTheDocument();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
