@@ -13,8 +13,11 @@ import {
   deleteRelayDevice,
   enableRelayMode,
   fetchRelayPortal,
+  forgetRelayDeviceToken,
+  readRelayDeviceToken,
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
+  storeRelayDeviceToken,
 } from '../lib/api';
 
 function errorMessage(caught: unknown, fallback: string) {
@@ -58,6 +61,7 @@ export function RelayDevicesPage() {
     setError(null);
     try {
       const result = await createRelayDevice({ name: deviceName });
+      storeRelayDeviceToken(result.device.id, result.token);
       setCreatedDevice(result);
       setDeviceName('');
       await load();
@@ -73,6 +77,7 @@ export function RelayDevicesPage() {
     setError(null);
     try {
       await deleteRelayDevice(device.id);
+      forgetRelayDeviceToken(device.id);
       if (createdDevice?.device.id === device.id) {
         setCreatedDevice(null);
       }
@@ -91,8 +96,12 @@ export function RelayDevicesPage() {
   }
 
   async function copySupervisorSetup(device: RelayDeviceDto) {
-    const token =
-      createdDevice?.device.id === device.id ? createdDevice.token : null;
+    const token = readRelayDeviceToken(device.id);
+    if (!token) {
+      setError('This device token is not available in this browser. Create a new device token if it was not saved.');
+      return;
+    }
+
     try {
       await navigator.clipboard?.writeText(relaySupervisorCommand(token));
       setCopiedDeviceId(device.id);
@@ -193,7 +202,7 @@ export function RelayDevicesPage() {
                     onConnect={() => connectDevice(device)}
                     onCopySetup={() => void copySupervisorSetup(device)}
                     onDelete={() => void removeDevice(device)}
-                    setupTokenAvailable={createdDevice?.device.id === device.id}
+                    setupTokenAvailable={Boolean(readRelayDeviceToken(device.id))}
                   />
                 ))}
               </div>
@@ -254,8 +263,9 @@ function DeviceRow({
             title={
               setupTokenAvailable
                 ? 'Copy relay supervisor setup command'
-                : 'Copy setup command with a token placeholder. Existing device tokens are not shown again.'
+                : 'Device token is not available in this browser. Create a new device token if it was not saved.'
             }
+            disabled={!setupTokenAvailable}
             type="button"
           >
             <Copy className="h-4 w-4" />
@@ -281,6 +291,11 @@ function DeviceRow({
           </button>
         </div>
       </div>
+      {!setupTokenAvailable ? (
+        <p className="mt-3 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
+          Token not available in this browser. Existing device tokens are not shown by the relay again.
+        </p>
+      ) : null}
     </article>
   );
 }
@@ -346,11 +361,11 @@ function Notice({
   );
 }
 
-function relaySupervisorCommand(token: string | null) {
+function relaySupervisorCommand(token: string) {
   const relayUrl = relayWebsocketBaseUrl();
   return [
     `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
-    `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token ?? '<device-token>')} \\`,
+    `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\`,
     'remote-codex relay-supervisor',
   ].join('\n');
 }
