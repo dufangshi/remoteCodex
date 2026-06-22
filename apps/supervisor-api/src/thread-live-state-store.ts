@@ -19,6 +19,7 @@ interface AgentMessageOrderingHint {
   id: string;
   text: string;
   sequence: number;
+  createdAt: string | null;
 }
 
 export class ThreadLiveStateStore {
@@ -170,7 +171,19 @@ export class ThreadLiveStateStore {
     items: ThreadHistoryItemDto[],
     options: { allowUnmatchedFallback?: boolean } = {},
   ) {
-    const hints = new Map<string, number>();
+    return new Map(
+      [...this.finalTurnAgentMessageOrderingMetadata(localThreadId, turnId, items, options)]
+        .map(([itemId, metadata]) => [itemId, metadata.sequence]),
+    );
+  }
+
+  finalTurnAgentMessageOrderingMetadata(
+    localThreadId: string,
+    turnId: string,
+    items: ThreadHistoryItemDto[],
+    options: { allowUnmatchedFallback?: boolean } = {},
+  ) {
+    const hints = new Map<string, { sequence: number; createdAt: string | null }>();
     const turnOrder = this.threadTurnItemOrder.get(localThreadId)?.get(turnId);
     const liveAgentMessages = [
       ...(this.threadAgentMessageOrderingHints
@@ -181,6 +194,7 @@ export class ThreadLiveStateStore {
       id: item.id,
       text: normalizeAgentMessageForMatching(item.text),
       sequence: item.sequence,
+      createdAt: item.createdAt,
     }));
     const usedLiveAgentIds = new Set<string>();
     const finalAgentItems = items.filter((item) => item.kind === 'agentMessage');
@@ -188,11 +202,14 @@ export class ThreadLiveStateStore {
     for (const item of finalAgentItems) {
       const existingSequence = turnOrder?.get(item.id);
       if (existingSequence !== undefined) {
-        hints.set(item.id, existingSequence);
         const matchingLiveAgent = liveAgentMessages.find(
           (liveAgent) =>
             liveAgent.id === item.id || liveAgent.sequence === existingSequence,
         );
+        hints.set(item.id, {
+          sequence: existingSequence,
+          createdAt: matchingLiveAgent?.createdAt ?? null,
+        });
         if (matchingLiveAgent) {
           usedLiveAgentIds.add(matchingLiveAgent.id);
         }
@@ -208,6 +225,7 @@ export class ThreadLiveStateStore {
         | {
             id: string;
             sequence: number;
+            createdAt: string | null;
             score: number;
           }
         | null = null;
@@ -224,13 +242,17 @@ export class ThreadLiveStateStore {
         bestMatch = {
           id: liveAgent.id,
           sequence: liveAgent.sequence,
+          createdAt: liveAgent.createdAt,
           score,
         };
       }
 
       if (bestMatch) {
         usedLiveAgentIds.add(bestMatch.id);
-        hints.set(item.id, bestMatch.sequence);
+        hints.set(item.id, {
+          sequence: bestMatch.sequence,
+          createdAt: bestMatch.createdAt,
+        });
       }
     }
 
@@ -249,7 +271,10 @@ export class ThreadLiveStateStore {
           break;
         }
 
-        hints.set(item.id, liveAgent.sequence);
+        hints.set(item.id, {
+          sequence: liveAgent.sequence,
+          createdAt: liveAgent.createdAt,
+        });
         remainingLiveAgentIndex += 1;
       }
     }
@@ -303,6 +328,7 @@ export class ThreadLiveStateStore {
     itemId: string;
     delta: string;
     sequence: number;
+    createdAt?: string | null | undefined;
   }): ThreadHistoryItemDto {
     const current = this.threadLiveItems.get(input.localThreadId);
     const currentItems =
@@ -317,7 +343,7 @@ export class ThreadLiveStateStore {
           }
         : {
             id: input.itemId,
-            createdAt: new Date().toISOString(),
+            createdAt: input.createdAt ?? new Date().toISOString(),
             kind: 'agentMessage',
             text: input.delta,
             sequence: input.sequence,
@@ -369,6 +395,7 @@ export class ThreadLiveStateStore {
       id: item.id,
       text: item.text,
       sequence,
+      createdAt: item.createdAt ?? null,
     });
   }
 

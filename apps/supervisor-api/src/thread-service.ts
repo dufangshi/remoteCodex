@@ -358,6 +358,7 @@ export class ThreadService {
             input.itemId,
             input.delta,
             input.sequence,
+            input.createdAt,
           ),
         clearPendingPlanDecisionRequests: (localThreadId, emitEvents) =>
           this.clearPendingPlanDecisionRequests(localThreadId, emitEvents),
@@ -1481,6 +1482,7 @@ export class ThreadService {
     itemId: string,
     delta: string,
     sequence: number,
+    createdAt?: string | null | undefined,
   ) {
     this.liveState.appendLiveAgentMessageDelta({
       localThreadId,
@@ -1488,6 +1490,7 @@ export class ThreadService {
       itemId,
       delta,
       sequence,
+      createdAt,
     });
   }
 

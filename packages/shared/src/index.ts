@@ -1218,6 +1218,7 @@ export interface ThreadEventPayloadMap {
     itemId: string;
     sequence: number;
     delta: string;
+    createdAt?: string | null;
   };
   'thread.turn.completed': {
     turnId: string;

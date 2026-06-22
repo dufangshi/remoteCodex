@@ -36,6 +36,7 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     itemId: string;
     delta: string;
     sequence: number;
+    createdAt?: string | null | undefined;
   }): void;
   clearPendingPlanDecisionRequests(localThreadId: string, emitEvents: boolean): void;
   clearPendingSteersForTurn(localThreadId: string, turnId: string): void;
@@ -294,8 +295,9 @@ export class ThreadRuntimeEventProjector {
         if (!turnId) {
           return;
         }
+        const eventTimestamp = new Date().toISOString();
         const liveItem = {
-          ...event.item,
+          ...withHistoryItemCreatedAt(event.item, eventTimestamp),
           sequence: liveState.recordTurnItemOrder(record.id, turnId, event.item.id),
         };
         const transportLiveItem = deferHistoryItemDetailForTransport(liveItem);
@@ -331,8 +333,9 @@ export class ThreadRuntimeEventProjector {
           displayTurnId,
           event.item.id,
         );
+        const eventTimestamp = new Date().toISOString();
         const orderedLiveItem = {
-          ...event.item,
+          ...withHistoryItemCreatedAt(event.item, eventTimestamp),
           sequence,
         };
         const transportLiveItem = deferHistoryItemDetailForTransport(orderedLiveItem);
@@ -393,18 +396,21 @@ export class ThreadRuntimeEventProjector {
           displayTurnId,
           event.itemId,
         );
+        const createdAt = new Date().toISOString();
         callbacks.appendLiveAgentMessageDelta({
           localThreadId: record.id,
           turnId: displayTurnId,
           itemId: event.itemId,
           delta: event.delta,
           sequence,
+          createdAt,
         });
         callbacks.emitThreadEvent('thread.output.delta', record.id, {
           turnId: displayTurnId,
           itemId: event.itemId,
           sequence,
           delta: event.delta,
+          createdAt,
         });
         return;
       }
@@ -527,4 +533,11 @@ export class ThreadRuntimeEventProjector {
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
+}
+
+function withHistoryItemCreatedAt<T extends ThreadHistoryItemDto>(
+  item: T,
+  createdAt: string,
+): T {
+  return item.createdAt ? item : { ...item, createdAt };
 }

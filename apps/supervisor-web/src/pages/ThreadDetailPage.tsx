@@ -498,7 +498,13 @@ export function ThreadDetailPage() {
   );
 
   const appendLiveAgentDelta = useCallback(
-    (turnId: string, itemId: string, delta: string, sequence: number | null) => {
+    (
+      turnId: string,
+      itemId: string,
+      delta: string,
+      sequence: number | null,
+      createdAt?: string | null,
+    ) => {
       setLiveItems((current) => {
         const currentItems =
           current?.turnId === turnId ? current.items : [];
@@ -512,6 +518,7 @@ export function ThreadDetailPage() {
               }
             : {
                 id: itemId,
+                createdAt: createdAt ?? new Date().toISOString(),
                 kind: 'agentMessage',
                 text: delta,
                 sequence,
@@ -1672,6 +1679,7 @@ export function ThreadDetailPage() {
             itemId,
             event.payload.delta,
             sequence,
+            event.payload.createdAt ?? event.timestamp,
           );
         } else {
           queueLiveOutputDelta(event.payload.delta);

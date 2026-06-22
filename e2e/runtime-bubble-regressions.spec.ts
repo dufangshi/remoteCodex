@@ -387,6 +387,22 @@ async function installApiRoutes(page: Page, detailFactory: DetailFactory) {
       await route.fulfill({ json: [] });
       return;
     }
+    if (path === '/api/auth/session') {
+      await route.fulfill({
+        json: {
+          authenticated: false,
+          username: null,
+          expiresAt: null,
+          mode: 'local',
+          authRequired: false,
+        },
+      });
+      return;
+    }
+    if (path === '/api/plugins') {
+      await route.fulfill({ json: [] });
+      return;
+    }
     if (path === '/api/threads/thread-1') {
       detailRequestCount += 1;
       await route.fulfill({ json: detailFactory(detailRequestCount) });
@@ -414,6 +430,74 @@ async function installApiRoutes(page: Page, detailFactory: DetailFactory) {
 test.describe('runtime bubble regressions', () => {
   test.beforeEach(async ({ page }) => {
     await installFakeWebSocket(page);
+  });
+
+  test('renders per-message timestamps instead of reusing the turn start time', async ({ page }) => {
+    const userCreatedAt = '2026-04-09T06:01:00.000Z';
+    const firstAgentCreatedAt = '2026-04-09T06:02:21.000Z';
+    const finalAgentCreatedAt = '2026-04-09T06:03:05.000Z';
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'false');
+    });
+    await installApiRoutes(page, () =>
+      detail('codex', {
+        turns: [
+          {
+            id: 'turn-1',
+            startedAt: userCreatedAt,
+            status: 'completed',
+            error: null,
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Timestamp prompt.',
+                createdAt: userCreatedAt,
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'First assistant update.',
+                createdAt: firstAgentCreatedAt,
+              },
+              {
+                id: 'agent-2',
+                kind: 'agentMessage',
+                text: 'Final assistant answer.',
+                createdAt: finalAgentCreatedAt,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await page.goto('/threads/thread-1');
+
+    const expectedLabels = await page.evaluate((timestamps) => {
+      return timestamps.map((timestamp) =>
+        new Date(timestamp).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      );
+    }, [userCreatedAt, firstAgentCreatedAt, finalAgentCreatedAt]);
+
+    const messageTimes = page.locator('.thread-graph-message-time');
+    await expect(messageTimes.filter({ hasText: expectedLabels[0] })).toHaveCount(1);
+    await expect(messageTimes.filter({ hasText: expectedLabels[1] })).toHaveCount(1);
+    await expect(messageTimes.filter({ hasText: expectedLabels[2] })).toHaveCount(1);
+    await expect(messageTimes).not.toHaveText([
+      expectedLabels[0],
+      expectedLabels[0],
+      expectedLabels[0],
+    ]);
   });
 
   test('renders Codex subagent tool calls as agent bubbles with deferred details', async ({ page }) => {

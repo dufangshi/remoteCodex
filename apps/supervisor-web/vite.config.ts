@@ -108,7 +108,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     optimizeDeps: {
-      exclude: ['@remote-codex/thread-ui'],
+      include: [
+        '@remote-codex/thread-ui',
+        'use-sync-external-store/shim/with-selector',
+      ],
     },
     server: {
       host: '0.0.0.0',

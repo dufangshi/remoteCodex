@@ -340,8 +340,17 @@ function historyItemTranscriptOrder(item: ThreadHistoryItemDto) {
 function copyPersistedOrderingHints(
   item: ThreadHistoryItemDto,
   persistedItem: ThreadHistoryItemDto,
+  turnStartedAt: string | null | undefined,
 ) {
   let nextItem = item;
+  if (
+    persistedItem.createdAt &&
+    (!nextItem.createdAt ||
+      (nextItem.kind === 'agentMessage' && nextItem.createdAt === turnStartedAt))
+  ) {
+    nextItem = { ...nextItem, createdAt: persistedItem.createdAt };
+  }
+
   if (hasHistoryItemSequence(persistedItem)) {
     const sequence = historyItemSequence(persistedItem);
     if (nextItem.sequence !== sequence) {
@@ -554,6 +563,7 @@ export function mergePersistedHistoryItemsIntoTurns(
       const sequencedItem = copyPersistedOrderingHints(
         itemWithTranscriptOrder,
         persistedItemWithTranscriptOrder,
+        turn.startedAt,
       );
       if (sequencedItem !== item) {
         changed = true;

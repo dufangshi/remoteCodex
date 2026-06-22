@@ -68,7 +68,7 @@ export class ThreadHistoryPersistenceCoordinator {
     turnId: string,
     items: ThreadHistoryItemDto[],
   ) {
-    const orderingHints = this.liveState.finalTurnAgentMessageOrderingHints(
+    const orderingHints = this.liveState.finalTurnAgentMessageOrderingMetadata(
       localThreadId,
       turnId,
       items,
@@ -82,8 +82,8 @@ export class ThreadHistoryPersistenceCoordinator {
         continue;
       }
 
-      const sequence = orderingHints.get(item.id);
-      if (sequence === undefined) {
+      const metadata = orderingHints.get(item.id);
+      if (!metadata) {
         continue;
       }
 
@@ -93,7 +93,8 @@ export class ThreadHistoryPersistenceCoordinator {
         itemId: item.id,
         itemJson: JSON.stringify({
           ...item,
-          sequence,
+          sequence: metadata.sequence,
+          createdAt: item.createdAt ?? metadata.createdAt,
           sourceTurnId: turnId,
         }),
       });
