@@ -500,6 +500,102 @@ test.describe('runtime bubble regressions', () => {
     ]);
   });
 
+  test('keeps live assistant timestamps after detail refresh materializes fallback timestamps', async ({ page }) => {
+    const userCreatedAt = '2026-04-09T06:01:00.000Z';
+    const agentCreatedAt = '2026-04-09T06:02:21.000Z';
+    let phase: 'live' | 'materializedFallback' = 'live';
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'false');
+    });
+    await installApiRoutes(page, () =>
+      detail('codex', {
+        thread: {
+          status: 'running',
+          activeTurnId: 'turn-1',
+          lastTurnCompletedAt: null,
+        },
+        turns: [
+          {
+            id: 'turn-1',
+            startedAt: userCreatedAt,
+            status: 'inProgress',
+            error: null,
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            items:
+              phase === 'materializedFallback'
+                ? [
+                    {
+                      id: 'user-1',
+                      kind: 'userMessage',
+                      text: 'Timestamp prompt.',
+                      createdAt: userCreatedAt,
+                    },
+                    {
+                      id: 'agent-live-1',
+                      kind: 'agentMessage',
+                      text: 'Streaming response after refresh.',
+                      createdAt: userCreatedAt,
+                    },
+                  ]
+                : [
+                    {
+                      id: 'user-1',
+                      kind: 'userMessage',
+                      text: 'Timestamp prompt.',
+                      createdAt: userCreatedAt,
+                    },
+                  ],
+          },
+        ],
+      }),
+    );
+
+    await page.goto('/threads/thread-1');
+    await waitForSocketReady(page);
+    await emitSocketMessage(page, {
+      type: 'thread.output.delta',
+      threadId: 'thread-1',
+      timestamp: agentCreatedAt,
+      payload: {
+        turnId: 'turn-1',
+        itemId: 'agent-live-1',
+        sequence: 1,
+        delta: 'Streaming response after refresh.',
+        createdAt: agentCreatedAt,
+      },
+    });
+
+    const [turnStartLabel, agentLabel] = await page.evaluate((timestamps) => {
+      return timestamps.map((timestamp) =>
+        new Date(timestamp).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      );
+    }, [userCreatedAt, agentCreatedAt]);
+
+    const messageTimes = page.locator('.thread-graph-message-time');
+    await expect(page.getByText('Streaming response after refresh.')).toBeVisible();
+    await expect(messageTimes.filter({ hasText: agentLabel })).toHaveCount(1);
+
+    phase = 'materializedFallback';
+    await emitSocketMessage(page, {
+      type: 'thread.updated',
+      threadId: 'thread-1',
+      timestamp: agentCreatedAt,
+      payload: { status: 'running' },
+    });
+
+    await expect(page.getByText('Streaming response after refresh.')).toBeVisible();
+    await expect(messageTimes.filter({ hasText: agentLabel })).toHaveCount(1);
+    await expect(messageTimes.filter({ hasText: turnStartLabel })).toHaveCount(1);
+  });
+
   test('renders Codex subagent tool calls as agent bubbles with deferred details', async ({ page }) => {
     await installApiRoutes(page, () =>
       detail('codex', {

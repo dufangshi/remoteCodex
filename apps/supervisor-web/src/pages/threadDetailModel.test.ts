@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ThreadDetailDto } from '@remote-codex/shared';
 import {
   appendLatestTurns,
+  applyLiveItemTimestampsToTurns,
   findTurnWithUserMessage,
   mergeGoalHistory,
   mergeLiveHistoryItem,
@@ -129,6 +130,45 @@ describe('threadDetailModel', () => {
     );
 
     expect(result).toBeNull();
+  });
+
+  it('keeps live agent timestamps when materialized turns only have fallback turn time', () => {
+    const turnStartedAt = '2026-05-24T00:00:00.000Z';
+    const liveAgentCreatedAt = '2026-05-24T00:00:21.000Z';
+
+    const turns = applyLiveItemTimestampsToTurns(
+      [
+        {
+          ...makeTurn('turn-1'),
+          startedAt: turnStartedAt,
+          items: [
+            {
+              id: 'agent-1',
+              kind: 'agentMessage',
+              text: 'streamed answer text',
+              createdAt: turnStartedAt,
+            },
+          ],
+        },
+      ],
+      {
+        turnId: 'turn-1',
+        updatedAt: liveAgentCreatedAt,
+        items: [
+          {
+            id: 'agent-1',
+            kind: 'agentMessage',
+            text: 'streamed answer',
+            createdAt: liveAgentCreatedAt,
+          },
+        ],
+      },
+    );
+
+    expect(turns[0]?.items[0]).toMatchObject({
+      id: 'agent-1',
+      createdAt: liveAgentCreatedAt,
+    });
   });
 
   it('matches photo prompts by their user text even when upload placeholders differ', () => {

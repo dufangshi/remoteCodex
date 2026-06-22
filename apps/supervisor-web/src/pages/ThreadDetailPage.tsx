@@ -94,6 +94,7 @@ import {
 } from '../lib/api';
 import {
   appendLatestTurns,
+  applyLiveItemTimestampsToTurns,
   createClientRequestId,
   effectiveSandboxMode,
   findTurnWithUserMessage,
@@ -324,6 +325,9 @@ export function ThreadDetailPage() {
   const [liveItems, setLiveItems] = useState<
     NonNullable<ThreadDetailDto['liveItems']> | null
   >(null);
+  const liveItemsRef = useRef<
+    NonNullable<ThreadDetailDto['liveItems']> | null
+  >(null);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -333,6 +337,11 @@ export function ThreadDetailPage() {
   const terminalPluginEnabled = plugins.getThreadPanels().some(
     (panel) => panel.kind === 'terminal',
   );
+
+  useEffect(() => {
+    liveItemsRef.current = liveItems;
+  }, [liveItems]);
+
   const localShellAdapter = useMemo(
     () => ({
       fetchState: fetchThreadShellState,
@@ -1078,59 +1087,67 @@ export function ThreadDetailPage() {
               },
             }
           : detailResponse;
+      const nextDetailWithLiveTimestamps = {
+        ...nextDetail,
+        turns: applyLiveItemTimestampsToTurns(nextDetail.turns, liveItemsRef.current),
+      };
       const previousDetail = detailRef.current;
-      detailRef.current = nextDetail;
-      setLivePlan(nextDetail.livePlan ?? null);
+      detailRef.current = nextDetailWithLiveTimestamps;
+      setLivePlan(nextDetailWithLiveTimestamps.livePlan ?? null);
       const mergedTurns = previousDetail
-        ? appendLatestTurns(previousDetail.turns, nextDetail.turns)
-        : nextDetail.turns;
+        ? appendLatestTurns(previousDetail.turns, nextDetailWithLiveTimestamps.turns)
+        : nextDetailWithLiveTimestamps.turns;
       setLiveItems((current) =>
-        reconcileLiveItemsWithDetail(current, nextDetail.liveItems ?? null, mergedTurns),
+        reconcileLiveItemsWithDetail(
+          current,
+          nextDetailWithLiveTimestamps.liveItems ?? null,
+          mergedTurns,
+        ),
       );
       setGoalState((current) =>
         current.status === 'idle'
           ? current
           : {
               ...current,
-              data: nextDetail.goal ?? null,
+              data: nextDetailWithLiveTimestamps.goal ?? null,
             },
       );
       const threadHasEnded =
-        nextDetail.thread.activeTurnId === null &&
-        nextDetail.thread.status !== 'running';
+        nextDetailWithLiveTimestamps.thread.activeTurnId === null &&
+        nextDetailWithLiveTimestamps.thread.status !== 'running';
 
       setDetail((current) =>
-        current && !nextDetail.goalHistory
+        current && !nextDetailWithLiveTimestamps.goalHistory
           ? {
-              ...nextDetail,
-              turns: appendLatestTurns(current.turns, nextDetail.turns),
+              ...nextDetailWithLiveTimestamps,
+              turns: appendLatestTurns(current.turns, nextDetailWithLiveTimestamps.turns),
               pendingRequests: mergePendingRequests(
                 current.pendingRequests,
-                nextDetail.pendingRequests,
+                nextDetailWithLiveTimestamps.pendingRequests,
                 resolvedRequestIdsRef.current,
               ),
               ...(current.goalHistory ? { goalHistory: current.goalHistory } : {}),
             }
           : current
             ? {
-                ...nextDetail,
-                turns: appendLatestTurns(current.turns, nextDetail.turns),
+                ...nextDetailWithLiveTimestamps,
+                turns: appendLatestTurns(current.turns, nextDetailWithLiveTimestamps.turns),
                 pendingRequests: mergePendingRequests(
                   current.pendingRequests,
-                  nextDetail.pendingRequests,
+                  nextDetailWithLiveTimestamps.pendingRequests,
                   resolvedRequestIdsRef.current,
                 ),
               }
-            : nextDetail,
+            : nextDetailWithLiveTimestamps,
       );
       setThreads((current) =>
-        mergeThreadIntoList(current, nextDetail.thread),
+        mergeThreadIntoList(current, nextDetailWithLiveTimestamps.thread),
       );
       const nextTurnsById = new Map(
-        nextDetail.turns.map((turn) => [turn.id, turn] as const),
+        nextDetailWithLiveTimestamps.turns.map((turn) => [turn.id, turn] as const),
       );
       const pendingSteerRequestIds = new Set(
-        (nextDetail.pendingSteers ?? [])
+        (nextDetailWithLiveTimestamps.pendingSteers ?? [])
           .map((steer) => steer.clientRequestId)
           .filter((value): value is string => Boolean(value)),
       );
@@ -1150,7 +1167,7 @@ export function ThreadDetailPage() {
           }
 
           if (
-            nextDetail.thread.activeTurnId !== steer.turnId &&
+            nextDetailWithLiveTimestamps.thread.activeTurnId !== steer.turnId &&
             targetTurn.status !== 'inProgress'
           ) {
             return false;
@@ -1165,11 +1182,14 @@ export function ThreadDetailPage() {
         }
 
         const resolvedTurnId = current.serverTurnId ?? current.id;
-        const hasMaterializedTurn = nextDetail.turns.some(
+        const hasMaterializedTurn = nextDetailWithLiveTimestamps.turns.some(
           (turn) => turn.id === resolvedTurnId,
         );
         const materializedTurn = nextTurnsById.get(resolvedTurnId) ?? null;
-        const promptTurn = findTurnWithUserMessage(nextDetail.turns, current.prompt);
+        const promptTurn = findTurnWithUserMessage(
+          nextDetailWithLiveTimestamps.turns,
+          current.prompt,
+        );
         const hasMaterializedPrompt = Boolean(promptTurn);
         if (promptTurn && !current.serverTurnId) {
           return {
@@ -1216,10 +1236,12 @@ export function ThreadDetailPage() {
         if (
           !current.serverTurnId &&
           current.prompt.includes('[PHOTO ') &&
-          nextDetail.thread.activeTurnId &&
-          nextDetail.thread.status === 'running'
+          nextDetailWithLiveTimestamps.thread.activeTurnId &&
+          nextDetailWithLiveTimestamps.thread.status === 'running'
         ) {
-          const activeTurn = nextTurnsById.get(nextDetail.thread.activeTurnId);
+          const activeTurn = nextTurnsById.get(
+            nextDetailWithLiveTimestamps.thread.activeTurnId,
+          );
           if (activeTurn && turnHasPhotoAttachment(activeTurn)) {
             return {
               ...current,
@@ -1236,7 +1258,7 @@ export function ThreadDetailPage() {
       if (
         threadHasEnded ||
         (terminalTurnPendingRef.current &&
-          nextDetail.turns.some(
+          nextDetailWithLiveTimestamps.turns.some(
             (turn) => turn.id === terminalTurnPendingRef.current,
           ))
       ) {

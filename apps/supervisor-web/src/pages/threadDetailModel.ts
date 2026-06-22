@@ -30,6 +30,60 @@ export function appendLatestTurns(
   return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
 }
 
+export function applyLiveItemTimestampsToTurns(
+  turns: ThreadDetailDto['turns'],
+  liveItems: NonNullable<ThreadDetailDto['liveItems']> | null,
+) {
+  if (!liveItems || liveItems.items.length === 0) {
+    return turns;
+  }
+
+  return turns.map((turn) => {
+    if (turn.id !== liveItems.turnId) {
+      return turn;
+    }
+
+    const liveAgentItems = liveItems.items.filter(
+      (item) => item.kind === 'agentMessage' && item.createdAt,
+    );
+    if (liveAgentItems.length === 0) {
+      return turn;
+    }
+
+    const liveAgentItemsById = new Map(liveAgentItems.map((item) => [item.id, item]));
+    const usedLiveAgentIds = new Set<string>();
+    let changed = false;
+    const nextItems = turn.items.map((item) => {
+      if (
+        item.kind !== 'agentMessage' ||
+        (item.createdAt && item.createdAt !== turn.startedAt)
+      ) {
+        return item;
+      }
+
+      let liveItem = liveAgentItemsById.get(item.id);
+      if (!liveItem) {
+        liveItem = liveAgentItems.find(
+          (candidate) =>
+            !usedLiveAgentIds.has(candidate.id) &&
+            candidate.text.trim().length >= 8 &&
+            item.text.trim().includes(candidate.text.trim()),
+        );
+      }
+
+      if (!liveItem?.createdAt || liveItem.createdAt === turn.startedAt) {
+        return item;
+      }
+
+      usedLiveAgentIds.add(liveItem.id);
+      changed = true;
+      return { ...item, createdAt: liveItem.createdAt };
+    });
+
+    return changed ? { ...turn, items: nextItems } : turn;
+  });
+}
+
 export function mergePendingRequestIntoDetail(
   detail: ThreadDetailDto,
   request: ThreadDetailDto['pendingRequests'][number],

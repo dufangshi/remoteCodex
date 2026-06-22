@@ -369,7 +369,7 @@ function applyLiveAgentMessageOrderingHints(
   liveState: ThreadLiveStateStore,
 ) {
   return turns.map((turn) => {
-    const orderingHints = liveState.finalTurnAgentMessageOrderingHints(
+    const orderingHints = liveState.finalTurnAgentMessageOrderingMetadata(
       localThreadId,
       turn.id,
       turn.items,
@@ -385,16 +385,26 @@ function applyLiveAgentMessageOrderingHints(
         return item;
       }
 
-      const sequence = orderingHints.get(item.id);
-      if (sequence === undefined || item.sequence === sequence) {
+      const metadata = orderingHints.get(item.id);
+      if (!metadata) {
         return item;
       }
 
-      changed = true;
-      return {
-        ...item,
-        sequence,
-      };
+      let nextItem = item;
+      if (nextItem.sequence !== metadata.sequence) {
+        nextItem = { ...nextItem, sequence: metadata.sequence };
+      }
+      if (
+        metadata.createdAt &&
+        (!nextItem.createdAt || nextItem.createdAt === turn.startedAt)
+      ) {
+        nextItem = { ...nextItem, createdAt: metadata.createdAt };
+      }
+
+      if (nextItem !== item) {
+        changed = true;
+      }
+      return nextItem;
     });
 
     return changed

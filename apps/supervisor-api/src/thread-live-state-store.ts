@@ -310,10 +310,14 @@ export class ThreadLiveStateStore {
     const currentItems =
       current?.turnId === turnId ? current.items : [];
     const existingIndex = currentItems.findIndex((entry) => entry.id === item.id);
+    const nextItem =
+      existingIndex >= 0 && !item.createdAt && currentItems[existingIndex]?.createdAt
+        ? { ...item, createdAt: currentItems[existingIndex]!.createdAt }
+        : item;
     const nextItems =
       existingIndex >= 0
-        ? currentItems.map((entry, index) => (index === existingIndex ? item : entry))
-        : [...currentItems, item];
+        ? currentItems.map((entry, index) => (index === existingIndex ? nextItem : entry))
+        : [...currentItems, nextItem];
 
     this.setLiveItems(localThreadId, {
       turnId,

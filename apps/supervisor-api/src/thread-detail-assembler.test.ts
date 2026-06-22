@@ -52,6 +52,7 @@ function session(turns: AgentTurn[], totalTurnCount = turns.length): AgentSessio
 }
 
 function createAssembler(remoteSession: AgentSessionDetail) {
+  const liveState = new ThreadLiveStateStore();
   const readRemoteSession = vi.fn(async () => remoteSession);
   const callbacks = {
     buildThreadPatch: vi.fn(() => ({})),
@@ -67,10 +68,11 @@ function createAssembler(remoteSession: AgentSessionDetail) {
 
   return {
     assembler: new ThreadDetailAssembler({
-      liveState: new ThreadLiveStateStore(),
+      liveState,
       callbacks,
     }),
     callbacks,
+    liveState,
   };
 }
 
@@ -186,5 +188,62 @@ describe('ThreadDetailAssembler', () => {
     });
 
     expect(callbacks.readRemoteSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps live agent timestamps after running items materialize in readThread', async () => {
+    const turnStartedAt = '2026-06-07T00:00:00.000Z';
+    const liveAgentCreatedAt = '2026-06-07T00:00:21.000Z';
+    const { assembler, liveState } = createAssembler(
+      session([
+        {
+          providerTurnId: 'turn-1',
+          startedAt: turnStartedAt,
+          status: 'inProgress',
+          error: null,
+          items: [
+            {
+              id: 'user-1',
+              kind: 'userMessage',
+              text: 'Prompt',
+            },
+            {
+              id: 'agent-live-1',
+              kind: 'agentMessage',
+              text: 'Materialized response text',
+            },
+          ],
+        },
+      ]),
+    );
+
+    liveState.recordTurnItemOrder(record.id, 'turn-1', 'user-1');
+    const sequence = liveState.recordTurnItemOrder(record.id, 'turn-1', 'agent-live-1');
+    liveState.appendLiveAgentMessageDelta({
+      localThreadId: record.id,
+      turnId: 'turn-1',
+      itemId: 'agent-live-1',
+      delta: 'Materialized response text',
+      sequence,
+      createdAt: liveAgentCreatedAt,
+    });
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record,
+      turnMetadataById: new Map(),
+      options: { limit: 3 },
+    });
+
+    expect(entry.turns[0]?.items).toMatchObject([
+      {
+        id: 'user-1',
+        createdAt: turnStartedAt,
+      },
+      {
+        id: 'agent-live-1',
+        createdAt: liveAgentCreatedAt,
+        sequence,
+      },
+    ]);
   });
 });
