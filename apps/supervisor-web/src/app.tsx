@@ -59,6 +59,8 @@ import {
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
+const AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY =
+  'remote-codex-auto-collapse-completed-turns';
 
 function controlPlaneDefaultEnabled() {
   return Boolean(import.meta.env.VITE_CONTROL_PLANE_BASE_URL);
@@ -111,6 +113,14 @@ function readInitialBackend(): AgentBackendIdDto {
   return normalizeAgentBackendId(stored) ?? defaultAgentBackendId;
 }
 
+function readInitialAutoCollapseCompletedTurns() {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  return window.localStorage.getItem(AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY) !== 'false';
+}
+
 function systemThemePreference(): 'light' | 'dark' {
   if (
     typeof window !== 'undefined' &&
@@ -135,6 +145,9 @@ function AppShell({
   const [navOpen, setNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defaultBackend, setDefaultBackendState] = useState<AgentBackendIdDto>(readInitialBackend);
+  const [autoCollapseCompletedTurns, setAutoCollapseCompletedTurnsState] = useState(
+    readInitialAutoCollapseCompletedTurns,
+  );
   const location = useLocation();
   const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
   const isControlPlaneSessionRoute = /^\/control-plane\/sessions\/[^/]+$/.test(location.pathname);
@@ -156,6 +169,14 @@ function AppShell({
     window.localStorage.setItem(BACKEND_STORAGE_KEY, backend);
   }
 
+  function setAutoCollapseCompletedTurns(enabled: boolean) {
+    setAutoCollapseCompletedTurnsState(enabled);
+    window.localStorage.setItem(
+      AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY,
+      enabled ? 'true' : 'false',
+    );
+  }
+
   const shellNavValue = {
     navOpen,
     openNav: () => setNavOpen(true),
@@ -172,6 +193,8 @@ function AppShell({
     effectiveTheme,
     defaultBackend,
     setDefaultBackend,
+    autoCollapseCompletedTurns,
+    setAutoCollapseCompletedTurns,
   };
 
   return (

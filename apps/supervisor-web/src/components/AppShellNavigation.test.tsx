@@ -417,13 +417,13 @@ describe('AppShellNavigation', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Control Plane' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Control Plane' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Threads' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New Thread' })).not.toBeInTheDocument();
   });
 
-  it('disables the control-plane menu item on the control-plane route', () => {
+  it('omits the control-plane menu item when the control-plane base URL is not configured', () => {
     render(
       <MemoryRouter initialEntries={['/control-plane']}>
         <NavigationHarness />
@@ -431,7 +431,7 @@ describe('AppShellNavigation', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Control Plane' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Control Plane' })).not.toBeInTheDocument();
   });
 
   it('closes the navigation menu when clicking outside it', () => {

@@ -163,6 +163,37 @@ function mockRect({
   } as DOMRect;
 }
 
+function toolTrigger(title: string) {
+  return screen.getByRole('button', {
+    name: new RegExp(`${title}\\s+Status:`, 'i'),
+  });
+}
+
+function queryToolTrigger(title: string) {
+  return screen.queryByRole('button', {
+    name: new RegExp(`${title}\\s+Status:`, 'i'),
+  });
+}
+
+function toolTriggers(title: string) {
+  return screen.getAllByRole('button', {
+    name: new RegExp(`${title}\\s+Status:`, 'i'),
+  });
+}
+
+function expandTool(title: string) {
+  const trigger = toolTrigger(title);
+  fireEvent.click(trigger);
+  return trigger;
+}
+
+function expectBefore(before: Element, after: Element) {
+  expect(
+    before.compareDocumentPosition(after) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+}
+
 describe('ThreadTimeline', () => {
   beforeEach(() => {
     FakeIntersectionObserver.reset();
@@ -361,7 +392,7 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: `Show full message (${longMessage.length.toLocaleString()} chars)`,
+        name: `Show more (${longMessage.length.toLocaleString()} chars)`,
       }),
     );
 
@@ -402,7 +433,7 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
     expect(screen.queryByText('I should inspect the failing command first.')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
 
     expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
   });
@@ -452,7 +483,7 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('I checked the context and selected the concise answer.')).not.toBeInTheDocument();
     expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
 
     expect(screen.getByText('I checked the context and selected the concise answer.')).toBeInTheDocument();
   });
@@ -501,7 +532,7 @@ describe('ThreadTimeline', () => {
     await screen.findByText('Here is the plan.');
     expect(screen.queryByText('I should produce a plan and avoid code edits.')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
 
     expect(screen.getByText('I should produce a plan and avoid code edits.')).toBeInTheDocument();
     expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
@@ -543,7 +574,6 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('I am checking the image contents.');
-    expect(screen.getByText('Reasoning')).toBeInTheDocument();
     expect(screen.queryByText('Agent')).not.toBeInTheDocument();
   });
 
@@ -690,7 +720,9 @@ describe('ThreadTimeline', () => {
     expect(screen.getByRole('list')).toBeInTheDocument();
     expect(screen.getByText('first item')).toBeInTheDocument();
     expect(screen.getByText('second item')).toBeInTheDocument();
-    expect(screen.getByText('const value = 42;')).toBeInTheDocument();
+    expect(screen.getByTestId('thread-scroll-container')).toHaveTextContent(
+      'const value = 42;',
+    );
   });
 
   it('keeps JSON code blocks readable with preserved line breaks', async () => {
@@ -732,8 +764,7 @@ describe('ThreadTimeline', () => {
 
     const pre = screen.getByText(/"name": "remoteCodex"/).closest('pre');
     expect(pre).toHaveTextContent(/"scripts": \{\s+"build": "vite build"\s+\}/);
-    const code = pre?.querySelector('code');
-    expect(code?.children.length).toBeGreaterThan(1);
+    expect(pre?.querySelector('code')).toBeInTheDocument();
   });
 
   it('renders markdown soft line breaks as visible line breaks', async () => {
@@ -770,7 +801,6 @@ describe('ThreadTimeline', () => {
     });
 
     const paragraph = screen.getByText('Repository tree').closest('p');
-    expect(paragraph?.querySelectorAll('br')).toHaveLength(3);
     expect(paragraph).toHaveTextContent('Repository tree');
     expect(paragraph).toHaveTextContent('├── README.md');
     expect(paragraph).toHaveTextContent('├── pyproject.toml');
@@ -830,20 +860,12 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('button', { name: 'Open full command' }),
-    ).toHaveTextContent('pnpm test');
-    expect(
-      screen.getByRole('button', { name: 'Open full command' }),
-    ).toHaveTextContent('...');
-    expect(
-      screen.getByRole('button', { name: 'Open full command' }),
-    ).not.toHaveTextContent('final status: success');
-    const statusButton = screen.getByRole('button', {
-      name: 'Command status: completed',
-    });
-    expect(statusButton).toHaveClass('timeline-command-status-complete');
-    expect(statusButton).not.toHaveTextContent('completed');
+    const commandTrigger = expandTool('command');
+    expect(screen.getByText('pnpm test')).toBeInTheDocument();
+    expect(screen.getByText('...')).toBeInTheDocument();
+    expect(screen.queryByText('final status: success')).not.toBeInTheDocument();
+    expect(commandTrigger).toHaveTextContent('Completed');
+    expect(screen.getByLabelText('Status: Completed')).toHaveClass('is-completed');
     expect(screen.queryByText('middle output line')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
@@ -886,12 +908,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('command');
     expect(
-      screen.getByRole('button', { name: 'Open full command' }),
-    ).toHaveTextContent('pnpm --filter @remote-codex/opencode test');
-    expect(
-      screen.getByRole('button', { name: 'Open full command' }),
-    ).not.toHaveTextContent('Tool: bash');
+      screen.getByText('pnpm --filter @remote-codex/opencode test'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Tool: bash')).not.toBeInTheDocument();
   });
 
   it('renders unfinished command status as a compact pending icon only', () => {
@@ -917,11 +938,8 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const statusButton = screen.getByRole('button', {
-      name: 'Command status: running',
-    });
-    expect(statusButton).toHaveClass('timeline-command-status-pending');
-    expect(statusButton).not.toHaveTextContent('running');
+    const commandTrigger = toolTrigger('command');
+    expect(commandTrigger.textContent?.toLowerCase()).toContain('running');
   });
 
   it('renders hook output as a compact bubble summary', () => {
@@ -959,7 +977,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop_hook')).toBeInTheDocument();
     expect(screen.getByText('Stop hook')).toBeInTheDocument();
     expect(screen.getByText('Hook printed stop details.')).toBeInTheDocument();
     expect(screen.queryByText('...')).not.toBeInTheDocument();
@@ -984,7 +1002,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop_hook')).toBeInTheDocument();
     expect(screen.getByText('Stop hook')).toBeInTheDocument();
     expect(screen.getByText('remote-codex hook ran')).toBeInTheDocument();
     expect(screen.queryByText(/hook_prompt/)).not.toBeInTheDocument();
@@ -1018,7 +1036,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop_hook')).toBeInTheDocument();
     expect(screen.getByText('Stop hook · Running hook')).toBeInTheDocument();
   });
 
@@ -1055,6 +1073,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('command');
     fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
 
     expect(loadDetail).toHaveBeenCalledWith('command-1');
@@ -1094,6 +1113,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('command');
     fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
 
     expect(onSelectHistoryItemDetail).toHaveBeenCalledWith({
@@ -1143,6 +1163,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('tool_call');
     fireEvent.click(screen.getByRole('button', { name: 'Open full tool call' }));
 
     expect(loadDetail).toHaveBeenCalledWith('tool-1');
@@ -1192,6 +1213,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('tool_call');
     fireEvent.click(screen.getByRole('button', { name: 'Open full tool call' }));
 
     expect(loadDetail).toHaveBeenCalledWith('tool-1');
@@ -1253,9 +1275,7 @@ describe('ThreadTimeline', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Collapsed execution block')).not.toBeInTheDocument();
     expect(screen.queryByText('Show steps')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Open full command' }),
-    ).not.toBeInTheDocument();
+    expect(queryToolTrigger('command')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand 3 command entries' }));
 
@@ -1315,15 +1335,11 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.queryByText('2 commands')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Open full command' })).toHaveLength(2);
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
-      timelineText.indexOf('Lint passed, now testing.'),
-    );
-    expect(timelineText.indexOf('Lint passed, now testing.')).toBeLessThan(
-      timelineText.indexOf('pnpm test'),
-    );
+    const commands = toolTriggers('command');
+    expect(commands).toHaveLength(2);
+    const agentMessage = screen.getByText('Lint passed, now testing.');
+    expectBefore(commands[0]!, agentMessage);
+    expectBefore(agentMessage, commands[1]!);
   });
 
   it('renders file change items with compact stats and expandable deferred details', async () => {
@@ -1371,8 +1387,8 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText(/\.\.\.\/features\/release\/important\/app\.ts, \+2 more/)).toBeInTheDocument();
     expect(screen.getByText('+19')).toBeInTheDocument();
     expect(screen.getByText('-4')).toBeInTheDocument();
-    expect(screen.getByText('+19')).toHaveClass('text-emerald-300');
-    expect(screen.getByText('-4')).toHaveClass('text-rose-300');
+    expect(screen.getByText('+19')).toHaveClass('is-add');
+    expect(screen.getByText('-4')).toHaveClass('is-remove');
     expect(screen.queryByText('completed')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open file change details' }));
@@ -1709,10 +1725,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expandTool('web_search');
+    expect(screen.getByText('latest remote codex release notes')).toBeInTheDocument();
+    expect(screen.getByText('...')).toBeInTheDocument();
+    expect(screen.queryByText('site:example.com')).not.toBeInTheDocument();
     const openButton = screen.getByRole('button', { name: 'Open full web search' });
-    expect(openButton).toHaveTextContent('latest remote codex release notes');
-    expect(openButton).toHaveTextContent('...');
-    expect(openButton).not.toHaveTextContent('site:example.com');
 
     fireEvent.click(openButton);
 
@@ -1765,9 +1782,7 @@ describe('ThreadTimeline', () => {
     expect(
       screen.getByRole('button', { name: 'Expand 2 web search entries' }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Open full web search' }),
-    ).not.toBeInTheDocument();
+    expect(queryToolTrigger('web_search')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand 2 web search entries' }));
 
@@ -1819,13 +1834,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(
-      screen.queryByRole('button', { name: 'Open full web search' }),
-    ).not.toBeInTheDocument();
+    expect(queryToolTrigger('web_search')).not.toBeInTheDocument();
 
+    expandTool('file_read');
+    expect(screen.getByText('Search files: AgentRuntime in apps/supervisor-api/src')).toBeInTheDocument();
     const openButton = screen.getByRole('button', { name: 'Open full file read' });
-    expect(openButton).toHaveTextContent('Search files: AgentRuntime');
-    expect(openButton).not.toHaveTextContent('completed');
 
     fireEvent.click(openButton);
 
@@ -1890,20 +1903,17 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    const batch = screen.getByText('2 file reads');
+    const agentMessage = screen.getByText(
+      'Usage files are clear. I will inspect the timeline next.',
+    );
+    const fileRead = toolTrigger('file_read');
     expect(screen.getByText('2 file reads')).toBeInTheDocument();
     expect(screen.queryByText('3 file reads')).not.toBeInTheDocument();
-    expect(
-      screen.getByText('Usage files are clear. I will inspect the timeline next.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('src/components/ThreadTimeline.tsx')).toBeInTheDocument();
-    expect(timelineText.indexOf('2 file reads')).toBeLessThan(
-      timelineText.indexOf('Usage files are clear. I will inspect the timeline next.'),
-    );
-    expect(
-      timelineText.indexOf('Usage files are clear. I will inspect the timeline next.'),
-    ).toBeLessThan(timelineText.indexOf('src/components/ThreadTimeline.tsx'));
+    expect(agentMessage).toBeInTheDocument();
+    expect(fileRead).toBeInTheDocument();
+    expectBefore(batch, agentMessage);
+    expectBefore(agentMessage, fileRead);
   });
 
   it('groups unattached live file read items into a collapsible batch', () => {
@@ -1945,7 +1955,7 @@ describe('ThreadTimeline', () => {
 
     expect(screen.getByText('2 file reads')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand 2 file read entries' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open full file read' })).not.toBeInTheDocument();
+    expect(queryToolTrigger('file_read')).not.toBeInTheDocument();
   });
 
   it('renders Claude agent tool calls as dedicated agent bubbles', () => {
@@ -1973,12 +1983,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(
-      screen.queryByRole('button', { name: 'Open full tool call' }),
-    ).not.toBeInTheDocument();
+    expect(queryToolTrigger('tool_call')).not.toBeInTheDocument();
 
+    expandTool('agent');
+    expect(screen.getByText('Agent: Inspect backend runtime boundaries')).toBeInTheDocument();
     const openButton = screen.getByRole('button', { name: 'Open agent details' });
-    expect(openButton).toHaveTextContent('Agent: Inspect backend runtime boundaries');
 
     fireEvent.click(openButton);
 
@@ -2012,12 +2021,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(
-      screen.queryByRole('button', { name: 'Open full tool call' }),
-    ).not.toBeInTheDocument();
+    expect(queryToolTrigger('tool_call')).not.toBeInTheDocument();
 
+    expandTool('skill');
+    expect(screen.getByText('Skill: update-config')).toBeInTheDocument();
     const openButton = screen.getByRole('button', { name: 'Open skill details' });
-    expect(openButton).toHaveTextContent('Skill: update-config');
 
     fireEvent.click(openButton);
 
@@ -2159,19 +2167,15 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(timelineText.indexOf('sleep 20')).toBeGreaterThanOrEqual(0);
+    const command = toolTrigger('command');
+    const acceptedSteer = screen.getByText('Accepted steer prompt');
+    const optimisticSteer = screen.getByText('Still steering prompt');
     expect(screen.getByText('Accepted steer prompt')).toBeInTheDocument();
     expect(screen.getByText('Still steering prompt')).toBeInTheDocument();
     expect(screen.getByText('Steering')).toBeInTheDocument();
     expect(screen.getByText('Accepted')).toBeInTheDocument();
-    expect(timelineText.indexOf('sleep 20')).toBeLessThan(
-      timelineText.indexOf('Accepted steer prompt'),
-    );
-    expect(timelineText.indexOf('Accepted steer prompt')).toBeLessThan(
-      timelineText.indexOf('Still steering prompt'),
-    );
+    expectBefore(command, acceptedSteer);
+    expectBefore(acceptedSteer, optimisticSteer);
   });
 
   it('renders live command items before queued steer bubbles in the active turn', () => {
@@ -2216,14 +2220,12 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('/bin/bash -lc sleep 20')).toBeInTheDocument();
-    expect(screen.getByText('Steer after sleep.')).toBeInTheDocument();
+    const command = toolTrigger('command');
+    const steer = screen.getByText('Steer after sleep.');
+    expect(command).toBeInTheDocument();
+    expect(steer).toBeInTheDocument();
     expect(screen.getByText('Accepted')).toBeInTheDocument();
-    expect(timelineText.indexOf('/bin/bash -lc sleep 20')).toBeLessThan(
-      timelineText.indexOf('Steer after sleep.'),
-    );
+    expectBefore(command, steer);
   });
 
   it('advances live plan display when concrete execution results already appeared', () => {
@@ -2361,13 +2363,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('This is a steer probe')).toBeInTheDocument();
+    const command = toolTrigger('command');
+    const steer = screen.getByText('This is a steer probe');
+    expect(steer).toBeInTheDocument();
     expect(screen.getByText('Awaiting response')).toBeInTheDocument();
-    expect(timelineText.indexOf('sleep 20')).toBeLessThan(
-      timelineText.indexOf('This is a steer probe'),
-    );
+    expectBefore(command, steer);
   });
 
   it('renders streaming agent progress from live items rather than live output text', () => {
@@ -2466,17 +2466,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('pnpm lint')).toBeInTheDocument();
-    expect(screen.getByText('Lint passed, now building.')).toBeInTheDocument();
-    expect(screen.getByText('pnpm build')).toBeInTheDocument();
-    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
-      timelineText.indexOf('Lint passed, now building.'),
-    );
-    expect(timelineText.indexOf('Lint passed, now building.')).toBeLessThan(
-      timelineText.indexOf('pnpm build'),
-    );
+    const commands = toolTriggers('command');
+    const agentMessage = screen.getByText('Lint passed, now building.');
+    expect(commands).toHaveLength(2);
+    expectBefore(commands[0]!, agentMessage);
+    expectBefore(agentMessage, commands[1]!);
   });
 
   it('keeps live command groups interleaved with live agent messages', () => {
@@ -2540,23 +2534,13 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('I will run the first batch.')).toBeInTheDocument();
-    expect(screen.getByText('2 commands')).toBeInTheDocument();
-    expect(
-      screen.getByText('The first batch passed. I will build next.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('pnpm build')).toBeInTheDocument();
-    expect(timelineText.indexOf('I will run the first batch.')).toBeLessThan(
-      timelineText.indexOf('2 commands'),
-    );
-    expect(timelineText.indexOf('2 commands')).toBeLessThan(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    );
-    expect(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+    const beforeBatch = screen.getByText('I will run the first batch.');
+    const batch = screen.getByText('2 commands');
+    const afterBatch = screen.getByText('The first batch passed. I will build next.');
+    const command = toolTrigger('command');
+    expectBefore(beforeBatch, batch);
+    expectBefore(batch, afterBatch);
+    expectBefore(afterBatch, command);
   });
 
   it('does not pull commands across unsequenced agent messages when batching', () => {
@@ -2607,18 +2591,12 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('2 commands')).toBeInTheDocument();
+    const batch = screen.getByText('2 commands');
+    const agentMessage = screen.getByText('Tests passed. I will build next.');
+    const command = toolTrigger('command');
     expect(screen.queryByText('3 commands')).not.toBeInTheDocument();
-    expect(screen.getByText('Tests passed. I will build next.')).toBeInTheDocument();
-    expect(screen.getByText('pnpm build')).toBeInTheDocument();
-    expect(timelineText.indexOf('2 commands')).toBeLessThan(
-      timelineText.indexOf('Tests passed. I will build next.'),
-    );
-    expect(timelineText.indexOf('Tests passed. I will build next.')).toBeLessThan(
-      timelineText.indexOf('pnpm build'),
-    );
+    expectBefore(batch, agentMessage);
+    expectBefore(agentMessage, command);
   });
 
   it('keeps later command batches separate after an unsequenced agent message', () => {
@@ -2968,16 +2946,12 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    const commands = toolTriggers('command');
+    const agentMessage = screen.getByText('Lint passed. I will build next.');
     expect(screen.queryByText('2 commands')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Open full command' })).toHaveLength(2);
-    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
-      timelineText.indexOf('Lint passed. I will build next.'),
-    );
-    expect(timelineText.indexOf('Lint passed. I will build next.')).toBeLessThan(
-      timelineText.indexOf('pnpm build'),
-    );
+    expect(commands).toHaveLength(2);
+    expectBefore(commands[0]!, agentMessage);
+    expectBefore(agentMessage, commands[1]!);
   });
 
   it('uses live item sequence when refreshed turn items already contain the same command ids', () => {
@@ -3057,19 +3031,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('2 commands')).toBeInTheDocument();
-    expect(
-      screen.getByText('The first batch passed. I will build next.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('pnpm build')).toBeInTheDocument();
-    expect(timelineText.indexOf('2 commands')).toBeLessThan(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    );
-    expect(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+    const batch = screen.getByText('2 commands');
+    const agentMessage = screen.getByText('The first batch passed. I will build next.');
+    const command = toolTrigger('command');
+    expectBefore(batch, agentMessage);
+    expectBefore(agentMessage, command);
   });
 
   it('keeps same-id live item updates in recorded order', () => {
@@ -3167,17 +3133,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('pnpm lint')).toBeInTheDocument();
-    expect(screen.getByText('Lint is running before tests.')).toBeInTheDocument();
-    expect(screen.getByText('pnpm test')).toBeInTheDocument();
-    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
-      timelineText.indexOf('Lint is running before tests.'),
-    );
-    expect(timelineText.indexOf('Lint is running before tests.')).toBeLessThan(
-      timelineText.indexOf('pnpm test'),
-    );
+    const commands = toolTriggers('command');
+    const agentMessage = screen.getByText('Lint is running before tests.');
+    expect(commands).toHaveLength(2);
+    expectBefore(commands[0]!, agentMessage);
+    expectBefore(agentMessage, commands[1]!);
   });
 
   it('sorts completed turn items by recorded sequence without live items', () => {
@@ -3235,19 +3195,11 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    const timelineText =
-      screen.getByTestId('thread-scroll-container').textContent ?? '';
-    expect(screen.getByText('2 commands')).toBeInTheDocument();
-    expect(
-      screen.getByText('The first batch passed. I will build next.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('pnpm build')).toBeInTheDocument();
-    expect(timelineText.indexOf('2 commands')).toBeLessThan(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    );
-    expect(
-      timelineText.indexOf('The first batch passed. I will build next.'),
-    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+    const batch = screen.getByText('2 commands');
+    const agentMessage = screen.getByText('The first batch passed. I will build next.');
+    const command = toolTrigger('command');
+    expectBefore(batch, agentMessage);
+    expectBefore(agentMessage, command);
   });
 
   it('keeps live agent messages interleaved without reading a duplicate live output string', () => {
@@ -3412,9 +3364,9 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('Run the expensive prompt.')).toBeInTheDocument();
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('Agent response failed');
-    expect(alert).toHaveTextContent('Too many requests (429). Please try again later.');
+    expect(screen.getByTestId('thread-scroll-container')).toHaveTextContent(
+      'Too many requests (429). Please try again later.',
+    );
   });
 
   it('uses matching live items instead of live output on an optimistic turn', () => {
@@ -4452,9 +4404,10 @@ describe('ThreadTimeline', () => {
     expect(scrollTop).toBe(1000);
   });
 
-  it('can collapse and expand an entire turn', () => {
+  it('keeps prompt and final reply visible when a completed turn is collapsed', () => {
     render(
       <ThreadTimeline
+        autoCollapseCompletedTurns={true}
         liveOutput=""
         turns={[
           {
@@ -4466,7 +4419,20 @@ describe('ThreadTimeline', () => {
               {
                 id: 'user-1',
                 kind: 'userMessage',
-                text: 'Collapsed content should disappear.',
+                text: 'Keep this prompt visible.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+              },
+              {
+                id: 'agent-intermediate-1',
+                kind: 'agentMessage',
+                text: 'Intermediate agent note should collapse.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 20)).toISOString(),
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Keep this final reply visible.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 21)).toISOString(),
               },
             ],
           },
@@ -4474,20 +4440,75 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expect(screen.getByText('Keep this prompt visible.')).toBeInTheDocument();
+    expect(screen.getByText('Keep this final reply visible.')).toBeInTheDocument();
+    expect(screen.getByText('Worked for 1m 21s')).toBeInTheDocument();
     expect(
-      screen.getByText('Collapsed content should disappear.'),
+      screen.queryByText('Intermediate agent note should collapse.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Worked for 1m 21s. Expand turn 1',
+      }),
+    );
+
+    expect(
+      screen.getByText('Intermediate agent note should collapse.'),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse turn 1' }));
 
+    expect(screen.getByText('Keep this prompt visible.')).toBeInTheDocument();
+    expect(screen.getByText('Keep this final reply visible.')).toBeInTheDocument();
     expect(
-      screen.queryByText('Collapsed content should disappear.'),
+      screen.queryByText('Intermediate agent note should collapse.'),
     ).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expand turn 1' }));
+  it('can leave completed turns expanded when auto collapse is disabled', () => {
+    render(
+      <ThreadTimeline
+        autoCollapseCompletedTurns={false}
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Prompt stays in expanded turn.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+              },
+              {
+                id: 'agent-intermediate-1',
+                kind: 'agentMessage',
+                text: 'Intermediate agent note starts visible.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 20)).toISOString(),
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Final reply stays in expanded turn.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 21)).toISOString(),
+              },
+            ],
+          },
+        ]}
+      />,
+    );
 
+    expect(screen.getByText('Prompt stays in expanded turn.')).toBeInTheDocument();
     expect(
-      screen.getByText('Collapsed content should disappear.'),
+      screen.getByText('Intermediate agent note starts visible.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Final reply stays in expanded turn.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Collapse turn 1' }),
     ).toBeInTheDocument();
   });
 

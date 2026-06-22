@@ -30,6 +30,20 @@ function parseUuidV7Timestamp(id: string): string | null {
   return new Date(millis).toISOString();
 }
 
+function normalizeHistoryItemCreatedAt(
+  item: ThreadHistoryItemDto,
+  fallback: string | null,
+): ThreadHistoryItemDto {
+  if (item.createdAt) {
+    return item;
+  }
+
+  return {
+    ...item,
+    createdAt: parseUuidV7Timestamp(item.id) ?? fallback,
+  };
+}
+
 function summarizeText(text: string, fallback: string) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   while (lines.length > 1 && lines.at(-1)?.trim() === '') {
@@ -577,15 +591,19 @@ export function agentTurnToThreadTurnDto(
   turn: AgentTurn,
   deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadTurnDto {
+  const startedAt = turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId);
   const baseTurn: ThreadTurnDto = {
     id: turn.providerTurnId,
-    startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
+    startedAt,
     status: turn.status,
     error: turn.error?.message ?? null,
     items: visibleRuntimeTurnItems(turn.items).map((item, transcriptIndex) =>
-      item.transcriptOrder === transcriptIndex
-        ? item
-        : { ...item, transcriptOrder: transcriptIndex },
+      normalizeHistoryItemCreatedAt(
+        item.transcriptOrder === transcriptIndex
+          ? item
+          : { ...item, transcriptOrder: transcriptIndex },
+        startedAt,
+      ),
     ),
   };
 
