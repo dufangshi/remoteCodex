@@ -49,7 +49,6 @@ RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
   REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
   REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
   bash ./scripts/setup-thread-ui-git-auth.sh \
-  && git clone --depth 1 --branch "${REMOTE_CODEX_THREAD_UI_REF}" "${REMOTE_CODEX_THREAD_UI_REPO}" /opt/remote-codex-thread-ui \
   && pnpm install --frozen-lockfile \
   && pnpm --filter @remote-codex/supervisor-api build \
   && pnpm --filter @remote-codex/db build \

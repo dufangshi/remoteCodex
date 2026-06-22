@@ -6,7 +6,8 @@ key="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY:-}"
 ssh_dir="${HOME}/.ssh"
 key_path="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_PATH:-${ssh_dir}/remote_codex_thread_ui_deploy_key}"
 key_file="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE:-}"
-repo_url="${REMOTE_CODEX_THREAD_UI_REPO_URL:-https://github.com/dufangshi/remote-codex-thread-ui.git}"
+repo_url="${REMOTE_CODEX_THREAD_UI_REPO_URL:-${REMOTE_CODEX_THREAD_UI_REPO:-https://github.com/dufangshi/remote-codex-thread-ui.git}}"
+repo_ref="${REMOTE_CODEX_THREAD_UI_REF:-}"
 repo_root="${GITHUB_WORKSPACE:-}"
 
 if [[ -z "${repo_root}" ]]; then
@@ -69,7 +70,11 @@ fi
 
 if [[ ! -d "${thread_ui_dir}/.git" ]]; then
   rm -rf "${thread_ui_dir}"
-  git clone --depth 1 "${repo_url}" "${thread_ui_dir}"
+  clone_args=(--depth 1)
+  if [[ -n "${repo_ref}" ]]; then
+    clone_args+=(--branch "${repo_ref}")
+  fi
+  git clone "${clone_args[@]}" "${repo_url}" "${thread_ui_dir}"
 fi
 
 if [[ ! -d "${thread_ui_dir}/packages/thread-ui" ]]; then
