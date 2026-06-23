@@ -134,6 +134,8 @@ const PREVIEW_DEFAULT_LIMIT_BYTES = 50_000;
 const WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_FOLDER_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024;
 const WORKSPACE_FOLDER_DOWNLOAD_MAX_FILES = 300;
+const WORKSPACE_TREE_DIRECTORY_ENTRY_LIMIT = 400;
+const WORKSPACE_TREE_DIRECTORY_SCAN_LIMIT = 2_000;
 const WORKSPACE_TREE_IGNORED_NAMES = new Set([
   '.git',
   'node_modules',
@@ -240,7 +242,6 @@ async function resolveWorkspaceItemPath(rootPath: string, relativePath = '') {
 async function buildWorkspaceTreeNode(
   rootPath: string,
   absPath: string,
-  depth = 0,
 ): Promise<ThreadWorkspaceTreeNodeDto> {
   const stats = await fs.stat(absPath);
   const relativePath = relativeWorkspacePath(rootPath, absPath);
@@ -259,43 +260,70 @@ async function buildWorkspaceTreeNode(
     name,
     path: relativePath,
     kind: 'directory',
+    childrenLoaded: true,
     children: []
   };
 
-  if (depth >= 6) {
-    return node;
-  }
-
-  let entries: Dirent<string>[];
+  const visible: Dirent<string>[] = [];
   try {
-    entries = await fs.readdir(absPath, { withFileTypes: true });
+    const directory = await fs.opendir(absPath);
+    let scanned = 0;
+    for await (const entry of directory) {
+      scanned += 1;
+      if (scanned > WORKSPACE_TREE_DIRECTORY_SCAN_LIMIT) {
+        node.truncated = true;
+        break;
+      }
+      if (entry.name.startsWith('.') || WORKSPACE_TREE_IGNORED_NAMES.has(entry.name)) {
+        continue;
+      }
+      if (!entry.isDirectory() && !entry.isFile()) {
+        continue;
+      }
+      if (visible.length >= WORKSPACE_TREE_DIRECTORY_ENTRY_LIMIT) {
+        node.truncated = true;
+        break;
+      }
+      visible.push(entry);
+    }
   } catch {
     return node;
   }
 
-  const visible = entries
-    .filter((entry) => !entry.name.startsWith('.'))
-    .filter((entry) => !WORKSPACE_TREE_IGNORED_NAMES.has(entry.name))
-    .sort((left, right) => {
-      if (left.isDirectory() && !right.isDirectory()) {
-        return -1;
-      }
-      if (!left.isDirectory() && right.isDirectory()) {
-        return 1;
-      }
-      return left.name.localeCompare(right.name);
-    })
-    .slice(0, 400);
+  node.hasChildren = visible.length > 0;
+
+  visible.sort((left, right) => {
+    if (left.isDirectory() && !right.isDirectory()) {
+      return -1;
+    }
+    if (!left.isDirectory() && right.isDirectory()) {
+      return 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
 
   node.children = (
     await Promise.all(
-      visible.map(async (entry) => {
+      visible.map(async (entry): Promise<ThreadWorkspaceTreeNodeDto | null> => {
         const childPath = path.join(absPath, entry.name);
         try {
-          if (!entry.isDirectory() && !entry.isFile()) {
-            return null;
+          const childRelativePath = relativeWorkspacePath(rootPath, childPath);
+          if (entry.isDirectory()) {
+            return {
+              name: entry.name,
+              path: childRelativePath,
+              kind: 'directory' as const,
+              hasChildren: true,
+              childrenLoaded: false,
+            };
           }
-          return await buildWorkspaceTreeNode(rootPath, childPath, depth + 1);
+          const childStats = await fs.stat(childPath);
+          return {
+            name: entry.name,
+            path: childRelativePath,
+            kind: 'file' as const,
+            size: childStats.size,
+          };
         } catch {
           return null;
         }

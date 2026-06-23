@@ -3486,7 +3486,8 @@ export function ThreadDetailPage() {
     }
 
     return {
-      listTree: () => fetchWorkspaceFileTree(workspaceId),
+      listTree: (input) =>
+        fetchWorkspaceFileTree(workspaceId, { path: input.path ?? '' }),
       readFile: (input) =>
         fetchWorkspaceFilePreview(workspaceId, {
           path: input.path,

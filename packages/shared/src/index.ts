@@ -482,6 +482,9 @@ export interface ThreadWorkspaceTreeNodeDto {
   path: string;
   kind: 'file' | 'directory';
   size?: number;
+  hasChildren?: boolean;
+  childrenLoaded?: boolean;
+  truncated?: boolean;
   children?: ThreadWorkspaceTreeNodeDto[];
 }
 

@@ -1413,9 +1413,17 @@ export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
 }
 
-export function fetchWorkspaceFileTree(workspaceId: string) {
+export function fetchWorkspaceFileTree(
+  workspaceId: string,
+  input: { path?: string | null } = {},
+) {
+  const params = new URLSearchParams();
+  if (input.path) {
+    params.set('path', input.path);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return request<ThreadWorkspaceTreeNodeDto>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree${suffix}`,
     {
       cache: 'no-store',
     },

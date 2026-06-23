@@ -3371,6 +3371,91 @@ describe('supervisor api', () => {
     });
   });
 
+  it('loads workspace file trees one directory level at a time', async () => {
+    const workspaceRoot = path.join(tempDir, 'workspace');
+    await fs.mkdir(path.join(workspaceRoot, 'src', 'nested'), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, 'src', 'index.ts'), 'export {};');
+    await fs.writeFile(path.join(workspaceRoot, 'src', 'nested', 'deep.ts'), 'export {};');
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspaceRoot,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspace = workspaceResponse.json();
+
+    const rootResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspace.id}/files/tree`,
+    });
+    expect(rootResponse.statusCode).toBe(200);
+    const rootTree = rootResponse.json();
+    const srcNode = rootTree.children.find((node: { name: string }) => node.name === 'src');
+    expect(srcNode).toMatchObject({
+      kind: 'directory',
+      path: 'src',
+      hasChildren: true,
+      childrenLoaded: false,
+    });
+    expect(srcNode.children).toBeUndefined();
+
+    const srcResponse = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspace.id}/files/tree?path=${encodeURIComponent('src')}`,
+    });
+    expect(srcResponse.statusCode).toBe(200);
+    const srcTree = srcResponse.json();
+    expect(srcTree).toMatchObject({
+      kind: 'directory',
+      path: 'src',
+      childrenLoaded: true,
+    });
+    expect(srcTree.children.map((node: { path: string }) => node.path)).toContain('src/index.ts');
+    const nestedNode = srcTree.children.find((node: { name: string }) => node.name === 'nested');
+    expect(nestedNode).toMatchObject({
+      path: 'src/nested',
+      kind: 'directory',
+      childrenLoaded: false,
+    });
+    expect(nestedNode.children).toBeUndefined();
+  });
+
+  it('caps workspace file tree directory listings', async () => {
+    const workspaceRoot = path.join(tempDir, 'workspace');
+    const manyRoot = path.join(workspaceRoot, 'many');
+    await fs.mkdir(manyRoot);
+    await Promise.all(
+      Array.from({ length: 401 }, (_, index) =>
+        fs.writeFile(path.join(manyRoot, `file-${String(index).padStart(3, '0')}.txt`), 'x'),
+      ),
+    );
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspaceRoot,
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspace = workspaceResponse.json();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspace.id}/files/tree?path=${encodeURIComponent('many')}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      path: 'many',
+      truncated: true,
+    });
+    expect(response.json().children).toHaveLength(400);
+  });
+
   it('updates a workspace label', async () => {
     const createResponse = await app.inject({
       method: 'POST',
