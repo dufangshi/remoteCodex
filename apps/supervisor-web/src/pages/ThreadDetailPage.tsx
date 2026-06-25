@@ -9,14 +9,9 @@ import {
   SandboxModeDto,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
-  ThreadExportTurnOptionsDto,
-  ThreadHooksDto,
   ThreadHistoryItemDto,
-  ThreadMcpServersDto,
-  ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
-  ThreadForkTurnOptionDto,
   ThreadTurnPriceEstimateDto,
   ThreadTurnTokenUsageDto,
   truncateAutoThreadTitle,
@@ -36,7 +31,6 @@ import {
   type ThreadComposerProps,
   type ThreadTimelineProps,
   type ThreadGraphWorkspaceFeatures,
-  type ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import {
   formatLongTimestamp,
@@ -45,52 +39,32 @@ import {
 import { usePlugins } from '@remote-codex/thread-ui';
 import {
   ApiError,
-  buildThreadPdfExportUrl,
   compactThread,
   connectSupervisorEvents,
   connectShellSocket,
-  createThreadHook,
   createThreadShell,
-  clearThreadGoal,
   disconnectThread,
-  downloadThreadTranscriptExport,
   deleteThread,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
   fetchProviderHostFile,
-  fetchWorkspaceFilePreview,
-  fetchWorkspaceFileTree,
-  fetchThreadForkTurns,
-  fetchThreadGoal,
-  fetchThreadHooks,
-  fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
   fetchThreadShellState,
-  fetchThreadSkills,
   fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
-  fetchThreadExportTurns,
-  forkThread,
   interruptThread,
   respondToThreadRequest,
   resumeThread,
   sendThreadPrompt,
   type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
-  trustThreadHook,
   updateThread,
   updateShell,
   updateProviderHostFile,
-  updateThreadGoal,
-  updateThreadHook,
   updateThreadSettings,
   terminateShell,
-  untrustThreadHook,
-  uploadWorkspaceFile,
-  writeWorkspaceFile,
-  downloadWorkspaceFile,
-  buildWorkspaceRawFileUrl,
+  buildThreadImageAssetUrl,
 } from '../lib/api';
 import {
   appendLatestTurns,
@@ -113,9 +87,13 @@ import {
   reconcileLiveItemsWithDetail,
   removePendingRequestFromDetail,
   turnHasPhotoAttachment,
+  promptHasPhotoPlaceholder,
   turnHasPhotoPromptText,
   turnHasUserMessage,
 } from './threadDetailModel';
+import { useMobileComposerLayout } from './useMobileComposerLayout';
+import { useThreadAuxiliaryActions } from './useThreadAuxiliaryActions';
+import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
 
 const INITIAL_DETAIL_TURN_PAGE_SIZE = 3;
 const DETAIL_TURN_PAGE_SIZE = 10;
@@ -125,14 +103,6 @@ const SUPERVISOR_CONNECTION_STALE_MS = 5_500;
 const ACTIVE_THREAD_REFRESH_INTERVAL_MS = 3_000;
 const SOCKET_CONNECTING = 0;
 
-type ThreadWorkspaceAdapterWithWrite = ThreadWorkspaceAdapter & {
-  writeFile?: (input: {
-    threadId: string;
-    workspaceId?: string | null;
-    path: string;
-    content: string;
-  }) => Promise<void> | void;
-};
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
 const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
@@ -177,11 +147,17 @@ interface OptimisticTurnState {
   status: 'sending' | 'inProgress' | 'failed';
   error: string | null;
   prompt: string;
+  attachmentPreviews: OptimisticAttachmentPreview[];
   model: string | null;
   reasoningEffort: ThreadDetailDto['thread']['reasoningEffort'];
   reasoningEffortAvailable: boolean | null;
   tokenUsage: ThreadTurnTokenUsageDto | null;
   priceEstimate: ThreadTurnPriceEstimateDto | null;
+}
+
+interface OptimisticAttachmentPreview {
+  path: string;
+  url: string;
 }
 
 interface OptimisticSteerState {
@@ -193,18 +169,54 @@ interface OptimisticSteerState {
   status: 'steering' | 'accepted';
 }
 
-interface SlashPanelState<T> {
-  status: 'idle' | 'loading' | 'ready' | 'failed';
-  data: T | null;
-  error: string | null;
-}
-
 type PendingThreadSettings = Partial<
   Pick<
     ThreadDto,
     'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode' | 'sandboxMode'
   >
 >;
+
+function photoPlaceholderPath(placeholder: string) {
+  return placeholder.match(/^\[PHOTO\s+([^\]]+)\]$/)?.[1]?.trim() ?? null;
+}
+
+function buildOptimisticAttachmentPreviews(
+  attachments: PromptAttachmentUpload[] | undefined,
+): OptimisticAttachmentPreview[] {
+  if (!attachments?.length || typeof URL.createObjectURL !== 'function') {
+    return [];
+  }
+
+  return attachments.flatMap((attachment) => {
+    if (attachment.kind !== 'photo') {
+      return [];
+    }
+
+    const path = photoPlaceholderPath(attachment.placeholder);
+    if (!path) {
+      return [];
+    }
+
+    return [
+      {
+        path,
+        url: URL.createObjectURL(attachment.file),
+      },
+    ];
+  });
+}
+
+function revokeOptimisticAttachmentPreviews(
+  previews: OptimisticAttachmentPreview[],
+) {
+  if (typeof URL.revokeObjectURL !== 'function') {
+    return;
+  }
+
+  for (const preview of previews) {
+    URL.revokeObjectURL(preview.url);
+  }
+}
 
 function CopyIcon() {
   return (
@@ -371,7 +383,7 @@ export function ThreadDetailPage() {
   );
   const getThreadImageAssetUrl = useCallback(
     ({ threadId, path }: { threadId: string; path: string }) =>
-      `/api/threads/${threadId}/assets/image?path=${encodeURIComponent(path)}`,
+      buildThreadImageAssetUrl(threadId, { path }),
     [],
   );
   const [chatDraft, setChatDraft] = useState<{
@@ -381,11 +393,6 @@ export function ThreadDetailPage() {
     prompt: '',
     attachments: [],
   });
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [mobileComposerHeight, setMobileComposerHeight] = useState(0);
-  const [mobileComposerOverlap, setMobileComposerOverlap] = useState(0);
-  const [mobileKeyboardInset, setMobileKeyboardInset] = useState(0);
-  const [mobilePromptFocused, setMobilePromptFocused] = useState(false);
   const [shellControlState, setShellControlState] =
     useState<ThreadShellControlState | null>(null);
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
@@ -407,55 +414,58 @@ export function ThreadDetailPage() {
   const [optimisticSteers, setOptimisticSteers] = useState<OptimisticSteerState[]>(
     [],
   );
-  const [skillsState, setSkillsState] = useState<SlashPanelState<ThreadSkillsDto>>({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
-  const [mcpState, setMcpState] = useState<SlashPanelState<ThreadMcpServersDto>>({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
-  const [hooksState, setHooksState] = useState<SlashPanelState<ThreadHooksDto>>({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
-  const [forkTurnOptionsState, setForkTurnOptionsState] = useState<
-    SlashPanelState<ThreadForkTurnOptionDto[]>
-  >({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
-  const [goalState, setGoalState] = useState<
-    SlashPanelState<ThreadDetailDto['goal']>
-  >({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
-  const [goalMonitorOpen, setGoalMonitorOpen] = useState(false);
-  const [goalActionBusy, setGoalActionBusy] = useState(false);
-  const [expandedGoalIds, setExpandedGoalIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportBusy, setExportBusy] = useState(false);
-  const [exportTurnsState, setExportTurnsState] = useState<
-    SlashPanelState<ThreadExportTurnOptionsDto>
-  >({
-    status: 'idle',
-    data: null,
-    error: null,
-  });
+  useEffect(() => {
+    const previews = optimisticTurn?.attachmentPreviews ?? [];
+    return () => {
+      revokeOptimisticAttachmentPreviews(previews);
+    };
+  }, [optimisticTurn]);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mcpProviderConfigFileName =
     backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
       ?.name ?? null;
+  const {
+    expandedGoalIds,
+    exportBusy,
+    exportDialogOpen,
+    exportTurnsState,
+    forkTurnOptionsState,
+    goalActionBusy,
+    goalMonitorOpen,
+    goalState,
+    handleCreateHook,
+    handleExportTranscript,
+    handleForkLatest,
+    handleForkTurn,
+    handleGoalStatusAction,
+    handleOpenForkTurns,
+    handleOpenGoal,
+    handleOpenHooks,
+    handleOpenMcp,
+    handleOpenSkills,
+    handleTerminateGoal,
+    handleTrustHook,
+    handleUntrustHook,
+    handleUpdateGoal,
+    handleUpdateHook,
+    hooksState,
+    loadExportTurns,
+    mcpState,
+    setExpandedGoalIds,
+    setExportDialogOpen,
+    setGoalMonitorOpen,
+    setGoalState,
+    skillsState,
+  } = useThreadAuxiliaryActions({
+    detailRef,
+    id,
+    navigate,
+    setDetail,
+    setError,
+    setThreads,
+  });
 
   const flushBufferedLiveOutput = useCallback(() => {
     const buffered = liveOutputBufferRef.current;
@@ -556,523 +566,6 @@ export function ThreadDetailPage() {
       liveOutputFrameRef.current = null;
     }
   }, []);
-
-  useEffect(() => {
-    setSkillsState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-    setMcpState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-    setHooksState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-    setForkTurnOptionsState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-    setGoalState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-    setExportDialogOpen(false);
-    setExportTurnsState({
-      status: 'idle',
-      data: null,
-      error: null,
-    });
-  }, [id]);
-
-  const loadExportTurns = useCallback(async () => {
-    if (!id) {
-      return;
-    }
-
-    setExportTurnsState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadExportTurns(id);
-      setExportTurnsState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      const message =
-        requestError instanceof ApiError
-          ? requestError.payload.message
-          : 'Unable to load export turns.';
-      setExportTurnsState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error: message,
-      }));
-    }
-  }, [id]);
-
-  async function handleExportTranscript(input: Parameters<typeof buildThreadPdfExportUrl>[1]) {
-    if (!id) {
-      return;
-    }
-
-    setError(null);
-    setExportBusy(true);
-
-    try {
-      const { blob, filename } = await downloadThreadTranscriptExport(id, input);
-      const href = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = href;
-      anchor.download = filename;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
-      setExportDialogOpen(false);
-    } catch (requestError) {
-      const message =
-        requestError instanceof ApiError
-          ? requestError.payload.message
-          : 'Unable to export transcript.';
-      setError(message);
-    } finally {
-      setExportBusy(false);
-    }
-  }
-
-  async function handleOpenGoal() {
-    if (!id) {
-      return;
-    }
-
-    setGoalState((current) => ({
-      status: 'loading',
-      data: current.data ?? detailRef.current?.goal ?? null,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadGoal(id);
-      setGoalState({
-        status: 'ready',
-        data: next.goal,
-        error: null,
-      });
-      setDetail((current) =>
-        current
-          ? next.goal
-            ? {
-                ...current,
-                goal: next.goal,
-                goalHistory: mergeGoalHistory(current.goalHistory ?? [], next.goal),
-              }
-            : {
-                ...current,
-                goal: next.goal,
-              }
-          : current,
-      );
-    } catch (requestError) {
-      setGoalState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to load goal.',
-      }));
-    }
-  }
-
-  async function handleUpdateGoal(input: {
-    objective?: string | null;
-    status?: NonNullable<ThreadDetailDto['goal']>['status'] | null;
-    tokenBudget?: number | null;
-  }) {
-    if (!id) {
-      return;
-    }
-
-    setGoalState((current) => ({
-      status: 'loading',
-      data: current.data ?? detailRef.current?.goal ?? null,
-      error: null,
-    }));
-
-    try {
-      const next = await updateThreadGoal(id, input);
-      setGoalState({
-        status: 'ready',
-        data: next.goal,
-        error: null,
-      });
-      setDetail((current) =>
-        current
-          ? next.goal
-            ? {
-                ...current,
-                goal: next.goal,
-                goalHistory: mergeGoalHistory(current.goalHistory ?? [], next.goal),
-              }
-            : {
-                ...current,
-                goal: next.goal,
-              }
-          : current,
-      );
-    } catch (requestError) {
-      setGoalState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to update goal.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleClearGoal() {
-    if (!id) {
-      return;
-    }
-
-    setGoalState((current) => ({
-      status: 'loading',
-      data: current.data ?? detailRef.current?.goal ?? null,
-      error: null,
-    }));
-
-    try {
-      const next = await clearThreadGoal(id);
-      setGoalState({
-        status: 'ready',
-        data: null,
-        error: null,
-      });
-      setDetail((current) =>
-        current
-          ? next.goalHistory
-            ? {
-                ...current,
-                goal: null,
-                goalHistory: next.goalHistory,
-              }
-            : {
-                ...current,
-                goal: null,
-              }
-          : current,
-      );
-    } catch (requestError) {
-      setGoalState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to clear goal.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleGoalStatusAction(
-    status: NonNullable<ThreadDetailDto['goal']>['status'],
-  ) {
-    setGoalActionBusy(true);
-    try {
-      await handleUpdateGoal({ status });
-    } finally {
-      setGoalActionBusy(false);
-    }
-  }
-
-  async function handleTerminateGoal() {
-    setGoalActionBusy(true);
-    try {
-      await handleClearGoal();
-    } finally {
-      setGoalActionBusy(false);
-    }
-  }
-
-  async function handleOpenSkills() {
-    if (!id) {
-      return;
-    }
-
-    setSkillsState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadSkills(id);
-      setSkillsState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setSkillsState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to load skills.',
-      }));
-    }
-  }
-
-  async function handleOpenMcp() {
-    if (!id) {
-      return;
-    }
-
-    setMcpState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadMcpServers(id);
-      setMcpState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setMcpState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to load MCP servers.',
-      }));
-    }
-  }
-
-  async function handleOpenHooks() {
-    if (!id) {
-      return;
-    }
-
-    setHooksState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadHooks(id);
-      setHooksState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setHooksState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to load hooks.',
-      }));
-    }
-  }
-
-  async function handleCreateHook(input: Parameters<typeof createThreadHook>[1]) {
-    if (!id) {
-      return;
-    }
-
-    setHooksState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await createThreadHook(id, input);
-      setHooksState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setHooksState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to create hook.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleUpdateHook(input: Parameters<typeof updateThreadHook>[1]) {
-    if (!id) {
-      return;
-    }
-
-    setHooksState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await updateThreadHook(id, input);
-      setHooksState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setHooksState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to update hook.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleTrustHook(input: Parameters<typeof trustThreadHook>[1]) {
-    if (!id) {
-      return;
-    }
-
-    setHooksState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await trustThreadHook(id, input);
-      setHooksState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setHooksState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to trust hook.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleUntrustHook(input: Parameters<typeof untrustThreadHook>[1]) {
-    if (!id) {
-      return;
-    }
-
-    setHooksState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await untrustThreadHook(id, input);
-      setHooksState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setHooksState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to untrust hook.',
-      }));
-      throw requestError;
-    }
-  }
-
-  async function handleOpenForkTurns() {
-    if (!id) {
-      return;
-    }
-
-    setForkTurnOptionsState((current) => ({
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }));
-
-    try {
-      const next = await fetchThreadForkTurns(id);
-      setForkTurnOptionsState({
-        status: 'ready',
-        data: next,
-        error: null,
-      });
-    } catch (requestError) {
-      setForkTurnOptionsState((current) => ({
-        status: 'failed',
-        data: current.data,
-        error:
-          requestError instanceof ApiError
-            ? requestError.payload.message
-            : 'Unable to load turns for forking.',
-      }));
-    }
-  }
-
-  async function handleForkLatest() {
-    if (!id) {
-      return;
-    }
-
-    const result = await forkThread(id, { mode: 'latest' });
-    setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
-    navigate(`/threads/${result.thread.thread.id}`);
-  }
-
-  async function handleForkTurn(turnId: string) {
-    if (!id) {
-      return;
-    }
-
-    const result = await forkThread(id, { mode: 'turn', turnId });
-    setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
-    navigate(`/threads/${result.thread.thread.id}`);
-  }
 
   const applyDetailResponse = useCallback(
     (detailResponse: ThreadDetailDto) => {
@@ -1208,7 +701,7 @@ export function ThreadDetailPage() {
           const materializedTurnHasPrompt =
             turnHasUserMessage(materializedTurn, current.prompt) ||
             (
-              current.prompt.includes('[PHOTO ') &&
+              promptHasPhotoPlaceholder(current.prompt) &&
               (
                 turnHasPhotoPromptText(materializedTurn, current.prompt) ||
                 turnHasPhotoAttachment(materializedTurn)
@@ -1235,7 +728,7 @@ export function ThreadDetailPage() {
         }
         if (
           !current.serverTurnId &&
-          current.prompt.includes('[PHOTO ') &&
+          promptHasPhotoPlaceholder(current.prompt) &&
           nextDetailWithLiveTimestamps.thread.activeTurnId &&
           nextDetailWithLiveTimestamps.thread.status === 'running'
         ) {
@@ -1477,147 +970,6 @@ export function ThreadDetailPage() {
       body.classList.remove('thread-detail-scroll-locked');
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return;
-    }
-
-    const mediaQuery = window.matchMedia('(max-width: 639px)');
-    const update = () => setIsMobileViewport(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener('change', update);
-    return () => {
-      mediaQuery.removeEventListener('change', update);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const updateKeyboardInset = () => {
-      const viewport = window.visualViewport;
-      const keyboardInset = viewport
-        ? Math.max(
-            0,
-            Math.round(window.innerHeight - viewport.height - viewport.offsetTop),
-          )
-        : 0;
-      setMobileKeyboardInset(keyboardInset);
-      document.documentElement.style.setProperty(
-        '--thread-detail-keyboard-inset',
-        `${keyboardInset}px`,
-      );
-    };
-
-    updateKeyboardInset();
-    window.visualViewport?.addEventListener('resize', updateKeyboardInset);
-    window.visualViewport?.addEventListener('scroll', updateKeyboardInset);
-    window.addEventListener('resize', updateKeyboardInset);
-
-    return () => {
-      window.visualViewport?.removeEventListener('resize', updateKeyboardInset);
-      window.visualViewport?.removeEventListener('scroll', updateKeyboardInset);
-      window.removeEventListener('resize', updateKeyboardInset);
-      document.documentElement.style.removeProperty('--thread-detail-keyboard-inset');
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    const updatePromptFocus = () => {
-      const activeElement = document.activeElement;
-      const host = composerHostRef.current;
-      const promptElement = host?.querySelector('[aria-label="Prompt"]');
-
-      setMobilePromptFocused(
-        Boolean(
-          activeElement &&
-            promptElement &&
-            (activeElement === promptElement || promptElement.contains(activeElement)),
-        ),
-      );
-    };
-
-    updatePromptFocus();
-    document.addEventListener('focusin', updatePromptFocus);
-    document.addEventListener('focusout', updatePromptFocus);
-
-    return () => {
-      document.removeEventListener('focusin', updatePromptFocus);
-      document.removeEventListener('focusout', updatePromptFocus);
-    };
-  }, [activeView, detail?.thread.id, isMobileViewport]);
-
-  useEffect(() => {
-    const node = composerHostRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const measuredNode =
-      (node.querySelector('form') as HTMLFormElement | null) ?? node;
-
-    const updateHeight = () => {
-      setMobileComposerHeight(
-        Math.max(
-          node.getBoundingClientRect().height,
-          measuredNode.getBoundingClientRect().height,
-        ),
-      );
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(() => {
-      updateHeight();
-    });
-    observer.observe(measuredNode);
-    return () => {
-      observer.disconnect();
-    };
-  }, [activeView, isMobileViewport]);
-
-  useEffect(() => {
-    const node = composerHostRef.current;
-    if (!node || !isMobileViewport || activeView !== 'chat') {
-      setMobileComposerOverlap(0);
-      return;
-    }
-
-    const updateOverlap = () => {
-      const rect = node.getBoundingClientRect();
-      setMobileComposerOverlap(Math.max(0, Math.ceil(window.innerHeight - rect.top)));
-    };
-
-    updateOverlap();
-    window.addEventListener('resize', updateOverlap);
-    window.visualViewport?.addEventListener('resize', updateOverlap);
-    window.visualViewport?.addEventListener('scroll', updateOverlap);
-
-    let observer: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(updateOverlap);
-      observer.observe(node);
-    }
-
-    return () => {
-      window.removeEventListener('resize', updateOverlap);
-      window.visualViewport?.removeEventListener('resize', updateOverlap);
-      window.visualViewport?.removeEventListener('scroll', updateOverlap);
-      observer?.disconnect();
-    };
-  }, [
-    activeView,
-    detail?.thread.id,
-    isMobileViewport,
-    mobileKeyboardInset,
-    mobilePromptFocused,
-  ]);
 
   useEffect(() => {
     void loadThreadDetail({
@@ -2302,6 +1654,7 @@ export function ThreadDetailPage() {
     const optimisticTurnId = `optimistic-${Date.now()}`;
     const optimisticSteerId = `optimistic-steer-${clientRequestId}`;
     const optimisticStartedAt = new Date().toISOString();
+    let optimisticAttachmentPreviews: OptimisticAttachmentPreview[] = [];
 
     try {
       let currentDetail = detailRef.current;
@@ -2376,6 +1729,9 @@ export function ThreadDetailPage() {
           },
         ]);
       } else {
+        optimisticAttachmentPreviews = buildOptimisticAttachmentPreviews(
+          input.attachments,
+        );
         clearBufferedLiveOutput();
         setLiveOutput('');
         setOptimisticTurn({
@@ -2385,6 +1741,7 @@ export function ThreadDetailPage() {
           status: 'sending',
           error: null,
           prompt: input.prompt,
+          attachmentPreviews: optimisticAttachmentPreviews,
           model: optimisticModel,
           reasoningEffort: optimisticReasoningEffort,
           reasoningEffortAvailable: getReasoningEffortAvailability(
@@ -2431,6 +1788,9 @@ export function ThreadDetailPage() {
           nextThread.lastTurnStartedAt !== currentEffectiveThread?.lastTurnStartedAt;
 
         if (fellBackToNewTurn) {
+          optimisticAttachmentPreviews = buildOptimisticAttachmentPreviews(
+            input.attachments,
+          );
           clearBufferedLiveOutput();
           setLiveOutput('');
           setLivePlan(null);
@@ -2444,6 +1804,7 @@ export function ThreadDetailPage() {
             status: 'inProgress',
             error: null,
             prompt: input.prompt,
+            attachmentPreviews: optimisticAttachmentPreviews,
             model: optimisticModel,
             reasoningEffort: optimisticReasoningEffort,
             reasoningEffortAvailable: getReasoningEffortAvailability(
@@ -2937,17 +2298,15 @@ export function ThreadDetailPage() {
       ? 'Restore this workspace path on the current machine before continuing.'
       : null
     : null;
-  const useFloatingMobileComposer = isMobileViewport && activeView === 'chat';
-  const floatingMobileComposerBottomOffset =
-    useFloatingMobileComposer && mobilePromptFocused ? mobileKeyboardInset : 0;
-  const effectiveMobileComposerHeight = Math.max(mobileComposerHeight, 144);
-  const effectiveMobileComposerOverlap = Math.max(
-    mobileComposerOverlap,
-    effectiveMobileComposerHeight + floatingMobileComposerBottomOffset,
-  );
-  const timelineBottomSpacer = useFloatingMobileComposer
-    ? effectiveMobileComposerOverlap + 12
-    : 0;
+  const {
+    floatingMobileComposerBottomOffset,
+    timelineBottomSpacer,
+    useFloatingMobileComposer,
+  } = useMobileComposerLayout({
+    activeView,
+    composerHostRef,
+    threadId: detail?.thread.id ?? id,
+  });
 
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
@@ -3061,7 +2420,7 @@ export function ThreadDetailPage() {
             const hasOptimisticPrompt =
               turnHasUserMessage(turn, optimisticTurn.prompt) ||
               (
-                optimisticTurn.prompt.includes('[PHOTO ') &&
+                promptHasPhotoPlaceholder(optimisticTurn.prompt) &&
                 (
                   turnHasPhotoPromptText(turn, optimisticTurn.prompt) ||
                   turnHasPhotoAttachment(turn)
@@ -3075,7 +2434,7 @@ export function ThreadDetailPage() {
                 turn.id === optimisticTurn.id ||
                 turnHasUserMessage(turn, optimisticTurn.prompt) ||
                 (
-                  optimisticTurn.prompt.includes('[PHOTO ') &&
+                  promptHasPhotoPlaceholder(optimisticTurn.prompt) &&
                   turnHasPhotoPromptText(turn, optimisticTurn.prompt)
                 )
               )
@@ -3101,6 +2460,12 @@ export function ThreadDetailPage() {
                 id: `${optimisticTurn.id}-user-message`,
                 kind: 'userMessage' as const,
                 text: optimisticTurn.prompt,
+                attachmentPreviewUrls: Object.fromEntries(
+                  optimisticTurn.attachmentPreviews.map((preview) => [
+                    preview.path,
+                    preview.url,
+                  ]),
+                ),
               },
             ],
           }
@@ -3479,57 +2844,10 @@ export function ThreadDetailPage() {
         : '',
     [detail?.thread.id, getThreadImageAssetUrl],
   );
-  const workspaceAdapter = useMemo<ThreadWorkspaceAdapterWithWrite | null>(() => {
-    const workspaceId = detail?.workspace.id ?? null;
-    if (!workspaceId) {
-      return null;
-    }
-
-    return {
-      listTree: (input) =>
-        fetchWorkspaceFileTree(workspaceId, { path: input.path ?? '' }),
-      readFile: (input) =>
-        fetchWorkspaceFilePreview(workspaceId, {
-          path: input.path,
-          ...(input.offset !== undefined ? { offset: input.offset } : {}),
-          ...(input.limit !== undefined ? { limit: input.limit } : {}),
-        }),
-      getRawFileUrl: (input) =>
-        buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
-      uploadFile: (input) =>
-        uploadWorkspaceFile(workspaceId, { file: input.file }),
-      writeFile: async (input) => {
-        await writeWorkspaceFile(workspaceId, {
-          path: input.path,
-          content: input.content,
-        });
-      },
-      downloadNode: async (input) => {
-        setError(null);
-        try {
-          const result = await downloadWorkspaceFile(workspaceId, {
-            path: input.path,
-          });
-          const url = URL.createObjectURL(result.blob);
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = result.filename;
-          document.body.append(anchor);
-          anchor.click();
-          anchor.remove();
-          URL.revokeObjectURL(url);
-        } catch (caught) {
-          setError(
-            caught instanceof ApiError
-              ? caught.payload.message
-              : caught instanceof Error
-                ? caught.message
-                : 'Workspace download failed.',
-          );
-        }
-      },
-    };
-  }, [detail?.workspace.id]);
+  const workspaceAdapter = useThreadWorkspaceAdapter({
+    setError,
+    workspaceId: detail?.workspace.id ?? null,
+  });
   const surfaceAdapter = useMemo(
     () => ({
       openThread,

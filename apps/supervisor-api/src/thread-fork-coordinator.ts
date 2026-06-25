@@ -2,7 +2,6 @@ import {
   createThreadForkRecord,
   createThreadRecord,
   getThreadRecordById,
-  listThreadTurnMetadataByThreadId,
   updateThreadRecord,
   type DatabaseClient,
 } from '../../../packages/db/src/index';
@@ -18,13 +17,10 @@ import type {
 } from '../../../packages/shared/src/index';
 import { HttpError } from './app';
 import {
-  normalizePricingTier,
-} from './thread-usage-accounting';
-import {
   ThreadDetailAssembler,
-  type ThreadTurnMetadataRecord,
 } from './thread-detail-assembler';
 import { ThreadSessionCoordinator } from './thread-session-coordinator';
+import { listThreadTurnMetadataMap } from './thread-turn-metadata';
 
 interface ThreadForkCallbacks {
   requireProviderSessionId(record: { providerSessionId?: string | null }): string;
@@ -71,20 +67,7 @@ export class ThreadForkCoordinator {
     }
     this.callbacks.requireProviderSessionId(record);
 
-    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
-      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
-        entry.turnId,
-        {
-          model: entry.model ?? null,
-          reasoningEffort: entry.reasoningEffort ?? null,
-          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
-          pricingModelKey: entry.pricingModelKey ?? null,
-          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
-          tokenUsageJson: entry.tokenUsageJson ?? null,
-          createdAt: entry.createdAt ?? null,
-        },
-      ]),
-    );
+    const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
     const cachedDetail = await this.detailAssembler.buildCacheEntry({
       localThreadId,
       record,

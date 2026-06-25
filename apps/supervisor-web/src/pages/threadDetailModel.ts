@@ -403,8 +403,14 @@ export function turnHasUserMessage(
   );
 }
 
+const PHOTO_PLACEHOLDER_PATTERN = /\s*\[(?:PHOTO\s+[^\]]+|localImage)\]\s*/g;
+
+export function promptHasPhotoPlaceholder(prompt: string) {
+  return /\[(?:PHOTO\s+[^\]]+|localImage)\]/.test(prompt);
+}
+
 function promptWithoutPhotoTokens(prompt: string) {
-  return prompt.replace(/\s*\[PHOTO\s+[^\]]+\]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  return prompt.replace(PHOTO_PLACEHOLDER_PATTERN, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function turnHasPhotoPromptText(
@@ -432,7 +438,7 @@ export function turnHasPhotoAttachment(
     turn?.items.some(
       (item) =>
         item.kind === 'userMessage' &&
-        /\[PHOTO\s+\.\/\.temp\/threads\/[^\]]+\]/.test(item.text),
+        /\[(?:PHOTO\s+\.\/\.temp\/threads\/[^\]]+|localImage)\]/.test(item.text),
     ) ?? false
   );
 }
@@ -443,7 +449,7 @@ export function findTurnWithUserMessage(
 ) {
   return (
     turns.find((turn) => turnHasUserMessage(turn, prompt)) ??
-    (prompt.includes('[PHOTO ')
+    (promptHasPhotoPlaceholder(prompt)
       ? turns.find((turn) => turnHasPhotoPromptText(turn, prompt)) ?? null
       : null)
   );

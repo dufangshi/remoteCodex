@@ -157,6 +157,7 @@ export class ThreadHistoryPersistenceCoordinator {
       pricingModelKey: runtimeMetadata.pricingModelKey ?? null,
       pricingTierKey: runtimeMetadata.pricingTierKey ?? null,
       tokenUsageJson: runtimeMetadata.tokenUsageJson ?? null,
+      displayPrompt: runtimeMetadata.displayPrompt ?? null,
     });
     deleteThreadTurnMetadataByThreadAndTurnId(this.db, localThreadId, runtimeTurnId);
   }

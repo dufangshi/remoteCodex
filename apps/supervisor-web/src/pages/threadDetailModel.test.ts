@@ -176,7 +176,7 @@ describe('threadDetailModel', () => {
       {
         id: 'user-1',
         kind: 'userMessage',
-        text: 'Describe this [PHOTO ./.temp/threads/thread-1/photo.png] please',
+        text: 'Describe this [localImage] please',
       },
     ]);
 

@@ -139,6 +139,7 @@ export class ThreadPromptTurnCoordinator {
       ),
       pricingModelKey: pricingSnapshot?.pricingModelKey ?? null,
       pricingTierKey: pricingSnapshot?.pricingTierKey ?? null,
+      displayPrompt,
     });
 
     const patch: Parameters<typeof updateThreadRecord>[2] = {

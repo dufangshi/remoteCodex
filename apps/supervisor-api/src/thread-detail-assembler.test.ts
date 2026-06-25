@@ -246,4 +246,56 @@ describe('ThreadDetailAssembler', () => {
       },
     ]);
   });
+
+  it('uses stored display prompt when Codex history returns local image placeholders', async () => {
+    const { assembler } = createAssembler(
+      session([
+        {
+          providerTurnId: 'turn-image-1',
+          startedAt: '2026-06-07T00:00:00.000Z',
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'user-image-1',
+              kind: 'userMessage',
+              text: '图中内容是什么\n[localImage]',
+            },
+            {
+              id: 'agent-image-1',
+              kind: 'agentMessage',
+              text: '图中是一张截图。',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record,
+      turnMetadataById: new Map([
+        [
+          'turn-image-1',
+          {
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            reasoningEffortAvailable: true,
+            pricingModelKey: null,
+            pricingTierKey: null,
+            tokenUsageJson: null,
+            displayPrompt: '图中内容是什么 [PHOTO ./.temp/threads/thread-1/image.png]',
+            createdAt: '2026-06-07T00:00:00.000Z',
+          },
+        ],
+      ]),
+      options: { limit: 3 },
+    });
+
+    expect(entry.turns[0]?.items[0]).toMatchObject({
+      id: 'user-image-1',
+      kind: 'userMessage',
+      text: '图中内容是什么 [PHOTO ./.temp/threads/thread-1/image.png]',
+    });
+  });
 });

@@ -76,6 +76,7 @@ export interface UpsertThreadTurnMetadataInput {
   pricingModelKey?: string | null;
   pricingTierKey?: string | null;
   tokenUsageJson?: string | null;
+  displayPrompt?: string | null;
 }
 
 export interface CreateThreadPendingSteerRecordInput {
@@ -392,6 +393,10 @@ export function upsertThreadTurnMetadata(
           input.tokenUsageJson !== undefined
             ? input.tokenUsageJson
             : existing.tokenUsageJson,
+        displayPrompt:
+          input.displayPrompt !== undefined
+            ? input.displayPrompt
+            : existing.displayPrompt,
         updatedAt: now,
       })
       .where(eq(threadTurnMetadata.id, existing.id))
@@ -410,6 +415,7 @@ export function upsertThreadTurnMetadata(
       pricingModelKey: input.pricingModelKey ?? null,
       pricingTierKey: input.pricingTierKey ?? null,
       tokenUsageJson: input.tokenUsageJson ?? null,
+      displayPrompt: input.displayPrompt ?? null,
       createdAt: now,
       updatedAt: now,
     })

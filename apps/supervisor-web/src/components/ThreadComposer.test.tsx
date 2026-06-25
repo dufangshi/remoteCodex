@@ -179,7 +179,7 @@ describe('ThreadComposer', () => {
     fireEvent.click(planToggle);
 
     expect(planToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(planToggle.className).toContain('thread-composer-plan-toggle-active');
+    expect(planToggle.className).toContain('thread-graph-composer-plan-toggle-active');
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({
@@ -507,7 +507,7 @@ describe('ThreadComposer', () => {
     );
 
     const trigger = screen.getByRole('button', { name: 'Open slash toolbox' });
-    expect(trigger).toHaveClass('border-stone-700');
+    expect(trigger).toHaveClass('thread-graph-composer-icon-button');
     expect(trigger).not.toHaveClass('border-amber-300/60');
 
     fireEvent.click(trigger);
@@ -1470,6 +1470,7 @@ describe('ThreadComposer', () => {
           },
         ],
         files: [imageFile],
+        getData: () => '',
       },
     });
     fireEvent(editor, pasteEvent);
@@ -1649,7 +1650,7 @@ describe('ThreadComposer', () => {
     });
     fireEvent(editor, dragEnterEvent);
 
-    expect(editor.parentElement).toHaveClass('border-sky-300/80');
+    expect(editor.parentElement).toHaveClass('is-drag-target');
 
     const dropEvent = createEvent.drop(editor, {
       bubbles: true,

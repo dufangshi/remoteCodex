@@ -16,7 +16,6 @@ import {
   getThreadRecordByProviderSessionId,
   getThreadRecordById,
   getWorkspaceRecordById,
-  listThreadTurnMetadataByThreadId,
   listThreadRecords,
   updateThreadRecord
 } from '../../../packages/db/src/index';
@@ -73,7 +72,6 @@ import {
 } from './thread-history-items';
 import {
   ThreadDetailAssembler,
-  type ThreadTurnMetadataRecord,
 } from './thread-detail-assembler';
 import {
   normalizeReasoningEffort,
@@ -115,6 +113,7 @@ import {
   harnessDeveloperInstructions,
 } from './harness-developer-instructions';
 import type { PluginService } from './plugins/plugin-service';
+import { listThreadTurnMetadataMap } from './thread-turn-metadata';
 
 const DEFAULT_THREAD_TITLE = 'Untitled thread';
 const GENERIC_REMOTE_THREAD_TITLE = 'Thread';
@@ -453,6 +452,28 @@ export class ThreadService {
     return record.providerSessionId;
   }
 
+  private requireThreadRecord(localThreadId: string) {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+    return record;
+  }
+
+  private requireWorkspaceForThread(record: { workspaceId: string }) {
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+    return workspace;
+  }
+
   private materializeHiddenRuntimeTurns(
     localThreadId: string,
     turns: AgentTurn[],
@@ -630,39 +651,13 @@ export class ThreadService {
     localThreadId: string,
     options: { limit?: number; beforeTurnId?: string } = {},
   ): Promise<ThreadDetailDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.'
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     this.requireProviderSessionId(record);
     const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
     const workspacePathStatus = (await pathExists(workspace.absPath)) ? 'present' : 'missing';
-    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
-      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
-        entry.turnId,
-        {
-          model: entry.model ?? null,
-          reasoningEffort: entry.reasoningEffort ?? null,
-          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
-          pricingModelKey: entry.pricingModelKey ?? null,
-          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
-          tokenUsageJson: entry.tokenUsageJson ?? null,
-          createdAt: entry.createdAt ?? null,
-        },
-      ]),
-    );
+    const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
     const cachedDetail = await this.detailAssembler.buildCacheEntry({
       localThreadId,
       record,
@@ -738,13 +733,7 @@ export class ThreadService {
   }
 
   async getThreadGoal(localThreadId: string): Promise<ThreadGoalDto | null> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
     return this.goalCoordinator.getThreadGoal(record);
   }
 
@@ -752,26 +741,14 @@ export class ThreadService {
     localThreadId: string,
     input: UpdateThreadGoalInput,
   ): Promise<ThreadGoalDto | null> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
     return this.goalCoordinator.updateThreadGoal(record, input);
   }
 
   async clearThreadGoal(
     localThreadId: string,
   ): Promise<{ cleared: boolean; goalHistory: ThreadGoalDto[] }> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
     return this.goalCoordinator.clearThreadGoal(record);
   }
 
@@ -807,30 +784,11 @@ export class ThreadService {
     localThreadId: string,
     itemId: string,
   ): Promise<ThreadHistoryItemDetailDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
 
     this.requireProviderSessionId(record);
 
-    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
-      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
-        entry.turnId,
-        {
-          model: entry.model ?? null,
-          reasoningEffort: entry.reasoningEffort ?? null,
-          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
-          pricingModelKey: entry.pricingModelKey ?? null,
-          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
-          tokenUsageJson: entry.tokenUsageJson ?? null,
-          createdAt: entry.createdAt ?? null,
-        },
-      ]),
-    );
+    const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
     const cachedDetail = await this.detailAssembler.buildCacheEntry({
       localThreadId,
       record,
@@ -874,13 +832,7 @@ export class ThreadService {
     input: SendThreadPromptInput,
     options: SendPromptOptions = {},
   ): Promise<ThreadDto> {
-    let record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
+    let record = this.requireThreadRecord(localThreadId);
     await this.importCoordinator.assertImportedThreadReadyForPrompt({
       source: record.source,
       provider: record.provider,
@@ -992,13 +944,7 @@ export class ThreadService {
     localThreadId: string,
     input: UpdateThreadSettingsInput
   ): Promise<ThreadDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
 
     const nextSettings = await this.sessionCoordinator.resolveThreadSettings({
       provider: record.provider,
@@ -1046,13 +992,7 @@ export class ThreadService {
   }
 
   async updateThreadTitle(localThreadId: string, title: string): Promise<ThreadDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
 
     const normalizedTitle = title.trim();
     if (!normalizedTitle) {
@@ -1077,13 +1017,7 @@ export class ThreadService {
   }
 
   async compactThread(localThreadId: string): Promise<ThreadDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
     const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.isConnected === false) {
@@ -1128,21 +1062,8 @@ export class ThreadService {
   }
 
   async listThreadSkills(localThreadId: string): Promise<ThreadSkillsDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.listThreadSkills({
       provider: record.provider,
@@ -1151,13 +1072,7 @@ export class ThreadService {
   }
 
   async listThreadMcpServers(localThreadId: string): Promise<ThreadMcpServersDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
 
     return this.managementCoordinator.listThreadMcpServers({
       provider: record.provider,
@@ -1165,21 +1080,8 @@ export class ThreadService {
   }
 
   async listThreadHooks(localThreadId: string): Promise<ThreadHooksDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.listThreadHooks({
       provider: record.provider,
@@ -1191,21 +1093,8 @@ export class ThreadService {
     localThreadId: string,
     input: CreateThreadHookInput,
   ): Promise<ThreadHooksDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.createThreadHook({
       provider: record.provider,
@@ -1218,21 +1107,8 @@ export class ThreadService {
     localThreadId: string,
     input: UpdateThreadHookInput,
   ): Promise<ThreadHooksDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.updateThreadHook({
       provider: record.provider,
@@ -1245,21 +1121,8 @@ export class ThreadService {
     localThreadId: string,
     input: TrustThreadHookInput,
   ): Promise<ThreadHooksDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.trustThreadHook({
       provider: record.provider,
@@ -1272,21 +1135,8 @@ export class ThreadService {
     localThreadId: string,
     input: UntrustThreadHookInput,
   ): Promise<ThreadHooksDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.',
-      });
-    }
-
-    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
-    if (!workspace) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Workspace was not found for this thread.',
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
 
     return this.managementCoordinator.untrustThreadHook({
       provider: record.provider,
@@ -1296,13 +1146,7 @@ export class ThreadService {
   }
 
   async interruptThread(localThreadId: string, requestedTurnId?: string): Promise<ThreadDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
     const providerSessionId = this.requireProviderSessionId(record);
     const interruptInput: {
       provider: string | null | undefined;
@@ -1343,13 +1187,7 @@ export class ThreadService {
     requestId: string,
     input: RespondThreadActionRequestInput
   ): Promise<ThreadDetailDto> {
-    const record = getThreadRecordById(this.db, localThreadId);
-    if (!record) {
-      throw new HttpError(404, {
-        code: 'not_found',
-        message: 'Thread was not found.'
-      });
-    }
+    const record = this.requireThreadRecord(localThreadId);
 
     const requestResponse = this.requestCoordinator.respondToRequest(
       localThreadId,
@@ -1557,20 +1395,7 @@ export class ThreadService {
       return;
     }
 
-    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
-      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
-        entry.turnId,
-        {
-          model: entry.model ?? null,
-          reasoningEffort: entry.reasoningEffort ?? null,
-          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
-          pricingModelKey: entry.pricingModelKey ?? null,
-          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
-          tokenUsageJson: entry.tokenUsageJson ?? null,
-          createdAt: entry.createdAt ?? null,
-        },
-      ]),
-    );
+    const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
     const cachedDetail = await this.detailAssembler.buildCacheEntry({
       localThreadId,
       record,

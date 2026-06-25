@@ -210,6 +210,10 @@ function apiPath(path: string) {
   return path;
 }
 
+export function buildApiUrl(path: string) {
+  return apiPath(path);
+}
+
 export interface FileDownloadResult {
   blob: Blob;
   filename: string;
@@ -1455,7 +1459,19 @@ export function buildWorkspaceRawFileUrl(
   input: { path: string },
 ) {
   const params = new URLSearchParams({ path: input.path });
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`;
+  return buildApiUrl(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`,
+  );
+}
+
+export function buildThreadImageAssetUrl(
+  threadId: string,
+  input: { path: string },
+) {
+  const params = new URLSearchParams({ path: input.path });
+  return buildApiUrl(
+    `/api/threads/${encodeURIComponent(threadId)}/assets/image?${params.toString()}`,
+  );
 }
 
 export function downloadWorkspaceFile(workspaceId: string, input: { path: string }) {

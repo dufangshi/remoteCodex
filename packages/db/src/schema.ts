@@ -94,6 +94,7 @@ export const threadTurnMetadata = sqliteTable(
     pricingModelKey: text('pricing_model_key'),
     pricingTierKey: text('pricing_tier_key'),
     tokenUsageJson: text('token_usage_json'),
+    displayPrompt: text('display_prompt'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

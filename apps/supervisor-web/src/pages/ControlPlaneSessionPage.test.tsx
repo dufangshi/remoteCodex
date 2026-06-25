@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -311,15 +311,12 @@ describe('ControlPlaneSessionPage', () => {
     renderControlPlaneSessionPage();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Expand thread navigation' }),
-      ).toHaveTextContent('Molecule study / Plan calculation');
+      expect(screen.getByTitle('Session and usage')).toHaveTextContent('Molecule study');
     });
     expect(screen.getByRole('link', { name: /Plan calculation/ })).toBeInTheDocument();
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
     expect(screen.getAllByText('Molecule study').length).toBeGreaterThan(0);
-    expect(screen.getByText('Computational chemistry')).toBeInTheDocument();
     expect(screen.getAllByText('gpt-5.1-codex').length).toBeGreaterThan(0);
     expect(screen.queryByText('session-1')).not.toBeInTheDocument();
     expect(screen.queryByText('worker-session-1')).not.toBeInTheDocument();
@@ -346,7 +343,10 @@ describe('ControlPlaneSessionPage', () => {
     ).not.toBeInTheDocument();
 
     expect(screen.queryByText(/middle output line/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
+    const commandSummaryTrigger = screen.getByText('command').closest('button');
+    expect(commandSummaryTrigger).not.toBeNull();
+    fireEvent.click(commandSummaryTrigger!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open full command' }));
     await waitFor(() => {
       expect(screen.getByRole('complementary', { name: 'Thread inspector' })).toBeInTheDocument();
     });
@@ -364,6 +364,7 @@ describe('ControlPlaneSessionPage', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Close thread inspector' }));
 
+    fireEvent.click(screen.getByRole('button', { name: 'Remote Codex extensions' }));
     fireEvent.click(screen.getByRole('button', { name: /Diagnostics/ }));
     expect(screen.getByText('Control session id')).toBeInTheDocument();
     expect(screen.getByText('session-1')).toBeInTheDocument();
@@ -372,14 +373,20 @@ describe('ControlPlaneSessionPage', () => {
     expect(screen.getByText(routerBaseUrl)).toBeInTheDocument();
     expect(screen.getByText('/workspace/molecule-study')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Navigation' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(screen.getByText('Terminal')).toBeInTheDocument();
-    expect(screen.getByText('XYZ Molecule Viewer')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    const settingsDialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(within(settingsDialog).getByText('Remote Session')).toBeInTheDocument();
+    expect(
+      within(settingsDialog).getByRole('button', { name: 'Reconnect session' }),
+    ).toBeInTheDocument();
+    expect(
+      within(settingsDialog).getByRole('button', { name: 'Refresh worker thread' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
     expect(
       vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/api/plugins')),
     ).toBe(false);
+    fireEvent.click(within(settingsDialog).getByRole('button', { name: 'Close' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
     expect(screen.getByText('Remote shell transport unavailable')).toBeInTheDocument();
@@ -854,9 +861,7 @@ describe('ControlPlaneSessionPage', () => {
     renderControlPlaneSessionPage();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Expand thread navigation' }),
-      ).toHaveTextContent('Molecule study / Plan calculation');
+      expect(screen.getByTitle('Session and usage')).toHaveTextContent('Molecule study');
     });
 
     setPromptValue(

@@ -44,6 +44,7 @@ export interface ThreadTurnMetadataRecord {
   pricingModelKey: string | null;
   pricingTierKey: ThreadTurnPricingTierDto | null;
   tokenUsageJson: string | null;
+  displayPrompt?: string | null;
   createdAt?: string | null;
 }
 
@@ -421,9 +422,19 @@ export function buildTurnDto(
   metadata: ThreadTurnMetadataRecord | undefined,
 ): ThreadTurnDto {
   const tokenUsage = parseThreadTurnTokenUsageJson(metadata?.tokenUsageJson);
+  const displayPrompt = metadata?.displayPrompt?.trim();
+  const items =
+    displayPrompt && turn.items.some((item) => /\[localImage\]/.test(item.text))
+      ? turn.items.map((item) =>
+          item.kind === 'userMessage' && /\[localImage\]/.test(item.text)
+            ? { ...item, text: displayPrompt }
+            : item,
+        )
+      : turn.items;
 
   return {
     ...turn,
+    items,
     startedAt: turn.startedAt ?? metadata?.createdAt ?? null,
     model: metadata?.model ?? null,
     reasoningEffort: normalizeReasoningEffort(metadata?.reasoningEffort),

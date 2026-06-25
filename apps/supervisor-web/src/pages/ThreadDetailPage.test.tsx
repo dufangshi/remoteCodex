@@ -277,6 +277,26 @@ function setPromptValue(element: HTMLElement, value: string) {
   fireEvent.input(element);
 }
 
+function stubMobileViewport() {
+  const addEventListener = vi.fn();
+  const removeEventListener = vi.fn();
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: query.includes('max-width: 639px'),
+      media: query,
+      onchange: null,
+      addEventListener,
+      removeEventListener,
+      addListener: addEventListener,
+      removeListener: removeEventListener,
+      dispatchEvent: () => false,
+    })),
+  );
+
+  return { addEventListener, removeEventListener };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -673,7 +693,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -681,14 +701,7 @@ describe('ThreadDetailPage', () => {
     expect(
       screen.queryByText('Other Workspace Thread'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('/tmp/demo')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Copy session ID' }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
-
-    expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Demo Thread').length).toBeGreaterThan(0);
   });
 
   it('prioritizes thread detail before loading page context', async () => {
@@ -994,11 +1007,11 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Plan' })).not.toBeInTheDocument();
-      expect(screen.getByText('Settings')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open settings' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /\/fast/i })).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('Settings').closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
     expect(screen.getByText('Sandbox Mode')).toBeInTheDocument();
   });
 
@@ -1141,10 +1154,20 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Export transcript' }).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByRole('button', {
+          name: 'Export transcript',
+          hidden: true,
+        }).length,
+      ).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Export transcript' })[0]!);
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: 'Export transcript',
+        hidden: true,
+      })[0]!,
+    );
     await screen.findByRole('dialog', { name: 'Export transcript' });
     fireEvent.click(screen.getByRole('button', { name: 'Custom selection' }));
     await screen.findByText('Second prompt preview');
@@ -1283,10 +1306,20 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Export transcript' }).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByRole('button', {
+          name: 'Export transcript',
+          hidden: true,
+        }).length,
+      ).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Export transcript' })[0]!);
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: 'Export transcript',
+        hidden: true,
+      })[0]!,
+    );
     await screen.findByRole('dialog', { name: 'Export transcript' });
     fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
     fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }));
@@ -1312,7 +1345,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -1724,7 +1757,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -2376,7 +2409,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -2494,7 +2527,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -2617,7 +2650,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -2630,9 +2663,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Failed')).toBeInTheDocument();
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveTextContent('Agent response failed');
-      expect(alert).toHaveTextContent('Prompt delivery failed.');
+      expect(screen.getAllByText('Prompt delivery failed.').length).toBeGreaterThan(0);
     });
   });
 
@@ -2737,7 +2768,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -2748,10 +2779,14 @@ describe('ThreadDetailPage', () => {
     expect(screen.getAllByText('Trigger an upstream outage.').length).toBeGreaterThan(0);
 
     await waitFor(() => {
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveTextContent('Agent response failed');
-      expect(alert).toHaveTextContent('Upstream service unavailable (503 Service Unavailable).');
-      expect(alert).toHaveTextContent('OpenAI upstream unavailable.');
+      expect(
+        screen.getAllByText(
+          /Upstream service unavailable \(503 Service Unavailable\)\.\s+OpenAI upstream unavailable\./,
+        ).length,
+      ).toBeGreaterThan(0);
+      expect(
+        screen.getAllByText(/OpenAI upstream unavailable\./).length,
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -3985,7 +4020,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -4185,7 +4220,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Demo Workspace / Demo Thread').length,
+        screen.getAllByText('Demo Workspace').length,
       ).toBeGreaterThan(0);
     });
 
@@ -4256,7 +4291,7 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Demo Thread')).toBeInTheDocument();
+      expect(screen.getAllByText('Demo Thread').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
@@ -5274,6 +5309,8 @@ describe('ThreadDetailPage', () => {
   });
 
   it('surfaces realtime connection status transitions in the mobile header', async () => {
+    stubMobileViewport();
+
     render(
       <MemoryRouter initialEntries={['/threads/thread-1']}>
         <Routes>
@@ -5609,6 +5646,8 @@ describe('ThreadDetailPage', () => {
   });
 
   it('shows a gray connect button in the mobile header for detached threads and reconnects on click', async () => {
+    stubMobileViewport();
+
     vi.stubGlobal(
       'fetch',
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
@@ -5960,14 +5999,7 @@ describe('ThreadDetailPage', () => {
   });
 
   it('keeps the mobile chat composer menu above the timeline without clipping', async () => {
-    const addEventListener = vi.fn();
-    const removeEventListener = vi.fn();
-    vi.stubGlobal('matchMedia', vi.fn(() => ({
-      matches: true,
-      media: '(max-width: 639px)',
-      addEventListener,
-      removeEventListener,
-    })));
+    stubMobileViewport();
 
     render(
       <MemoryRouter initialEntries={['/threads/thread-1']}>
@@ -5978,7 +6010,7 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Demo Thread')).toBeInTheDocument();
+      expect(screen.getAllByText('Demo Thread').length).toBeGreaterThan(0);
     });
 
     const trigger = screen.getByRole('button', { name: 'Open slash toolbox' });

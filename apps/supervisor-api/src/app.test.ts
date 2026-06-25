@@ -42,6 +42,12 @@ import {
   updateThreadRecord,
   upsertThreadTurnMetadata,
 } from '../../../packages/db/src/repositories';
+import type {
+  ShellBackend,
+  ShellBackendAttachOptions,
+  ShellBackendCreateInput,
+  ShellBackendSession,
+} from './shell/shell-backend';
 
 vi.mock('puppeteer-core', () => ({
   default: {
@@ -52,6 +58,10 @@ vi.mock('puppeteer-core', () => ({
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const workerIdentitySecret = 'worker-identity-secret';
 type BuildAppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
+
+function normalizeMacTempPath(filePath: string) {
+  return filePath.replace(/^\/private\/var\//, '/var/');
+}
 
 function makeWorkerIdentityHeaders(
   input: Partial<WorkerIdentityEnvelope> = {},
@@ -406,6 +416,83 @@ class FakeInstallRuntime extends FakeClaudeRuntime {
   }
 }
 
+function createTestShellBackend(): ShellBackend {
+  const sessions = new Map<string, ShellBackendSession>();
+
+  function makeSession(sessionId: string, cwd: string): ShellBackendSession {
+    return {
+      id: sessionId,
+      cwd,
+      cols: 120,
+      rows: 36,
+      snapshot: '$ ',
+      runtime: {
+        cursorX: 2,
+        cursorY: 0,
+        panePid: 42,
+        currentCommand: 'zsh',
+        currentPath: cwd,
+        paneWidth: 120,
+        paneHeight: 36,
+        envPrefix: null,
+        isCommandRunning: false,
+      },
+    };
+  }
+
+  return {
+    kind: 'test',
+    sessionNameForThread(threadId: string) {
+      return `rcx-${threadId.slice(0, 8)}`;
+    },
+    async listSessionNames() {
+      return [...sessions.keys()];
+    },
+    async hasSession(sessionName: string) {
+      return sessions.has(sessionName);
+    },
+    async createSession(input: ShellBackendCreateInput) {
+      sessions.set(input.sessionId, makeSession(input.sessionId, input.cwd));
+    },
+    async attach(sessionName: string, _options: ShellBackendAttachOptions) {
+      const session = sessions.get(sessionName);
+      if (!session) {
+        throw new Error('Missing test shell session.');
+      }
+      return {
+        session,
+        attachment: {
+          dispose() {},
+        },
+      };
+    },
+    async resize(sessionName: string, cols: number, rows: number) {
+      const session = sessions.get(sessionName);
+      if (session) {
+        sessions.set(sessionName, { ...session, cols, rows });
+      }
+    },
+    async sendInput() {},
+    async killSession(sessionName: string) {
+      sessions.delete(sessionName);
+    },
+    async clear(sessionName: string) {
+      const session = sessions.get(sessionName);
+      if (!session) {
+        throw new Error('Missing test shell session.');
+      }
+      return session;
+    },
+    async snapshot(sessionName: string) {
+      const session = sessions.get(sessionName);
+      if (!session) {
+        throw new Error('Missing test shell session.');
+      }
+      return session;
+    },
+  };
+}
+
 describe('supervisor api', () => {
   let tempDir = '';
   let codexHome = '';
@@ -449,6 +536,7 @@ describe('supervisor api', () => {
           ...(options.claudeRuntime ? { claude: path.join(tempDir, 'claude-home') } : {}),
         },
       },
+      shellBackend: createTestShellBackend(),
       serviceLifecycle: {
         async launchBuildRestart() {
           launchBuildRestartCalls += 1;
@@ -7228,13 +7316,13 @@ describe('supervisor api', () => {
     });
 
     expect(skillsResponse.statusCode).toBe(200);
-    expect(skillsResponse.json()).toMatchObject({
-      cwd: path.join(tempDir, 'workspace'),
+    const skillsPayload = skillsResponse.json();
+    expect(normalizeMacTempPath(skillsPayload.cwd)).toBe(path.join(tempDir, 'workspace'));
+    expect(skillsPayload).toMatchObject({
       skills: [
         {
           name: 'skill-creator',
           description: 'Create or update a Codex skill',
-          path: path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
           scope: 'repo',
           enabled: true,
           interface: {
@@ -7244,6 +7332,9 @@ describe('supervisor api', () => {
       ],
       errors: [],
     });
+    expect(normalizeMacTempPath(skillsPayload.skills[0].path)).toBe(
+      path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
+    );
   });
 
   it('lists thread mcp servers from the codex manager', async () => {
@@ -7399,12 +7490,15 @@ describe('supervisor api', () => {
     });
 
     expect(hooksResponse.statusCode).toBe(200);
-    expect(hooksResponse.json()).toMatchObject({
-      cwd: workspacePath,
-      projectHooksPath: path.join(workspacePath, '.codex/hooks.json'),
+    const hooksPayload = hooksResponse.json();
+    expect(normalizeMacTempPath(hooksPayload.cwd)).toBe(workspacePath);
+    expect(normalizeMacTempPath(hooksPayload.projectHooksPath)).toBe(
+      path.join(workspacePath, '.codex/hooks.json'),
+    );
+    expect(hooksPayload).toMatchObject({
       globalHooksPath: path.join(codexHome, 'hooks.json'),
     });
-    expect(hooksResponse.json().hooks).toEqual(
+    expect(hooksPayload.hooks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           eventName: 'preToolUse',
@@ -7629,8 +7723,9 @@ describe('supervisor api', () => {
     });
 
     expect(hooksResponse.statusCode).toBe(200);
-    expect(hooksResponse.json()).toMatchObject({
-      cwd: workspacePath,
+    const hooksPayload = hooksResponse.json();
+    expect(normalizeMacTempPath(hooksPayload.cwd)).toBe(workspacePath);
+    expect(hooksPayload).toMatchObject({
       warnings: [
         'Codex app-server does not expose hooks/list yet; showing hooks parsed from hooks.json only.',
       ],

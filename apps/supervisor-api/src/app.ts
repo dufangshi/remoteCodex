@@ -46,6 +46,7 @@ import { registerPluginRoutes } from './routes/plugins';
 import { registerAuthRoutes } from './routes/auth';
 import { ProviderHostConfigService } from './provider-host-config-service';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
+import type { ShellBackend } from './shell/shell-backend';
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
 import { PluginSettingsStore } from './plugins/plugin-settings-store';
@@ -204,6 +205,7 @@ export function buildApp(
     agentRuntimes?: AgentRuntimeRegistry;
     runtimeBootstrap?: AgentRuntimeBootstrap;
     shellService?: ShellSessionService;
+    shellBackend?: ShellBackend;
     serviceLifecycle?: AppServices['serviceLifecycle'];
     controlPlaneSyncClient?: AppServices['controlPlaneSyncClient'];
     relayTunnelClient?: RelayTunnelClient;
@@ -237,7 +239,7 @@ export function buildApp(
     new ShellSessionService(
       database.db,
       eventBus,
-      createTerminalShellBackend(options.env),
+      options.shellBackend ?? createTerminalShellBackend(options.env),
     );
   const providerHostConfigService = new ProviderHostConfigService(
     agentRuntimes,

@@ -10,6 +10,8 @@ import {
   createControlPlaneWorkspace,
   createWorkspace,
   disconnectThread,
+  buildThreadImageAssetUrl,
+  buildWorkspaceRawFileUrl,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
   fetchAuthSession,
@@ -18,6 +20,7 @@ import {
   importThread,
   buildAndRestartService,
   login,
+  enableRelayMode,
   renameProviderHostConfigArchive,
   restartAgentBackend,
   loginControlPlanePasswordAccount,
@@ -25,6 +28,7 @@ import {
   resumeControlPlaneSession,
   resumeThread,
   sendThreadPrompt,
+  setSelectedRelayDeviceId,
   terminateShell,
   updateProviderHostFile,
 } from './api';
@@ -148,6 +152,26 @@ describe('api request helper', () => {
     expect(call?.[1]?.body).toBeInstanceOf(FormData);
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.has('Content-Type')).toBe(false);
+  });
+
+  it('maps browser media urls through the selected relay device', () => {
+    enableRelayMode();
+    setSelectedRelayDeviceId('device-1');
+
+    expect(
+      buildThreadImageAssetUrl('thread-1', {
+        path: './.temp/threads/thread-1/image.png',
+      }),
+    ).toBe(
+      '/relay/devices/device-1/api/threads/thread-1/assets/image?path=.%2F.temp%2Fthreads%2Fthread-1%2Fimage.png',
+    );
+    expect(
+      buildWorkspaceRawFileUrl('workspace-1', {
+        path: 'screenshots/image 1.png',
+      }),
+    ).toBe(
+      '/relay/devices/device-1/api/workspaces/workspace-1/files/raw?path=screenshots%2Fimage+1.png',
+    );
   });
 
   it('preserves non-JSON upstream error status and body text', async () => {

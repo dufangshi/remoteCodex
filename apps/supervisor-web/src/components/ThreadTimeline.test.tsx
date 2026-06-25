@@ -4466,6 +4466,44 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('does not show a worked summary when a collapsed turn has no hidden middle items', () => {
+    render(
+      <ThreadTimeline
+        autoCollapseCompletedTurns={true}
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Only prompt.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Only final reply.',
+                createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 3)).toISOString(),
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Only prompt.')).toBeInTheDocument();
+    expect(screen.getByText('Only final reply.')).toBeInTheDocument();
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Expand turn 1/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it('can leave completed turns expanded when auto collapse is disabled', () => {
     render(
       <ThreadTimeline

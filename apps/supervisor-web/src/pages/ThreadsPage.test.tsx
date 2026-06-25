@@ -262,7 +262,7 @@ describe('ThreadsPage', () => {
     expect(screen.queryByText(/^Thread Count$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Next Step$/i)).not.toBeInTheDocument();
     expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open Navigation' })).toBeInTheDocument();
+    expect(screen.getByTitle('Collapse rooms')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
       'href',
       '/workspaces',
@@ -335,20 +335,14 @@ describe('ThreadsPage', () => {
       expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
     });
 
-    const collapseButton = screen.getByRole('button', {
-      name: 'Collapse thread list',
-    });
+    const collapseButton = screen.getByTitle('Collapse rooms');
     fireEvent.click(collapseButton);
 
-    expect(
-      screen.getByRole('button', { name: 'Expand thread list' }),
-    ).toBeInTheDocument();
+    expect(screen.getByTitle('Expand rooms')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expand thread list' }));
+    fireEvent.click(screen.getByTitle('Expand rooms'));
 
-    expect(
-      screen.getByRole('button', { name: 'Collapse thread list' }),
-    ).toBeInTheDocument();
+    expect(screen.getByTitle('Collapse rooms')).toBeInTheDocument();
   });
 
   it('opens a workspace thread directly into the thread detail route', async () => {
