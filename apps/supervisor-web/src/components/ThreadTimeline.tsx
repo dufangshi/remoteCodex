@@ -4,6 +4,7 @@ import {
 } from '@remote-codex/thread-ui';
 import type { ComponentProps } from 'react';
 import { buildThreadImageAssetUrl } from '../lib/api';
+import { currentThreadHref } from '../lib/relayRoutes';
 
 type ThreadTimelineProps = ComponentProps<typeof SharedThreadTimeline> & {
   onLoadHistoryItemDetail?: ThreadTimelineAdapter['onLoadHistoryItemDetail'];
@@ -22,7 +23,7 @@ export function ThreadTimeline({
     onOpenLinkedThread:
       onOpenThread ??
       ((threadId) => {
-        window.location.assign(`/threads/${threadId}`);
+        window.location.assign(currentThreadHref(threadId));
       }),
     ...(onLoadHistoryItemDetail
       ? { onLoadHistoryItemDetail }

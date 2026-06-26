@@ -91,6 +91,12 @@ import {
   turnHasPhotoPromptText,
   turnHasUserMessage,
 } from './threadDetailModel';
+import {
+  currentNewThreadHref,
+  currentThreadHref,
+  currentThreadsHref,
+  currentWorkspacesHref,
+} from '../lib/relayRoutes';
 import { useMobileComposerLayout } from './useMobileComposerLayout';
 import { useThreadAuxiliaryActions } from './useThreadAuxiliaryActions';
 import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
@@ -169,6 +175,12 @@ interface OptimisticSteerState {
   status: 'steering' | 'accepted';
 }
 
+interface WorkspaceFocusPathRequest {
+  path: string;
+  line?: number;
+  requestId: number;
+}
+
 type PendingThreadSettings = Partial<
   Pick<
     ThreadDto,
@@ -216,6 +228,25 @@ function revokeOptimisticAttachmentPreviews(
   for (const preview of previews) {
     URL.revokeObjectURL(preview.url);
   }
+}
+
+function relativeWorkspaceLinkPath(path: string, workspaceAbsPath: string) {
+  const normalizedPath = path.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalizedRoot = workspaceAbsPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalizedPath) {
+    return null;
+  }
+  if (!normalizedPath.startsWith('/')) {
+    return normalizedPath.replace(/^\.\/+/, '').replace(/^\/+/, '');
+  }
+  if (normalizedPath === normalizedRoot) {
+    return '';
+  }
+  const rootPrefix = `${normalizedRoot}/`;
+  if (!normalizedPath.startsWith(rootPrefix)) {
+    return null;
+  }
+  return normalizedPath.slice(rootPrefix.length);
 }
 
 function CopyIcon() {
@@ -346,6 +377,8 @@ export function ThreadDetailPage() {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] =
+    useState<WorkspaceFocusPathRequest | null>(null);
   const terminalPluginEnabled = plugins.getThreadPanels().some(
     (panel) => panel.kind === 'terminal',
   );
@@ -365,20 +398,17 @@ export function ThreadDetailPage() {
     [],
   );
   const getThreadHref = useCallback(
-    (threadId: string) => `/threads/${threadId}`,
+    (threadId: string) => currentThreadHref(threadId),
     [],
   );
   const openThread = useCallback(
     (threadId: string) => {
-      navigate(`/threads/${threadId}`);
+      navigate(currentThreadHref(threadId));
     },
     [navigate],
   );
   const getNewThreadHref = useCallback(
-    (workspaceId?: string | null) =>
-      workspaceId
-        ? `/threads/new?workspaceId=${encodeURIComponent(workspaceId)}`
-        : '/threads/new',
+    (workspaceId?: string | null) => currentNewThreadHref(workspaceId),
     [],
   );
   const getThreadImageAssetUrl = useCallback(
@@ -2208,7 +2238,7 @@ export function ThreadDetailPage() {
           thread.id !== deletingThread.id &&
           thread.workspaceId === detail?.thread.workspaceId
         ) ?? threads.find((thread) => thread.id !== deletingThread.id);
-        navigate(nextThread ? `/threads/${nextThread.id}` : '/threads');
+        navigate(nextThread ? currentThreadHref(nextThread.id) : currentThreadsHref());
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete thread.');
@@ -2848,6 +2878,31 @@ export function ThreadDetailPage() {
     setError,
     workspaceId: detail?.workspace.id ?? null,
   });
+  const handleOpenWorkspaceFile = useCallback(
+    (input: { path: string; line?: number }) => {
+      const currentDetail = detailRef.current;
+      if (!currentDetail) {
+        return;
+      }
+
+      const relativePath = relativeWorkspaceLinkPath(
+        input.path,
+        currentDetail.workspace.absPath,
+      );
+      if (relativePath === null) {
+        setError(`Cannot open ${input.path}; it is outside this workspace.`);
+        return;
+      }
+
+      setActiveView('chat');
+      setWorkspaceFocusPathRequest((current) => ({
+        path: relativePath,
+        ...(input.line !== undefined ? { line: input.line } : {}),
+        requestId: (current?.requestId ?? 0) + 1,
+      }));
+    },
+    [],
+  );
   const surfaceAdapter = useMemo(
     () => ({
       openThread,
@@ -2861,6 +2916,7 @@ export function ThreadDetailPage() {
       updateSettings: handleUpdateThreadSettings,
       loadHistoryItemDetail: handleLoadHistoryItemDetail,
       getImageAssetUrl: getCurrentThreadImageAssetUrl,
+      openWorkspaceFile: handleOpenWorkspaceFile,
       workspace: workspaceAdapter,
       shell: localShellAdapter,
     }),
@@ -2871,6 +2927,7 @@ export function ThreadDetailPage() {
       handleCompactThread,
       handleInterrupt,
       handleLoadHistoryItemDetail,
+      handleOpenWorkspaceFile,
       handlePrompt,
       handleRenameThread,
       handleUpdateThreadSettings,
@@ -2880,8 +2937,8 @@ export function ThreadDetailPage() {
     ],
   );
   const workspaceReturnHref = detail?.thread.workspaceId
-    ? `/threads?workspaceId=${encodeURIComponent(detail.thread.workspaceId)}`
-    : '/workspaces';
+    ? currentThreadsHref(detail.thread.workspaceId)
+    : currentWorkspacesHref();
   const dialogs = (
     <>
       <ExportTranscriptDialog
@@ -2934,6 +2991,7 @@ export function ThreadDetailPage() {
       surfaceActions={surfaceActions}
       floatingPanel={goalMonitorPanel}
       workspaceFeatures={SUPERVISOR_WORKSPACE_FEATURES}
+      workspaceFocusPathRequest={workspaceFocusPathRequest}
       activeView={activeView}
       liveOutput={liveOutput}
       timelineProps={timelineProps}

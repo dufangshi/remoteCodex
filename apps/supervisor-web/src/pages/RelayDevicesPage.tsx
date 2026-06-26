@@ -16,6 +16,7 @@ import {
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
 } from '../lib/api';
+import { workspacesHref } from '../lib/relayRoutes';
 
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof ApiError
@@ -87,7 +88,7 @@ export function RelayDevicesPage() {
   function connectDevice(device: RelayDeviceDto) {
     setSelectedRelayDeviceId(device.id);
     setSelectedRelayThreadId(null);
-    navigate('/workspaces');
+    navigate(workspacesHref(device.id));
   }
 
   async function copySupervisorSetup(device: RelayDeviceDto) {

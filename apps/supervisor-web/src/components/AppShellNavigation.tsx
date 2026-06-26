@@ -7,6 +7,10 @@ import {
   MenuIcon,
   menuItemClassName,
 } from './appShellNavigationModel';
+import {
+  currentRelayScopedPath,
+  currentWorkspacesHref,
+} from '../lib/relayRoutes';
 export { AppShellSettingsDialog } from './AppShellSettingsDialog';
 
 export function AppShellMenuButton({ className = '' }: { className?: string }) {
@@ -39,8 +43,12 @@ export function AppShellNavigationMenu({
   const location = useLocation();
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const isWorkspacesRoute = location.pathname === '/workspaces';
-  const isImportRoute = location.pathname === '/threads/import';
+  const isWorkspacesRoute =
+    location.pathname === '/workspaces' ||
+    /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
+  const isImportRoute =
+    location.pathname === '/threads/import' ||
+    /^\/devices\/[^/]+\/threads\/import$/.test(location.pathname);
 
   useEffect(() => {
     if (!shellNav?.navOpen) {
@@ -114,7 +122,7 @@ export function AppShellNavigationMenu({
             }
 
             shellNav.closeNav();
-            navigate('/workspaces');
+            navigate(currentWorkspacesHref());
           }}
           className={menuItemClassName(isWorkspacesRoute)}
         >
@@ -129,7 +137,7 @@ export function AppShellNavigationMenu({
             }
 
             shellNav.closeNav();
-            navigate('/threads/import');
+            navigate(currentRelayScopedPath('/threads/import'));
           }}
           className={menuItemClassName(isImportRoute)}
         >

@@ -7,15 +7,18 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
 import { AppShellSettingsDialog } from './AppShellNavigation';
+import {
+  currentNewThreadHref,
+  currentThreadHref,
+  currentWorkspacesHref,
+} from '../lib/relayRoutes';
 
 type ThreadWorkspaceLayoutProps = ComponentProps<
   typeof SharedThreadWorkspaceLayout
 >;
 
 function buildNewThreadHref(workspaceId?: string | null) {
-  return workspaceId
-    ? `/threads/new?workspaceId=${encodeURIComponent(workspaceId)}`
-    : '/threads/new';
+  return currentNewThreadHref(workspaceId);
 }
 
 export { ThreadCards };
@@ -38,23 +41,23 @@ export function ThreadWorkspaceLayout({
   return (
     <SharedThreadWorkspaceLayout
       {...props}
-      workspaceReturnHref={props.workspaceReturnHref ?? '/workspaces'}
+      workspaceReturnHref={props.workspaceReturnHref ?? currentWorkspacesHref()}
       globalSettingsContent={
         props.globalSettingsContent ?? <AppShellSettingsDialog embedded />
       }
       {...(effectiveTheme ? { effectiveTheme } : {})}
       {...(themeMode ? { themeMode } : {})}
       {...(onThemeModeChange ? { onThemeModeChange } : {})}
-      getThreadHref={getThreadHref ?? ((threadId) => `/threads/${threadId}`)}
+      getThreadHref={getThreadHref ?? ((threadId) => currentThreadHref(threadId))}
       onOpenThread={
-        onOpenThread ?? ((threadId) => navigate(`/threads/${threadId}`))
+        onOpenThread ?? ((threadId) => navigate(currentThreadHref(threadId)))
       }
       getNewThreadHref={getNewThreadHref ?? buildNewThreadHref}
       renderThreadLink={
         renderThreadLink ??
         (({ thread, children, className, onClick }) => (
           <Link
-            to={`/threads/${thread.id}`}
+            to={currentThreadHref(thread.id)}
             className={className}
             onClick={onClick}
           >

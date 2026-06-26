@@ -23,6 +23,11 @@ import {
   fetchWorkspaces,
   updateThread,
 } from '../lib/api';
+import {
+  currentNewThreadHref,
+  currentThreadHref,
+  currentWorkspacesHref,
+} from '../lib/relayRoutes';
 
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
@@ -121,11 +126,11 @@ export function ThreadsPage() {
     (thread) => thread.status === 'running',
   ).length;
   const newThreadHref = selectedWorkspaceId
-    ? `/threads/new?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`
-    : '/threads/new';
+    ? currentNewThreadHref(selectedWorkspaceId)
+    : currentNewThreadHref();
 
   if (selectedWorkspaceId === null) {
-    return <Navigate to="/workspaces" replace />;
+    return <Navigate to={currentWorkspacesHref()} replace />;
   }
 
   function supervisorDotClassName() {
@@ -269,7 +274,7 @@ export function ThreadsPage() {
                   threads={visibleThreads}
                   currentWorkspaceId={selectedWorkspaceId}
                   workspaceLabels={workspaceLabels}
-                  onOpenThread={(threadId) => navigate(`/threads/${threadId}`)}
+                  onOpenThread={(threadId) => navigate(currentThreadHref(threadId))}
                   onBeginRenameThread={(thread) => {
                     setEditingRecentThreadId(thread.id);
                     setRecentDraftTitle(thread.title);

@@ -21,6 +21,10 @@ import {
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
 } from '../lib/api';
+import {
+  threadHref,
+  workspacesHref,
+} from '../lib/relayRoutes';
 import { RelayUserMenu } from '../components/RelayUserMenu';
 
 type AuthMode = 'login' | 'register';
@@ -105,13 +109,13 @@ export function RelayPortalPage() {
   function openOwnDevice(deviceId: string) {
     setSelectedRelayDeviceId(deviceId);
     setSelectedRelayThreadId(null);
-    navigate('/workspaces');
+    navigate(workspacesHref(deviceId));
   }
 
   function openSharedSession(deviceId: string, threadId: string) {
     setSelectedRelayDeviceId(deviceId);
     setSelectedRelayThreadId(threadId);
-    navigate(`/threads/${encodeURIComponent(threadId)}`);
+    navigate(threadHref(threadId, deviceId));
   }
 
   if (loading) {

@@ -71,6 +71,10 @@ import type {
 } from '@remote-codex/shared';
 export type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 import type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
+import {
+  currentRelayDeviceIdFromPath,
+  currentThreadIdFromPath,
+} from './relayRoutes';
 
 export class ApiError extends Error {
   constructor(
@@ -164,7 +168,10 @@ export function readSelectedRelayDeviceId() {
   if (typeof window === 'undefined') {
     return null;
   }
-  return window.localStorage.getItem(RELAY_DEVICE_STORAGE_KEY);
+  return (
+    currentRelayDeviceIdFromPath() ??
+    window.localStorage.getItem(RELAY_DEVICE_STORAGE_KEY)
+  );
 }
 
 export function setSelectedRelayDeviceId(deviceId: string | null) {
@@ -182,7 +189,10 @@ export function readSelectedRelayThreadId() {
   if (typeof window === 'undefined') {
     return null;
   }
-  return window.localStorage.getItem(RELAY_THREAD_STORAGE_KEY);
+  return (
+    currentThreadIdFromPath() ??
+    window.localStorage.getItem(RELAY_THREAD_STORAGE_KEY)
+  );
 }
 
 export function setSelectedRelayThreadId(threadId: string | null) {

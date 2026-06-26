@@ -16,6 +16,10 @@ import {
   updateWorkspace,
   updateWorkspaceFavorite,
 } from '../lib/api';
+import {
+  currentRelayScopedPath,
+  currentThreadsHref,
+} from '../lib/relayRoutes';
 
 function workspaceSortTimestamp(workspace: WorkspaceDto) {
   return Date.parse(workspace.lastOpenedAt ?? workspace.createdAt);
@@ -171,7 +175,7 @@ export function WorkspacesPage() {
   }
 
   function openWorkspaceThreads(workspaceId: string) {
-    navigate(`/threads?workspaceId=${encodeURIComponent(workspaceId)}`);
+    navigate(currentThreadsHref(workspaceId));
   }
 
   async function handleDeleteWorkspace() {
@@ -212,13 +216,13 @@ export function WorkspacesPage() {
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <AppShellMenuButton />
             <Link
-              to="/threads/import"
+              to={currentRelayScopedPath('/threads/import')}
               className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-full border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
             >
               Import
             </Link>
             <Link
-              to="/workspaces/new"
+              to={currentRelayScopedPath('/workspaces/new')}
               className="ui-action-primary inline-flex h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
             >
               Create

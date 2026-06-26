@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { WorkspaceForm } from '../components/WorkspaceForm';
 import { ApiError, createWorkspace } from '../lib/api';
+import { currentThreadsHref } from '../lib/relayRoutes';
 
 export function WorkspaceNewPage() {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ export function WorkspaceNewPage() {
 
     try {
       const workspace = await createWorkspace(input);
-      navigate(`/threads?workspaceId=${encodeURIComponent(workspace.id)}`);
+      navigate(currentThreadsHref(workspace.id));
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);

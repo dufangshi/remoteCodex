@@ -10,6 +10,7 @@ import {
   createControlPlaneWorkspace,
   createWorkspace,
   disconnectThread,
+  buildApiUrl,
   buildThreadImageAssetUrl,
   buildWorkspaceRawFileUrl,
   fetchAgentBackendModels,
@@ -36,6 +37,7 @@ import {
 describe('api request helper', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.history.pushState(null, '', '/');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -171,6 +173,23 @@ describe('api request helper', () => {
       }),
     ).toBe(
       '/relay/devices/device-1/api/workspaces/workspace-1/files/raw?path=screenshots%2Fimage+1.png',
+    );
+  });
+
+  it('lets relay device ids in the URL override the globally selected device', () => {
+    enableRelayMode();
+    setSelectedRelayDeviceId('device-b');
+    window.history.pushState(null, '', '/devices/device-a/threads/thread-1');
+
+    expect(buildApiUrl('/api/threads/thread-1')).toBe(
+      '/relay/devices/device-a/api/threads/thread-1',
+    );
+    expect(
+      buildThreadImageAssetUrl('thread-1', {
+        path: './.temp/threads/thread-1/image.png',
+      }),
+    ).toBe(
+      '/relay/devices/device-a/api/threads/thread-1/assets/image?path=.%2F.temp%2Fthreads%2Fthread-1%2Fimage.png',
     );
   });
 

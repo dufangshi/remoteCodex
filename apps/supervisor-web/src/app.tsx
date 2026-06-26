@@ -149,14 +149,24 @@ function AppShell({
     readInitialAutoCollapseCompletedTurns,
   );
   const location = useLocation();
-  const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
+  const isThreadUtilityRoute =
+    /^\/threads\/(?:import|new)$/.test(location.pathname) ||
+    /^\/devices\/[^/]+\/threads\/(?:import|new)$/.test(location.pathname);
+  const isThreadDetailRoute =
+    !isThreadUtilityRoute &&
+    (/^\/threads\/[^/]+$/.test(location.pathname) ||
+      /^\/devices\/[^/]+\/threads\/[^/]+$/.test(location.pathname));
   const isControlPlaneSessionRoute = /^\/control-plane\/sessions\/[^/]+$/.test(location.pathname);
-  const isThreadsRoute = location.pathname === '/threads';
+  const isThreadsRoute =
+    location.pathname === '/threads' ||
+    /^\/devices\/[^/]+\/threads$/.test(location.pathname);
   const isViewportLockedRoute = isThreadDetailRoute || isControlPlaneSessionRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
     isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
   const ownsNavigationShell = isThreadDetailRoute || isControlPlaneSessionRoute;
-  const isWorkspacesRoute = location.pathname === '/workspaces';
+  const isWorkspacesRoute =
+    location.pathname === '/workspaces' ||
+    /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
   const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
   const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
 
@@ -466,6 +476,12 @@ function SupervisorRoutes({
         <Route path="/threads/import" element={<ThreadImportPage />} />
         <Route path="/threads/new" element={<ThreadNewPage />} />
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        <Route path="/devices/:relayDeviceId/workspaces" element={<WorkspacesPage />} />
+        <Route path="/devices/:relayDeviceId/workspaces/new" element={<WorkspaceNewPage />} />
+        <Route path="/devices/:relayDeviceId/threads" element={<ThreadsPage />} />
+        <Route path="/devices/:relayDeviceId/threads/import" element={<ThreadImportPage />} />
+        <Route path="/devices/:relayDeviceId/threads/new" element={<ThreadNewPage />} />
+        <Route path="/devices/:relayDeviceId/threads/:id" element={<ThreadDetailPage />} />
       </Route>
     </Routes>
   );

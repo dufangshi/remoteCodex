@@ -35,6 +35,7 @@ import {
   updateThreadGoal,
   updateThreadHook,
 } from '../lib/api';
+import { currentThreadHref } from '../lib/relayRoutes';
 import { mergeGoalHistory, mergeThreadIntoList } from './threadDetailModel';
 
 export interface SlashPanelState<T> {
@@ -576,7 +577,7 @@ export function useThreadAuxiliaryActions({
 
     const result = await forkThread(id, { mode: 'latest' });
     setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
-    navigate(`/threads/${result.thread.thread.id}`);
+    navigate(currentThreadHref(result.thread.thread.id));
   }
 
   async function handleForkTurn(turnId: string) {
@@ -586,7 +587,7 @@ export function useThreadAuxiliaryActions({
 
     const result = await forkThread(id, { mode: 'turn', turnId });
     setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
-    navigate(`/threads/${result.thread.thread.id}`);
+    navigate(currentThreadHref(result.thread.thread.id));
   }
 
   return {

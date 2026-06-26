@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import type { AgentBackendDto, AgentBackendIdDto } from '@remote-codex/shared';
 import { agentBackendMetadata, defaultAgentBackendId } from '@remote-codex/shared';
 import { ApiError, fetchAgentBackends, importThread } from '../lib/api';
+import { currentThreadHref } from '../lib/relayRoutes';
 
 export function ThreadImportPage() {
   const navigate = useNavigate();
@@ -74,7 +75,7 @@ export function ThreadImportPage() {
         sessionId: normalizedSessionId,
         provider,
       });
-      navigate(`/threads/${imported.thread.id}`);
+      navigate(currentThreadHref(imported.thread.id));
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);

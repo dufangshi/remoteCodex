@@ -17,6 +17,11 @@ import {
   fetchAgentBackendModels,
   fetchWorkspaces,
 } from '../lib/api';
+import {
+  currentThreadHref,
+  currentThreadsHref,
+  currentWorkspacesHref,
+} from '../lib/relayRoutes';
 
 function backendCanStartSession(backend: AgentBackendDto) {
   return backend.enabled && backend.capabilities.sessions.resume && backend.capabilities.turns.start;
@@ -136,11 +141,11 @@ export function ThreadNewPage() {
     }
 
     if (requestedWorkspaceId) {
-      navigate(`/threads?workspaceId=${encodeURIComponent(requestedWorkspaceId)}`);
+      navigate(currentThreadsHref(requestedWorkspaceId));
       return;
     }
 
-    navigate('/workspaces');
+    navigate(currentWorkspacesHref());
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -165,7 +170,7 @@ export function ThreadNewPage() {
               approvalMode
             }
       );
-      navigate(`/threads/${thread.id}`);
+      navigate(currentThreadHref(thread.id));
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
