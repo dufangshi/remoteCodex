@@ -11,18 +11,12 @@ const envSchema = z.object({
   CONTROL_PLANE_JWT_SECRET: z.string().min(16).optional(),
   CONTROL_PLANE_JWT_SECRET_ID: z.string().min(1).optional(),
   CONTROL_PLANE_JWT_PREVIOUS_SECRETS: z.string().optional(),
-  CONTROL_PLANE_ROUTE_TOKEN_SECRET: z.string().min(16).optional(),
-  CONTROL_PLANE_ROUTE_TOKEN_KEY_ID: z.string().min(1).optional(),
   SANDBOX_ROUTER_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   SANDBOX_ROUTER_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   SANDBOX_ROUTER_STATIC_ENDPOINTS: z.string().optional(),
   SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL: z.string().url().optional(),
   SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
   SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(16).optional(),
-  SANDBOX_ROUTER_HOST_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
-  SANDBOX_ROUTER_HOST_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(16).optional(),
-  SANDBOX_ROUTER_ACCESS_COOKIE_NAME: z.string().min(1).optional(),
-  SANDBOX_ROUTER_ACCESS_COOKIE_MAX_AGE_SECONDS: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_CORS_ALLOWED_ORIGINS: z.string().optional(),
   SANDBOX_ROUTER_MAX_REQUEST_BYTES: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
@@ -43,10 +37,6 @@ export interface SandboxRouterConfig {
   defaultWorkerBaseUrl: string | null;
   controlPlaneBaseUrl: string | null;
   controlPlaneServiceToken: string | null;
-  hostControlPlaneBaseUrl: string | null;
-  hostControlPlaneServiceToken: string | null;
-  accessCookieName: string;
-  accessCookieMaxAgeSeconds: number;
   corsAllowedOrigins: Set<string>;
   maxRequestBytes: number;
   upstreamTimeoutMs: number;
@@ -116,11 +106,8 @@ function parseStaticEndpoints(value: string | undefined) {
 function routeTokenSigningKeys(parsed: z.infer<typeof envSchema>) {
   const keys: SigningKey[] = [
     {
-      id: parsed.CONTROL_PLANE_JWT_SECRET_ID ?? parsed.CONTROL_PLANE_ROUTE_TOKEN_KEY_ID ?? 'current',
-      secret:
-        parsed.CONTROL_PLANE_JWT_SECRET ??
-        parsed.CONTROL_PLANE_ROUTE_TOKEN_SECRET ??
-        'dev-control-plane-route-token-secret',
+      id: parsed.CONTROL_PLANE_JWT_SECRET_ID ?? 'current',
+      secret: parsed.CONTROL_PLANE_JWT_SECRET ?? 'dev-control-plane-route-token-secret',
     },
     ...parsePreviousSigningKeys(parsed.CONTROL_PLANE_JWT_PREVIOUS_SECRETS),
   ];
@@ -150,14 +137,6 @@ export function loadSandboxRouterConfig(
       'SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL and SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN must be configured together.',
     );
   }
-  if (
-    Boolean(parsed.SANDBOX_ROUTER_HOST_CONTROL_PLANE_BASE_URL) !==
-    Boolean(parsed.SANDBOX_ROUTER_HOST_CONTROL_PLANE_SERVICE_TOKEN)
-  ) {
-    throw new Error(
-      'SANDBOX_ROUTER_HOST_CONTROL_PLANE_BASE_URL and SANDBOX_ROUTER_HOST_CONTROL_PLANE_SERVICE_TOKEN must be configured together.',
-    );
-  }
 
   return {
     nodeEnv,
@@ -172,16 +151,6 @@ export function loadSandboxRouterConfig(
     defaultWorkerBaseUrl: parsed.SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL ?? null,
     controlPlaneBaseUrl: parsed.SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL ?? null,
     controlPlaneServiceToken: parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN ?? null,
-    hostControlPlaneBaseUrl:
-      parsed.SANDBOX_ROUTER_HOST_CONTROL_PLANE_BASE_URL ??
-      parsed.SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL ??
-      null,
-    hostControlPlaneServiceToken:
-      parsed.SANDBOX_ROUTER_HOST_CONTROL_PLANE_SERVICE_TOKEN ??
-      parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN ??
-      null,
-    accessCookieName: parsed.SANDBOX_ROUTER_ACCESS_COOKIE_NAME ?? 'sandbox_access',
-    accessCookieMaxAgeSeconds: parsed.SANDBOX_ROUTER_ACCESS_COOKIE_MAX_AGE_SECONDS ?? 3600,
     corsAllowedOrigins: new Set([
       ...DEFAULT_CORS_ALLOWED_ORIGINS,
       ...(parsed.SANDBOX_ROUTER_CORS_ALLOWED_ORIGINS ?? '')

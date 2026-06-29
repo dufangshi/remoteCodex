@@ -28,17 +28,6 @@ class RouterHttpError extends Error {
   }
 }
 
-interface ProxyRouteContext {
-  payload: SandboxAppRouteTokenPayload;
-  path: string;
-  token: string;
-}
-
-type SandboxAppRouteTokenPayload = RouteTokenPayload & {
-  app_kind?: string;
-  host?: string;
-};
-
 export interface SandboxEndpointResolver {
   resolve(input: { sandboxId: string; userId: string | null }): Promise<{
     workerBaseUrl: string | null;
@@ -205,31 +194,6 @@ function readRouteToken(request: FastifyRequest) {
   return query.token ?? bearer ?? null;
 }
 
-function parseCookies(header: string | undefined) {
-  const cookies = new Map<string, string>();
-  if (!header) {
-    return cookies;
-  }
-  for (const part of header.split(';')) {
-    const separator = part.indexOf('=');
-    if (separator <= 0) {
-      continue;
-    }
-    const name = part.slice(0, separator).trim();
-    const value = part.slice(separator + 1).trim();
-    if (name) {
-      cookies.set(name, decodeURIComponent(value));
-    }
-  }
-  return cookies;
-}
-
-function readAccessCookieToken(request: FastifyRequest) {
-  return parseCookies(request.headers.cookie).get(
-    request.server.services.config.accessCookieName,
-  ) ?? null;
-}
-
 function parseProxyParams(params: unknown) {
   return z.object({
     sandboxId: z.string().min(1),
@@ -237,29 +201,17 @@ function parseProxyParams(params: unknown) {
   }).parse(params);
 }
 
-function verifyRouteToken(request: FastifyRequest, token: string | null) {
+function verifyRouteTokenForRequest(request: FastifyRequest) {
+  const token = readRouteToken(request);
   if (!token) {
     throw new RouterHttpError(401, 'missing_route_token', 'Route token is required.');
   }
 
   try {
-    return verifySignedTokenWithKeys<SandboxAppRouteTokenPayload>(
+    const payload = verifySignedTokenWithKeys<RouteTokenPayload>(
       token,
       request.server.services.config.routeTokenSigningKeys,
     );
-  } catch (error) {
-    if (error instanceof RouterHttpError) {
-      throw error;
-    }
-    throw new RouterHttpError(401, 'invalid_route_token', 'Route token is invalid or expired.');
-  }
-}
-
-function verifyRouteTokenForPathRequest(request: FastifyRequest): ProxyRouteContext {
-  const token = readRouteToken(request);
-
-  try {
-    const payload = verifyRouteToken(request, token);
     const params = parseProxyParams(request.params);
     if (payload.sandbox_id !== params.sandboxId) {
       throw new RouterHttpError(403, 'wrong_sandbox', 'Route token does not match this sandbox.');
@@ -267,7 +219,6 @@ function verifyRouteTokenForPathRequest(request: FastifyRequest): ProxyRouteCont
     return {
       payload,
       path: params['*'] ?? '',
-      token: token!,
     };
   } catch (error) {
     if (error instanceof RouterHttpError) {
@@ -277,89 +228,6 @@ function verifyRouteTokenForPathRequest(request: FastifyRequest): ProxyRouteCont
   }
 }
 
-function parseHostProxyParams(params: unknown) {
-  return z.object({
-    '*': z.string().optional(),
-  }).parse(params);
-}
-
-function normalizedHost(request: FastifyRequest) {
-  const rawHost = request.headers['x-forwarded-host'] ?? request.headers.host;
-  const firstHost = Array.isArray(rawHost) ? rawHost[0] : rawHost;
-  return firstHost?.split(',')[0]?.trim().toLowerCase().replace(/:\d+$/u, '') ?? null;
-}
-
-function verifyRouteTokenForHostRequest(request: FastifyRequest): ProxyRouteContext {
-  const token = readAccessCookieToken(request);
-  const payload = verifyRouteToken(request, token);
-  const host = normalizedHost(request);
-  if (payload.host && host && payload.host.toLowerCase() !== host) {
-    throw new RouterHttpError(403, 'wrong_host', 'Route token does not match this host.');
-  }
-  const params = parseHostProxyParams(request.params);
-  return {
-    payload,
-    path: params['*'] ?? '',
-    token: token!,
-  };
-}
-
-function accessCookieHeader(request: FastifyRequest, token: string) {
-  const { accessCookieName, accessCookieMaxAgeSeconds } = request.server.services.config;
-  return [
-    `${accessCookieName}=${encodeURIComponent(token)}`,
-    'Path=/',
-    `Max-Age=${accessCookieMaxAgeSeconds}`,
-    'HttpOnly',
-    'Secure',
-    'SameSite=Lax',
-  ].join('; ');
-}
-
-async function verifyBootstrapTokenWithControlPlane(
-  request: FastifyRequest,
-  token: string,
-  localPayload: SandboxAppRouteTokenPayload,
-) {
-  const { hostControlPlaneBaseUrl, hostControlPlaneServiceToken } = request.server.services.config;
-  if (!hostControlPlaneBaseUrl || !hostControlPlaneServiceToken) {
-    return localPayload;
-  }
-
-  const base = hostControlPlaneBaseUrl.endsWith('/')
-    ? hostControlPlaneBaseUrl
-    : `${hostControlPlaneBaseUrl}/`;
-  const url = new URL('api/route-token/verify', base);
-  url.searchParams.set('token', token);
-  const response = await fetch(url, {
-    headers: {
-      'x-remote-codex-service-token': hostControlPlaneServiceToken,
-    },
-  });
-  if (!response.ok) {
-    throw new RouterHttpError(401, 'invalid_route_token', 'Route token is invalid or expired.');
-  }
-  const body = z.object({
-    payload: z.object({
-      sub: z.string().min(1),
-      sandbox_id: z.string().min(1),
-      host: z.string().min(1).optional(),
-    }),
-  }).parse(await response.json());
-  if (
-    body.payload.sub !== localPayload.sub ||
-    body.payload.sandbox_id !== localPayload.sandbox_id ||
-    (body.payload.host && localPayload.host && body.payload.host !== localPayload.host)
-  ) {
-    throw new RouterHttpError(
-      502,
-      'route_token_verification_mismatch',
-      'Control-plane returned mismatched route-token metadata.',
-    );
-  }
-  return localPayload;
-}
-
 function copyForwardHeaders(request: FastifyRequest) {
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers)) {
@@ -367,7 +235,6 @@ function copyForwardHeaders(request: FastifyRequest) {
     if (
       lowerName === 'host' ||
       lowerName === 'authorization' ||
-      lowerName === 'cookie' ||
       lowerName === 'content-length' ||
       lowerName === 'connection' ||
       lowerName === 'upgrade' ||
@@ -491,11 +358,8 @@ function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply) {
   reply.header('Access-Control-Max-Age', '600');
 }
 
-async function proxyRequest(
-  request: FastifyRequest,
-  getContext: (request: FastifyRequest) => ProxyRouteContext = verifyRouteTokenForPathRequest,
-) {
-  const { payload, path } = getContext(request);
+async function proxyRequest(request: FastifyRequest) {
+  const { payload, path } = verifyRouteTokenForRequest(request);
   try {
     enforceRateLimit(request, payload);
   } catch (error) {
@@ -721,11 +585,8 @@ async function hookProxyRequest(request: FastifyRequest) {
   }
 }
 
-async function websocketProxyContext(
-  request: FastifyRequest,
-  getContext: (request: FastifyRequest) => ProxyRouteContext = verifyRouteTokenForPathRequest,
-) {
-  const { payload, path } = getContext(request);
+async function websocketProxyContext(request: FastifyRequest) {
+  const { payload, path } = verifyRouteTokenForRequest(request);
   try {
     enforceRateLimit(request, payload);
   } catch (error) {
@@ -824,21 +685,8 @@ export function buildSandboxRouterApp(options: {
     }
     return reply.send(Buffer.from(await response.arrayBuffer()));
   };
-  const hostHttpProxyHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    const response = await proxyRequest(request, verifyRouteTokenForHostRequest);
-    reply.status(response.status);
-    copyResponseHeaders(response, reply);
-    if (isEventStreamResponse(response) && response.body) {
-      return reply.send(Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]));
-    }
-    return reply.send(Buffer.from(await response.arrayBuffer()));
-  };
-  const websocketProxyHandler = (
-    clientSocket: WebSocket,
-    request: FastifyRequest,
-    getContext: (request: FastifyRequest) => ProxyRouteContext = verifyRouteTokenForPathRequest,
-  ) => {
-    const contextPromise = websocketProxyContext(request, getContext);
+  const websocketProxyHandler = (clientSocket: WebSocket, request: FastifyRequest) => {
+    const contextPromise = websocketProxyContext(request);
     let upstreamSocket: WebSocket | null = null;
     const pendingClientMessages: Array<Parameters<WebSocket['send']>[0]> = [];
     let clientClosed = false;
@@ -953,7 +801,7 @@ export function buildSandboxRouterApp(options: {
       method: 'GET',
       url: '/api/sandboxes/:sandboxId/*',
       handler: httpProxyHandler,
-      wsHandler: (clientSocket, request) => websocketProxyHandler(clientSocket, request),
+      wsHandler: websocketProxyHandler,
     });
   });
   for (const method of ['DELETE', 'PATCH', 'POST', 'PUT', 'OPTIONS'] as const) {
@@ -963,36 +811,6 @@ export function buildSandboxRouterApp(options: {
       handler: method === 'OPTIONS'
         ? async (_request, reply) => reply.status(204).send()
         : httpProxyHandler,
-    });
-  }
-
-  app.get('/__sandbox_access', async (request, reply) => {
-    const query = z.object({ token: z.string().min(1) }).parse(request.query);
-    const payload = verifyRouteToken(request, query.token);
-    await verifyBootstrapTokenWithControlPlane(request, query.token, payload);
-    const host = normalizedHost(request);
-    if (payload.host && host && payload.host.toLowerCase() !== host) {
-      throw new RouterHttpError(403, 'wrong_host', 'Route token does not match this host.');
-    }
-    reply.header('set-cookie', accessCookieHeader(request, query.token));
-    return reply.redirect('/');
-  });
-
-  app.register(async (hostRealtimeApp) => {
-    await hostRealtimeApp.register(websocket);
-    hostRealtimeApp.route({
-      method: 'GET',
-      url: '/*',
-      handler: hostHttpProxyHandler,
-      wsHandler: (clientSocket, request) =>
-        websocketProxyHandler(clientSocket, request, verifyRouteTokenForHostRequest),
-    });
-  });
-  for (const method of ['DELETE', 'PATCH', 'POST', 'PUT'] as const) {
-    app.route({
-      method,
-      url: '/*',
-      handler: hostHttpProxyHandler,
     });
   }
 
