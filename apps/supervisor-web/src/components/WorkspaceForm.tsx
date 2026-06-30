@@ -31,6 +31,7 @@ interface WorkspaceFormProps {
   submitLabel?: string;
   error?: string | null;
   busy?: boolean;
+  surface?: boolean;
   onSubmit: (input: { absPath: string; label?: string } | { gitUrl: string; label?: string }) => Promise<void> | void;
 }
 
@@ -40,6 +41,7 @@ export function WorkspaceForm({
   submitLabel = 'Save Workspace',
   error,
   busy = false,
+  surface = true,
   onSubmit
 }: WorkspaceFormProps) {
   const initialAutoLabel = inferWorkspaceLabel(initialPath);
@@ -84,8 +86,12 @@ export function WorkspaceForm({
     );
   }
 
+  const formClassName = surface
+    ? 'host-panel space-y-5 rounded-3xl border p-6'
+    : 'space-y-5';
+
   return (
-    <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-3xl border p-6">
+    <form onSubmit={handleSubmit} className={formClassName}>
       <div>
         <label htmlFor="workspace-path" className="host-form-label text-sm font-medium">
           Path or Git URL

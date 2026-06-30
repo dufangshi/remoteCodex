@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { WorkspaceForm } from '../components/WorkspaceForm';
+import { FloatingRoutePanel } from '../components/FloatingRoutePanel';
 import { ApiError, createWorkspace } from '../lib/api';
 import { currentThreadsHref } from '../lib/relayRoutes';
 
@@ -29,16 +30,18 @@ export function WorkspaceNewPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">Add Workspace</p>
-        <h2 className="host-page-title mt-2 text-3xl font-semibold">Create a workspace</h2>
-        <p className="host-page-description mt-3 max-w-2xl text-sm leading-6">
-          Register an existing local directory, create one missing child directory under dev home,
-          or clone a Git repository into dev home.
-        </p>
-      </div>
-      <WorkspaceForm busy={busy} error={error} submitLabel="Create Workspace" onSubmit={handleSubmit} />
-    </div>
+    <FloatingRoutePanel
+      eyebrow="Add Workspace"
+      title="Create a workspace"
+      description="Register a local directory, create one missing child directory under dev home, or clone a Git repository into dev home."
+    >
+      <WorkspaceForm
+        busy={busy}
+        error={error}
+        submitLabel="Create Workspace"
+        surface={false}
+        onSubmit={handleSubmit}
+      />
+    </FloatingRoutePanel>
   );
 }

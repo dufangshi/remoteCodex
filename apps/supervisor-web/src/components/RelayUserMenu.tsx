@@ -1,4 +1,4 @@
-import { LogOut, MonitorSmartphone, Settings } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
@@ -91,14 +91,6 @@ export function RelayUserMenu() {
           >
             <Settings className="h-4 w-4" />
             Account settings
-          </Link>
-          <Link
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
-            role="menuitem"
-            to="/relay-devices"
-          >
-            <MonitorSmartphone className="h-4 w-4" />
-            Device management
           </Link>
           <button
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)]"

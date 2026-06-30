@@ -210,7 +210,7 @@ export function RelayPortalPage() {
                         onClick={() => openOwnDevice(device.id)}
                         type="button"
                       >
-                        Open
+                        Connect
                       </button>
                       <button
                         className="relay-button-secondary"

@@ -10,6 +10,7 @@ import {
   WorkspaceDto,
 } from '@remote-codex/shared';
 import { useAppShellNav } from '../components/AppShellNavContext';
+import { FloatingRoutePanel } from '../components/FloatingRoutePanel';
 import {
   ApiError,
   createThread,
@@ -183,21 +184,18 @@ export function ThreadNewPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">New Thread</p>
-        <h2 className="host-page-title mt-2 text-3xl font-semibold">Start a backend session</h2>
-        <p className="host-page-description mt-3 max-w-2xl text-sm leading-6">
-          Choose the workspace, model, and approval mode that should back the new thread.
-        </p>
-      </div>
-
+    <FloatingRoutePanel
+      eyebrow="New Thread"
+      title="Start a backend session"
+      description="Choose the workspace, model, and approval mode that should back the new thread."
+      maxWidthClassName="max-w-3xl"
+    >
       {loading ? (
         <div className="host-empty-state rounded-3xl border px-6 py-12 text-center">
           Loading creation form...
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-3xl border p-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="host-form-label text-sm font-medium" htmlFor="thread-backend">
               Backend
@@ -311,6 +309,6 @@ export function ThreadNewPage() {
           </div>
         </form>
       )}
-    </div>
+    </FloatingRoutePanel>
   );
 }
