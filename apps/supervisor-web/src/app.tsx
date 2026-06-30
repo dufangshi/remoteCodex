@@ -37,6 +37,7 @@ import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
 import { LoginPage } from './pages/LoginPage';
 import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
+import { RelayDevicesPage } from './pages/RelayDevicesPage';
 import { RelayPortalPage } from './pages/RelayPortalPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -453,7 +454,7 @@ function SupervisorRoutes({
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
         <Route path="/relay-account" element={<RelayAccountPage />} />
-        <Route path="/relay-devices" element={<Navigate to="/relay-portal" replace />} />
+        <Route path="/relay-devices" element={<RelayDevicesPage />} />
         <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
         <Route
           path="/control-plane"
