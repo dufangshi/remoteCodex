@@ -521,6 +521,18 @@ function shouldAppendPersistedMissingItem(
   );
 }
 
+function shouldUsePersistedUserMessageText(
+  item: ThreadHistoryItemDto,
+  persistedItem: ThreadHistoryItemDto,
+) {
+  return (
+    item.kind === 'userMessage' &&
+    persistedItem.kind === 'userMessage' &&
+    /\[localImage\]/.test(item.text) &&
+    /\[PHOTO\s+[^\]]+\]/.test(persistedItem.text)
+  );
+}
+
 export function mergePersistedHistoryItemsIntoTurns(
   turns: ThreadTurnDto[],
   persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
@@ -560,6 +572,11 @@ export function mergePersistedHistoryItemsIntoTurns(
         ...persistedItem,
         transcriptOrder: transcriptIndex,
       };
+      if (shouldUsePersistedUserMessageText(item, persistedItemWithTranscriptOrder)) {
+        changed = true;
+        return deferHistoryItemDetail(persistedItemWithTranscriptOrder, deferredDetails);
+      }
+
       const sequencedItem = copyPersistedOrderingHints(
         itemWithTranscriptOrder,
         persistedItemWithTranscriptOrder,

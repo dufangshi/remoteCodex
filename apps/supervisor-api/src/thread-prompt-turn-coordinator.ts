@@ -212,7 +212,7 @@ export class ThreadPromptTurnCoordinator {
           turnId: steerTurnId,
           clientRequestId: input.clientRequestId,
           displayPrompt: input.displayPrompt,
-          submittedPrompt: input.displayPrompt,
+          submittedPrompt: input.prompt,
         });
         this.callbacks.invalidateThreadDetailCache(localThreadId);
         this.callbacks.emitThreadUpdated(localThreadId, {

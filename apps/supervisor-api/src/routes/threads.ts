@@ -764,7 +764,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
           )
         : parsed.input;
     return app.services.threadService.sendPrompt(params.id, input, {
-      displayPrompt: parsed.input.prompt,
+      displayPrompt: parsed.attachments.length > 0 ? input.prompt : parsed.input.prompt,
     });
   });
 

@@ -8,6 +8,7 @@ import {
   listThreadForkRecordsByForkedThreadId,
   listThreadForkRecordsBySourceThreadId,
   listThreadPendingSteerRecordsByThreadId,
+  upsertThreadHistoryItemRecord,
   type DatabaseClient,
 } from '../../../packages/db/src/index';
 import type {
@@ -155,6 +156,18 @@ export class ThreadAuxiliaryStateStore {
       remoteSession.turns.map((turn) => [turn.providerTurnId, turn]),
     );
     let removed = false;
+    let persistedDisplayPrompt = false;
+    const localImageUserItemCursorByTurnId = new Map<string, number>();
+    const photoPendingSteerCountByTurnId = new Map<string, number>();
+    for (const record of records) {
+      if (!/\[PHOTO\s+[^\]]+\]/.test(record.displayPrompt)) {
+        continue;
+      }
+      photoPendingSteerCountByTurnId.set(
+        record.turnId,
+        (photoPendingSteerCountByTurnId.get(record.turnId) ?? 0) + 1,
+      );
+    }
 
     for (const record of records) {
       const turn = turnsById.get(record.turnId);
@@ -165,9 +178,20 @@ export class ThreadAuxiliaryStateStore {
       }
 
       const turnMessages = extractTurnUserMessages(turn);
+      const persistedLocalImagePrompt = persistPendingSteerDisplayPrompt({
+        db: this.db,
+        localThreadId,
+        record,
+        turn,
+        cursorByTurnId: localImageUserItemCursorByTurnId,
+        pendingSteerCount:
+          photoPendingSteerCountByTurnId.get(record.turnId) ?? 0,
+      });
+      persistedDisplayPrompt = persistedDisplayPrompt || persistedLocalImagePrompt;
       if (
         turnMessages.includes(record.submittedPrompt) ||
         turnMessages.includes(record.displayPrompt) ||
+        persistedLocalImagePrompt ||
         turn.status !== 'inProgress'
       ) {
         deleteThreadPendingSteerRecordById(this.db, record.id);
@@ -175,7 +199,7 @@ export class ThreadAuxiliaryStateStore {
       }
     }
 
-    if (removed) {
+    if (removed || persistedDisplayPrompt) {
       this.callbacks.invalidateThreadDetailCache(localThreadId);
       this.callbacks.emitPendingSteerUpdated(localThreadId);
     }
@@ -187,4 +211,52 @@ function extractTurnUserMessages(turn: AgentTurn) {
     .filter((item) => item.kind === 'userMessage')
     .map((item) => item.text.trim())
     .filter((text) => text.length > 0);
+}
+
+function persistPendingSteerDisplayPrompt(input: {
+  db: DatabaseClient;
+  localThreadId: string;
+  record: {
+    turnId: string;
+    displayPrompt: string;
+  };
+  turn: AgentTurn;
+  cursorByTurnId: Map<string, number>;
+  pendingSteerCount: number;
+}) {
+  if (!/\[PHOTO\s+[^\]]+\]/.test(input.record.displayPrompt)) {
+    return false;
+  }
+
+  const localImageUserItems = input.turn.items.filter(
+    (item) =>
+      item.kind === 'userMessage' &&
+      /\[localImage\]/.test(item.text) &&
+      item.text.trim() !== input.record.displayPrompt.trim(),
+  );
+  if (localImageUserItems.length === 0) {
+    return false;
+  }
+
+  const cursor = input.cursorByTurnId.get(input.record.turnId) ?? 0;
+  const firstPendingSteerItemIndex = Math.max(
+    0,
+    localImageUserItems.length - input.pendingSteerCount,
+  );
+  const item = localImageUserItems[firstPendingSteerItemIndex + cursor];
+  if (!item) {
+    return false;
+  }
+
+  input.cursorByTurnId.set(input.record.turnId, cursor + 1);
+  upsertThreadHistoryItemRecord(input.db, {
+    threadId: input.localThreadId,
+    turnId: input.record.turnId,
+    itemId: item.id,
+    itemJson: JSON.stringify({
+      ...item,
+      text: input.record.displayPrompt,
+    }),
+  });
+  return true;
 }

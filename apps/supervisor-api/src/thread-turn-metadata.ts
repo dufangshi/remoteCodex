@@ -19,6 +19,7 @@ export function listThreadTurnMetadataMap(
         pricingModelKey: entry.pricingModelKey ?? null,
         pricingTierKey: normalizePricingTier(entry.pricingTierKey),
         tokenUsageJson: entry.tokenUsageJson ?? null,
+        displayPrompt: entry.displayPrompt ?? null,
         createdAt: entry.createdAt ?? null,
       },
     ]),

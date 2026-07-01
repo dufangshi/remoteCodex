@@ -6168,6 +6168,123 @@ describe('supervisor api', () => {
       expect.stringMatching(/^notes-[a-z0-9]{8}\.txt$/),
       expect.stringMatching(/^screen-[a-z0-9]{8}\.png$/),
     ]);
+
+    const remoteTurn = remoteThread?.turns.at(-1) as any;
+    remoteTurn.items[0] = {
+      ...remoteTurn.items[0],
+      text: undefined,
+      content: [
+        { type: 'text', text: 'Use the image ' },
+        { type: 'localImage' },
+        { type: 'text', text: ' and file [FILE notes.txt].' },
+      ],
+    };
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detailUserMessage = detailResponse
+      .json()
+      .turns.at(-1)
+      ?.items.find((item: any) => item.kind === 'userMessage');
+    expect(detailUserMessage?.text).toContain('[PHOTO ./.temp/threads/');
+    expect(detailUserMessage?.text).toContain('/screen-');
+    expect(detailUserMessage?.text).not.toContain('[localImage]');
+  });
+
+  it('restores running-turn photo steers when Codex history only returns local image placeholders', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Running Photo Steer Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Initial request',
+      },
+    });
+    expect(firstPromptResponse.statusCode).toBe(200);
+
+    const manifest = [
+      {
+        clientId: 'photo-1',
+        kind: 'photo',
+        originalName: 'screen.png',
+        placeholder: '[PHOTO screen.png]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Follow up with [PHOTO screen.png]',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: 'screen.png',
+          contentType: 'image/png',
+          content: Buffer.from('fake-png')
+        }
+      ]
+    });
+
+    const steerPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+    expect(steerPromptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.steerTurnCalls.at(-1)?.prompt).toContain(
+      '[PHOTO ./.temp/threads/',
+    );
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
+    const remoteTurn = remoteThread?.turns.at(-1) as any;
+    remoteTurn.items[1] = {
+      ...remoteTurn.items[1],
+      text: undefined,
+      content: [
+        { type: 'text', text: 'Follow up with ' },
+        { type: 'localImage' },
+      ],
+    };
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detail = detailResponse.json();
+    const userMessages = detail.turns
+      .at(-1)
+      ?.items.filter((item: any) => item.kind === 'userMessage') ?? [];
+    expect(userMessages.at(-1)?.text).toContain('[PHOTO ./.temp/threads/');
+    expect(userMessages.at(-1)?.text).toContain('/screen-');
+    expect(userMessages.at(-1)?.text).not.toContain('[localImage]');
+    expect(detail.pendingSteers).toEqual([]);
   });
 
   it('accepts mobile photo uploads even when the browser sends an empty original file name', async () => {

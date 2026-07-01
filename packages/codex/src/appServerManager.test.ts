@@ -5,6 +5,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { CodexAppServerManager } from './appServerManager';
+import type { CodexUserInput } from './types';
 
 async function waitForCondition(
   condition: () => boolean,
@@ -198,7 +199,7 @@ describe('CodexAppServerManager', () => {
   });
 
   it('forwards structured image input when starting a turn', async () => {
-    const expectedInput = [
+    const expectedInput: CodexUserInput[] = [
       { type: 'text', text: 'Inspect this ', text_elements: [] },
       { type: 'localImage', path: '/tmp/workspace/photo.png' },
       { type: 'text', text: ' and summarize.', text_elements: [] },

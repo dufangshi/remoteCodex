@@ -117,6 +117,32 @@ describe('codex history item persistence policy', () => {
     ]);
   });
 
+  it('maps local image content with a path back to a photo token', () => {
+    const turn = codexTurnToAgentTurn({
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'user-1',
+          type: 'userMessage',
+          content: [
+            { type: 'text', text: 'Inspect this' },
+            {
+              type: 'localImage',
+              path: '/tmp/workspace/.temp/threads/thread-1/photo.png',
+            } as any,
+          ],
+        },
+      ],
+    });
+
+    expect(turn.items[0]).toMatchObject({
+      kind: 'userMessage',
+      text: 'Inspect this\n[PHOTO /tmp/workspace/.temp/threads/thread-1/photo.png]',
+    });
+  });
+
   it('keeps MCP tool result text extractable for plugin artifacts', () => {
     const artifactText = [
       'Created a 3D molecule artifact for Methane.',

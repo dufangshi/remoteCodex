@@ -178,6 +178,23 @@ function textFromContentEntries(
           return entry.text;
         }
 
+        const assetEntry = entry as {
+          path?: unknown;
+          imagePath?: unknown;
+          filePath?: unknown;
+        };
+        const assetPath =
+          typeof assetEntry.path === 'string'
+            ? assetEntry.path
+            : typeof assetEntry.imagePath === 'string'
+              ? assetEntry.imagePath
+              : typeof assetEntry.filePath === 'string'
+                ? assetEntry.filePath
+                : null;
+        if (entry.type === 'localImage' && assetPath) {
+          return `[PHOTO ${assetPath}]`;
+        }
+
         return `[${entry.type}]`;
       })
       .join('\n')

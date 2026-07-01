@@ -98,4 +98,42 @@ describe('agentTurnToThreadTurnDto', () => {
       sequence: 1,
     });
   });
+
+  it('uses persisted photo prompt text when provider history only keeps a local image placeholder', () => {
+    const normalizedTurn = agentTurnToThreadTurnDto({
+      providerTurnId: 'turn-1',
+      startedAt: '2026-04-09T06:01:00.000Z',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'user-photo',
+          kind: 'userMessage',
+          text: 'Inspect this\n[localImage]',
+        },
+      ],
+    });
+
+    const mergedTurns = mergePersistedHistoryItemsIntoTurns(
+      [normalizedTurn],
+      new Map([
+        [
+          'turn-1',
+          [
+            {
+              id: 'user-photo',
+              kind: 'userMessage',
+              text: 'Inspect this [PHOTO ./.temp/threads/thread-1/photo.png]',
+            },
+          ],
+        ],
+      ]),
+      new Map(),
+    );
+
+    expect(mergedTurns[0]?.items[0]).toMatchObject({
+      id: 'user-photo',
+      text: 'Inspect this [PHOTO ./.temp/threads/thread-1/photo.png]',
+    });
+  });
 });
