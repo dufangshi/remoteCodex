@@ -670,6 +670,28 @@ final class RemoteCodexUITests: XCTestCase {
     }
 
     @MainActor
+    func testLiveLocalThreadWebViewQueuesRealClaudeHaikuContinuation() async throws {
+        try await runLiveLocalRealBackendQueuedContinuationSmoke(
+            provider: "claude",
+            model: "haiku",
+            label: "Claude Haiku",
+            appendPrefix: "IOS_CLAUDE_PHASE4_DONE",
+            firstTurnDelaySeconds: 10
+        )
+    }
+
+    @MainActor
+    func testLiveLocalThreadWebViewQueuesRealOpenCodeContinuation() async throws {
+        try await runLiveLocalRealBackendQueuedContinuationSmoke(
+            provider: "opencode",
+            model: "opencode/mimo-v2.5-free",
+            label: "OpenCode MiMo",
+            appendPrefix: "IOS_OPENCODE_PHASE4_DONE",
+            firstTurnDelaySeconds: 6
+        )
+    }
+
+    @MainActor
     func testLiveLocalThreadWebViewOptimisticallyRendersSubmittedPrompt() async throws {
         let baseURL = try await Self.liveLocalBaseURL()
         try await Self.requireLiveE2EFakeRuntime(baseURL: baseURL)
@@ -730,6 +752,81 @@ final class RemoteCodexUITests: XCTestCase {
             text: "IOS_STREAM_COMPLETED"
         )
         XCTAssertTrue(scrollUntilElement(containing: "IOS_STREAM_COMPLETED", in: app, timeout: 45, maxSwipes: 12))
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
+
+    @MainActor
+    private func runLiveLocalRealBackendQueuedContinuationSmoke(
+        provider: String,
+        model: String,
+        label: String,
+        appendPrefix: String,
+        firstTurnDelaySeconds: Int
+    ) async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "iOS \(label) Queued Continuation E2E"
+        )
+        let suffix = UUID().uuidString.prefix(8)
+        let continuationFileName = "ios-\(provider)-phase4-\(suffix.lowercased()).txt"
+        let continuationFilePath = URL(fileURLWithPath: workspacePath)
+            .appendingPathComponent(continuationFileName)
+            .path
+        let continuationText = "\(appendPrefix.lowercased()) \(suffix.lowercased())"
+        let thread = try await Self.createLiveThread(
+            baseURL: baseURL,
+            workspaceId: workspace.id,
+            title: "iOS \(label) Queued Continuation Thread",
+            provider: provider,
+            model: model
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-live-local-connection",
+            "--use-ios-thread-webview",
+        ]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_THREAD_ID"] = thread.id
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        assertThreadWebViewReady(app, title: thread.title)
+
+        let startingPrompt = "Use bash to run exactly this command before replying: sleep \(firstTurnDelaySeconds); echo phase4_first_turn_done. After the command finishes, briefly say it completed."
+        XCTAssertTrue(typeIntoWebPrompt(startingPrompt, in: app))
+        let firstSendButton = webElement("Send Prompt", in: app).firstMatch
+        if firstSendButton.waitForExistence(timeout: 3) {
+            firstSendButton.tap()
+        } else {
+            tapWebComposerSend(in: app)
+        }
+
+        try await Self.waitForLiveThreadActiveTurn(baseURL: baseURL, threadId: thread.id)
+
+        let queuedPrompt = "Create a file at this exact path: \(continuationFilePath). Put exactly this text in it: \(continuationText). Then briefly confirm the file was written."
+        XCTAssertTrue(typeIntoWebPrompt(queuedPrompt, in: app))
+        let secondSendButton = webElement("Send Prompt", in: app).firstMatch
+        if secondSendButton.waitForExistence(timeout: 3) {
+            secondSendButton.tap()
+        } else {
+            tapWebComposerSend(in: app)
+        }
+
+        try await Self.waitForLocalFileText(
+            workspacePath: workspacePath,
+            fileName: continuationFileName,
+            text: continuationText,
+            timeout: 120
+        )
+
+        XCTAssertTrue(scrollUntilElement(containing: continuationFileName, in: app, timeout: 30, maxSwipes: 12))
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
@@ -2560,6 +2657,52 @@ extension RemoteCodexUITests {
             domain: "RemoteCodexUITests",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for live thread text: \(text)"]
+        )
+    }
+
+    static func waitForLiveThreadActiveTurn(
+        baseURL: URL,
+        threadId: String,
+        timeout: TimeInterval = 30
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let detail = try await liveThreadObject(baseURL: baseURL, threadId: threadId)
+            let thread = detail["thread"] as? [String: Any]
+            if let activeTurnId = thread?["activeTurnId"] as? String, !activeTurnId.isEmpty {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NSError(
+            domain: "RemoteCodexUITests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for live thread active turn: \(threadId)"]
+        )
+    }
+
+    static func waitForLocalFileText(
+        workspacePath: String,
+        fileName: String,
+        text: String,
+        timeout: TimeInterval = 60
+    ) async throws {
+        let fileURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(fileName)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let contents = try? String(contentsOf: fileURL, encoding: .utf8),
+               contents.contains(text) {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NSError(
+            domain: "RemoteCodexUITests",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Timed out waiting for local file \(fileName) to contain: \(text)"
+            ]
         )
     }
 

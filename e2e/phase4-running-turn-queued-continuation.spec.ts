@@ -36,14 +36,14 @@ test.describe('Phase 4 running-turn queued continuation', () => {
     {
       provider: 'claude' as const,
       model: 'haiku',
-      startPrefix: 'PHASE4_WEB_CLAUDE_QUEUE_START',
-      appendPrefix: 'PHASE4_WEB_CLAUDE_QUEUE_APPEND',
+      appendPrefix: 'PHASE4_WEB_CLAUDE_DONE',
+      firstTurnDelaySeconds: 10,
     },
     {
       provider: 'opencode' as const,
       model: 'opencode/mimo-v2.5-free',
-      startPrefix: 'PHASE4_WEB_OPENCODE_QUEUE_START',
-      appendPrefix: 'PHASE4_WEB_OPENCODE_QUEUE_APPEND',
+      appendPrefix: 'PHASE4_WEB_OPENCODE_DONE',
+      firstTurnDelaySeconds: 6,
     },
   ]) {
     test(`queues a ${scenario.provider} continuation from the Web composer`, async ({
@@ -52,9 +52,10 @@ test.describe('Phase 4 running-turn queued continuation', () => {
       await requireBackendReady(scenario.provider);
 
       const suffix = randomUUID().slice(0, 8).toUpperCase();
-      const startMarker = `${scenario.startPrefix}_${suffix}`;
-      const appendMarker = `${scenario.appendPrefix}_${suffix}`;
+      const continuationFile = `phase4-${scenario.provider.toLowerCase()}-${suffix.toLowerCase()}.txt`;
+      const continuationText = `${scenario.appendPrefix.toLowerCase()} ${suffix.toLowerCase()}`;
       const workspace = await createWorkspace(`phase4-${scenario.provider}-${suffix}`);
+      const continuationFilePath = path.join(workspace.absPath, continuationFile);
       const thread = await createThread({
         workspaceId: workspace.id,
         provider: scenario.provider,
@@ -65,18 +66,17 @@ test.describe('Phase 4 running-turn queued continuation', () => {
       await page.goto(`/threads/${thread.id}`);
       await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
 
-      const startingPrompt = [
-        'Run a short blocking command before replying:',
-        "python3 - <<'PY'",
-        'import time',
-        'time.sleep(12)',
-        'PY',
-        `After the command finishes, reply with exactly: ${startMarker}`,
-      ].join('\n');
+      const startingPrompt =
+        `Use bash to run exactly this command before replying: ` +
+        `sleep ${scenario.firstTurnDelaySeconds}; echo phase4_first_turn_done. ` +
+        `After the command finishes, briefly say it completed.`;
       await submitPromptFromComposer(page, startingPrompt);
       await waitForThreadActiveTurn(thread.id);
 
-      const queuedPrompt = `After the current turn completes, reply with exactly: ${appendMarker}`;
+      const queuedPrompt =
+        `Create a file at this exact path: ${continuationFilePath}. ` +
+        `Put exactly this text in it: ${continuationText}. ` +
+        `Then briefly confirm the file was written.`;
       await submitPromptFromComposer(page, queuedPrompt);
 
       await expect(page.getByText(queuedPrompt).first()).toBeVisible({
@@ -86,14 +86,14 @@ test.describe('Phase 4 running-turn queued continuation', () => {
         timeout: 15_000,
       });
       await waitForPendingSteer(thread.id, queuedPrompt);
-      await waitForThreadText(thread.id, startMarker, 180_000);
-      await waitForThreadText(thread.id, appendMarker, 180_000);
+      await waitForFileText(
+        continuationFilePath,
+        continuationText,
+        180_000,
+      );
 
       await page.reload();
-      await expect(page.getByText(startMarker).first()).toBeVisible({
-        timeout: 30_000,
-      });
-      await expect(page.getByText(appendMarker).first()).toBeVisible({
+      await expect(page.getByText(continuationFile).first()).toBeVisible({
         timeout: 30_000,
       });
     });
@@ -110,10 +110,11 @@ async function createWorkspace(name: string) {
   const absPath = path.join(workspaceRoot, name);
   await fs.mkdir(absPath, { recursive: true });
   await fs.writeFile(path.join(absPath, 'README.md'), `# ${name}\n`);
-  return postJson<{ id: string }>('/api/workspaces', {
+  const workspace = await postJson<{ id: string }>('/api/workspaces', {
     absPath,
     label: name,
   });
+  return { ...workspace, absPath };
 }
 
 async function createThread(input: {
@@ -167,23 +168,21 @@ async function waitForThreadActiveTurn(threadId: string, timeoutMs = 30_000) {
   );
 }
 
-async function waitForThreadText(
-  threadId: string,
+async function waitForFileText(
+  filePath: string,
   text: string,
   timeoutMs: number,
 ) {
-  await pollUntil(
-    async () => detailText(await getThreadDetail(threadId)).includes(text),
-    `thread ${threadId} transcript to contain ${text}`,
-    timeoutMs,
-  );
-}
-
-function detailText(detail: ThreadDetail) {
-  return detail.turns
-    .flatMap((turn) => turn.items)
-    .map((item) => item.text ?? '')
-    .join('\n');
+  await pollUntil(async () => {
+    try {
+      return (await fs.readFile(filePath, 'utf8')).includes(text);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') {
+        return false;
+      }
+      throw error;
+    }
+  }, `file ${filePath} to contain ${text}`, timeoutMs);
 }
 
 async function getThreadDetail(threadId: string) {
