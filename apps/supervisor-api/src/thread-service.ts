@@ -1218,6 +1218,30 @@ export class ThreadService {
     return this.deletionCoordinator.deleteThread(localThreadId);
   }
 
+  async cancelPendingSteer(
+    localThreadId: string,
+    pendingSteerId: string,
+  ): Promise<ThreadDetailDto> {
+    this.requireThreadRecord(localThreadId);
+    const pending = this.auxiliaryState.findPendingSteerRecord(
+      localThreadId,
+      pendingSteerId,
+    );
+    if (!pending) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Pending queued prompt was not found.',
+      });
+    }
+
+    this.auxiliaryState.deletePendingSteerRecord(
+      localThreadId,
+      pending.id,
+      pending.turnId,
+    );
+    return this.getThreadDetail(localThreadId);
+  }
+
   async respondToRequest(
     localThreadId: string,
     requestId: string,

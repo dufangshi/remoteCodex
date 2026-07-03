@@ -138,6 +138,12 @@ export class ThreadAuxiliaryStateStore {
     );
   }
 
+  findPendingSteerRecord(localThreadId: string, id: string) {
+    return listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).find(
+      (record) => record.id === id,
+    ) ?? null;
+  }
+
   hasPendingSteersForTurn(localThreadId: string, turnId: string) {
     return this.listPendingSteerRecordsForTurn(localThreadId, turnId).length > 0;
   }

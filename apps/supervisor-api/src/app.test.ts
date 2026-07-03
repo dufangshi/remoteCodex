@@ -2208,6 +2208,88 @@ describe('supervisor api', () => {
     });
   });
 
+  it('cancels queued Claude prompts before a non-steer continuation starts', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        provider: 'claude',
+        model: 'sonnet',
+        title: 'Claude Canceled Queue'
+      }
+    });
+    expect(createResponse.statusCode).toBe(200);
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Start the visible turn.',
+      }
+    });
+    expect(promptResponse.statusCode).toBe(200);
+    updateThreadRecord(app.services.database.db, createResponse.json().id, {
+      status: 'idle',
+    });
+
+    const queuedResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Cancel this queued prompt.',
+      },
+    });
+    expect(queuedResponse.statusCode).toBe(200);
+
+    const queuedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    const pendingSteer = queuedDetailResponse.json().pendingSteers[0];
+    expect(pendingSteer).toMatchObject({
+      turnId: 'claude-turn-1',
+      prompt: 'Cancel this queued prompt.',
+    });
+
+    const cancelResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/${createResponse.json().id}/pending-steers/${pendingSteer.id}`,
+    });
+    expect(cancelResponse.statusCode).toBe(200);
+    expect(cancelResponse.json().pendingSteers).toEqual([]);
+
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeClaudeRuntime.startTurnInputs.map((input) => input.prompt)).toEqual([
+      'Start the visible turn.',
+    ]);
+
+    const completedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(completedDetailResponse.json().thread).toMatchObject({
+      status: 'idle',
+      activeTurnId: null,
+    });
+    expect(completedDetailResponse.json().pendingSteers).toEqual([]);
+  });
+
   it('keeps Claude streamed assistant output out of persisted history when final transcript arrives', async () => {
     await app.close();
     fakeClaudeRuntime = new FakeClaudeRuntime();
