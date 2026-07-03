@@ -1035,6 +1035,7 @@ final class RemoteCodexUITests: XCTestCase {
 
         let workspaceButton = app.buttons["workspace-open-\(workspace.id)"]
         XCTAssertTrue(scrollUntilExists(workspaceButton, in: app))
+        workspaceButton.tap()
         let threadButton = app.buttons["thread-open-\(thread.id)"]
         XCTAssertTrue(scrollUntilExists(threadButton, in: app))
         threadButton.tap()
@@ -1043,6 +1044,28 @@ final class RemoteCodexUITests: XCTestCase {
         assertThreadWebViewReady(app, title: thread.title)
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
+
+    @MainActor
+    func testLiveLocalCreatesClaudeHaikuThreadFromWorkspacePicker() async throws {
+        try await runLiveLocalWorkspacePickerCreateThread(
+            providerButtonId: "new-thread-provider-claude",
+            modelButtonId: "new-thread-model-haiku",
+            expectedProvider: "claude",
+            expectedModel: "haiku",
+            titlePrefix: "iOS Claude Haiku Picker"
+        )
+    }
+
+    @MainActor
+    func testLiveLocalCreatesOpenCodeThreadFromWorkspacePicker() async throws {
+        try await runLiveLocalWorkspacePickerCreateThread(
+            providerButtonId: "new-thread-provider-opencode",
+            modelButtonId: nil,
+            expectedProvider: "opencode",
+            expectedModel: "opencode/mimo-v2.5-free",
+            titlePrefix: "iOS OpenCode Picker"
+        )
     }
 
     @MainActor
@@ -1926,6 +1949,97 @@ final class RemoteCodexUITests: XCTestCase {
         threadButton.tap()
         assertThreadWebViewReady(app, title: thread.title, timeout: 20)
     }
+
+    @MainActor
+    private func runLiveLocalWorkspacePickerCreateThread(
+        providerButtonId: String,
+        modelButtonId: String?,
+        expectedProvider: String,
+        expectedModel: String,
+        titlePrefix: String
+    ) async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "\(titlePrefix) Workspace"
+        )
+        let title = "\(titlePrefix) \(UUID().uuidString.prefix(8))"
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--reset-settings", "--ui-test-live-local-connection"]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_WORKSPACE_ID"] = workspace.id
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["\(titlePrefix) Workspace"].waitForExistence(timeout: 10))
+        XCTAssertTrue(tapElement(app.buttons["New"], in: app, maxSwipes: 6))
+
+        let titleField = app.textFields["new-thread-title"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 10))
+        titleField.tap()
+        titleField.typeText(title)
+        dismissKeyboardIfPresent(in: app)
+
+        _ = app.buttons["new-thread-model-gpt-5.4"].waitForExistence(timeout: 15)
+        let providerButton = app.buttons[providerButtonId]
+        guard tapElement(providerButton, in: app, maxSwipes: 8) else {
+            XCTFail("Provider button \(providerButtonId) was not tappable.")
+            return
+        }
+        if let modelButtonId {
+            let modelButton = app.buttons[modelButtonId]
+            guard waitForAndTapElement(modelButton, in: app, timeout: 20, maxSwipes: 12) else {
+                XCTFail("Model button \(modelButtonId) was not tappable.")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        guard tapElement(app.buttons["new-thread-start"], in: app, maxSwipes: 4) else {
+            XCTFail("Start button was not tappable.")
+            return
+        }
+
+        let created = try await Self.waitForLiveThreadSummary(
+            baseURL: baseURL,
+            title: title,
+            provider: expectedProvider,
+            model: expectedModel
+        )
+        XCTAssertEqual(created.workspaceId, workspace.id)
+    }
+
+    @MainActor
+    private func waitForAndTapElement(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        maxSwipes: Int
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if tapElement(element, in: app, maxSwipes: maxSwipes) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+        return false
+    }
+
+    @MainActor
+    private func dismissKeyboardIfPresent(in app: XCUIApplication) {
+        guard app.keyboards.firstMatch.exists else {
+            return
+        }
+        if app.keyboards.buttons["Done"].exists {
+            app.keyboards.buttons["Done"].tap()
+        } else if app.keyboards.buttons["Return"].exists {
+            app.keyboards.buttons["Return"].tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        }
+    }
 }
 
 extension RemoteCodexUITests {
@@ -1936,6 +2050,15 @@ extension RemoteCodexUITests {
     struct LiveThread: Decodable {
         let id: String
         let title: String
+    }
+
+    struct LiveThreadSummary: Decodable {
+        let id: String
+        let workspaceId: String
+        let title: String
+        let provider: String
+        let model: String
+        let status: String
     }
 
     struct LiveServerCredentials {
@@ -2362,6 +2485,32 @@ extension RemoteCodexUITests {
             domain: "RemoteCodexUITests",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for live thread title: \(title)"]
+        )
+    }
+
+    static func waitForLiveThreadSummary(
+        baseURL: URL,
+        title: String,
+        provider: String,
+        model: String
+    ) async throws -> LiveThreadSummary {
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            let threads: [LiveThreadSummary] = try await getJSON(baseURL: baseURL, path: "/api/threads")
+            if let thread = threads.first(where: {
+                $0.title == title && $0.provider == provider && $0.model == model
+            }) {
+                return thread
+            }
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        throw NSError(
+            domain: "RemoteCodexUITests",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Timed out waiting for thread \(title) with \(provider) / \(model)"
+            ]
         )
     }
 

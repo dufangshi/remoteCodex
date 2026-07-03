@@ -512,6 +512,7 @@ struct WorkspaceDetailScreen: View {
                         Text(thread.status).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                .accessibilityIdentifier("thread-open-\(thread.id)")
             }
         } header: {
             HStack {
@@ -528,6 +529,7 @@ struct WorkspaceDetailScreen: View {
         NavigationStack {
             Form {
                 TextField("Title", text: $model.newThreadTitle)
+                    .accessibilityIdentifier("new-thread-title")
                 Section("Provider") {
                     if model.newThreadBackends.isEmpty, model.newThreadOptionsLoading {
                         ProgressView()
@@ -557,6 +559,7 @@ struct WorkspaceDetailScreen: View {
                                     }
                                 }
                                 .disabled(!backend.canStartSession || model.newThreadRuntimeBusyProvider != nil)
+                                .accessibilityIdentifier("new-thread-provider-\(backend.provider)")
                                 Spacer()
                                 if let action = backend.runtimeActionLabel {
                                     Button {
@@ -572,6 +575,7 @@ struct WorkspaceDetailScreen: View {
                                     }
                                     .disabled(model.newThreadRuntimeBusyProvider != nil || backend.busy)
                                     .buttonStyle(.bordered)
+                                    .accessibilityIdentifier("new-thread-provider-action-\(backend.provider)")
                                 }
                                 if backend.provider == model.newThreadProvider {
                                     Image(systemName: "checkmark")
@@ -602,6 +606,7 @@ struct WorkspaceDetailScreen: View {
                                     }
                                 }
                             }
+                            .accessibilityIdentifier("new-thread-model-\(workspaceFileIdentifierToken(option.model))")
                         }
                     }
                 }
@@ -630,6 +635,7 @@ struct WorkspaceDetailScreen: View {
                         }
                     }
                     .disabled(!model.canStartNewThread)
+                    .accessibilityIdentifier("new-thread-start")
                 }
             }
         }
