@@ -123,10 +123,10 @@ E2E gate:
 
 - [x] Claude 长任务运行中，从 Web 输入追加信息，最终 transcript 包含并遵循追加信息。
 - [x] Claude 长任务运行中，从 iOS 输入追加信息，最终结果包含并遵循追加信息。
-- [ ] Claude 长任务运行中，从 Android 输入追加信息，最终 transcript 包含并遵循追加信息。
+- [x] Claude 长任务运行中，从 Android 输入追加信息，最终结果包含并遵循追加信息。
 - [x] OpenCode 长任务运行中，从 Web 输入追加信息，最终 transcript 包含并遵循追加信息。
 - [x] OpenCode 长任务运行中，从 iOS 输入追加信息，最终结果包含并遵循追加信息。
-- [ ] OpenCode 长任务运行中，从 Android 输入追加信息，最终 transcript 包含并遵循追加信息。
+- [x] OpenCode 长任务运行中，从 Android 输入追加信息，最终结果包含并遵循追加信息。
 
 Implementation notes 2026-07-03:
 
@@ -161,6 +161,12 @@ Implementation notes 2026-07-03 iOS UI update:
 - 新增 iOS real-backend UI tests：`testLiveLocalThreadWebViewQueuesRealClaudeHaikuContinuation` 和 `testLiveLocalThreadWebViewQueuesRealOpenCodeContinuation`。
 - iOS E2E 流程：API 创建 workspace/thread，iOS WebView composer 发送短阻塞命令 prompt，等待 `activeTurnId` 出现后再次从 WebView composer 发送追加 prompt；测试等待 continuation 在 workspace 中写入指定文件，并确认 WebView 没有 `thread-webview-error`。
 - OpenCode 的真实响应不应依赖逐字 marker 输出；测试改用 `sleep; echo` 触发首轮短阻塞，再用文件写入验证 queued continuation 已真实执行。
+
+Implementation notes 2026-07-03 Android UI update:
+
+- 新增 Android real-backend gate `e2e/android-phase4-running-turn-queued-continuation.mjs`，通过 ADB 启动真实 Android app WebView fixture，再用 WebView DevTools/CDP 操作 app 内 `remote-codex-thread-ui` composer。
+- Android E2E 流程：API 创建 workspace/thread，AOSP app WebView composer 发送短阻塞命令 prompt，等待 `activeTurnId` 出现后再次从同一个 WebView composer 发送追加 prompt；测试等待 continuation 在 workspace 中写入指定文件。
+- `pendingSteerObserved` 在 Android 脚本中作为诊断项输出：OpenCode/Claude 成功路径可以观察到 pending，但真实后端窗口较短时不应只依赖 pending 可见性；最终文件写入是 queued continuation 被执行的稳定证据。
 
 ## Phase 5: Claude Slash Command Parity
 
@@ -246,6 +252,8 @@ Implementation notes 2026-07-03:
 - [x] Web UI Phase 4 OpenCode queued continuation smoke 通过：`REMOTE_CODEX_REAL_BACKEND_E2E=1 ... pnpm exec playwright test e2e/phase4-running-turn-queued-continuation.spec.ts --project=desktop-chromium --grep "opencode"`，Web composer 追加输入后写入 `.local/phase4-web-e2e/workspaces/phase4-opencode-A4603493/phase4-opencode-a4603493.txt`，内容命中 `phase4_web_opencode_done a4603493`。
 - [x] iOS WebView Phase 4 Claude queued continuation smoke 通过：`xcodebuild ... -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewQueuesRealClaudeHaikuContinuation test`，thread `f8430788-6bde-42ff-9d14-c9f0c22e2bb5`，provider `claude`，model `haiku`，写入 `.local/ios-e2e-workspaces/EF2E3FBF-B0AA-4FBF-844E-A4ACEB90D0D2/ios-claude-phase4-65b5593a.txt`，内容命中 `ios_claude_phase4_done 65b5593a`。
 - [x] iOS WebView Phase 4 OpenCode queued continuation smoke 通过：`xcodebuild ... -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewQueuesRealOpenCodeContinuation test`，thread `55195502-d7ac-4d73-a2a1-2f13d2e7f734`，provider `opencode`，model `opencode/mimo-v2.5-free`，写入 `.local/ios-e2e-workspaces/7B2D3993-C7D3-42B9-B12E-8C9CDDEF8B57/ios-opencode-phase4-cea9b144.txt`，内容命中 `ios_opencode_phase4_done cea9b144`。
+- [x] Android AOSP WebView Phase 4 Claude queued continuation smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8932 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8932 ANDROID_PHASE4_PROVIDER=claude pnpm exec node e2e/android-phase4-running-turn-queued-continuation.mjs`，thread `45cfbda2-ed1c-4d79-80ce-25122da1f4d5`，provider `claude`，model `haiku`，写入 `.local/android-phase4-e2e/workspaces/android-claude-45158a6d/android-claude-phase4-45158a6d.txt`，内容命中 `android_claude_phase4_done 45158a6d`。
+- [x] Android AOSP WebView Phase 4 OpenCode queued continuation smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8932 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8932 ANDROID_PHASE4_PROVIDER=opencode pnpm exec node e2e/android-phase4-running-turn-queued-continuation.mjs`，thread `8e42e0da-9c19-4341-aba2-6f69b658e36b`，provider `opencode`，model `opencode/mimo-v2.5-free`，写入 `.local/android-phase4-e2e/workspaces/android-opencode-802c5f7a/android-opencode-phase4-802c5f7a.txt`，内容命中 `android_opencode_phase4_done 802c5f7a`。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
 - [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
 - [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
@@ -256,5 +264,4 @@ Implementation notes 2026-07-03:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode running-turn queued continuation 已有后端覆盖、真实 API smoke、Web UI smoke 和 iOS WebView smoke；Android UI 长任务追加输入 E2E 仍未完成。
 - [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
