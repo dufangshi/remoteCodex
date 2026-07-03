@@ -1,26 +1,32 @@
 import type { ThreadDetailDto } from '@remote-codex/shared';
 
-export const IOS_THREAD_HISTORY_INITIAL_LIMIT = 30;
-export const IOS_THREAD_HISTORY_PAGE_STEP = 10;
-export const IOS_THREAD_HISTORY_MAX_LIMIT = 100;
+export const IOS_THREAD_HISTORY_INITIAL_LIMIT = 3;
+export const IOS_THREAD_HISTORY_PAGE_STEP = 3;
 
-export function nextThreadHistoryLimit(
-  detail: ThreadDetailDto,
-  currentLimit: number,
-) {
+export function canLoadEarlierThreadHistory(detail: ThreadDetailDto) {
   const loadedTurnCount = detail.turns.length;
   const totalTurnCount = detail.totalTurnCount ?? loadedTurnCount;
-  const maximumLimit = Math.min(totalTurnCount, IOS_THREAD_HISTORY_MAX_LIMIT);
 
-  if (loadedTurnCount >= totalTurnCount || currentLimit >= maximumLimit) {
-    return currentLimit;
-  }
+  return loadedTurnCount < totalTurnCount && loadedTurnCount > 0;
+}
 
-  return Math.min(
-    maximumLimit,
-    Math.max(
-      currentLimit + IOS_THREAD_HISTORY_PAGE_STEP,
-      loadedTurnCount + IOS_THREAD_HISTORY_PAGE_STEP,
+export function mergeEarlierThreadHistory(
+  current: ThreadDetailDto,
+  earlier: ThreadDetailDto,
+) {
+  const existingIds = new Set(current.turns.map((turn) => turn.id));
+  const mergedTurns = [
+    ...earlier.turns.filter((turn) => !existingIds.has(turn.id)),
+    ...current.turns,
+  ];
+
+  return {
+    ...earlier,
+    turns: mergedTurns,
+    totalTurnCount: Math.max(
+      current.totalTurnCount ?? current.turns.length,
+      earlier.totalTurnCount ?? earlier.turns.length,
+      mergedTurns.length,
     ),
-  );
+  };
 }

@@ -32,8 +32,10 @@ import {
 } from './IOSBootstrap';
 import { IOSApiClient } from './IOSApiClient';
 import {
+  canLoadEarlierThreadHistory,
   IOS_THREAD_HISTORY_INITIAL_LIMIT,
-  nextThreadHistoryLimit,
+  IOS_THREAD_HISTORY_PAGE_STEP,
+  mergeEarlierThreadHistory,
 } from './IOSHistoryPaging';
 import {
   hasNativeBridge,
@@ -649,23 +651,30 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       return;
     }
 
-    const previousLimit = historyLimitRef.current;
-    const nextLimit = nextThreadHistoryLimit(detail, previousLimit);
-    if (nextLimit === previousLimit) {
+    const beforeTurnId = detail.turns[0]?.id;
+    if (!beforeTurnId || !canLoadEarlierThreadHistory(detail)) {
       return;
     }
 
-    historyLimitRef.current = nextLimit;
-    setHistoryLimit(nextLimit);
+    const previousLimit = historyLimitRef.current;
     setLoadingEarlier(true);
     try {
-      const loadedDetail = await client.fetchThreadDetail(threadId, nextLimit);
-      detailRef.current = loadedDetail;
-      setDetail(loadedDetail);
+      const loadedDetail = await client.fetchThreadDetail(threadId, {
+        limit: IOS_THREAD_HISTORY_PAGE_STEP,
+        beforeTurnId,
+      });
+      const mergedDetail = mergeEarlierThreadHistory(
+        detailRef.current ?? detail,
+        loadedDetail,
+      );
+      historyLimitRef.current = mergedDetail.turns.length;
+      setHistoryLimit(mergedDetail.turns.length);
+      detailRef.current = mergedDetail;
+      setDetail(mergedDetail);
       setError(null);
       postNativeMessage({
         type: 'threadWebDebug',
-        message: `history-page:loaded:${loadedDetail.turns.length}:${loadedDetail.totalTurnCount ?? loadedDetail.turns.length}`,
+        message: `history-page:loaded:${loadedDetail.turns.length}:${mergedDetail.totalTurnCount ?? mergedDetail.turns.length}`,
       });
     } catch (caught) {
       historyLimitRef.current = previousLimit;

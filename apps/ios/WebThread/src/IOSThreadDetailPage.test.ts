@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ThreadDetailDto, ThreadEventEnvelope } from '@remote-codex/shared';
 
 import {
+  canLoadEarlierThreadHistory,
   IOS_THREAD_HISTORY_INITIAL_LIMIT,
-  nextThreadHistoryLimit,
+  IOS_THREAD_HISTORY_PAGE_STEP,
+  mergeEarlierThreadHistory,
 } from './IOSHistoryPaging';
 import { buildOptimisticPromptDetail } from './IOSOptimisticPrompt';
 import { projectThreadEventIntoDetail } from './IOSWebSocketProjection';
@@ -98,35 +100,17 @@ describe('buildOptimisticPromptDetail', () => {
   });
 });
 
-describe('nextThreadHistoryLimit', () => {
-  it('loads older server-managed history in fixed steps up to the known total', () => {
-    const detail = {
-      ...threadDetail(),
-      turns: Array.from({ length: 30 }, (_, index) => ({
-        id: `turn-${index + 16}`,
-        startedAt: '2026-07-01T00:00:00.000Z',
-        status: 'completed' as const,
-        error: null,
-        model: 'ios-e2e-stream',
-        reasoningEffort: 'medium' as const,
-        reasoningEffortAvailable: true,
-        tokenUsage: null,
-        priceEstimate: null,
-        items: [],
-      })),
-      totalTurnCount: 45,
-    };
-
-    expect(
-      nextThreadHistoryLimit(detail, IOS_THREAD_HISTORY_INITIAL_LIMIT),
-    ).toBe(40);
+describe('IOSHistoryPaging', () => {
+  it('uses three-turn history windows', () => {
+    expect(IOS_THREAD_HISTORY_INITIAL_LIMIT).toBe(3);
+    expect(IOS_THREAD_HISTORY_PAGE_STEP).toBe(3);
   });
 
-  it('does not request beyond fully loaded history', () => {
+  it('detects older server-managed history', () => {
     const detail = {
       ...threadDetail(),
-      turns: Array.from({ length: 45 }, (_, index) => ({
-        id: `turn-${index + 1}`,
+      turns: Array.from({ length: 3 }, (_, index) => ({
+        id: `turn-${index + 43}`,
         startedAt: '2026-07-01T00:00:00.000Z',
         status: 'completed' as const,
         error: null,
@@ -140,7 +124,50 @@ describe('nextThreadHistoryLimit', () => {
       totalTurnCount: 45,
     };
 
-    expect(nextThreadHistoryLimit(detail, 45)).toBe(45);
+    expect(canLoadEarlierThreadHistory(detail)).toBe(true);
+  });
+
+  it('merges earlier history pages without duplicating existing turns', () => {
+    const current = {
+      ...threadDetail(),
+      turns: Array.from({ length: 3 }, (_, index) => ({
+        id: `turn-${index + 4}`,
+        startedAt: '2026-07-01T00:00:00.000Z',
+        status: 'completed' as const,
+        error: null,
+        model: 'ios-e2e-stream',
+        reasoningEffort: 'medium' as const,
+        reasoningEffortAvailable: true,
+        tokenUsage: null,
+        priceEstimate: null,
+        items: [],
+      })),
+      totalTurnCount: 6,
+    };
+    const earlier = {
+      ...threadDetail(),
+      turns: Array.from({ length: 3 }, (_, index) => ({
+        id: `turn-${index + 2}`,
+        startedAt: '2026-07-01T00:00:00.000Z',
+        status: 'completed' as const,
+        error: null,
+        model: 'ios-e2e-stream',
+        reasoningEffort: 'medium' as const,
+        reasoningEffortAvailable: true,
+        tokenUsage: null,
+        priceEstimate: null,
+        items: [],
+      })),
+      totalTurnCount: 6,
+    };
+
+    expect(mergeEarlierThreadHistory(current, earlier).turns.map((turn) => turn.id)).toEqual([
+      'turn-2',
+      'turn-3',
+      'turn-4',
+      'turn-5',
+      'turn-6',
+    ]);
   });
 });
 
