@@ -105,6 +105,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   };
   sessions = new Map<string, any>();
   activeTurnId: string | null = null;
+  autoStreamDeltas = true;
   startTurnInputs: Array<Parameters<AgentRuntime['startTurn']>[0]> = [];
 
   getStatus(): AgentRuntime['getStatus'] extends () => infer T ? T : never {
@@ -131,6 +132,8 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
           { reasoningEffort: 'low', description: 'Low' },
           { reasoningEffort: 'medium', description: 'Medium' },
           { reasoningEffort: 'high', description: 'High' },
+          { reasoningEffort: 'xhigh', description: 'Extra high' },
+          { reasoningEffort: 'max', description: 'Max' },
         ],
         defaultReasoningEffort: 'medium',
       },
@@ -222,23 +225,42 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
       providerSessionId: input.providerSessionId,
       turn,
     });
-    queueMicrotask(() => {
-      const agentItem: AgentHistoryItem = markTransientAgentHistoryItem({
-        id: `${providerTurnId}:assistant`,
-        kind: 'agentMessage',
-        text: 'Hello from Claude',
+    if (this.autoStreamDeltas) {
+      queueMicrotask(() => {
+        this.streamAssistantDelta(input.providerSessionId, providerTurnId);
       });
-      turn.items.push(agentItem);
-      this.emitRuntimeEvent({
-        type: 'output.delta',
-        provider: 'claude',
-        providerSessionId: input.providerSessionId,
-        providerTurnId,
-        itemId: agentItem.id,
-        delta: agentItem.text,
-      });
-    });
+    }
     return turn;
+  }
+  streamAssistantDelta(
+    providerSessionId: string,
+    providerTurnId: string,
+    text = 'Hello from Claude',
+  ) {
+    const session = this.sessions.get(providerSessionId);
+    const turn = session?.turns.find((entry: any) => entry.providerTurnId === providerTurnId);
+    if (!turn) {
+      return;
+    }
+    const itemId = `${providerTurnId}:assistant`;
+    const existing = turn.items.find((entry: AgentHistoryItem) => entry.id === itemId);
+    if (existing?.kind === 'agentMessage') {
+      existing.text = `${existing.text}${text}`;
+    } else {
+      turn.items.push(markTransientAgentHistoryItem({
+        id: itemId,
+        kind: 'agentMessage',
+        text,
+      }));
+    }
+    this.emitRuntimeEvent({
+      type: 'output.delta',
+      provider: 'claude',
+      providerSessionId,
+      providerTurnId,
+      itemId,
+      delta: text,
+    });
   }
   async interruptTurn(input: Parameters<AgentRuntime['interruptTurn']>[0]) {
     const session = await this.readSession(input.providerSessionId);
@@ -2277,6 +2299,76 @@ describe('supervisor api', () => {
         expect.objectContaining({ kind: 'userMessage', text: 'Second prompt while running.' }),
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
+    });
+  });
+
+  it('invalidates cached Claude detail when streamed assistant output arrives', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    fakeClaudeRuntime.autoStreamDeltas = false;
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        title: 'Claude cached stream'
+      }
+    });
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Reply with exactly 1.',
+      }
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    const cachedUserOnlyResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(cachedUserOnlyResponse.statusCode).toBe(200);
+    expect(cachedUserOnlyResponse.json().thread).toMatchObject({
+      status: 'running',
+      activeTurnId: 'claude-turn-1',
+    });
+    expect(cachedUserOnlyResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-1',
+      items: [
+        expect.objectContaining({ kind: 'userMessage', text: 'Reply with exactly 1.' }),
+      ],
+    });
+
+    fakeClaudeRuntime.streamAssistantDelta(
+      createResponse.json().providerSessionId,
+      'claude-turn-1',
+      '1',
+    );
+
+    const streamedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(streamedDetailResponse.statusCode).toBe(200);
+    expect(streamedDetailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-1',
+      items: [
+        expect.objectContaining({ kind: 'userMessage', text: 'Reply with exactly 1.' }),
+        expect.objectContaining({ kind: 'agentMessage', text: '1' }),
+      ],
     });
   });
 
@@ -5574,6 +5666,42 @@ describe('supervisor api', () => {
     });
   });
 
+  it('imports a local Codex session whose workspace is outside WORKSPACE_ROOT', async () => {
+    const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-external-import-'));
+    try {
+      const importedWorkspace = path.join(externalRoot, 'external-codex-project');
+      await fs.mkdir(importedWorkspace);
+      const expectedWorkspacePath = await fs.realpath(importedWorkspace);
+      await createLocalCodexFixture({
+        sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d5',
+        cwd: importedWorkspace,
+        title: 'External writer session'
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/threads/import',
+        payload: {
+          sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d5'
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        thread: {
+          providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d5',
+          source: 'local_codex_import',
+        },
+        workspace: {
+          absPath: expectedWorkspacePath,
+          label: 'external-codex-project'
+        },
+      });
+    } finally {
+      await fs.rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('imports a Claude runtime session when a provider is selected', async () => {
     fakeClaudeRuntime = new FakeClaudeRuntime();
     app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
@@ -5651,6 +5779,54 @@ describe('supervisor api', () => {
         },
       ],
     });
+  });
+
+  it('imports a Claude runtime session whose workspace is outside WORKSPACE_ROOT', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-external-claude-import-'));
+    try {
+      const importedWorkspace = path.join(externalRoot, 'external-claude-project');
+      await fs.mkdir(importedWorkspace);
+      const expectedWorkspacePath = await fs.realpath(importedWorkspace);
+      fakeClaudeRuntime.sessions.set('claude-session-external-import-1', {
+        provider: 'claude',
+        providerSessionId: 'claude-session-external-import-1',
+        cwd: importedWorkspace,
+        title: 'External Claude session',
+        preview: 'Claude external import preview',
+        createdAt: '2026-06-12T10:00:00.000Z',
+        updatedAt: '2026-06-12T10:01:00.000Z',
+        status: 'idle',
+        turns: [],
+        rawSession: null,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/threads/import',
+        payload: {
+          provider: 'claude',
+          sessionId: 'claude-session-external-import-1',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        thread: {
+          provider: 'claude',
+          providerSessionId: 'claude-session-external-import-1',
+          source: 'supervisor',
+        },
+        workspace: {
+          absPath: expectedWorkspacePath,
+          label: 'external-claude-project',
+        },
+      });
+    } finally {
+      await fs.rm(externalRoot, { recursive: true, force: true });
+    }
   });
 
   it('persists fast mode via config service_tier and records a timeline activity note', async () => {

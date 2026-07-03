@@ -518,7 +518,14 @@ export type ThreadWorkspaceUploadResultDto =
     };
 
 export type ApprovalMode = 'yolo' | 'guarded';
-export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffortDto =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
 export type CollaborationModeDto = 'default' | 'plan';
 export type SandboxModeDto = 'read-only' | 'workspace-write' | 'danger-full-access';
 

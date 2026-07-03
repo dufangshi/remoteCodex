@@ -46,12 +46,22 @@ type MultipartPromptRequest = FastifyRequest & {
   isMultipart: () => boolean;
 };
 
+const reasoningEffortValues = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as [ReasoningEffortDto, ...ReasoningEffortDto[]];
+
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
   title: z.string().optional(),
   provider: agentBackendIdSchema.optional(),
   model: z.string().min(1),
-  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
+  reasoningEffort: z.enum(reasoningEffortValues).nullable().optional(),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
 });
 
@@ -59,7 +69,7 @@ const promptSchema = z.object({
   prompt: z.string().min(1),
   clientRequestId: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
+  reasoningEffort: z.enum(reasoningEffortValues).nullable().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional(),
 });
 
@@ -76,7 +86,7 @@ const updateThreadSchema = z.object({
 
 const updateThreadSettingsSchema = z.object({
   model: z.string().min(1).optional(),
-  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
+  reasoningEffort: z.enum(reasoningEffortValues).nullable().optional(),
   fastMode: z.boolean().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional(),
 }).refine((body) => Object.keys(body).length > 0, {

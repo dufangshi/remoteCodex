@@ -422,6 +422,7 @@ export class ThreadRuntimeEventProjector {
           sequence,
           createdAt,
         });
+        callbacks.invalidateThreadDetailCache(record.id);
         callbacks.emitThreadEvent('thread.output.delta', record.id, {
           turnId: displayTurnId,
           itemId: event.itemId,

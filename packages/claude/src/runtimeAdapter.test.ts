@@ -604,6 +604,9 @@ describe('ClaudeRuntimeAdapter', () => {
           model: 'fable',
           displayName: 'Claude Fable',
           defaultReasoningEffort: 'medium',
+          supportedReasoningEfforts: expect.arrayContaining([
+            expect.objectContaining({ reasoningEffort: 'max' }),
+          ]),
         }),
       ]),
     );
@@ -870,7 +873,7 @@ describe('ClaudeRuntimeAdapter', () => {
       providerSessionId: 'claude-session-1',
       prompt: 'Say hello and run pwd',
       model: 'sonnet',
-      reasoningEffort: 'xhigh',
+      reasoningEffort: 'max',
       workspacePath: '/tmp/workspace',
     });
     expect(started.status).toBe('inProgress');

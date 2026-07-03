@@ -24,6 +24,7 @@ export function normalizeReasoningEffort(
     case 'medium':
     case 'high':
     case 'xhigh':
+    case 'max':
       return value;
     default:
       return null;

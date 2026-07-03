@@ -494,6 +494,7 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
       { reasoningEffort: 'medium', description: 'Medium effort' },
       { reasoningEffort: 'high', description: 'High effort' },
       { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+      { reasoningEffort: 'max', description: 'Maximum effort' },
     ],
     defaultReasoningEffort: 'medium',
   },
@@ -509,6 +510,7 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
       { reasoningEffort: 'medium', description: 'Medium effort' },
       { reasoningEffort: 'high', description: 'High effort' },
       { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+      { reasoningEffort: 'max', description: 'Maximum effort' },
     ],
     defaultReasoningEffort: 'medium',
   },
@@ -524,6 +526,7 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
       { reasoningEffort: 'medium', description: 'Medium effort' },
       { reasoningEffort: 'high', description: 'High effort' },
       { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+      { reasoningEffort: 'max', description: 'Maximum effort' },
     ],
     defaultReasoningEffort: 'medium',
   },
@@ -539,6 +542,7 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
       { reasoningEffort: 'medium', description: 'Medium effort' },
       { reasoningEffort: 'high', description: 'High effort' },
       { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+      { reasoningEffort: 'max', description: 'Maximum effort' },
     ],
     defaultReasoningEffort: 'medium',
   },
@@ -593,7 +597,7 @@ function mapModelInfo(model: ModelInfo, index: number): AgentModel {
     isDefault: index === 0,
     hidden: false,
     supportedReasoningEfforts: (model.supportedEffortLevels ?? []).map((effort) => ({
-      reasoningEffort: effort === 'max' ? 'xhigh' : effort,
+      reasoningEffort: effort,
       description: `${effort} effort`,
     })),
     defaultReasoningEffort: model.supportsEffort ? 'medium' : null,
@@ -1072,7 +1076,7 @@ function queryOptionsForRuntime(
     options.betas = ['context-1m-2025-08-07'];
   }
   if (input.reasoningEffort) {
-    const effort = input.reasoningEffort === 'xhigh' ? 'max' : input.reasoningEffort;
+    const effort = input.reasoningEffort;
     if (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
       options.effort = effort as NonNullable<ClaudeQueryOptions['effort']>;
     }

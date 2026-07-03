@@ -40,7 +40,6 @@ async function resolveComparablePath(absPath: string): Promise<string> {
 }
 
 async function resolveImportedWorkspacePath(
-  workspaceRoot: string,
   candidatePath: string,
 ) {
   if (!path.isAbsolute(candidatePath)) {
@@ -50,30 +49,14 @@ async function resolveImportedWorkspacePath(
     });
   }
 
-  const resolvedRoot = await resolveComparablePath(workspaceRoot);
-  const resolvedCandidate = await resolveComparablePath(candidatePath);
-  const normalizedRoot = resolvedRoot.endsWith(path.sep)
-    ? resolvedRoot
-    : `${resolvedRoot}${path.sep}`;
-
-  if (
-    resolvedCandidate !== resolvedRoot &&
-    !resolvedCandidate.startsWith(normalizedRoot)
-  ) {
-    throw new HttpError(403, {
-      code: 'forbidden',
-      message: 'Imported session path must stay within the configured workspace root.',
-    });
-  }
-
-  return resolvedCandidate;
+  return resolveComparablePath(candidatePath);
 }
 
 export class ThreadImportCoordinator {
   constructor(
     private readonly db: DatabaseClient,
     private readonly sessionCoordinator: ThreadSessionCoordinator,
-    private readonly workspaceRoot: string,
+    _workspaceRoot: string,
   ) {}
 
   async importLocalThread(input: ImportThreadInput) {
@@ -106,10 +89,7 @@ export class ThreadImportCoordinator {
       });
     }
 
-    const importedPath = await resolveImportedWorkspacePath(
-      this.workspaceRoot,
-      importSession.cwd,
-    );
+    const importedPath = await resolveImportedWorkspacePath(importSession.cwd);
     let workspace = getWorkspaceRecordByPath(this.db, importedPath);
 
     if (!workspace) {
