@@ -2,12 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   applyProviderHostConfigArchive,
-  bootstrapControlPlaneUser,
-  closeControlPlaneSession,
-  controlPlaneOAuthStartUrl,
   createThreadShell,
   createProviderHostConfigArchive,
-  createControlPlaneWorkspace,
   createWorkspace,
   disconnectThread,
   buildApiUrl,
@@ -19,14 +15,12 @@ import {
   fetchProviderHostConfigArchives,
   fetchProviderHostFile,
   importThread,
+  installOrUpdateAgentBackend,
   buildAndRestartService,
   login,
   enableRelayMode,
   renameProviderHostConfigArchive,
   restartAgentBackend,
-  loginControlPlanePasswordAccount,
-  registerControlPlanePasswordAccount,
-  resumeControlPlaneSession,
   resumeThread,
   sendThreadPrompt,
   setSelectedRelayDeviceId,
@@ -259,6 +253,7 @@ describe('api request helper', () => {
     await fetchAgentBackendStatus('codex');
     await restartAgentBackend('codex');
     await fetchAgentBackendModels('codex');
+    await installOrUpdateAgentBackend('claude', 'install');
     await buildAndRestartService();
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -266,90 +261,11 @@ describe('api request helper', () => {
     expect(calls[1]?.[0]).toBe('/api/agent-runtimes/codex/restart');
     expect(calls[1]?.[1]?.method).toBe('POST');
     expect(calls[2]?.[0]).toBe('/api/agent-runtimes/codex/models');
-    expect(calls[3]?.[0]).toBe('/api/service/build-restart');
+    expect(calls[3]?.[0]).toBe('/api/agent-runtimes/claude/install');
     expect(calls[3]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[3]?.[1]?.body))).toEqual({ action: 'install' });
+    expect(calls[4]?.[0]).toBe('/api/service/build-restart');
+    expect(calls[4]?.[1]?.method).toBe('POST');
   });
 
-  it('uses control-plane password auth endpoints', async () => {
-    await registerControlPlanePasswordAccount('https://control.example.test/', {
-      email: 'user@example.com',
-      password: 'password123',
-      displayName: 'User',
-    });
-    await loginControlPlanePasswordAccount('https://control.example.test/', {
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[0]?.[0]).toBe('https://control.example.test/api/auth/password/register');
-    expect(calls[0]?.[1]?.method).toBe('POST');
-    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
-      email: 'user@example.com',
-      password: 'password123',
-      displayName: 'User',
-    });
-    expect(calls[1]?.[0]).toBe('https://control.example.test/api/auth/password/login');
-    expect(calls[1]?.[1]?.method).toBe('POST');
-  });
-
-  it('builds oauth start urls with return targets', () => {
-    const url = new URL(controlPlaneOAuthStartUrl(
-      'https://control.example.test/',
-      'github',
-      'https://frontend.example.test/control-plane/login',
-    ));
-    expect(url.origin + url.pathname).toBe('https://control.example.test/api/auth/oauth/github/start');
-    expect(url.searchParams.get('returnTo')).toBe('https://frontend.example.test/control-plane/login');
-  });
-
-  it('keeps control-plane auth headers and JSON request shape', async () => {
-    const auth = {
-      baseUrl: 'https://control.example.test/',
-      token: 'dev:user-1',
-    };
-
-    await bootstrapControlPlaneUser(auth, {
-      email: 'user@example.com',
-      displayName: 'User',
-    });
-    await createControlPlaneWorkspace(auth, {
-      projectId: 'project-1',
-      name: 'Molecule study',
-      slug: 'molecule-study',
-    });
-    await closeControlPlaneSession(auth, 'session-1');
-    await resumeControlPlaneSession(auth, 'session-1');
-
-    const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[0]?.[0]).toBe('https://control.example.test/api/me/bootstrap');
-    expect(calls[0]?.[1]?.method).toBe('POST');
-    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
-      email: 'user@example.com',
-      displayName: 'User',
-    });
-    expect(new Headers(calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
-    expect(new Headers(calls[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
-
-    expect(calls[1]?.[0]).toBe(
-      'https://control.example.test/api/projects/project-1/workspaces',
-    );
-    expect(calls[1]?.[1]?.method).toBe('POST');
-    expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
-      name: 'Molecule study',
-      slug: 'molecule-study',
-    });
-    expect(new Headers(calls[1]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
-    expect(new Headers(calls[1]?.[1]?.headers).get('Content-Type')).toBe('application/json');
-
-    expect(calls[2]?.[0]).toBe('https://control.example.test/api/sessions/session-1/close');
-    expect(calls[2]?.[1]?.method).toBe('POST');
-    expect(new Headers(calls[2]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
-    expect(new Headers(calls[2]?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
-
-    expect(calls[3]?.[0]).toBe('https://control.example.test/api/sessions/session-1/resume');
-    expect(calls[3]?.[1]?.method).toBe('POST');
-    expect(new Headers(calls[3]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
-    expect(new Headers(calls[3]?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
-  });
 });

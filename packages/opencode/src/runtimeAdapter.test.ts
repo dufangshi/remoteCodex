@@ -1179,7 +1179,7 @@ describe('OpenCodeRuntimeAdapter', () => {
     });
 
     await adapter.start();
-    expect(adapter.capabilities.controls.sandboxMode).toBe(true);
+    expect(adapter.capabilities.controls.sandboxMode).toBe(false);
     await adapter.startSession({
       cwd: '/tmp/project',
       model: 'opencode/big-pickle',

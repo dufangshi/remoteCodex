@@ -17,6 +17,7 @@ import {
   fetchAgentBackends,
   fetchAgentBackendModels,
   fetchWorkspaces,
+  installOrUpdateAgentBackend,
 } from '../lib/api';
 import {
   currentThreadHref,
@@ -56,9 +57,11 @@ export function ThreadNewPage() {
   const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestedWorkspaceId = searchParams.get('workspaceId');
   const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
+  const selectedBackend = backends.find((backend) => backend.provider === provider);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +137,42 @@ export function ThreadNewPage() {
       cancelled = true;
     };
   }, [provider]);
+
+  async function reloadBackendsAndModels(nextProvider: AgentBackendIdDto = provider) {
+    const backendRecords = await fetchAgentBackends();
+    setBackends(backendRecords);
+    const requestedBackend = backendRecords.find((backend) => backend.provider === nextProvider);
+    const selectableProvider = requestedBackend && backendCanStartSession(requestedBackend)
+      ? nextProvider
+      : chooseInitialProvider(backendRecords, defaultBackend);
+    setProvider(selectableProvider);
+    const modelRecords = await fetchAgentBackendModels(selectableProvider);
+    setModels(modelRecords);
+    setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
+  }
+
+  async function handleRuntimeAction(backend: AgentBackendDto) {
+    const action = backend.installation.installed ? 'update' : 'install';
+    setRuntimeBusyProvider(backend.provider);
+    setError(null);
+    try {
+      await installOrUpdateAgentBackend(backend.provider, action);
+      await reloadBackendsAndModels(backend.provider);
+    } catch (caught) {
+      if (caught instanceof ApiError) {
+        setError(caught.payload.message);
+      } else {
+        setError(caught instanceof Error ? caught.message : `Unable to ${action} ${backend.displayName}.`);
+      }
+      try {
+        await reloadBackendsAndModels(provider);
+      } catch {
+        // Keep the original install/update error visible.
+      }
+    } finally {
+      setRuntimeBusyProvider(null);
+    }
+  }
 
   function handleCancel() {
     if (window.history.length > 1) {
@@ -220,6 +259,78 @@ export function ThreadNewPage() {
                 </option>
               ))}
             </select>
+            <div className="mt-3 space-y-2">
+              {backends.map((backend) => {
+                const canStart = backendCanStartSession(backend);
+                const isSelected = backend.provider === provider;
+                const installAvailable = backend.installation.installed
+                  ? Boolean(backend.installation.updateCommand)
+                  : Boolean(backend.installation.installCommand);
+                const actionLabel = backend.installation.installed ? 'Update' : 'Install';
+                const rowBusy = runtimeBusyProvider === backend.provider || backend.installation.busy;
+
+                return (
+                  <div
+                    key={backend.provider}
+                    className={`rounded-2xl border px-4 py-3 transition ${
+                      isSelected ? 'host-surface-strong' : 'host-surface'
+                    } ${canStart ? '' : 'opacity-75'}`}
+                  >
+                    <div className="flex flex-wrap items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canStart) {
+                            setProvider(backend.provider);
+                          }
+                        }}
+                        disabled={!canStart || busy || rowBusy}
+                        className="min-w-0 flex-1 text-left disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{backend.displayName}</span>
+                          {isSelected ? (
+                            <span className="host-pill rounded-full px-2 py-0.5 text-xs">Selected</span>
+                          ) : null}
+                          {!canStart ? (
+                            <span className="host-pill rounded-full px-2 py-0.5 text-xs">Not available</span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-sm opacity-75">
+                          {backend.installation.installed
+                            ? `Installed${backend.installation.installedVersion ? `: ${backend.installation.installedVersion}` : ''}`
+                            : backend.installation.lastError ?? backend.status.lastError ?? 'Runtime is not installed.'}
+                        </p>
+                        {!canStart && backend.installation.lastError ? (
+                          <p className="mt-1 text-xs opacity-70">{backend.installation.lastError}</p>
+                        ) : null}
+                      </button>
+                      {installAvailable ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRuntimeAction(backend)}
+                          disabled={busy || rowBusy || runtimeBusyProvider !== null}
+                          className="host-secondary-button rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={`${actionLabel} ${backend.displayName}`}
+                        >
+                          {rowBusy ? `${actionLabel}ing...` : actionLabel}
+                        </button>
+                      ) : null}
+                    </div>
+                    {!canStart && installAvailable ? (
+                      <p className="mt-2 text-xs opacity-70">
+                        Relay connections install or update the runtime on the selected device.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            {selectedBackend && !backendCanStartSession(selectedBackend) ? (
+              <p className="mt-2 text-sm opacity-75">
+                Select an available backend, or install this runtime before creating a thread.
+              </p>
+            ) : null}
           </div>
           <div>
             <label className="host-form-label text-sm font-medium" htmlFor="thread-workspace">

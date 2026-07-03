@@ -151,7 +151,7 @@ const opencodeCapabilities: AgentProviderCapabilities = {
   controls: {
     planMode: true,
     permissionRequests: false,
-    sandboxMode: true,
+    sandboxMode: false,
     performanceMode: false,
     goals: false,
   },
