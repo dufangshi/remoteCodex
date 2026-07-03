@@ -184,9 +184,9 @@ Checklist:
 
 E2E gate:
 
-- [ ] Claude `/btw` 在 Web/iOS/Android 的行为一致。
-- [x] Web Claude `/mcp` 能打开或显示合理结果；iOS/Android 待补真实 gate。
-- [x] Web OpenCode `/compact`、`/fork` 可见，且当前 runtime 不支持 MCP status 时不会展示会 409 的 `/mcp` 假入口；iOS/Android 待补真实 gate。
+- [x] Claude `/btw` 在 Web/iOS/Android 的行为一致：当前 SDK session 未暴露，因此三端均显示为 disabled/unsupported。
+- [x] Web/iOS/Android Claude `/mcp` 能打开或显示合理结果；iOS/Android 真实 gate 已覆盖菜单中 `/mcp` 可见。
+- [x] Web/iOS/Android OpenCode `/compact`、`/fork` 可见，且当前 runtime 不支持 MCP status 时不会展示会 409 的 `/mcp` 假入口。
 
 Implementation notes 2026-07-03:
 
@@ -205,6 +205,8 @@ Implementation notes 2026-07-03 Phase 5 update:
 - 已补齐空 prompt 输入 `/` 打开 backend-aware slash command 菜单；为避免误吞正文中的斜杠，只在 chat prompt 为空且菜单项可用时拦截。
 - 已通过 focused tests 覆盖：Claude adapter 会从 SDK init 更新 slash toolbox；Web composer 会把 backend prompt slash command 插入 prompt、禁用 unsupported item，并在空 prompt 输入 `/` 时打开菜单。
 - 已补 Web real-backend Phase 5 gate `e2e/phase5-slash-command-parity.spec.ts`：Claude haiku 真实启动后，Web composer 展示 SDK 动态 slash commands、禁用 unsupported `/btw`，`/compact` 会插入 prompt，`/mcp` 可打开 panel；OpenCode Web composer 展示 `/compact`、`/fork`，且不会展示当前 runtime 不支持的 `/mcp`。
+- 已补 iOS WebView Phase 5 gate：`testLiveLocalThreadWebViewShowsRealClaudeSlashToolbox` 和 `testLiveLocalThreadWebViewShowsRealOpenCodeSlashToolbox` 会创建真实 backend thread，打开 app 内 WebView，验证 slash toolbox 按钮和空 prompt 输入 `/` 都能打开 backend-aware 菜单；Claude 验证 `/mcp` 可见、`/btw` disabled，OpenCode 验证 `/compact`、`/fork` 可见且不展示 `/mcp`/`/btw`。
+- 已补 Android AOSP WebView Phase 5 gate `e2e/android-phase5-slash-command-parity.mjs`：通过 ADB 启动真实 Android app WebView fixture，再用 WebView DevTools/CDP 验证 slash toolbox 按钮和键入 `/` 的行为；Claude/OpenCode 断言与 iOS gate 保持一致。
 
 ## Current Local Baseline
 
@@ -265,6 +267,9 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] iOS WebView Phase 4 OpenCode queued continuation smoke 通过：`xcodebuild ... -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewQueuesRealOpenCodeContinuation test`，thread `55195502-d7ac-4d73-a2a1-2f13d2e7f734`，provider `opencode`，model `opencode/mimo-v2.5-free`，写入 `.local/ios-e2e-workspaces/7B2D3993-C7D3-42B9-B12E-8C9CDDEF8B57/ios-opencode-phase4-cea9b144.txt`，内容命中 `ios_opencode_phase4_done cea9b144`。
 - [x] Android AOSP WebView Phase 4 Claude queued continuation smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8932 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8932 ANDROID_PHASE4_PROVIDER=claude pnpm exec node e2e/android-phase4-running-turn-queued-continuation.mjs`，thread `45cfbda2-ed1c-4d79-80ce-25122da1f4d5`，provider `claude`，model `haiku`，写入 `.local/android-phase4-e2e/workspaces/android-claude-45158a6d/android-claude-phase4-45158a6d.txt`，内容命中 `android_claude_phase4_done 45158a6d`。
 - [x] Android AOSP WebView Phase 4 OpenCode queued continuation smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8932 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8932 ANDROID_PHASE4_PROVIDER=opencode pnpm exec node e2e/android-phase4-running-turn-queued-continuation.mjs`，thread `8e42e0da-9c19-4341-aba2-6f69b658e36b`，provider `opencode`，model `opencode/mimo-v2.5-free`，写入 `.local/android-phase4-e2e/workspaces/android-opencode-802c5f7a/android-opencode-phase4-802c5f7a.txt`，内容命中 `android_opencode_phase4_done 802c5f7a`。
+- [x] Web Phase 5 slash command parity smoke 通过：`REMOTE_CODEX_REAL_BACKEND_E2E=1 REMOTE_CODEX_E2E_BASE_URL=http://127.0.0.1:8935 pnpm --filter @remote-codex/supervisor-web exec playwright test ../../e2e/phase5-slash-command-parity.spec.ts --project=chromium`；Claude haiku 展示 SDK 动态 slash commands、禁用 unsupported `/btw`、`/compact` 插入 prompt、`/mcp` 打开 panel；OpenCode 展示 `/compact`、`/fork` 且不展示 `/mcp`/`/btw`。
+- [x] iOS WebView Phase 5 slash command parity smoke 通过：`REMOTE_CODEX_IOS_E2E_BASE_URL=http://127.0.0.1:8936 xcodebuild -project apps/ios/RemoteCodex.xcodeproj -scheme RemoteCodex -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewShowsRealClaudeSlashToolbox -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewShowsRealOpenCodeSlashToolbox test`；Claude/OpenCode 两个真实 backend WebView 测试均通过。
+- [x] Android AOSP WebView Phase 5 slash command parity smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8936 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8936 pnpm exec node e2e/android-phase5-slash-command-parity.mjs`；Claude thread `a17a6ac9-12bc-440e-a560-12e577b5cb06`，model `haiku`；OpenCode thread `4591a8d9-18d9-4285-86f2-375cc0039fac`，model `opencode/mimo-v2.5-free`。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
 - [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
 - [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
@@ -275,4 +280,4 @@ Implementation notes 2026-07-03 Phase 5 update:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode slash command parity 已有 Web real-backend gate；iOS/Android 仍需补真实 UI E2E，确认 `/` 菜单、unsupported `/btw` 和 backend-specific toolbox 行为一致。
+- [ ] slash command 执行结果落入 timeline/settings panel 的产品形态仍需补齐；当前三端 Phase 5 gate 覆盖的是 backend-aware 菜单、prompt command 插入和 unsupported item 状态。
