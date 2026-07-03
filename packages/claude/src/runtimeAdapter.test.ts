@@ -250,6 +250,31 @@ describe('ClaudeRuntimeAdapter', () => {
     expect(sdkOptions[0]).not.toHaveProperty('tools');
   });
 
+  it('updates slash toolbox items from Claude SDK system init commands', async () => {
+    const adapter = makeAdapter(() => [
+      {
+        ...systemInit(),
+        slash_commands: ['compact', 'usage', 'code-review'],
+      },
+      result(),
+    ]);
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    expect(adapter.managementSchema.toolboxItems).toEqual([
+      expect.objectContaining({ action: 'mcp', command: '/mcp', panel: 'mcp' }),
+      expect.objectContaining({ action: 'prompt', command: '/code-review' }),
+      expect.objectContaining({ action: 'prompt', command: '/compact' }),
+      expect.objectContaining({ action: 'prompt', command: '/usage' }),
+      expect.objectContaining({ action: 'unsupported', command: '/btw' }),
+    ]);
+  });
+
   it('maps thread sandbox modes to Claude permission and sandbox settings', async () => {
     const turnOptions: Record<string, unknown>[] = [];
     const adapter = makeAdapter((_prompt, options) => {

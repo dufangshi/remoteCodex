@@ -20,6 +20,7 @@ import type {
   AgentRuntime,
   AgentRuntimeEvent,
   AgentRuntimeManagementSchema,
+  AgentRuntimeToolboxItemSchema,
   AgentRuntimeStatus,
   AgentSessionDetail,
   AgentSessionSummary,
@@ -103,6 +104,7 @@ interface SDKMessage {
   session_id?: string;
   cwd?: string;
   model?: string;
+  slash_commands?: unknown;
   uuid?: string;
   message?: unknown;
   event?: unknown;
@@ -406,6 +408,78 @@ export const claudeCapabilities: AgentProviderCapabilities = {
     costUsd: true,
   },
 };
+
+function normalizeClaudeSlashCommands(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const commands = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    const command = entry.trim().replace(/^\/+/, '');
+    if (command) {
+      commands.add(command);
+    }
+  }
+  return [...commands].sort((left, right) => left.localeCompare(right));
+}
+
+function claudeSlashLabel(command: string) {
+  switch (command) {
+    case 'compact':
+      return '/compact';
+    case 'clear':
+      return '/clear';
+    case 'context':
+      return '/context';
+    case 'usage':
+      return '/usage';
+    default:
+      return `/${command}`;
+  }
+}
+
+function buildClaudeToolboxItems(
+  slashCommands: string[],
+): AgentRuntimeToolboxItemSchema[] {
+  const discovered = new Set(slashCommands);
+  const items: AgentRuntimeToolboxItemSchema[] = [
+    {
+      action: 'mcp',
+      command: '/mcp',
+      label: 'MCP',
+      description: 'Open MCP status for this Claude Code session.',
+      panel: 'mcp',
+    },
+  ];
+
+  for (const command of slashCommands) {
+    if (command === 'mcp') {
+      continue;
+    }
+    items.push({
+      action: 'prompt',
+      command: `/${command}`,
+      label: claudeSlashLabel(command),
+      description: 'Claude Code slash command discovered from the SDK session.',
+    });
+  }
+
+  if (!discovered.has('btw')) {
+    items.push({
+      action: 'unsupported',
+      command: '/btw',
+      label: '/btw',
+      description:
+        'Not listed by the current Claude Agent SDK session; it may require the interactive Claude TTY or a different Claude Code version.',
+    });
+  }
+
+  return items;
+}
 
 const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
   {
@@ -1020,9 +1094,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   };
   readonly managementSchema: AgentRuntimeManagementSchema = {
     hostConfigFiles: [],
-    toolboxItems: [
-      { action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' },
-    ],
+    toolboxItems: buildClaudeToolboxItems([]),
     hookCommandTemplates: [],
     providerConfigFormat: 'none',
     mcpConfigFormat: 'none',
@@ -1065,6 +1137,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   getStatus(): AgentRuntimeStatus {
     return { ...this.status };
+  }
+
+  private updateToolboxItemsFromSystemInit(message: SDKMessage) {
+    this.managementSchema.toolboxItems = buildClaudeToolboxItems(
+      normalizeClaudeSlashCommands(message.slash_commands),
+    );
   }
 
   async start() {
@@ -1220,6 +1298,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       for await (const message of query) {
         rawMessages.push(message);
         if (message.type === 'system' && message.subtype === 'init') {
+          this.updateToolboxItemsFromSystemInit(message);
           const sessionId = message.session_id;
           if (sessionId) {
             providerSessionId = sessionId;
@@ -1556,6 +1635,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     this.captureUsage(state, message);
 
     if (message.type === 'system' && message.subtype === 'init') {
+      this.updateToolboxItemsFromSystemInit(message);
       if (message.session_id) {
         this.sessionCwds.set(message.session_id, message.cwd ?? '');
         this.sessionModels.set(message.session_id, message.model ?? null);

@@ -109,7 +109,9 @@ export type AgentRuntimeToolboxAction =
   | 'fork'
   | 'skills'
   | 'mcp'
-  | 'hooks';
+  | 'hooks'
+  | 'prompt'
+  | 'unsupported';
 
 export interface AgentRuntimeToolboxItemSchema {
   action: AgentRuntimeToolboxAction;
