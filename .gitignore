@@ -24,3 +24,6 @@ apps/android/.gradle/
 apps/android/build/
 apps/android/**/build/
 apps/android/local.properties
+apps/android/thread-web/dist/
+apps/android/app/src/main/assets/thread-ui/
+apps/ios/RemoteCodex/Resources/WebThreadDist/

@@ -16,7 +16,7 @@ enum SupervisorConnectionMode: String, CaseIterable, Codable, Identifiable {
     var label: String {
         switch self {
         case .local:
-            "Intranet"
+            "Local / Intranet"
         case .server:
             "Server"
         case .relay:

@@ -39,7 +39,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.CreateSupervisorWorkspaceRequest
 import com.remotecodex.android.api.ImportSupervisorThreadRequest
 import com.remotecodex.android.api.ImportSupervisorPluginRequest
@@ -57,6 +56,8 @@ import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.api.UpdateSupervisorPluginRequest
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceSettingsRequest
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceRequest
+import com.remotecodex.android.api.canStartSession
+import com.remotecodex.android.api.runtimeActionLabel
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
 import com.remotecodex.android.ui.components.GraphActionIcon
@@ -69,7 +70,10 @@ import com.remotecodex.android.ui.components.GraphDialogActionTone
 import com.remotecodex.android.ui.components.GraphDialogFooter
 import com.remotecodex.android.ui.components.GraphDialogFrame
 import com.remotecodex.android.ui.components.GraphDialogOverlay
-import com.remotecodex.android.ui.model.AppShellNavigationItemPreview
+import com.remotecodex.android.ui.components.GraphFloatingIconButton
+import com.remotecodex.android.ui.components.GraphIconButton
+import com.remotecodex.android.ui.components.GraphSelectionGlyph
+import com.remotecodex.android.ui.components.GraphSelectionTone
 import com.remotecodex.android.ui.model.ShellProcessPreview
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -100,14 +104,10 @@ fun SupervisorHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val appShell = ThreadPreviewSample.appShell
-    val detail = ThreadPreviewSample.detail
     val coroutineScope = rememberCoroutineScope()
     val client = remember(supervisorConnection) { SupervisorApiClient(supervisorConnection) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var selectedDestination by remember { mutableStateOf(HomeDestination.Workspaces) }
-    var threadFilter by rememberSaveable { mutableStateOf(ThreadListFilter.All) }
-    var threadSort by rememberSaveable { mutableStateOf(ThreadListSort.Updated) }
-    var threadQuery by rememberSaveable { mutableStateOf("") }
+    var homeMenuOpen by remember { mutableStateOf(false) }
     var workspaceActionBusyId by remember { mutableStateOf<String?>(null) }
     var workspaceActionError by remember { mutableStateOf<String?>(null) }
     var workspaceDialog by remember { mutableStateOf<WorkspaceActionDialog?>(null) }
@@ -369,11 +369,9 @@ fun SupervisorHomeScreen(
                 HomeHeader(
                     productName = appShell.productName,
                     connection = supervisorConnection,
-                    username = sessionUsername,
                     loading = homeSnapshotLoading,
                     error = homeSnapshotError,
-                    onOpenSettings = { settingsOpen = true },
-                    onChangeConnection = onChangeConnection,
+                    onOpenMenu = { homeMenuOpen = true },
                 )
             }
 
@@ -386,172 +384,73 @@ fun SupervisorHomeScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    appShell.navigationItems
-                        .filter { item -> AndroidFeatureFlags.ShellEnabled || HomeDestination.fromLabel(item.label) != HomeDestination.Shells }
-                        .forEach { item ->
-                        val destination = HomeDestination.fromLabel(item.label)
-                        HomeDestinationRow(
-                            item = item,
-                            snapshot = homeSnapshot,
-                            selected = destination == selectedDestination,
-                            onClick = {
-                                selectedDestination = destination
-                            },
-                        )
-                    }
-                }
+                HomeSectionTitle(
+                    title = "Workspaces",
+                    detail = "Trusted project roots",
+                    actionLabel = "New",
+                    actionContentDescription = "Create workspace",
+                    onAction = {
+                        workspaceActionError = null
+                        workspaceDialog = WorkspaceActionDialog.Create
+                    },
+                )
             }
-
-            when (selectedDestination) {
-                HomeDestination.Workspaces -> {
-	                    item {
-	                        HomeSectionTitle(
-	                            title = "Workspaces",
-	                            detail = "Trusted project roots",
-	                            actionLabel = "New",
-                            actionContentDescription = "Create workspace",
-                            onAction = {
-                                workspaceActionError = null
-                                workspaceDialog = WorkspaceActionDialog.Create
-	                            },
-	                        )
-	                    }
-                    item {
-                        GraphButton(
-                            label = "Import Session",
-                            icon = GraphActionIcon.Open,
-                            variant = GraphButtonVariant.Outline,
-                            size = GraphButtonSize.Small,
-                            contentDescription = "Import existing backend session",
-                            onClick = {
-                                workspaceActionError = null
-                                workspaceDialog = WorkspaceActionDialog.ImportThread
-                            },
-                        )
-                    }
-                    val workspaces = homeSnapshot?.workspaces.orEmpty()
-                    if (workspaces.isEmpty()) {
-                        item {
-                            EmptyHomeRow(
-                                title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
-                                detail = homeSnapshotError ?: "Add a trusted project root to start threads from this Android client.",
-                                actionLabel = "New Workspace",
-                                onClick = {
-                                    workspaceActionError = null
-                                    workspaceDialog = WorkspaceActionDialog.Create
-                                },
-                            )
-                        }
-                    } else {
-                        items(workspaces.take(8), key = { it.id }) { workspace ->
-                            WorkspaceSummaryRow(
-                                workspace = workspace,
-                                busy = workspaceActionBusyId == workspace.id,
-                                onOpenWorkspace = {
-                                    onOpenWorkspace(workspace.id)
-                                },
-                                onToggleFavorite = {
-                                    runWorkspaceAction(workspace.id) {
-                                        client.setWorkspaceFavorite(workspace.id, !workspace.isFavorite)
-                                    }
-                                },
-                                onRenameWorkspace = {
-                                    workspaceActionError = null
-                                    workspaceDialog = WorkspaceActionDialog.Rename(workspace)
-                                },
-                                onStartThread = {
-                                    workspaceActionError = null
-                                    workspaceDialog = WorkspaceActionDialog.StartThread(workspace)
-                                },
-                                onDeleteWorkspace = {
-                                    workspaceActionError = null
-                                    workspaceDialog = WorkspaceActionDialog.Delete(workspace)
-                                },
-                            )
-                        }
-                    }
+            item {
+                GraphButton(
+                    label = "Import Session",
+                    icon = GraphActionIcon.Open,
+                    variant = GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Import existing backend session",
+                    onClick = {
+                        workspaceActionError = null
+                        workspaceDialog = WorkspaceActionDialog.ImportThread
+                    },
+                )
+            }
+            val workspaces = homeSnapshot?.workspaces.orEmpty()
+                .sortedWith(
+                    compareByDescending<SupervisorWorkspaceSummary> { it.isFavorite }
+                        .thenBy { workspace -> workspace.label.ifBlank { workspace.absPath }.lowercase() },
+                )
+            if (workspaces.isEmpty()) {
+                item {
+                    EmptyHomeRow(
+                        title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
+                        detail = homeSnapshotError ?: "Add a trusted project root to start threads from this Android client.",
+                        actionLabel = "New Workspace",
+                        onClick = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.Create
+                        },
+                    )
                 }
-                HomeDestination.Threads -> {
-                    item {
-                        HomeSectionTitle(title = "Threads", detail = "Filter and resume supervisor sessions")
-                    }
-                    val threads = homeSnapshot?.threads.orEmpty()
-                    if (threads.isEmpty()) {
-                        item {
-                            EmptyHomeRow(
-                                title = if (homeSnapshotLoading) "Loading threads" else "No threads loaded",
-                                detail = homeSnapshotError ?: "Connect to a supervisor and open a thread preview while the list endpoint is empty.",
-                                actionLabel = "Open Preview",
-                                onClick = { onOpenThread(null) },
-                            )
-                        }
-                    } else {
-                        item {
-                            ThreadListControls(
-                                threads = threads,
-                                query = threadQuery,
-                                filter = threadFilter,
-                                sort = threadSort,
-                                onQueryChange = { threadQuery = it },
-                                onFilterChange = { threadFilter = it },
-                                onSortChange = { threadSort = it },
-                            )
-                        }
-                        val filteredThreads = buildFilteredThreads(
-                            threads = threads,
-                            query = threadQuery,
-                            filter = threadFilter,
-                            sort = threadSort,
-                        )
-                        if (filteredThreads.isEmpty()) {
-                            item {
-                                EmptyHomeRow(
-                                    title = "No matching threads",
-                                    detail = "Adjust the search text or status filter to show more supervisor sessions.",
-                                    actionLabel = "Clear",
-                                    onClick = {
-                                        threadQuery = ""
-                                        threadFilter = ThreadListFilter.All
-                                    },
-                                )
+            } else {
+                items(workspaces.take(8), key = { it.id }) { workspace ->
+                    WorkspaceSummaryRow(
+                        workspace = workspace,
+                        busy = workspaceActionBusyId == workspace.id,
+                        onOpenWorkspace = {
+                            onOpenWorkspace(workspace.id)
+                        },
+                        onToggleFavorite = {
+                            runWorkspaceAction(workspace.id) {
+                                client.setWorkspaceFavorite(workspace.id, !workspace.isFavorite)
                             }
-                        } else {
-                            val grouped = groupThreads(filteredThreads)
-                            grouped.forEach { group ->
-                                item(key = "group-${group.key}") {
-                                    ThreadGroupHeader(group = group)
-                                }
-                                items(group.threads, key = { it.id }) { thread ->
-                                    ThreadSummaryRow(
-                                        thread = thread,
-                                        workspace = homeSnapshot?.workspaces?.firstOrNull { it.id == thread.workspaceId },
-                                        onClick = { onOpenThread(thread.id) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                HomeDestination.Shells -> {
-                    item {
-                        HomeSectionTitle(title = "Shells", detail = detail.shellPreview.connectionLabel)
-                    }
-                    items(detail.shellPreview.processes, key = { it.id }) { process ->
-                        ShellProcessSummaryRow(
-                            process = process,
-                            activeProcessId = detail.shellPreview.activeProcessId,
-                            onClick = { onOpenThread(null) },
-                        )
-                    }
-                    item {
-                        EmptyHomeRow(
-                            title = "Shell disabled",
-                            detail = "Terminal access is policy-gated and is not part of the current Android client scope.",
-                            actionLabel = "Open Thread Preview",
-                            onClick = { onOpenThread(null) },
-                        )
-                    }
+                        },
+                        onRenameWorkspace = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.Rename(workspace)
+                        },
+                        onStartThread = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.StartThread(workspace)
+                        },
+                        onDeleteWorkspace = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.Delete(workspace)
+                        },
+                    )
                 }
             }
         }
@@ -597,11 +496,33 @@ fun SupervisorHomeScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        if (homeMenuOpen) {
+            HomeOverflowMenuDialog(
+                onClose = { homeMenuOpen = false },
+                onOpenSettings = {
+                    homeMenuOpen = false
+                    settingsOpen = true
+                },
+                onRefresh = {
+                    homeMenuOpen = false
+                    onRefreshHomeSnapshot()
+                },
+                onOpenDevices = {
+                    homeMenuOpen = false
+                    onChangeConnection()
+                },
+            )
+        }
         workspaceDialog?.let { dialog ->
             WorkspaceActionDialogOverlay(
                 dialog = dialog,
                 backends = agentBackends.orEmpty(),
                 loadModels = { provider -> client.listAgentModels(provider) },
+                installOrUpdateBackend = { backend ->
+                    val action = if (backend.installed) "update" else "install"
+                    client.installOrUpdateAgentBackend(backend.provider, action)
+                    agentBackends = client.listAgentBackends()
+                },
                 busy = dialog.busyId == workspaceActionBusyId,
                 error = workspaceActionError,
                 onClose = {
@@ -631,7 +552,7 @@ fun SupervisorHomeScreen(
                 onDeleteWorkspace = {
                     dialog.workspace?.let { workspace ->
                         runWorkspaceAction(workspace.id) {
-                            client.deleteWorkspace(workspace.id)
+                            client.deleteWorkspace(workspace.id, workspace.label)
                         }
                     }
                 },
@@ -645,11 +566,9 @@ fun SupervisorHomeScreen(
 private fun HomeHeader(
     productName: String,
     connection: SupervisorConnectionConfig,
-    username: String?,
     loading: Boolean,
     error: String?,
-    onOpenSettings: () -> Unit,
-    onChangeConnection: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -679,46 +598,57 @@ private fun HomeHeader(
                 variant = if (error == null) GraphBadgeVariant.Outline else GraphBadgeVariant.Destructive,
             )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.End) {
-            GraphButton(
-                label = "Settings",
-                icon = GraphActionIcon.Open,
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Open settings",
-                onClick = onOpenSettings,
-            )
-            AccountAvatarButton(
-                label = accountInitials(username ?: connection.mode.label),
-                contentDescription = "Open connection settings",
-                onClick = onChangeConnection,
-            )
-        }
+        GraphFloatingIconButton(
+            icon = GraphActionIcon.Menu,
+            contentDescription = "Open home menu",
+            onClick = onOpenMenu,
+        )
     }
 }
 
 @Composable
-private fun AccountAvatarButton(
-    label: String,
-    contentDescription: String,
-    onClick: () -> Unit,
+private fun HomeOverflowMenuDialog(
+    onClose: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenDevices: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(ThreadColors.Primary)
-            .semantics { this.contentDescription = contentDescription }
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = ThreadColors.PrimaryForeground,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+    GraphDialogOverlay(onDismiss = onClose) {
+        GraphDialogFrame(
+            title = "Actions",
+            subtitle = "Supervisor controls",
+            onClose = onClose,
+            footer = {},
+            showFooter = false,
+        ) {
+            GraphButton(
+                label = "Settings",
+                modifier = Modifier.fillMaxWidth(),
+                icon = GraphActionIcon.Settings,
+                variant = GraphButtonVariant.Secondary,
+                size = GraphButtonSize.Default,
+                contentDescription = "Open settings",
+                onClick = onOpenSettings,
+            )
+            GraphButton(
+                label = "Refresh",
+                modifier = Modifier.fillMaxWidth(),
+                icon = GraphActionIcon.Refresh,
+                variant = GraphButtonVariant.Secondary,
+                size = GraphButtonSize.Default,
+                contentDescription = "Refresh home",
+                onClick = onRefresh,
+            )
+            GraphButton(
+                label = "Devices",
+                modifier = Modifier.fillMaxWidth(),
+                icon = GraphActionIcon.Devices,
+                variant = GraphButtonVariant.Secondary,
+                size = GraphButtonSize.Default,
+                contentDescription = "Open devices",
+                onClick = onOpenDevices,
+            )
+        }
     }
 }
 
@@ -789,55 +719,6 @@ private fun SnapshotMetric(
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun HomeDestinationRow(
-    item: AppShellNavigationItemPreview,
-    snapshot: SupervisorHomeSnapshot?,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val count = when (item.label) {
-        "Workspaces" -> snapshot?.workspaces?.size
-        "Threads" -> snapshot?.threads?.size
-        "Shells" -> snapshot?.activeThreadCount
-        else -> null
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) ThreadColors.SurfaceStrong else ThreadColors.Surface)
-            .border(1.dp, if (selected) ThreadColors.BorderStrong else ThreadColors.Border, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "Open ${item.label}" }
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
-    ) {
-        DestinationMark(label = item.label)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                text = item.label,
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-            Text(
-                text = item.detail,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        GraphBadge(
-            label = if (selected) "Active" else count?.toString() ?: "Preview",
-            variant = GraphBadgeVariant.Outline,
         )
     }
 }
@@ -1030,6 +911,8 @@ private fun WorkspaceSummaryRow(
             .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
+            .clickable(enabled = !busy, onClick = onOpenWorkspace)
+            .semantics { contentDescription = "Open workspace ${workspace.label}" }
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -1058,12 +941,21 @@ private fun WorkspaceSummaryRow(
             }
             Text(
                 text = workspace.workspaceMetaLabel(),
-                color = ThreadColors.ForegroundSoft,
+                color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (workspace.isFavorite) {
+                GraphIconButton(
+                    icon = GraphActionIcon.Pin,
+                    contentDescription = "Pinned workspace",
+                    enabled = false,
+                    variant = GraphButtonVariant.Ghost,
+                    size = GraphButtonSize.Small,
+                )
+            }
         }
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
@@ -1071,20 +963,12 @@ private fun WorkspaceSummaryRow(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             GraphButton(
-                label = "Open",
-                icon = GraphActionIcon.Open,
-                enabled = !busy,
-                variant = GraphButtonVariant.Secondary,
-                size = GraphButtonSize.Small,
-                contentDescription = "Open workspace ${workspace.label}",
-                onClick = onOpenWorkspace,
-            )
-            GraphButton(
-                label = if (workspace.isFavorite) "Unstar" else "Star",
+                label = if (workspace.isFavorite) "Unpin" else "Pin",
+                icon = GraphActionIcon.Pin,
                 enabled = !busy,
                 variant = GraphButtonVariant.Outline,
                 size = GraphButtonSize.Small,
-                contentDescription = "Toggle favorite workspace ${workspace.label}",
+                contentDescription = "Toggle pinned workspace ${workspace.label}",
                 onClick = onToggleFavorite,
             )
             GraphButton(
@@ -1097,6 +981,7 @@ private fun WorkspaceSummaryRow(
             )
             GraphButton(
                 label = "New Thread",
+                icon = GraphActionIcon.Add,
                 enabled = !busy,
                 variant = GraphButtonVariant.Default,
                 size = GraphButtonSize.Small,
@@ -1118,7 +1003,7 @@ private fun WorkspaceSummaryRow(
 
 private fun SupervisorWorkspaceSummary.workspaceMetaLabel(): String {
     return when {
-        isFavorite -> "favorite"
+        isFavorite -> "pinned"
         lastOpenedAt != null -> "opened"
         else -> "workspace"
     }
@@ -1160,6 +1045,7 @@ private fun WorkspaceActionDialogOverlay(
     dialog: WorkspaceActionDialog,
     backends: List<SupervisorAgentBackend>,
     loadModels: suspend (String) -> List<SupervisorModelOption>,
+    installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
     error: String?,
     onClose: () -> Unit,
@@ -1196,6 +1082,7 @@ private fun WorkspaceActionDialogOverlay(
                 workspace = dialog.workspace,
                 backends = backends,
                 loadModels = loadModels,
+                installOrUpdateBackend = installOrUpdateBackend,
                 busy = busy,
                 error = error,
                 onClose = onClose,
@@ -1282,22 +1169,33 @@ private fun StartThreadDialog(
     workspace: SupervisorWorkspaceSummary,
     backends: List<SupervisorAgentBackend>,
     loadModels: suspend (String) -> List<SupervisorModelOption>,
+    installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
     error: String?,
     onClose: () -> Unit,
     onStartThread: (StartThreadDraft) -> Unit,
 ) {
     var title by rememberSaveable(workspace.id) { mutableStateOf("") }
-    val enabledBackends = backends.filter { it.enabled }.ifEmpty { backends }
+    val selectableBackends = backends.filter { it.canStartSession }
     var provider by rememberSaveable(workspace.id, backends.map { it.provider }.joinToString(",")) {
-        mutableStateOf(enabledBackends.firstOrNull { it.isDefault }?.provider ?: enabledBackends.firstOrNull()?.provider ?: "codex")
+        mutableStateOf(selectableBackends.firstOrNull { it.isDefault }?.provider ?: selectableBackends.firstOrNull()?.provider ?: backends.firstOrNull()?.provider ?: "codex")
     }
     var models by remember(provider) { mutableStateOf<List<SupervisorModelOption>>(emptyList()) }
     var modelsLoading by remember(provider) { mutableStateOf(false) }
     var modelsError by remember(provider) { mutableStateOf<String?>(null) }
     var model by rememberSaveable(workspace.id, provider) { mutableStateOf(DefaultStartThreadModel) }
     var reasoningEffort by rememberSaveable(workspace.id, provider, model) { mutableStateOf<String?>(null) }
+    var runtimeBusyProvider by remember { mutableStateOf<String?>(null) }
+    val dialogScope = rememberCoroutineScope()
     LaunchedEffect(provider) {
+        val backend = backends.firstOrNull { it.provider == provider }
+        if (backend?.canStartSession != true) {
+            models = emptyList()
+            model = ""
+            reasoningEffort = null
+            modelsError = "Install this runtime before creating a thread."
+            return@LaunchedEffect
+        }
         modelsLoading = true
         modelsError = null
         val result = withContext(Dispatchers.IO) {
@@ -1333,7 +1231,7 @@ private fun StartThreadDialog(
             GraphDialogFooter(
                 primaryLabel = if (busy) "Starting" else "Start",
                 primaryTone = GraphDialogActionTone.Success,
-                primaryEnabled = !busy && normalizedModel.isNotBlank(),
+                    primaryEnabled = !busy && normalizedModel.isNotBlank() && backends.firstOrNull { it.provider == provider }?.canStartSession == true,
                 onCancel = onClose,
                 onPrimary = {
                     onStartThread(
@@ -1348,14 +1246,31 @@ private fun StartThreadDialog(
             )
         },
     ) {
-        OptionSelector(
-            label = "Backend",
-            options = enabledBackends.map { backend ->
-                backend.provider to (backend.displayName.ifBlank { backend.provider } + if (backend.enabled) "" else " (not ready)")
-            }.ifEmpty { listOf("codex" to "Codex") },
+        BackendSelector(
+            backends = backends,
             selected = provider,
-            enabled = !busy,
+            enabled = !busy && runtimeBusyProvider == null,
+            busyProvider = runtimeBusyProvider,
             onSelected = { provider = it },
+            onInstallOrUpdate = { backend ->
+                runtimeBusyProvider = backend.provider
+                modelsError = null
+                dialogScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { installOrUpdateBackend(backend) }
+                    }
+                    runtimeBusyProvider = null
+                    result
+                        .onSuccess {
+                            if (provider == backend.provider) {
+                                provider = backend.provider
+                            }
+                        }
+                        .onFailure { throwable ->
+                            modelsError = throwable.message ?: "Runtime install/update failed."
+                        }
+                }
+            },
         )
         if (models.isNotEmpty()) {
             OptionSelector(
@@ -1371,14 +1286,10 @@ private fun StartThreadDialog(
                 },
             )
         } else {
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Model") },
-                singleLine = true,
-                colors = workspaceTextFieldColors(),
+            Text(
+                text = if (modelsLoading) "Loading model list..." else "No models available for this backend.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
             )
         }
         if (reasoningOptions.isNotEmpty()) {
@@ -1487,6 +1398,106 @@ private fun ImportThreadDialog(
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
+private fun BackendSelector(
+    backends: List<SupervisorAgentBackend>,
+    selected: String,
+    enabled: Boolean,
+    busyProvider: String?,
+    onSelected: (String) -> Unit,
+    onInstallOrUpdate: (SupervisorAgentBackend) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(
+            text = "Backend",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            backends.ifEmpty {
+                listOf(
+                    SupervisorAgentBackend(
+                        provider = "codex",
+                        displayName = "Codex",
+                        description = "",
+                        enabled = true,
+                        isDefault = true,
+                        statusState = "ready",
+                        statusDetail = null,
+                        installed = true,
+                        installedVersion = null,
+                        latestVersion = null,
+                        installAvailable = false,
+                        updateAvailable = false,
+                        busy = false,
+                        lastError = null,
+                        configArchives = false,
+                        buildRestart = false,
+                    ),
+                )
+            }.forEach { backend ->
+                val active = backend.provider == selected
+                val canStart = backend.canStartSession
+                val action = backend.runtimeActionLabel
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (active) ThreadColors.Surface else ThreadColors.SurfaceStrong)
+                        .border(
+                            1.dp,
+                            if (active) ThreadColors.Primary else ThreadColors.Border,
+                            RoundedCornerShape(14.dp),
+                        )
+                        .then(if (enabled && canStart) Modifier.clickable { onSelected(backend.provider) } else Modifier)
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = backend.displayName.ifBlank { backend.provider },
+                            color = if (canStart) ThreadColors.Foreground else ThreadColors.ForegroundMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (canStart) {
+                                backend.installedVersion ?: backend.statusState.ifBlank { backend.provider }
+                            } else {
+                                backend.lastError ?: backend.statusDetail ?: "Runtime is not available."
+                            },
+                            color = if (canStart) ThreadColors.ForegroundMuted else ThreadColors.Warning,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (action != null) {
+                        GraphButton(
+                            label = if (busyProvider == backend.provider || backend.busy) "${action}ing" else action,
+                            enabled = enabled && busyProvider == null && !backend.busy,
+                            size = GraphButtonSize.Small,
+                            variant = GraphButtonVariant.Outline,
+                            onClick = { onInstallOrUpdate(backend) },
+                        )
+                    }
+                    if (active) {
+                        Text(
+                            text = "✓",
+                            color = ThreadColors.Primary,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun OptionSelector(
     label: String,
     options: List<Pair<String, String>>,
@@ -1584,6 +1595,8 @@ private fun DeleteWorkspaceDialog(
     onClose: () -> Unit,
     onDeleteWorkspace: () -> Unit,
 ) {
+    var confirmed by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    val canDelete = confirmed && !busy
     GraphDialogFrame(
         title = "Delete Workspace",
         subtitle = workspace.label.ifBlank { workspace.absPath },
@@ -1592,23 +1605,58 @@ private fun DeleteWorkspaceDialog(
             GraphDialogFooter(
                 primaryLabel = if (busy) "Deleting" else "Delete",
                 primaryTone = GraphDialogActionTone.Danger,
-                primaryEnabled = !busy,
+                primaryEnabled = canDelete,
                 onCancel = onClose,
                 onPrimary = onDeleteWorkspace,
             )
         },
     ) {
-        Text(
-            text = "This removes the workspace record and its related threads from the supervisor.",
-            color = ThreadColors.Foreground,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = workspace.absPath,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "This removes the workspace record and its related threads from the supervisor.",
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = workspace.absPath,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(ThreadColors.Surface)
+                    .border(
+                        1.dp,
+                        if (confirmed) ThreadColors.Danger.copy(alpha = 0.42f) else ThreadColors.Border,
+                        RoundedCornerShape(12.dp),
+                    )
+                    .clickable(enabled = !busy) { confirmed = !confirmed }
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GraphSelectionGlyph(
+                    selected = confirmed,
+                    tone = GraphSelectionTone.Warning,
+                    contentDescription = if (confirmed) {
+                        "Workspace delete confirmation selected"
+                    } else {
+                        "Workspace delete confirmation not selected"
+                    },
+                )
+                Text(
+                    text = "I understand this removes the workspace record and its related threads.",
+                    modifier = Modifier.weight(1f),
+                    color = if (confirmed) ThreadColors.Danger else ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         error?.let { message ->
             Text(
                 text = message,
@@ -1872,22 +1920,6 @@ private fun String.threadStatusLabel(): String {
         "failed" -> "failed"
         "waiting", "blocked", "needs-input", "needs_attention", "requires-action", "requires_action" -> "attention"
         else -> trim().ifBlank { "thread" }
-    }
-}
-
-private enum class HomeDestination {
-    Workspaces,
-    Threads,
-    Shells;
-
-    companion object {
-        fun fromLabel(label: String): HomeDestination {
-            return when (label) {
-                "Threads" -> Threads
-                "Shells" -> Shells
-                else -> Workspaces
-            }
-        }
     }
 }
 

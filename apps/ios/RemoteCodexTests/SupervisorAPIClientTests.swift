@@ -198,6 +198,37 @@ final class SupervisorAPIClientTests: XCTestCase {
         XCTAssertTrue(workspace.isFavorite)
     }
 
+    func testDeleteWorkspacePostsConfirmationBody() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            XCTAssertEqual(request.url.path, "/api/workspaces/w1")
+            XCTAssertEqual(request.method, "DELETE")
+            XCTAssertEqual(request.jsonBodyString("confirmWorkspaceId"), "w1")
+            XCTAssertEqual(request.jsonBodyString("confirmLabel"), "Demo Workspace")
+            return SupervisorHTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"id":"w1"}"#.utf8),
+                headers: [:]
+            )
+        }
+        let client = SupervisorAPIClient(
+            config: SupervisorConnectionConfig(mode: .local, baseURL: "http://127.0.0.1:8787"),
+            transport: transport
+        )
+
+        let deleted = try await client.deleteWorkspace(
+            workspace: SupervisorWorkspaceSummary(
+                id: "w1",
+                label: "Demo Workspace",
+                absPath: "/Users/test/demo",
+                isFavorite: false,
+                lastOpenedAt: nil
+            )
+        )
+
+        XCTAssertEqual(deleted.id, "w1")
+    }
+
     func testStartThreadPostsExpectedBody() async throws {
         let transport = MockSupervisorTransport()
         transport.handler = { request in
@@ -225,6 +256,69 @@ final class SupervisorAPIClientTests: XCTestCase {
         )
 
         XCTAssertEqual(thread.id, "t1")
+    }
+
+    func testSupervisorAPIErrorUsesReadableDescription() {
+        XCTAssertEqual(
+            SupervisorAPIError.http(statusCode: 404, message: "Workspace was not found.", body: nil).localizedDescription,
+            "Workspace was not found."
+        )
+        XCTAssertEqual(
+            SupervisorAPIError.invalidURL("not a url").localizedDescription,
+            "Invalid URL: not a url"
+        )
+    }
+
+    func testListAgentBackendsDecodesRuntimeDtoAndModels() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch (request.method, request.url.path) {
+            case ("GET", "/api/agent-runtimes"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.agentBackendsJSON.utf8), headers: [:])
+            case ("GET", "/api/agent-runtimes/claude/models"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.agentModelsJSON.utf8), headers: [:])
+            default:
+                XCTFail("Unexpected request \(request.method) \(request.url.path)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let client = SupervisorAPIClient(
+            config: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            transport: transport
+        )
+
+        let backends = try await client.listAgentBackends()
+        let models = try await client.listAgentModels(provider: "claude")
+
+        XCTAssertEqual(backends.first?.provider, "claude")
+        XCTAssertEqual(backends.first?.displayName, "Claude Code")
+        XCTAssertEqual(backends.first?.statusState, "ready")
+        XCTAssertEqual(backends.first?.installedVersion, "1.0.0")
+        XCTAssertTrue(backends.first?.installAvailable == true)
+        XCTAssertTrue(backends.first?.configArchives == true)
+        XCTAssertEqual(models.first?.model, "claude-sonnet-4")
+        XCTAssertEqual(models.first?.defaultReasoningEffort, "medium")
+    }
+
+    func testInstallOrUpdateAgentBackendPostsExpectedAction() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            XCTAssertEqual(request.method, "POST")
+            XCTAssertEqual(request.url.path, "/api/agent-runtimes/claude/install")
+            XCTAssertEqual(request.jsonBodyString("action"), "install")
+            let backendJSON = Self.agentBackendsJSON
+                .replacingOccurrences(of: #"^\s*\[\s*"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"\s*\]\s*$"#, with: "", options: .regularExpression)
+            return SupervisorHTTPResponse(statusCode: 200, body: Data(backendJSON.utf8), headers: [:])
+        }
+        let client = SupervisorAPIClient(
+            config: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            transport: transport
+        )
+
+        let backend = try await client.installOrUpdateAgentBackend(provider: "claude", action: "install")
+
+        XCTAssertEqual(backend.provider, "claude")
     }
 
     func testSettingsAndPluginEndpointsUseExpectedPaths() async throws {
@@ -527,6 +621,56 @@ private extension SupervisorAPIClientTests {
         "size": 19
       }
     }
+    """
+
+    static let agentBackendsJSON = """
+    [{
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "description": "Claude runtime",
+      "enabled": true,
+      "isDefault": false,
+      "status": {
+        "state": "ready",
+        "detail": "Runtime is ready"
+      },
+      "capabilities": {},
+      "managementSchema": {
+        "hostConfigFiles": [],
+        "toolboxItems": [],
+        "hookCommandTemplates": [],
+        "providerConfigFormat": "json",
+        "mcpConfigFormat": "claude-json",
+        "configArchives": true,
+        "buildRestart": false
+      },
+      "installation": {
+        "packageName": "@anthropic-ai/claude-code",
+        "installed": true,
+        "installedVersion": "1.0.0",
+        "latestVersion": "1.1.0",
+        "installCommand": "pnpm add claude",
+        "updateCommand": null,
+        "busy": false,
+        "lastError": null
+      }
+    }]
+    """
+
+    static let agentModelsJSON = """
+    [{
+      "id": "claude-sonnet-4",
+      "model": "claude-sonnet-4",
+      "displayName": "Claude Sonnet 4",
+      "description": "Balanced Claude model",
+      "isDefault": true,
+      "hidden": false,
+      "supportsPerformanceMode": false,
+      "supportedReasoningEfforts": [
+        {"reasoningEffort": "medium", "description": "Balanced"}
+      ],
+      "defaultReasoningEffort": "medium"
+    }]
     """
 
     static let threadListJSON = """

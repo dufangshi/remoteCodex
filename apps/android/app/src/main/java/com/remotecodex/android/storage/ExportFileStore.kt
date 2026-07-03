@@ -58,7 +58,7 @@ fun Context.shareSavedExport(file: SavedExportFile) {
         putExtra(Intent.EXTRA_TITLE, file.filename)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    val chooser = Intent.createChooser(sendIntent, "Share transcript export").apply {
+    val chooser = Intent.createChooser(sendIntent, "Share Remote Codex file").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     startActivity(chooser)

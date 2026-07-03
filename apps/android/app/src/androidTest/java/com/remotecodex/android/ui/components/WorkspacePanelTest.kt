@@ -15,11 +15,13 @@ import com.remotecodex.android.ui.model.WorkspaceNodePreview
 import com.remotecodex.android.ui.model.WorkspacePreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import org.junit.Assert.assertEquals
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Legacy native workspace panel is a debug-only fallback; production workspace detail is hosted by shared thread-ui/WebView.")
 class WorkspacePanelTest {
     @get:Rule
     val composeRule = createComposeRule()

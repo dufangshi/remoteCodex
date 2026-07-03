@@ -13,11 +13,13 @@ import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Legacy native thread preview is a debug-only fallback; production coverage uses WebView host tests.")
 class ThreadDetailPreviewScreenTest {
     @get:Rule
     val composeRule = createComposeRule()

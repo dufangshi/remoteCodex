@@ -2,24 +2,57 @@ import XCTest
 
 extension RemoteCodexUITests {
     @MainActor
-    func testPendingRequestFixtureSubmitsApprovalQuestionAndPlanDecisionControls() {
+    func testPendingRequestFixtureAutoResolvesApprovalQuestionAndPlanDecisionThroughWebView() {
         let app = XCUIApplication()
-        app.launchArguments = ["--reset-settings", "--ui-test-workspace-fixture", "--ui-test-thread-route"]
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-ios-thread-webview-fixture",
+            "--ui-test-ios-thread-webview-auto-resolve-pending",
+        ]
         app.launch()
 
-        XCTAssertTrue(app.buttons["thread-show-pending-requests"].waitForExistence(timeout: 5))
-        tapCurrentElement(app.buttons["thread-show-pending-requests"])
-        tapCurrentElement(app.descendants(matching: .any)["thread-pending-request-option-q-approval-Approve"])
-        tapCurrentElement(app.descendants(matching: .any)["thread-pending-request-submit-req-approval"])
-        XCTAssertTrue(app.descendants(matching: .any)["thread-pending-request-option-q-question-Detailed"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
+        let debug = app.staticTexts["thread-webview-debug"]
+        XCTAssertTrue(
+            waitForStaticText(
+                debug,
+                labelBeginsWith: "pendingRequests:auto-resolved:ios-web-approval-request,ios-web-question-request,ios-web-plan-request",
+                timeout: 10
+            ),
+            debug.exists ? debug.label : "Pending requests did not resolve through the WebView responder."
+        )
 
-        tapCurrentElement(app.descendants(matching: .any)["thread-pending-request-option-q-question-Detailed"])
-        tapCurrentElement(app.descendants(matching: .any)["thread-pending-request-submit-req-question"])
-        let fixturePlanOption = app.descendants(matching: .any)["thread-pending-request-option-plan-decision-Stay-in-plan-mode"]
-        XCTAssertTrue(fixturePlanOption.waitForExistence(timeout: 5))
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
 
-        tapCurrentElement(fixturePlanOption)
-        XCTAssertTrue(app.staticTexts["No pending requests."].waitForExistence(timeout: 5))
+    @MainActor
+    func testPendingRequestFixtureClicksVisibleWebViewControls() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-ios-thread-webview-fixture",
+            "--ui-test-ios-thread-webview-click-pending-controls",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
+        let debug = app.staticTexts["thread-webview-debug"]
+        XCTAssertTrue(
+            waitForStaticText(
+                debug,
+                labelBeginsWith: "pendingRequests:clicked-controls:ios-web-approval-request,ios-web-question-request,ios-web-plan-request",
+                timeout: 15
+            ),
+            debug.exists ? debug.label : "Pending requests did not resolve through visible WebView controls."
+        )
+
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
 
     @MainActor
@@ -167,4 +200,5 @@ extension RemoteCodexUITests {
             element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
     }
+
 }

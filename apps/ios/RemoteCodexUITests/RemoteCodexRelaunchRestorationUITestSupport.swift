@@ -24,11 +24,9 @@ extension RemoteCodexUITests {
         XCTAssertTrue(app.staticTexts["iOS Relaunch Restoration E2E"].waitForExistence(timeout: 8))
 
         launchLiveLocalRoute(app, baseURL: baseURL, threadId: thread.id)
-        XCTAssertTrue(app.staticTexts[thread.title].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Events"].waitForExistence(timeout: 8))
+        assertThreadWebViewReady(app, title: thread.title, timeout: 20)
         relaunchFromPersistedSettings(app)
-        XCTAssertTrue(app.staticTexts[thread.title].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Events"].waitForExistence(timeout: 8))
+        assertThreadWebViewReady(app, title: thread.title, timeout: 20)
     }
 
     @MainActor

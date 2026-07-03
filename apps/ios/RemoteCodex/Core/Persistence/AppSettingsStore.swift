@@ -19,6 +19,25 @@ enum SavedAppRoute: Equatable {
     case threadDetail(String)
 }
 
+struct SavedSupervisorDevice: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var mode: SupervisorConnectionMode
+    var baseURL: String
+    var authTokenAccount: String?
+    var relayDeviceId: String?
+    var createdAt: String
+    var updatedAt: String
+
+    var normalizedBaseURL: String {
+        normalizeBaseURL(baseURL)
+    }
+
+    var modeLabel: String {
+        mode.label
+    }
+}
+
 final class AppSettingsStore {
     private let defaults: UserDefaults
     private let tokenStore: TokenStore
@@ -51,6 +70,28 @@ final class AppSettingsStore {
         )
     }
 
+    func readSavedSupervisorDevices() -> [SavedSupervisorDevice] {
+        let saved = decodedSavedSupervisorDevices()
+        if !saved.isEmpty {
+            return saved
+        }
+        guard let connection = readSupervisorConnection() else {
+            return []
+        }
+        return [
+            SavedSupervisorDevice(
+                id: "legacy-\(connection.mode.storageKey)-\(connection.normalizedBaseURL)",
+                name: defaultDeviceName(for: connection),
+                mode: connection.mode,
+                baseURL: connection.normalizedBaseURL,
+                authTokenAccount: defaults.string(forKey: Keys.supervisorAuthTokenKey),
+                relayDeviceId: nil,
+                createdAt: nowString(),
+                updatedAt: nowString()
+            )
+        ]
+    }
+
     func writeSupervisorConnection(_ config: SupervisorConnectionConfig) throws {
         defaults.set(config.mode.storageKey, forKey: Keys.supervisorMode)
         defaults.set(config.normalizedBaseURL, forKey: Keys.supervisorBaseURL)
@@ -63,6 +104,86 @@ final class AppSettingsStore {
         } else {
             try? tokenStore.deleteToken(account: account)
             defaults.removeObject(forKey: Keys.supervisorAuthTokenKey)
+        }
+        _ = try upsertSavedSupervisorDevice(config: config)
+    }
+
+    @discardableResult
+    func upsertSavedSupervisorDevice(
+        config: SupervisorConnectionConfig,
+        name: String? = nil
+    ) throws -> SavedSupervisorDevice {
+        var devices = decodedSavedSupervisorDevices()
+        let matchRelayContainer = config.mode == .relay
+        let matchIndex = devices.firstIndex { device in
+            device.mode == config.mode &&
+                device.normalizedBaseURL == config.normalizedBaseURL &&
+                (matchRelayContainer || device.relayDeviceId == config.relayDeviceId)
+        }
+        let now = nowString()
+        let id = matchIndex.map { devices[$0].id } ?? UUID().uuidString
+        let tokenAccount = config.authToken?.trimmedNonEmpty == nil
+            ? nil
+            : "supervisor_device:\(id)"
+        if let token = config.authToken?.trimmedNonEmpty, let tokenAccount {
+            try tokenStore.writeToken(token, account: tokenAccount)
+        }
+        let saved = SavedSupervisorDevice(
+            id: id,
+            name: name?.trimmedNonEmpty
+                ?? matchIndex.map { devices[$0].name }
+                ?? defaultDeviceName(for: config),
+            mode: config.mode,
+            baseURL: config.normalizedBaseURL,
+            authTokenAccount: tokenAccount ?? matchIndex.flatMap { devices[$0].authTokenAccount },
+            relayDeviceId: matchRelayContainer ? nil : config.relayDeviceId,
+            createdAt: matchIndex.map { devices[$0].createdAt } ?? now,
+            updatedAt: now
+        )
+        if let matchIndex {
+            devices[matchIndex] = saved
+        } else {
+            devices.insert(saved, at: 0)
+        }
+        writeSavedSupervisorDevices(devices)
+        defaults.set(saved.id, forKey: Keys.activeSupervisorDeviceId)
+        return saved
+    }
+
+    func supervisorConnection(for device: SavedSupervisorDevice, relayDeviceId: String? = nil) -> SupervisorConnectionConfig {
+        let token = device.authTokenAccount.flatMap { try? tokenStore.readToken(account: $0) }
+        return SupervisorConnectionConfig(
+            mode: device.mode,
+            baseURL: device.normalizedBaseURL,
+            authToken: token?.trimmedNonEmpty,
+            relayDeviceId: relayDeviceId ?? device.relayDeviceId
+        )
+    }
+
+    func updateSavedSupervisorDevice(
+        id: String,
+        name: String,
+        baseURL: String
+    ) {
+        var devices = decodedSavedSupervisorDevices()
+        guard let index = devices.firstIndex(where: { $0.id == id }) else { return }
+        devices[index].name = name.trimmedNonEmpty ?? devices[index].name
+        devices[index].baseURL = normalizeBaseURL(baseURL)
+        devices[index].updatedAt = nowString()
+        writeSavedSupervisorDevices(devices)
+    }
+
+    func deleteSavedSupervisorDevice(id: String) {
+        var devices = decodedSavedSupervisorDevices()
+        guard let index = devices.firstIndex(where: { $0.id == id }) else { return }
+        let removed = devices.remove(at: index)
+        if let account = removed.authTokenAccount {
+            try? tokenStore.deleteToken(account: account)
+        }
+        writeSavedSupervisorDevices(devices)
+        if defaults.string(forKey: Keys.activeSupervisorDeviceId) == id {
+            defaults.removeObject(forKey: Keys.activeSupervisorDeviceId)
+            clearSupervisorConnection()
         }
     }
 
@@ -128,11 +249,42 @@ final class AppSettingsStore {
         "last_route:\(config.mode.storageKey):\(config.normalizedBaseURL):\(config.relayDeviceId ?? "")"
     }
 
+    private func decodedSavedSupervisorDevices() -> [SavedSupervisorDevice] {
+        guard let data = defaults.data(forKey: Keys.savedSupervisorDevices),
+              let devices = try? JSONDecoder().decode([SavedSupervisorDevice].self, from: data)
+        else {
+            return []
+        }
+        return devices
+    }
+
+    private func writeSavedSupervisorDevices(_ devices: [SavedSupervisorDevice]) {
+        guard let data = try? JSONEncoder().encode(devices) else { return }
+        defaults.set(data, forKey: Keys.savedSupervisorDevices)
+    }
+
+    private func defaultDeviceName(for config: SupervisorConnectionConfig) -> String {
+        switch config.mode {
+        case .local:
+            "Local supervisor"
+        case .server:
+            "Server supervisor"
+        case .relay:
+            "Relay"
+        }
+    }
+
+    private func nowString() -> String {
+        ISO8601DateFormatter().string(from: Date())
+    }
+
     private enum Keys {
         static let themeMode = "theme_mode"
         static let supervisorMode = "supervisor_mode"
         static let supervisorBaseURL = "supervisor_base_url"
         static let supervisorAuthTokenKey = "supervisor_auth_token_key"
         static let supervisorRelayDeviceId = "supervisor_relay_device_id"
+        static let savedSupervisorDevices = "saved_supervisor_devices_v1"
+        static let activeSupervisorDeviceId = "active_supervisor_device_id"
     }
 }

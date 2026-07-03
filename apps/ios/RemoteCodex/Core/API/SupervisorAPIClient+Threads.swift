@@ -33,7 +33,6 @@ extension SupervisorAPIClient {
             "model": request.model,
             "reasoningEffort": request.reasoningEffort,
             "collaborationMode": request.collaborationMode,
-            "sandboxMode": request.sandboxMode,
             "attachmentManifest": request.attachmentManifestJSON
         ].compactMapValues { $0?.trimmedNonEmpty }
         if request.attachments.isEmpty {

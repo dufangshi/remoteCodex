@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@source "../../../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
+
+:root {
+  color-scheme: dark;
+  color: rgb(245 245 244);
+  background:
+    radial-gradient(circle at top, rgb(251 191 36 / 0.12), transparent 30%),
+    linear-gradient(180deg, rgb(12 10 9) 0%, rgb(28 25 23) 100%);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  --background: oklch(0.19 0.01 84);
+  --foreground: oklch(0.97 0.01 84);
+  --card: oklch(0.24 0.01 84);
+  --card-foreground: oklch(0.97 0.01 84);
+  --muted: oklch(0.3 0.01 84);
+  --muted-foreground: oklch(0.77 0.01 84);
+  --border: oklch(0.34 0.01 84);
+  --input: oklch(0.34 0.01 84);
+  --primary: oklch(0.9 0.06 150);
+  --primary-foreground: oklch(0.18 0.01 84);
+  --radius: 0.5rem;
+  --app-bg:
+    radial-gradient(circle at top, rgb(251 191 36 / 0.12), transparent 30%),
+    linear-gradient(180deg, rgb(12 10 9) 0%, rgb(28 25 23) 100%);
+  --app-fg: rgb(245 245 244);
+  --theme-panel: rgb(28 25 23 / 0.96);
+  --theme-surface: rgb(12 10 9 / 0.58);
+  --theme-surface-strong: rgb(12 10 9 / 0.9);
+  --theme-muted: rgb(41 37 36 / 0.72);
+  --theme-hover: rgb(41 37 36 / 0.94);
+  --theme-fg: rgb(245 245 244);
+  --theme-fg-soft: rgb(168 162 158);
+  --theme-fg-muted: rgb(144 137 132);
+  --theme-border: rgb(41 37 36 / 0.95);
+  --theme-border-strong: rgb(68 64 60 / 0.82);
+  --theme-border-contrast: rgb(120 113 108 / 0.95);
+  --theme-accent-soft: rgb(251 191 36 / 0.11);
+  --theme-accent-border: rgb(252 211 77 / 0.34);
+  --theme-accent-strong: rgb(252 211 77);
+  --theme-accent-solid: rgb(252 211 77);
+  --theme-accent-solid-hover: rgb(253 230 138);
+  --theme-accent-solid-fg: rgb(28 25 23);
+  --action-primary-bg: rgb(252 211 77);
+  --action-primary-bg-hover: rgb(253 230 138);
+  --action-primary-fg: rgb(28 25 23);
+  --action-info-bg: rgb(125 211 252);
+  --action-info-bg-hover: rgb(186 230 253);
+  --action-info-fg: rgb(8 47 73);
+  --action-success-bg: rgb(110 231 183);
+  --action-success-bg-hover: rgb(167 243 208);
+  --action-success-fg: rgb(6 78 59);
+  --action-danger-bg: rgb(253 164 175);
+  --action-danger-bg-hover: rgb(254 205 211);
+  --action-danger-fg: rgb(76 5 25);
+  --status-info-bg: rgb(125 211 252 / 0.14);
+  --status-info-border: rgb(125 211 252 / 0.36);
+  --status-info-fg: rgb(186 230 253);
+  --status-success-bg: rgb(110 231 183 / 0.14);
+  --status-success-border: rgb(110 231 183 / 0.34);
+  --status-success-fg: rgb(209 250 229);
+  --status-warning-bg: rgb(252 211 77 / 0.14);
+  --status-warning-border: rgb(252 211 77 / 0.34);
+  --status-warning-fg: rgb(254 243 199);
+  --status-danger-bg: rgb(253 164 175 / 0.14);
+  --status-danger-border: rgb(253 164 175 / 0.34);
+  --status-danger-fg: rgb(255 228 230);
+  --status-neutral-bg: rgb(41 37 36 / 0.72);
+  --status-neutral-border: rgb(87 83 78 / 0.72);
+  --status-neutral-fg: rgb(214 211 209);
+  --overlay-scrim: rgb(12 10 9 / 0.62);
+  --scrollbar-thumb: rgb(87 83 78 / 0.9);
+  --scrollbar-thumb-hover: rgb(120 113 108 / 0.95);
+  --scrollbar-track: rgb(12 10 9 / 0.55);
+  --scrollbar-corner: rgb(12 10 9 / 0.55);
+  --android-safe-area-top: env(safe-area-inset-top);
+  --android-safe-area-bottom: env(safe-area-inset-bottom);
+}
+
+:root[data-theme-effective='light'] {
+  color-scheme: light;
+  color: rgb(15 23 42);
+  background:
+    radial-gradient(circle at top, rgb(59 130 246 / 0.045), transparent 34%),
+    linear-gradient(180deg, rgb(238 242 247) 0%, rgb(229 235 244) 100%);
+  --app-bg:
+    radial-gradient(circle at top, rgb(59 130 246 / 0.045), transparent 34%),
+    linear-gradient(180deg, rgb(238 242 247) 0%, rgb(229 235 244) 100%);
+  --app-fg: rgb(15 23 42);
+  --theme-panel: rgb(248 250 252 / 0.98);
+  --theme-surface: rgb(243 246 251 / 0.96);
+  --theme-surface-strong: rgb(237 242 247 / 0.98);
+  --theme-muted: rgb(230 237 245 / 0.96);
+  --theme-hover: rgb(232 238 246 / 0.98);
+  --theme-fg: rgb(15 23 42);
+  --theme-fg-soft: rgb(51 65 85);
+  --theme-fg-muted: rgb(100 116 139);
+  --theme-border: rgb(203 213 225 / 0.88);
+  --theme-border-strong: rgb(174 187 204 / 0.96);
+  --theme-border-contrast: rgb(123 139 161 / 0.98);
+  --theme-accent-soft: rgb(15 23 42 / 0.06);
+  --theme-accent-border: rgb(15 23 42 / 0.18);
+  --theme-accent-strong: rgb(15 23 42);
+  --theme-accent-solid: rgb(30 41 59);
+  --theme-accent-solid-hover: rgb(51 65 85);
+  --theme-accent-solid-fg: rgb(248 250 252);
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+  color: var(--app-fg);
+  background: var(--app-bg);
+}
+
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+}
+
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.thread-ui-shell.thread-ui-viewport-constrained {
+  height: 100%;
+  max-height: 100%;
+  min-height: 100%;
+  background: var(--app-bg);
+  color: var(--app-fg);
+  padding: 0;
+}
+
+@supports (height: 100dvh) {
+  .thread-ui-shell.thread-ui-viewport-constrained {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 100dvh;
+  }
+}
+
+.thread-ui-shell.thread-ui-viewport-constrained .thread-main-panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.thread-ui-shell.thread-ui-viewport-constrained .thread-topbar-surface {
+  padding-right: max(4rem, calc(env(safe-area-inset-right) + 3.5rem));
+  background: color-mix(in srgb, var(--theme-panel) 94%, transparent);
+  color: var(--theme-fg);
+}
+
+:root[data-theme-effective='light']
+  .thread-ui-shell.thread-ui-viewport-constrained
+  .thread-topbar-surface {
+  background: rgb(248 250 252 / 0.96);
+  color: var(--theme-fg);
+}
+
+.thread-ui-shell.thread-ui-viewport-constrained .thread-graph-composer-form {
+  padding-bottom: max(calc(env(safe-area-inset-bottom) - 0.45rem), 0.25rem) !important;
+}
+
+.thread-ui-shell.thread-ui-viewport-constrained .thread-graph-composer-host {
+  padding-bottom: 0 !important;
+}
+
+.thread-detail-surface {
+  height: 100%;
+  min-height: 0;
+}
+
+.ios-thread-message {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--theme-fg-soft);
+  text-align: center;
+}

@@ -194,6 +194,16 @@ data class SupervisorAgentBackend(
     val buildRestart: Boolean,
 )
 
+val SupervisorAgentBackend.canStartSession: Boolean
+    get() = enabled
+
+val SupervisorAgentBackend.runtimeActionLabel: String?
+    get() = when {
+        installed && updateAvailable -> "Update"
+        !installed && installAvailable -> "Install"
+        else -> null
+    }
+
 data class SupervisorModelOption(
     val id: String,
     val model: String,

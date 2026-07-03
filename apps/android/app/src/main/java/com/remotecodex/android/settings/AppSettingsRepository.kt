@@ -3,11 +3,61 @@ package com.remotecodex.android.settings
 import android.content.Context
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 sealed interface SavedAppRoute {
     data object Home : SavedAppRoute
     data class WorkspaceDetail(val workspaceId: String) : SavedAppRoute
-    data class ThreadDetail(val threadId: String) : SavedAppRoute
+    data class ThreadDetail(val threadId: String, val workspaceId: String? = null) : SavedAppRoute
+}
+
+data class SavedSupervisorDevice(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val mode: SupervisorConnectionMode,
+    val baseUrl: String,
+    val username: String? = null,
+    val password: String? = null,
+    val authToken: String? = null,
+    val relayDeviceId: String? = null,
+) {
+    val normalizedBaseUrl: String = SupervisorConnectionConfig(
+        mode = mode,
+        baseUrl = baseUrl,
+        authToken = authToken,
+        relayDeviceId = relayDeviceId,
+    ).normalizedBaseUrl
+
+    fun toConnectionConfig(): SupervisorConnectionConfig {
+        return SupervisorConnectionConfig(
+            mode = mode,
+            baseUrl = baseUrl,
+            authToken = authToken?.takeIf { it.isNotBlank() },
+            relayDeviceId = relayDeviceId?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    companion object {
+        fun fromConnection(config: SupervisorConnectionConfig, name: String? = null): SavedSupervisorDevice {
+            return SavedSupervisorDevice(
+                name = name?.takeIf { it.isNotBlank() } ?: defaultDeviceName(config),
+                mode = config.mode,
+                baseUrl = config.normalizedBaseUrl,
+                authToken = config.authToken,
+                relayDeviceId = config.relayDeviceId,
+            )
+        }
+
+        fun defaultDeviceName(config: SupervisorConnectionConfig): String {
+            return when (config.mode) {
+                SupervisorConnectionMode.Local -> "Local"
+                SupervisorConnectionMode.Server -> "Server"
+                SupervisorConnectionMode.Relay -> "Relay"
+            }
+        }
+    }
 }
 
 class AppSettingsRepository(context: Context) {
@@ -63,6 +113,41 @@ class AppSettingsRepository(context: Context) {
             .apply()
     }
 
+    fun readSavedSupervisorDevices(): List<SavedSupervisorDevice> {
+        val raw = preferences.getString(SAVED_SUPERVISOR_DEVICES_KEY, null)?.takeIf { it.isNotBlank() }
+            ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            List(array.length()) { index ->
+                array.getJSONObject(index).toSavedSupervisorDevice()
+            }
+                .filter { it.name.isNotBlank() && it.baseUrl.isNotBlank() }
+                .distinctBy { it.id }
+        }.getOrDefault(emptyList())
+    }
+
+    fun writeSavedSupervisorDevices(devices: List<SavedSupervisorDevice>) {
+        val array = JSONArray()
+        devices.forEach { device ->
+            array.put(device.toJson())
+        }
+        preferences.edit()
+            .putString(SAVED_SUPERVISOR_DEVICES_KEY, array.toString())
+            .apply()
+    }
+
+    fun upsertSavedSupervisorDevice(device: SavedSupervisorDevice) {
+        val current = readSavedSupervisorDevices()
+        val next = current
+            .filterNot { it.id == device.id }
+            .plus(device)
+        writeSavedSupervisorDevices(next)
+    }
+
+    fun deleteSavedSupervisorDevice(deviceId: String) {
+        writeSavedSupervisorDevices(readSavedSupervisorDevices().filterNot { it.id == deviceId })
+    }
+
     fun readLastRoute(config: SupervisorConnectionConfig?): SavedAppRoute {
         if (config == null) return SavedAppRoute.Home
         val key = lastRouteKey(config)
@@ -70,7 +155,13 @@ class AppSettingsRepository(context: Context) {
         return when (type) {
             "thread" -> preferences.getString("$key:thread_id", null)
                 ?.takeIf { it.isNotBlank() }
-                ?.let(SavedAppRoute::ThreadDetail)
+                ?.let { threadId ->
+                    SavedAppRoute.ThreadDetail(
+                        threadId = threadId,
+                        workspaceId = preferences.getString("$key:workspace_id", null)
+                            ?.takeIf { it.isNotBlank() },
+                    )
+                }
                 ?: SavedAppRoute.Home
             "workspace" -> preferences.getString("$key:workspace_id", null)
                 ?.takeIf { it.isNotBlank() }
@@ -97,6 +188,11 @@ class AppSettingsRepository(context: Context) {
             is SavedAppRoute.ThreadDetail -> {
                 editor.putString("$key:type", "thread")
                     .putString("$key:thread_id", route.threadId)
+                if (route.workspaceId.isNullOrBlank()) {
+                    editor.remove("$key:workspace_id")
+                } else {
+                    editor.putString("$key:workspace_id", route.workspaceId)
+                }
             }
         }
         editor.apply()
@@ -113,5 +209,31 @@ class AppSettingsRepository(context: Context) {
         const val SUPERVISOR_BASE_URL_KEY = "supervisor_base_url"
         const val SUPERVISOR_AUTH_TOKEN_KEY = "supervisor_auth_token"
         const val SUPERVISOR_RELAY_DEVICE_ID_KEY = "supervisor_relay_device_id"
+        const val SAVED_SUPERVISOR_DEVICES_KEY = "saved_supervisor_devices"
     }
+}
+
+private fun SavedSupervisorDevice.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("name", name)
+        .put("mode", mode.storageKey)
+        .put("baseUrl", normalizedBaseUrl)
+        .put("username", username.orEmpty())
+        .put("password", password.orEmpty())
+        .put("authToken", authToken.orEmpty())
+        .put("relayDeviceId", relayDeviceId.orEmpty())
+}
+
+private fun JSONObject.toSavedSupervisorDevice(): SavedSupervisorDevice {
+    return SavedSupervisorDevice(
+        id = optString("id").takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
+        name = optString("name").takeIf { it.isNotBlank() } ?: "Device",
+        mode = SupervisorConnectionMode.fromStorageKey(optString("mode")),
+        baseUrl = optString("baseUrl").takeIf { it.isNotBlank() } ?: "",
+        username = optString("username").takeIf { it.isNotBlank() },
+        password = optString("password").takeIf { it.isNotBlank() },
+        authToken = optString("authToken").takeIf { it.isNotBlank() },
+        relayDeviceId = optString("relayDeviceId").takeIf { it.isNotBlank() },
+    )
 }

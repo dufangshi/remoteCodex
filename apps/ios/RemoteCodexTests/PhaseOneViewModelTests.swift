@@ -88,6 +88,63 @@ final class PhaseOneViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testRelayConnectionWithoutDeviceStartsAtDeviceList() async throws {
+        let transport = MockSupervisorTransport()
+        let environment = makeEnvironment(transport: transport)
+        try environment.settingsStore.writeSupervisorConnection(
+            SupervisorConnectionConfig(
+                mode: .relay,
+                baseURL: "https://relay.example.com",
+                authToken: "relay-token",
+                relayDeviceId: nil
+            )
+        )
+
+        let model = ConnectionViewModel(environment: environment) { _ in }
+
+        XCTAssertEqual(model.mode, .relay)
+        XCTAssertEqual(model.route, .relayDevices)
+        XCTAssertEqual(model.authToken, "relay-token")
+    }
+
+    @MainActor
+    func testLocalModeDoesNotRouteToServerLoginWhenUrlIsServerMode() async {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            if request.url.path == "/api/auth/session" {
+                return SupervisorHTTPResponse(
+                    statusCode: 200,
+                    body: Data("""
+                    {"authenticated":false,"username":null,"expiresAt":null,"mode":"server","authRequired":true}
+                    """.utf8),
+                    headers: [:]
+                )
+            }
+            if request.url.path == "/healthz" {
+                return SupervisorHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"status":"ok"}"#.utf8),
+                    headers: [:]
+                )
+            }
+            return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+        }
+        let environment = makeEnvironment(transport: transport)
+        var readyConfig: SupervisorConnectionConfig?
+        let model = ConnectionViewModel(environment: environment) { config in
+            readyConfig = config
+        }
+        model.mode = .local
+        model.baseURL = "http://127.0.0.1:8787"
+
+        await model.connectDirect()
+
+        XCTAssertNil(readyConfig)
+        XCTAssertEqual(model.route, .modeSelect)
+        XCTAssertEqual(model.errorMessage, "This URL is running server mode. Choose Server or use a Local / Intranet supervisor URL.")
+    }
+
+    @MainActor
     private func makeEnvironment(transport: MockSupervisorTransport) -> AppEnvironment {
         let settingsStore = AppSettingsStore(defaults: defaults, tokenStore: tokenStore)
         return AppEnvironment(settingsStore: settingsStore) { config in

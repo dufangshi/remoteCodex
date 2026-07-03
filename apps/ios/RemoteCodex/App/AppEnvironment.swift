@@ -62,6 +62,11 @@ struct AppEnvironment {
             try? settingsStore.writeSupervisorConnection(config)
             settingsStore.writeLastRoute(liveUITestRoute(environment: environment), for: config)
         }
+        if arguments.contains("--ui-test-ios-thread-webview-fixture") {
+            let config = SupervisorConnectionConfig(mode: .local, baseURL: "http://fixture.local")
+            try? settingsStore.writeSupervisorConnection(config)
+            settingsStore.writeLastRoute(.threadDetail("ios-web-fixture-thread"), for: config)
+        }
         if arguments.contains("--ui-test-workspace-fixture") {
             let config = SupervisorConnectionConfig(mode: .local, baseURL: "http://fixture.local")
             try? settingsStore.writeSupervisorConnection(config)

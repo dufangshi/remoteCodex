@@ -52,6 +52,7 @@ struct SupervisorConnectionCheck: Equatable {
     var config: SupervisorConnectionConfig
     var authenticated: Bool
     var authRequired: Bool
+    var sessionMode: String
     var sessionLabel: String
     var healthLabel: String
     var websocketURL: String
@@ -97,6 +98,11 @@ struct CreateSupervisorWorkspaceRequest: Codable, Equatable {
 
 struct UpdateSupervisorWorkspaceRequest: Codable, Equatable {
     var label: String
+}
+
+struct DeleteSupervisorWorkspaceRequest: Codable, Equatable {
+    var confirmWorkspaceId: String
+    var confirmLabel: String
 }
 
 struct DeletedResource: Codable, Equatable {
@@ -462,6 +468,125 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
     var lastError: String?
     var configArchives: Bool
     var buildRestart: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case displayName
+        case description
+        case enabled
+        case isDefault
+        case status
+        case statusState
+        case statusDetail
+        case installation
+        case installed
+        case installedVersion
+        case latestVersion
+        case installAvailable
+        case updateAvailable
+        case busy
+        case lastError
+        case managementSchema
+        case configArchives
+        case buildRestart
+    }
+
+    enum StatusCodingKeys: String, CodingKey {
+        case state
+        case detail
+        case message
+    }
+
+    enum InstallationCodingKeys: String, CodingKey {
+        case installed
+        case installedVersion
+        case latestVersion
+        case installCommand
+        case updateCommand
+        case busy
+        case lastError
+    }
+
+    enum ManagementSchemaCodingKeys: String, CodingKey {
+        case configArchives
+        case buildRestart
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decode(String.self, forKey: .provider)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        description = try container.decode(String.self, forKey: .description)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+
+        if let status = try? container.nestedContainer(keyedBy: StatusCodingKeys.self, forKey: .status) {
+            statusState = try status.decodeIfPresent(String.self, forKey: .state) ?? "unknown"
+            statusDetail = try status.decodeIfPresent(String.self, forKey: .detail)
+                ?? status.decodeIfPresent(String.self, forKey: .message)
+        } else {
+            statusState = try container.decodeIfPresent(String.self, forKey: .statusState) ?? "unknown"
+            statusDetail = try container.decodeIfPresent(String.self, forKey: .statusDetail)
+        }
+
+        if let installation = try? container.nestedContainer(keyedBy: InstallationCodingKeys.self, forKey: .installation) {
+            installed = try installation.decodeIfPresent(Bool.self, forKey: .installed) ?? false
+            installedVersion = try installation.decodeIfPresent(String.self, forKey: .installedVersion)
+            latestVersion = try installation.decodeIfPresent(String.self, forKey: .latestVersion)
+            installAvailable = try installation.decodeIfPresent(String.self, forKey: .installCommand) != nil
+            updateAvailable = try installation.decodeIfPresent(String.self, forKey: .updateCommand) != nil
+            busy = try installation.decodeIfPresent(Bool.self, forKey: .busy) ?? false
+            lastError = try installation.decodeIfPresent(String.self, forKey: .lastError)
+        } else {
+            installed = try container.decodeIfPresent(Bool.self, forKey: .installed) ?? false
+            installedVersion = try container.decodeIfPresent(String.self, forKey: .installedVersion)
+            latestVersion = try container.decodeIfPresent(String.self, forKey: .latestVersion)
+            installAvailable = try container.decodeIfPresent(Bool.self, forKey: .installAvailable) ?? false
+            updateAvailable = try container.decodeIfPresent(Bool.self, forKey: .updateAvailable) ?? false
+            busy = try container.decodeIfPresent(Bool.self, forKey: .busy) ?? false
+            lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+        }
+
+        if let managementSchema = try? container.nestedContainer(keyedBy: ManagementSchemaCodingKeys.self, forKey: .managementSchema) {
+            configArchives = try managementSchema.decodeIfPresent(Bool.self, forKey: .configArchives) ?? false
+            buildRestart = try managementSchema.decodeIfPresent(Bool.self, forKey: .buildRestart) ?? false
+        } else {
+            configArchives = try container.decodeIfPresent(Bool.self, forKey: .configArchives) ?? false
+            buildRestart = try container.decodeIfPresent(Bool.self, forKey: .buildRestart) ?? false
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(description, forKey: .description)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(isDefault, forKey: .isDefault)
+        try container.encode(statusState, forKey: .statusState)
+        try container.encodeIfPresent(statusDetail, forKey: .statusDetail)
+        try container.encode(installed, forKey: .installed)
+        try container.encodeIfPresent(installedVersion, forKey: .installedVersion)
+        try container.encodeIfPresent(latestVersion, forKey: .latestVersion)
+        try container.encode(installAvailable, forKey: .installAvailable)
+        try container.encode(updateAvailable, forKey: .updateAvailable)
+        try container.encode(busy, forKey: .busy)
+        try container.encodeIfPresent(lastError, forKey: .lastError)
+        try container.encode(configArchives, forKey: .configArchives)
+        try container.encode(buildRestart, forKey: .buildRestart)
+    }
+}
+
+extension SupervisorAgentBackend {
+    var canStartSession: Bool {
+        enabled
+    }
+
+    var runtimeActionLabel: String? {
+        if installed, updateAvailable { return "Update" }
+        if !installed, installAvailable { return "Install" }
+        return nil
+    }
 }
 
 struct SupervisorModelOption: Codable, Equatable, Identifiable {

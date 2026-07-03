@@ -185,7 +185,7 @@ fun buildThreadDetailPreviewFromSupervisor(
             reasoningEffort = detail.thread.reasoningEffort ?: "medium",
             fastMode = detail.thread.fastMode,
             planModeActive = detail.thread.collaborationMode == "plan",
-            workspaceModeLabel = detail.thread.sandboxMode ?: "workspace write",
+            workspaceModeLabel = "full access",
             modelOptions = modelOptions.toComposerModelOptions(detail.thread.model),
             reasoningEffortOptions = modelOptions.toComposerReasoningEffortOptions(detail.thread.model),
             forkTurnOptions = buildForkTurnOptionsPreview(forkTurns, forkTurnsError),

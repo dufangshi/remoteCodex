@@ -31,6 +31,19 @@ enum SupervisorAPIError: Error, Equatable {
     case parse(String)
 }
 
+extension SupervisorAPIError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case let .invalidURL(url):
+            "Invalid URL: \(url)"
+        case let .http(statusCode, message, _):
+            message.isEmpty ? "HTTP \(statusCode)" : message
+        case let .parse(message):
+            message
+        }
+    }
+}
+
 final class SupervisorAPIClient: @unchecked Sendable {
     let config: SupervisorConnectionConfig
     private let transport: SupervisorHTTPTransport
@@ -125,10 +138,14 @@ final class SupervisorAPIClient: @unchecked Sendable {
         )
     }
 
-    func deleteWorkspace(workspaceId: String) async throws -> DeletedResource {
+    func deleteWorkspace(workspace: SupervisorWorkspaceSummary) async throws -> DeletedResource {
         try await requestJSON(
-            config.restPath("/api/workspaces/\(workspaceId.urlPathEncoded)"),
-            method: "DELETE"
+            config.restPath("/api/workspaces/\(workspace.id.urlPathEncoded)"),
+            method: "DELETE",
+            body: DeleteSupervisorWorkspaceRequest(
+                confirmWorkspaceId: workspace.id,
+                confirmLabel: workspace.label
+            )
         )
     }
 
@@ -187,6 +204,14 @@ final class SupervisorAPIClient: @unchecked Sendable {
 
     func listAgentModels(provider: String) async throws -> [SupervisorModelOption] {
         try await requestJSON(config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/models"))
+    }
+
+    func installOrUpdateAgentBackend(provider: String, action: String) async throws -> SupervisorAgentBackend {
+        try await requestJSON(
+            config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/install"),
+            method: "POST",
+            body: ["action": action]
+        )
     }
 
     func listPlugins() async throws -> [SupervisorPluginSummary] {
@@ -306,6 +331,7 @@ final class SupervisorAPIClient: @unchecked Sendable {
             config: config,
             authenticated: session.authenticated,
             authRequired: session.authRequired,
+            sessionMode: session.mode,
             sessionLabel: sessionLabel(for: session),
             healthLabel: healthLabel(for: health),
             websocketURL: config.webSocketURL()

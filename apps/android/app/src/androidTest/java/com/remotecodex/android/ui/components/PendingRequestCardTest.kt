@@ -13,11 +13,13 @@ import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import org.junit.Assert.assertEquals
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Legacy native pending-request UI is a debug-only fallback; production pending requests are rendered by shared thread-ui/WebView.")
 class PendingRequestCardTest {
     @get:Rule
     val composeRule = createComposeRule()

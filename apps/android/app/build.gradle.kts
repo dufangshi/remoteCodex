@@ -3,6 +3,40 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val repoRoot = rootProject.projectDir.parentFile.parentFile
+val androidThreadWebDir = rootProject.layout.projectDirectory.dir("thread-web")
+val androidThreadWebDistDir = androidThreadWebDir.dir("dist")
+val androidThreadWebAssetsDir = layout.projectDirectory.dir("src/main/assets/thread-ui")
+
+val buildAndroidThreadWeb by tasks.registering(Exec::class) {
+    workingDir = repoRoot
+    commandLine(
+        "pnpm",
+        "--dir",
+        repoRoot.absolutePath,
+        "--filter",
+        "@remote-codex/android-thread-web",
+        "build",
+    )
+    inputs.files(
+        androidThreadWebDir.file("package.json"),
+        androidThreadWebDir.file("tsconfig.json"),
+        androidThreadWebDir.file("vite.config.ts"),
+        androidThreadWebDir.file("index.html"),
+    )
+    inputs.dir(androidThreadWebDir.dir("src"))
+    outputs.dir(androidThreadWebDistDir)
+}
+
+val copyAndroidThreadWebAssets by tasks.registering(Copy::class) {
+    dependsOn(buildAndroidThreadWeb)
+    doFirst {
+        delete(androidThreadWebAssetsDir)
+    }
+    from(androidThreadWebDistDir)
+    into(androidThreadWebAssetsDir)
+}
+
 android {
     namespace = "com.remotecodex.android"
     compileSdk = 34
@@ -17,8 +51,24 @@ android {
     }
 
     buildTypes {
+        debug {
+            val nativeThreadFallbackEnabled = providers
+                .gradleProperty("remoteCodex.nativeThreadFallback")
+                .orElse("false")
+                .get()
+            buildConfigField(
+                "boolean",
+                "REMOTE_CODEX_NATIVE_THREAD_DETAIL_FALLBACK",
+                nativeThreadFallbackEnabled,
+            )
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField(
+                "boolean",
+                "REMOTE_CODEX_NATIVE_THREAD_DETAIL_FALLBACK",
+                "false",
+            )
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -36,6 +86,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 
@@ -53,6 +104,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.json:json:20240303")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -69,4 +121,8 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+tasks.named("preBuild") {
+    dependsOn(copyAndroidThreadWebAssets)
 }

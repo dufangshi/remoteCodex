@@ -21,6 +21,11 @@ final class ConnectionViewModel: ObservableObject {
     @Published var newDeviceName = "iOS workstation"
     @Published var relayDeviceId = ""
     @Published var authToken = ""
+    @Published var deviceName = ""
+    @Published var savedDevices: [SavedSupervisorDevice] = []
+    @Published var editingDevice: SavedSupervisorDevice?
+    @Published var editName = ""
+    @Published var editBaseURL = ""
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var busy = false
@@ -35,9 +40,29 @@ final class ConnectionViewModel: ObservableObject {
         let saved = environment.settingsStore.readSupervisorConnection()
         mode = saved?.mode ?? .local
         baseURL = saved?.normalizedBaseURL ?? "http://127.0.0.1:8787"
+        let savedRelayDeviceId = saved?.relayDeviceId ?? ""
+        let savedAuthToken = saved?.authToken ?? ""
+        relayDeviceId = savedRelayDeviceId
+        authToken = savedAuthToken
+        savedDevices = environment.settingsStore.readSavedSupervisorDevices()
+        if saved?.mode == .relay, !savedAuthToken.isEmpty, savedRelayDeviceId.isEmpty {
+            route = .relayDevices
+        } else {
+            route = .modeSelect
+        }
+    }
+
+    func beginAddingDevice() {
         route = .modeSelect
-        relayDeviceId = saved?.relayDeviceId ?? ""
-        authToken = saved?.authToken ?? ""
+        deviceName = ""
+        username = ""
+        email = ""
+        password = ""
+        authToken = ""
+        relayDeviceId = ""
+        createdDevice = nil
+        statusMessage = nil
+        errorMessage = nil
     }
 
     func continueFromModeSelect() {
@@ -56,17 +81,30 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
-    func connectDirect() async {
+    func connectDirect(savedDeviceName: String? = nil) async {
         await runBusy {
             let config = SupervisorConnectionConfig(mode: mode, baseURL: baseURL)
             let client = environment.apiClientFactory(config)
             let check = try await client.checkConnection()
+            if check.sessionMode != mode.rawValue {
+                errorMessage = "This URL is running \(check.sessionMode) mode. Choose \(check.sessionMode.capitalized) or use a \(mode.label) supervisor URL."
+                return
+            }
             if check.authRequired, !check.authenticated {
-                route = .serverAuth
-                statusMessage = "Login required."
+                if mode == .server {
+                    route = .serverAuth
+                    statusMessage = "Login required."
+                } else {
+                    errorMessage = "\(mode.label) should not require login. Check that the URL points to a local-mode supervisor."
+                }
                 return
             }
             try environment.settingsStore.writeSupervisorConnection(config)
+            try environment.settingsStore.upsertSavedSupervisorDevice(
+                config: config,
+                name: savedDeviceName ?? deviceName
+            )
+            refreshSavedDevices()
             statusMessage = "\(check.sessionLabel). \(check.healthLabel)."
             onReady(config)
         }
@@ -79,6 +117,11 @@ final class ConnectionViewModel: ObservableObject {
             let config = baseConfig.withAuthToken(login.token)
             _ = try await environment.apiClientFactory(config).checkConnection()
             try environment.settingsStore.writeSupervisorConnection(config)
+            try environment.settingsStore.upsertSavedSupervisorDevice(
+                config: config,
+                name: deviceName
+            )
+            refreshSavedDevices()
             onReady(config)
         }
     }
@@ -96,6 +139,11 @@ final class ConnectionViewModel: ObservableObject {
             authToken = result.token
             let saved = baseConfig.withAuthToken(result.token)
             try environment.settingsStore.writeSupervisorConnection(saved)
+            try environment.settingsStore.upsertSavedSupervisorDevice(
+                config: saved,
+                name: deviceName
+            )
+            refreshSavedDevices()
             route = .relayDevices
             await loadRelayPortal()
         }
@@ -146,6 +194,8 @@ final class ConnectionViewModel: ObservableObject {
             )
             _ = try await environment.apiClientFactory(config).checkConnection()
             try environment.settingsStore.writeSupervisorConnection(config)
+            try environment.settingsStore.upsertSavedSupervisorDevice(config: config)
+            refreshSavedDevices()
             onReady(config)
         }
     }
@@ -159,10 +209,73 @@ final class ConnectionViewModel: ObservableObject {
                 relayDeviceId: device.id
             )
             try environment.settingsStore.writeSupervisorConnection(config)
+            try environment.settingsStore.upsertSavedSupervisorDevice(config: config)
+            refreshSavedDevices()
             relayDeviceId = device.id
             statusMessage = "Device saved. Workspaces will load when the backend connects."
             onReady(config)
         }
+    }
+
+    func connectSavedDevice(_ device: SavedSupervisorDevice) async {
+        switch device.mode {
+        case .local:
+            mode = .local
+            baseURL = device.normalizedBaseURL
+            await connectDirect(savedDeviceName: device.name)
+        case .server:
+            let config = environment.settingsStore.supervisorConnection(for: device)
+            mode = .server
+            baseURL = config.normalizedBaseURL
+            authToken = config.authToken ?? ""
+            guard config.authToken?.trimmedNonEmpty != nil else {
+                route = .serverAuth
+                return
+            }
+            await runBusy {
+                _ = try await environment.apiClientFactory(config).checkConnection()
+                try environment.settingsStore.writeSupervisorConnection(config)
+                try environment.settingsStore.upsertSavedSupervisorDevice(config: config, name: device.name)
+                refreshSavedDevices()
+                onReady(config)
+            }
+        case .relay:
+            let config = environment.settingsStore.supervisorConnection(for: device)
+            mode = .relay
+            baseURL = config.normalizedBaseURL
+            authToken = config.authToken ?? ""
+            relayDeviceId = ""
+            route = config.authToken?.trimmedNonEmpty == nil ? .relayAuth : .relayDevices
+            if route == .relayDevices {
+                await loadRelayPortal()
+            }
+        }
+    }
+
+    func editSavedDevice(_ device: SavedSupervisorDevice) {
+        editingDevice = device
+        editName = device.name
+        editBaseURL = device.normalizedBaseURL
+    }
+
+    func saveEditedDevice() {
+        guard let editingDevice else { return }
+        environment.settingsStore.updateSavedSupervisorDevice(
+            id: editingDevice.id,
+            name: editName,
+            baseURL: editBaseURL
+        )
+        self.editingDevice = nil
+        refreshSavedDevices()
+    }
+
+    func deleteSavedDevice(_ device: SavedSupervisorDevice) {
+        environment.settingsStore.deleteSavedSupervisorDevice(id: device.id)
+        refreshSavedDevices()
+    }
+
+    func refreshSavedDevices() {
+        savedDevices = environment.settingsStore.readSavedSupervisorDevices()
     }
 
     private func runBusy(_ operation: () async throws -> Void) async {
@@ -189,6 +302,10 @@ enum RelayAuthMode: String, CaseIterable, Identifiable {
 struct ConnectionScreen: View {
     @StateObject private var model: ConnectionViewModel
     @State private var offlineDevice: RelayDeviceSummary?
+    @State private var revokeDevice: RelayDeviceSummary?
+    @State private var deleteDevice: SavedSupervisorDevice?
+    @State private var showingAddDevice = false
+    @State private var showingCreateRelayDevice = false
 
     init(environment: AppEnvironment, onReady: @escaping (SupervisorConnectionConfig) -> Void) {
         _model = StateObject(wrappedValue: ConnectionViewModel(environment: environment, onReady: onReady))
@@ -196,19 +313,19 @@ struct ConnectionScreen: View {
 
     var body: some View {
         Form {
-            statusSection
-            switch model.route {
-            case .modeSelect:
-                modeSection
-            case .serverAuth:
-                serverAuthSection
-            case .relayAuth:
-                relayAuthSection
-            case .relayDevices:
+            if model.route == .relayDevices {
                 relayDeviceSection
+            } else {
+                statusSection
+                savedDevicesSection
             }
         }
-        .navigationTitle("Remote Codex")
+        .navigationTitle("Devices")
+        .task(id: model.route) {
+            if model.route == .relayDevices, model.relayPortal == nil {
+                await model.loadRelayPortal()
+            }
+        }
         .toolbar {
             if model.route != .modeSelect {
                 ToolbarItem(placement: .topBarLeading) {
@@ -217,6 +334,52 @@ struct ConnectionScreen: View {
                     }
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if model.route == .relayDevices {
+                        model.createdDevice = nil
+                        model.errorMessage = nil
+                        showingCreateRelayDevice = true
+                    } else {
+                        model.beginAddingDevice()
+                        showingAddDevice = true
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(model.route == .relayDevices ? "Create relay device" : "Add device")
+            }
+        }
+        .sheet(isPresented: $showingAddDevice, onDismiss: {
+            if model.route != .relayDevices {
+                model.route = .modeSelect
+            }
+        }) {
+            addDeviceSheet
+        }
+        .sheet(isPresented: $showingCreateRelayDevice) {
+            createRelayDeviceSheet
+        }
+        .sheet(item: $model.editingDevice) { _ in
+            editDeviceSheet
+        }
+        .onChange(of: model.route) { _, route in
+            if route == .relayDevices {
+                showingAddDevice = false
+            }
+        }
+        .alert("Delete Device?", isPresented: deleteDeviceAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                deleteDevice = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let deleteDevice {
+                    model.deleteSavedDevice(deleteDevice)
+                }
+                deleteDevice = nil
+            }
+        } message: {
+            Text(deleteDevice?.name ?? "This device")
         }
         .alert("Device is offline", isPresented: offlineDeviceAlertPresented) {
             Button("Cancel", role: .cancel) {}
@@ -228,14 +391,31 @@ struct ConnectionScreen: View {
         } message: {
             Text("Workspaces will not load until the private backend connects to the relay.")
         }
-        .task(id: model.route) {
-            guard model.route == .relayDevices else { return }
-            while model.route == .relayDevices {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, !model.busy else { continue }
-                await model.loadRelayPortal()
+        .alert("Revoke Device?", isPresented: revokeDeviceAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                revokeDevice = nil
             }
+            Button("Revoke", role: .destructive) {
+                guard let device = revokeDevice else { return }
+                Task {
+                    await model.revokeRelayDevice(device)
+                    revokeDevice = nil
+                }
+            }
+        } message: {
+            Text(revokeDevice?.name ?? "This device")
         }
+    }
+
+    private var deleteDeviceAlertPresented: Binding<Bool> {
+        Binding(
+            get: { deleteDevice != nil },
+            set: { presented in
+                if !presented {
+                    deleteDevice = nil
+                }
+            }
+        )
     }
 
     private var offlineDeviceAlertPresented: Binding<Bool> {
@@ -244,6 +424,17 @@ struct ConnectionScreen: View {
             set: { presented in
                 if !presented {
                     offlineDevice = nil
+                }
+            }
+        )
+    }
+
+    private var revokeDeviceAlertPresented: Binding<Bool> {
+        Binding(
+            get: { revokeDevice != nil },
+            set: { presented in
+                if !presented {
+                    revokeDevice = nil
                 }
             }
         )
@@ -263,8 +454,33 @@ struct ConnectionScreen: View {
         }
     }
 
+    private var savedDevicesSection: some View {
+        Section("Saved Devices") {
+            if model.savedDevices.isEmpty {
+                ContentUnavailableView("No Devices", systemImage: "rectangle.stack.badge.plus")
+            }
+            ForEach(model.savedDevices) { device in
+                SavedDeviceRow(
+                    device: device,
+                    onConnect: {
+                        Task { await model.connectSavedDevice(device) }
+                    },
+                    onEdit: {
+                        model.editSavedDevice(device)
+                    },
+                    onDelete: {
+                        deleteDevice = device
+                    }
+                )
+            }
+        }
+    }
+
     private var modeSection: some View {
-        Section("Connect") {
+        Section("Add Device") {
+            if model.mode == .local {
+                TextField("Name", text: $model.deviceName)
+            }
             Picker("Mode", selection: $model.mode) {
                 ForEach(SupervisorConnectionMode.allCases) { mode in
                     Text(mode.label).tag(mode)
@@ -273,7 +489,7 @@ struct ConnectionScreen: View {
             TextField("URL", text: $model.baseURL)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
-            Button("Next") {
+            Button("Continue") {
                 model.continueFromModeSelect()
             }
             .disabled(model.busy)
@@ -281,11 +497,12 @@ struct ConnectionScreen: View {
     }
 
     private var serverAuthSection: some View {
-        Section("Server Login") {
+        Section("Server Device") {
+            TextField("Name", text: $model.deviceName)
             TextField("Username", text: $model.username)
                 .textInputAutocapitalization(.never)
             SecureField("Password", text: $model.password)
-            Button("Sign in") {
+            Button("Add Server") {
                 Task { await model.signInServer() }
             }
             .disabled(model.busy || model.username.isEmpty || model.password.isEmpty)
@@ -293,7 +510,8 @@ struct ConnectionScreen: View {
     }
 
     private var relayAuthSection: some View {
-        Section("Relay Account") {
+        Section("Relay Device Group") {
+            TextField("Name", text: $model.deviceName)
             Picker("Action", selection: $model.relayAuthMode) {
                 ForEach(RelayAuthMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -308,7 +526,7 @@ struct ConnectionScreen: View {
             TextField("Identifier / Username", text: $model.username)
                 .textInputAutocapitalization(.never)
             SecureField("Password", text: $model.password)
-            Button(model.relayAuthMode.rawValue) {
+            Button(model.relayAuthMode == .signIn ? "Add Relay" : "Register Relay") {
                 Task { await model.relayLoginOrRegister() }
             }
             .disabled(model.busy || model.username.isEmpty || model.password.isEmpty)
@@ -316,52 +534,169 @@ struct ConnectionScreen: View {
     }
 
     private var relayDeviceSection: some View {
-        Group {
-            Section("Relay Devices") {
+        Section("Relay Devices") {
+            HStack {
                 Button("Refresh") {
                     Task { await model.loadRelayPortal() }
                 }
+                Spacer()
                 if let refreshedAt = model.lastRelayRefreshAt {
-                    Text("Last refreshed \(refreshedAt.formatted(date: .omitted, time: .standard))")
+                    Text(refreshedAt.formatted(date: .omitted, time: .standard))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if model.relayPortal?.devices.isEmpty == true {
-                    ContentUnavailableView("No Devices", systemImage: "antenna.radiowaves.left.and.right")
-                }
-                ForEach(model.relayPortal?.devices ?? []) { device in
-                    RelayDeviceRow(
-                        device: device,
-                        selected: model.relayDeviceId == device.id,
-                        onConnect: {
-                            if device.online {
-                                Task { await model.connectRelayDevice(device) }
-                            } else {
-                                offlineDevice = device
-                            }
-                        },
-                        onRevoke: { Task { await model.revokeRelayDevice(device) } }
-                    )
+            }
+            if model.busy {
+                ProgressView("Working...")
+            }
+            if let message = model.statusMessage {
+                Text(message).foregroundStyle(.secondary)
+            }
+            if let error = model.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+            if model.relayPortal?.devices.isEmpty == true {
+                ContentUnavailableView("No Devices", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            ForEach(model.relayPortal?.devices ?? []) { device in
+                RelayDeviceRow(
+                    device: device,
+                    selected: model.relayDeviceId == device.id,
+                    onConnect: {
+                        if device.online {
+                            Task { await model.connectRelayDevice(device) }
+                        } else {
+                            offlineDevice = device
+                        }
+                    },
+                    onRevoke: { revokeDevice = device }
+                )
+            }
+        }
+    }
+
+    private var addDeviceSheet: some View {
+        NavigationStack {
+            Form {
+                statusSection
+                switch model.route {
+                case .modeSelect:
+                    modeSection
+                case .serverAuth:
+                    serverAuthSection
+                case .relayAuth:
+                    relayAuthSection
+                case .relayDevices:
+                    EmptyView()
                 }
             }
-            Section("Create Device") {
-                TextField("Device name", text: $model.newDeviceName)
-                Button("Create device") {
-                    Task { await model.createRelayDevice() }
-                }
-                .disabled(model.busy || model.newDeviceName.isEmpty)
-                if let created = model.createdDevice {
-                    Text("Token: \(created.token)")
-                        .font(.footnote.monospaced())
-                        .textSelection(.enabled)
-                    if let command = created.command {
-                        Text(command)
-                            .font(.footnote.monospaced())
-                            .textSelection(.enabled)
+            .navigationTitle("Add Device")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showingAddDevice = false
+                        if model.route != .relayDevices {
+                            model.route = .modeSelect
+                        }
                     }
                 }
             }
         }
+    }
+
+    private var createRelayDeviceSheet: some View {
+        NavigationStack {
+            Form {
+                TextField("Device name", text: $model.newDeviceName)
+                Button("Create") {
+                    Task { await model.createRelayDevice() }
+                }
+                .disabled(model.busy || model.newDeviceName.isEmpty)
+                if model.busy {
+                    ProgressView("Working...")
+                }
+                if let error = model.errorMessage {
+                    Text(error).foregroundStyle(.red)
+                }
+                if let created = model.createdDevice {
+                    Section("Setup") {
+                        Text("Token: \(created.token)")
+                            .font(.footnote.monospaced())
+                            .textSelection(.enabled)
+                        if let command = created.command {
+                            Text(command)
+                                .font(.footnote.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Create Device")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        showingCreateRelayDevice = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var editDeviceSheet: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $model.editName)
+                TextField("URL", text: $model.editBaseURL)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+            }
+            .navigationTitle("Edit Device")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        model.editingDevice = nil
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        model.saveEditedDevice()
+                    }
+                    .disabled(model.editName.trimmedNonEmpty == nil || model.editBaseURL.trimmedNonEmpty == nil)
+                }
+            }
+        }
+    }
+}
+
+private struct SavedDeviceRow: View {
+    let device: SavedSupervisorDevice
+    let onConnect: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(device.name)
+                        .font(.headline)
+                    Text(device.normalizedBaseURL)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                GraphBadge(text: device.modeLabel, tone: .neutral)
+            }
+            HStack {
+                Button(device.mode == .relay ? "Open Devices" : "Connect", action: onConnect)
+                Button(action: onEdit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                Button("Delete", role: .destructive, action: onDelete)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 4)
     }
 }
 

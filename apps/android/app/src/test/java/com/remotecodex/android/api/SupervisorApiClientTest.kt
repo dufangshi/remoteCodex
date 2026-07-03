@@ -821,7 +821,7 @@ class SupervisorApiClientTest {
         )
         assertEquals("POST", transport.requests.single().method)
         assertTrue(transport.requests.single().body!!.contains("\"model\":\"gpt-5\""))
-        assertTrue(transport.requests.single().body!!.contains("\"sandboxMode\":\"danger-full-access\""))
+        assertFalse(transport.requests.single().body!!.contains("sandboxMode"))
     }
 
     @Test
@@ -927,7 +927,7 @@ class SupervisorApiClientTest {
         val renamed = client.updateWorkspace("workspace-1", UpdateSupervisorWorkspaceRequest("Renamed Workspace"))
         val favorite = client.setWorkspaceFavorite("workspace-1", true)
         val opened = client.openWorkspace("workspace-1")
-        val deletedId = client.deleteWorkspace("workspace-1")
+        val deletedId = client.deleteWorkspace("workspace-1", "Renamed Workspace")
 
         assertEquals("Renamed Workspace", renamed.label)
         assertTrue(favorite.isFavorite)
@@ -956,6 +956,8 @@ class SupervisorApiClientTest {
             transport.requests[3].url,
         )
         assertEquals("DELETE", transport.requests[3].method)
+        assertTrue(transport.requests[3].body!!.contains("\"confirmWorkspaceId\":\"workspace-1\""))
+        assertTrue(transport.requests[3].body!!.contains("\"confirmLabel\":\"Renamed Workspace\""))
     }
 
     @Test
@@ -1058,6 +1060,37 @@ class SupervisorApiClientTest {
         )
         assertEquals("GET", transport.requests.single().method)
         assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
+    fun installOrUpdateAgentBackendUsesRelayDevicePathAndPostsAction() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"provider":"claude","displayName":"Claude Code","description":"Claude runtime","enabled":true,"isDefault":false,"status":{"state":"ready"},"capabilities":{},"managementSchema":{"hostConfigFiles":[],"toolboxItems":[],"hookCommandTemplates":[],"providerConfigFormat":"json","mcpConfigFormat":"none","configArchives":false,"buildRestart":false},"installation":{"packageName":"@anthropic-ai/claude-agent-sdk","installed":true,"installedVersion":"2.1.197","latestVersion":"2.1.197","installCommand":"npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk","updateCommand":"npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest","busy":false,"lastError":null}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val backend = client.installOrUpdateAgentBackend("claude", "install")
+
+        assertEquals("claude", backend.provider)
+        assertTrue(backend.enabled)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/agent-runtimes/claude/install",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        assertTrue(transport.requests.single().body!!.contains("\"action\":\"install\""))
     }
 
     @Test
@@ -1169,7 +1202,7 @@ class SupervisorApiClientTest {
         assertTrue(body.contains("\"reasoningEffort\":\"high\""))
         assertTrue(body.contains("\"fastMode\":true"))
         assertTrue(body.contains("\"collaborationMode\":\"plan\""))
-        assertTrue(body.contains("\"sandboxMode\":\"danger-full-access\""))
+        assertFalse(body.contains("sandboxMode"))
     }
 
     @Test

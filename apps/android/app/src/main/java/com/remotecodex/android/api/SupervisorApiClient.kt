@@ -97,10 +97,15 @@ class SupervisorApiClient(
         ).toWorkspaceSummary()
     }
 
-    fun deleteWorkspace(workspaceId: String): String {
+    fun deleteWorkspace(workspaceId: String, label: String): String {
+        val body = JSONObject()
+            .put("confirmWorkspaceId", workspaceId)
+            .put("confirmLabel", label)
+            .toString()
         val json = requestJson(
             config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}"),
             method = "DELETE",
+            body = body,
         )
         return json.optString("id", workspaceId)
     }
@@ -187,6 +192,17 @@ class SupervisorApiClient(
         return requestArray(
             config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/models"),
         ).map { item -> item.toModelOption() }
+    }
+
+    fun installOrUpdateAgentBackend(provider: String, action: String): SupervisorAgentBackend {
+        val body = JSONObject()
+            .put("action", action)
+            .toString()
+        return requestJson(
+            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/install"),
+            method = "POST",
+            body = body,
+        ).toAgentBackend()
     }
 
     fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
@@ -469,7 +485,6 @@ class SupervisorApiClient(
     fun resumeThread(threadId: String, request: ResumeThreadRequest = ResumeThreadRequest()): SupervisorThreadDetail {
         val body = JSONObject()
         request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
-        request.sandboxMode?.takeIf { it.isNotBlank() }?.let { body.put("sandboxMode", it) }
         return requestJson(
             config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/resume"),
             method = "POST",
@@ -494,7 +509,6 @@ class SupervisorApiClient(
         request.reasoningEffort?.let { body.put("reasoningEffort", it) }
         request.fastMode?.let { body.put("fastMode", it) }
         request.collaborationMode?.takeIf { it.isNotBlank() }?.let { body.put("collaborationMode", it) }
-        request.sandboxMode?.let { body.put("sandboxMode", it) }
         return requestJson(
             config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/settings"),
             method = "PATCH",

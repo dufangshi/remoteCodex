@@ -103,7 +103,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithText("Thread title").assertExists()
         composeRule.onNodeWithText("Model").assertExists()
         composeRule.onNodeWithText("gpt-5").assertExists()
-        composeRule.onNodeWithText("Starts a Codex thread in /home/u/dev/remoteCodex-main.").assertExists()
+        composeRule.onNodeWithText("Starts a codex thread in /home/u/dev/remoteCodex-main.").assertExists()
         composeRule.onNodeWithContentDescription("Close dialog").performClick()
 
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").performClick()
@@ -114,6 +114,9 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").performClick()
         composeRule.onNodeWithText("Delete Workspace").assertExists()
         composeRule.onNodeWithText("This removes the workspace record and its related threads from the supervisor.").assertExists()
+        composeRule.onNodeWithContentDescription("Workspace delete confirmation not selected").assertExists()
+        composeRule.onNodeWithText("I understand this removes the workspace record and its related threads.").performClick()
+        composeRule.onNodeWithContentDescription("Workspace delete confirmation selected").assertExists()
     }
 
     @Test

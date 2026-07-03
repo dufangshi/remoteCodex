@@ -11,10 +11,12 @@ import androidx.test.uiautomator.Until
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Legacy native composer is a debug-only fallback; production composer coverage lives in shared thread-ui/WebView E2E.")
 class ThreadComposerMenuTest {
     private lateinit var device: UiDevice
 

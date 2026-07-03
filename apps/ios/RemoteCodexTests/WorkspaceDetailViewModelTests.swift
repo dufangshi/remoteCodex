@@ -49,6 +49,82 @@ final class WorkspaceDetailViewModelTests: XCTestCase {
             )
         )
     }
+
+    func testNewThreadLoadsProviderModelsAndStartsWithProvider() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch (request.method, request.url.path) {
+            case ("GET", "/api/agent-runtimes"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.agentBackendsJSON.utf8), headers: [:])
+            case ("GET", "/api/agent-runtimes/claude/models"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.agentModelsJSON.utf8), headers: [:])
+            case ("POST", "/api/threads/start"):
+                XCTAssertEqual(request.jsonBodyString("workspaceId"), "w1")
+                XCTAssertEqual(request.jsonBodyString("provider"), "claude")
+                XCTAssertEqual(request.jsonBodyString("model"), "claude-sonnet-4")
+                XCTAssertEqual(request.jsonBodyString("approvalMode"), "yolo")
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.startedThreadJSON.utf8), headers: [:])
+            default:
+                XCTFail("Unexpected request \(request.method) \(request.url)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let environment = try AppEnvironment(
+            settingsStore: AppSettingsStore(
+                defaults: XCTUnwrap(UserDefaults(suiteName: "WorkspaceDetailViewModelTests-\(UUID().uuidString)")),
+                tokenStore: MemoryTokenStore()
+            )
+        ) { config in
+            SupervisorAPIClient(config: config, transport: transport)
+        }
+        let model = WorkspaceDetailViewModel(
+            environment: environment,
+            connection: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            workspaceId: "w1"
+        )
+
+        await model.loadNewThreadOptions()
+        let threadId = await model.startThread()
+
+        XCTAssertEqual(model.newThreadProvider, "claude")
+        XCTAssertEqual(model.newThreadModel, "claude-sonnet-4")
+        XCTAssertEqual(threadId, "t2")
+    }
+
+    func testRefreshStopsWhenWorkspaceNoLongerExists() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch (request.method, request.url.path) {
+            case ("GET", "/api/workspaces"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data("[]".utf8), headers: [:])
+            case ("GET", "/api/threads"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data("[]".utf8), headers: [:])
+            default:
+                XCTFail("Unexpected request \(request.method) \(request.url)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let environment = try AppEnvironment(
+            settingsStore: AppSettingsStore(
+                defaults: XCTUnwrap(UserDefaults(suiteName: "WorkspaceDetailViewModelTests-\(UUID().uuidString)")),
+                tokenStore: MemoryTokenStore()
+            )
+        ) { config in
+            SupervisorAPIClient(config: config, transport: transport)
+        }
+        let model = WorkspaceDetailViewModel(
+            environment: environment,
+            connection: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            workspaceId: "missing"
+        )
+
+        await model.refresh()
+
+        XCTAssertNil(model.workspace)
+        XCTAssertNil(model.tree)
+        XCTAssertEqual(model.errorMessage, "Workspace is no longer available. Return to Workspaces and refresh.")
+        XCTAssertFalse(transport.requests.contains { $0.url.path.contains("/files/tree") })
+    }
 }
 
 private extension WorkspaceDetailViewModelTests {
@@ -200,6 +276,69 @@ private extension WorkspaceDetailViewModelTests {
         "kind": "file",
         "size": 17
       }
+    }
+    """
+
+    static let agentBackendsJSON = """
+    [{
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "description": "Claude runtime",
+      "enabled": true,
+      "isDefault": false,
+      "status": {"state": "ready"},
+      "capabilities": {},
+      "managementSchema": {
+        "hostConfigFiles": [],
+        "toolboxItems": [],
+        "hookCommandTemplates": [],
+        "providerConfigFormat": "json",
+        "mcpConfigFormat": "claude-json",
+        "configArchives": false,
+        "buildRestart": false
+      },
+      "installation": {
+        "packageName": "@anthropic-ai/claude-code",
+        "installed": true,
+        "installedVersion": "1.0.0",
+        "latestVersion": null,
+        "installCommand": null,
+        "updateCommand": null,
+        "busy": false,
+        "lastError": null
+      }
+    }]
+    """
+
+    static let agentModelsJSON = """
+    [{
+      "id": "claude-sonnet-4",
+      "model": "claude-sonnet-4",
+      "displayName": "Claude Sonnet 4",
+      "description": "Balanced Claude model",
+      "isDefault": true,
+      "hidden": false,
+      "supportsPerformanceMode": false,
+      "supportedReasoningEfforts": [],
+      "defaultReasoningEffort": null
+    }]
+    """
+
+    static let startedThreadJSON = """
+    {
+      "id": "t2",
+      "workspaceId": "w1",
+      "provider": "claude",
+      "title": "Claude Sonnet 4",
+      "status": "running",
+      "model": "claude-sonnet-4",
+      "reasoningEffort": null,
+      "fastMode": false,
+      "collaborationMode": "default",
+      "sandboxMode": null,
+      "updatedAt": "2026-06-14T02:00:00Z",
+      "summaryText": null,
+      "isLoaded": true
     }
     """
 }

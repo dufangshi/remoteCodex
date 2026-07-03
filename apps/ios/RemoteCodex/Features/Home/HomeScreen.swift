@@ -12,7 +12,13 @@ final class HomeViewModel: ObservableObject {
     @Published var workspaceDraftLabel = ""
     @Published var newThreadWorkspaceId = ""
     @Published var newThreadTitle = ""
-    @Published var newThreadModel = "gpt-5.4"
+    @Published var newThreadProvider = ""
+    @Published var newThreadModel = ""
+    @Published var newThreadBackends: [SupervisorAgentBackend] = []
+    @Published var newThreadModels: [SupervisorModelOption] = []
+    @Published var newThreadOptionsLoading = false
+    @Published var newThreadRuntimeBusyProvider: String?
+    @Published var newThreadOptionsError: String?
     @Published var settings = HomeSettingsState()
     @Published var themeMode: ThemeMode
 
@@ -61,6 +67,32 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    var visibleWorkspaces: [SupervisorWorkspaceSummary] {
+        (snapshot?.workspaces ?? [])
+            .sorted {
+                if $0.isFavorite != $1.isFavorite {
+                    return $0.isFavorite && !$1.isFavorite
+                }
+                let lhs = $0.label.isEmpty ? $0.absPath : $0.label
+                let rhs = $1.label.isEmpty ? $1.absPath : $1.label
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+    }
+
+    var visibleNewThreadModels: [SupervisorModelOption] {
+        let visible = newThreadModels.filter { !$0.hidden }
+        return visible.isEmpty ? newThreadModels : visible
+    }
+
+    var canStartNewThread: Bool {
+        !newThreadWorkspaceId.isEmpty &&
+            !newThreadProvider.isEmpty &&
+            !newThreadModel.isEmpty &&
+            !loading &&
+            !newThreadOptionsLoading &&
+            newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true
+    }
+
     func refresh() async {
         await runBusy {
             snapshot = try await client.fetchHomeSnapshot()
@@ -100,7 +132,7 @@ final class HomeViewModel: ObservableObject {
 
     func deleteWorkspace(_ workspace: SupervisorWorkspaceSummary) async {
         await runBusy {
-            _ = try await client.deleteWorkspace(workspaceId: workspace.id)
+            _ = try await client.deleteWorkspace(workspace: workspace)
             snapshot = try await client.fetchHomeSnapshot()
         }
     }
@@ -122,7 +154,7 @@ final class HomeViewModel: ObservableObject {
                 StartSupervisorThreadRequest(
                     workspaceId: newThreadWorkspaceId,
                     title: newThreadTitle.trimmedNonEmpty,
-                    provider: nil,
+                    provider: newThreadProvider.trimmedNonEmpty,
                     model: newThreadModel,
                     reasoningEffort: nil,
                     approvalMode: "yolo"
@@ -132,6 +164,103 @@ final class HomeViewModel: ObservableObject {
             snapshot = try await client.fetchHomeSnapshot()
         }
         return createdThreadId
+    }
+
+    func loadNewThreadOptionsIfNeeded() async {
+        guard newThreadBackends.isEmpty || visibleNewThreadModels.isEmpty else { return }
+        await loadNewThreadOptions()
+    }
+
+    func loadNewThreadOptions() async {
+        newThreadOptionsLoading = true
+        newThreadOptionsError = nil
+        defer { newThreadOptionsLoading = false }
+        do {
+            let backends = try await client.listAgentBackends()
+            newThreadBackends = backends
+            guard !backends.isEmpty else {
+                newThreadProvider = ""
+                newThreadModels = []
+                newThreadModel = ""
+                newThreadOptionsError = "No agent providers are configured."
+                return
+            }
+            let selectable = selectableBackends(from: backends)
+            let provider = selectable.first { $0.provider == newThreadProvider }?.provider
+                ?? selectable.first { $0.isDefault }?.provider
+                ?? selectable.first?.provider
+                ?? backends[0].provider
+            newThreadProvider = provider
+            if selectable.contains(where: { $0.provider == provider }) {
+                try await loadNewThreadModels(provider: provider)
+            } else {
+                newThreadModels = []
+                newThreadModel = ""
+                newThreadOptionsError = "Install this runtime before creating a thread."
+            }
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func selectNewThreadProvider(_ provider: String) async {
+        guard provider != newThreadProvider else { return }
+        guard newThreadBackends.first(where: { $0.provider == provider })?.canStartSession == true else {
+            newThreadProvider = provider
+            newThreadModels = []
+            newThreadModel = ""
+            newThreadOptionsError = "Install this runtime before creating a thread."
+            return
+        }
+        newThreadProvider = provider
+        newThreadModels = []
+        newThreadModel = ""
+        newThreadOptionsError = nil
+        newThreadOptionsLoading = true
+        defer { newThreadOptionsLoading = false }
+        do {
+            try await loadNewThreadModels(provider: provider)
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func installOrUpdateNewThreadBackend(_ backend: SupervisorAgentBackend) async {
+        let action = backend.installed ? "update" : "install"
+        newThreadRuntimeBusyProvider = backend.provider
+        newThreadOptionsError = nil
+        defer { newThreadRuntimeBusyProvider = nil }
+        do {
+            _ = try await client.installOrUpdateAgentBackend(provider: backend.provider, action: action)
+            await loadNewThreadOptions()
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+            do {
+                newThreadBackends = try await client.listAgentBackends()
+            } catch {
+                // Keep the install/update error visible.
+            }
+        }
+    }
+
+    private func selectableBackends(from backends: [SupervisorAgentBackend]) -> [SupervisorAgentBackend] {
+        let selectable = backends.filter(\.canStartSession)
+        return selectable.isEmpty ? [] : selectable
+    }
+
+    private func loadNewThreadModels(provider: String) async throws {
+        let models = try await client.listAgentModels(provider: provider)
+        newThreadModels = models
+        let selectableModels = models.filter { !$0.hidden }
+        let candidates = selectableModels.isEmpty ? models : selectableModels
+        guard !candidates.isEmpty else {
+            newThreadModel = ""
+            newThreadOptionsError = "No models are available for this provider."
+            return
+        }
+        newThreadModel = candidates.first { $0.model == newThreadModel }?.model
+            ?? candidates.first { $0.isDefault }?.model
+            ?? candidates[0].model
     }
 
     func loadSettings() async {
@@ -290,6 +419,7 @@ struct HomeScreen: View {
     @State private var showingSettings = false
     @State private var renameTarget: SupervisorWorkspaceSummary?
     @State private var renameDraft = ""
+    @State private var deleteTarget: SupervisorWorkspaceSummary?
 
     init(
         environment: AppEnvironment,
@@ -308,21 +438,13 @@ struct HomeScreen: View {
 
     var body: some View {
         List {
-            statusSection
             workspaceSection
-            threadSection
         }
         .navigationTitle("Remote Codex")
-        .searchable(text: $model.searchText, prompt: "Search threads")
         .refreshable { await model.refresh() }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("Settings") {
-                    showingSettings = true
-                }
-                Button("Refresh") {
-                    Task { await model.refresh() }
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                homeMenu
             }
         }
         .task { await model.refresh() }
@@ -338,42 +460,79 @@ struct HomeScreen: View {
         .sheet(item: $renameTarget) { workspace in
             renameWorkspaceSheet(workspace)
         }
+        .alert("Delete Workspace?", isPresented: deleteConfirmationPresented) {
+            Button("Cancel", role: .cancel) {
+                deleteTarget = nil
+            }
+            Button("Delete", role: .destructive) {
+                guard let workspace = deleteTarget else { return }
+                Task {
+                    await model.deleteWorkspace(workspace)
+                    deleteTarget = nil
+                }
+            }
+        } message: {
+            Text(deleteTarget?.label ?? "This workspace")
+        }
     }
 
-    private var statusSection: some View {
-        Section("Supervisor") {
-            LabeledContent("Mode", value: model.connection.mode.label)
-            LabeledContent("URL", value: model.connection.normalizedBaseURL)
-            LabeledContent("Workspaces", value: "\(model.snapshot?.workspaces.count ?? 0)")
-            LabeledContent("Threads", value: "\(model.snapshot?.threads.count ?? 0)")
+    private var homeMenu: some View {
+        FloatingActionMenu(
+            accessibilityIdentifier: "home-action-menu",
+            appliesFloatingPadding: false
+        ) {
+            Button {
+                showingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            Divider()
+            Button(role: .destructive, action: onChangeConnection) {
+                Label("Devices", systemImage: "iphone")
+            }
+        }
+    }
+
+    private var deleteConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { deleteTarget != nil },
+            set: { isPresented in
+                if !isPresented {
+                    deleteTarget = nil
+                }
+            }
+        )
+    }
+
+    private var workspaceSection: some View {
+        Section {
             if model.loading {
                 ProgressView("Loading...")
             }
             if let error = model.errorMessage {
                 Text(error).foregroundStyle(.red)
             }
-            Button("Change Connection", role: .destructive, action: onChangeConnection)
-        }
-    }
-
-    private var workspaceSection: some View {
-        Section {
             if model.snapshot?.workspaces.isEmpty == true {
                 ContentUnavailableView("No Workspaces", systemImage: "folder.badge.plus")
             }
-            ForEach(model.snapshot?.workspaces ?? []) { workspace in
+            ForEach(model.visibleWorkspaces) { workspace in
                 WorkspaceRow(
                     workspace: workspace,
                     onOpen: {
                         Task { await model.openWorkspace(workspace) }
                         onOpenWorkspace(workspace.id)
                     },
-                    onFavorite: { Task { await model.toggleFavorite(workspace) } },
+                    onPin: { Task { await model.toggleFavorite(workspace) } },
                     onRename: {
                         renameTarget = workspace
                         renameDraft = workspace.label
                     },
-                    onDelete: { Task { await model.deleteWorkspace(workspace) } }
+                    onDelete: { deleteTarget = workspace }
                 )
             }
         } header: {
@@ -383,43 +542,6 @@ struct HomeScreen: View {
                 Button("Add") {
                     showingCreateWorkspace = true
                 }
-            }
-        }
-    }
-
-    private var threadSection: some View {
-        Section {
-            Picker("Filter", selection: $model.threadFilter) {
-                ForEach(ThreadFilter.allCases) { filter in
-                    Text(filter.rawValue).tag(filter)
-                }
-            }
-            Picker("Sort", selection: $model.threadSort) {
-                ForEach(ThreadSort.allCases) { sort in
-                    Text(sort.rawValue).tag(sort)
-                }
-            }
-            ForEach(model.groupedThreads, id: \.0) { title, threads in
-                Section(title) {
-                    ForEach(threads) { thread in
-                        Button {
-                            onOpenThread(thread.id)
-                        } label: {
-                            ThreadRow(thread: thread)
-                        }
-                        .accessibilityIdentifier("thread-open-\(thread.id)")
-                    }
-                }
-            }
-        } header: {
-            HStack {
-                Text("Threads")
-                Spacer()
-                Button("New") {
-                    model.newThreadWorkspaceId = model.snapshot?.workspaces.first?.id ?? ""
-                    showingNewThread = true
-                }
-                .disabled(model.snapshot?.workspaces.isEmpty != false)
             }
         }
     }
@@ -458,10 +580,94 @@ struct HomeScreen: View {
                     }
                 }
                 TextField("Title", text: $model.newThreadTitle)
-                TextField("Model", text: $model.newThreadModel)
-                    .textInputAutocapitalization(.never)
+                Section("Provider") {
+                    if model.newThreadBackends.isEmpty, model.newThreadOptionsLoading {
+                        ProgressView()
+                    } else {
+                        ForEach(model.newThreadBackends) { backend in
+                            HStack {
+                                Button {
+                                    Task {
+                                        await model.selectNewThreadProvider(backend.provider)
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(backend.displayName)
+                                            .foregroundStyle(backend.canStartSession ? .primary : .secondary)
+                                        Text(backend.provider)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if !backend.canStartSession {
+                                            Text(backend.lastError ?? "Runtime is not available.")
+                                                .font(.caption2)
+                                                .foregroundStyle(.red)
+                                        } else if let version = backend.installedVersion {
+                                            Text(version)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .disabled(!backend.canStartSession || model.newThreadRuntimeBusyProvider != nil)
+                                Spacer()
+                                if let action = backend.runtimeActionLabel {
+                                    Button {
+                                        Task {
+                                            await model.installOrUpdateNewThreadBackend(backend)
+                                        }
+                                    } label: {
+                                        if model.newThreadRuntimeBusyProvider == backend.provider || backend.busy {
+                                            ProgressView()
+                                        } else {
+                                            Label(action, systemImage: backend.installed ? "arrow.clockwise" : "arrow.down.circle")
+                                        }
+                                    }
+                                    .disabled(model.newThreadRuntimeBusyProvider != nil || backend.busy)
+                                    .buttonStyle(.bordered)
+                                }
+                                if backend.provider == model.newThreadProvider {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+                Section("Model") {
+                    if model.newThreadOptionsLoading, model.visibleNewThreadModels.isEmpty {
+                        ProgressView()
+                    } else {
+                        ForEach(model.visibleNewThreadModels) { option in
+                            Button {
+                                model.newThreadModel = option.model
+                            } label: {
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(option.displayName)
+                                            .foregroundStyle(.primary)
+                                        Text(option.model)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if option.model == model.newThreadModel {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let error = model.newThreadOptionsError {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle("New Thread")
+            .task {
+                await model.loadNewThreadOptionsIfNeeded()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showingNewThread = false }
@@ -475,7 +681,7 @@ struct HomeScreen: View {
                             }
                         }
                     }
-                    .disabled(model.newThreadWorkspaceId.isEmpty || model.newThreadModel.isEmpty)
+                    .disabled(!model.canStartNewThread)
                 }
             }
         }
@@ -508,7 +714,7 @@ struct HomeScreen: View {
 private struct WorkspaceRow: View {
     let workspace: SupervisorWorkspaceSummary
     let onOpen: () -> Void
-    let onFavorite: () -> Void
+    let onPin: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
@@ -519,16 +725,23 @@ private struct WorkspaceRow: View {
                     .font(.headline)
                     .accessibilityIdentifier("workspace-open-\(workspace.id)")
                 Spacer()
-                Button(workspace.isFavorite ? "Starred" : "Star", action: onFavorite)
+                if workspace.isFavorite {
+                    Image(systemName: "pin.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Pinned")
+                }
             }
+            .buttonStyle(.borderless)
             Text(workspace.absPath)
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
             HStack {
+                Button(workspace.isFavorite ? "Unpin" : "Pin", action: onPin)
                 Button("Rename", action: onRename)
                 Button("Delete", role: .destructive, action: onDelete)
             }
             .font(.caption)
+            .buttonStyle(.borderless)
         }
     }
 }

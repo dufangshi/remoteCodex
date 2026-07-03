@@ -1,5 +1,7 @@
 packages:
   - apps/*
+  - apps/android/thread-web
+  - apps/ios/WebThread
   - packages/*
 allowBuilds:
   '@homebridge/node-pty-prebuilt-multiarch': true

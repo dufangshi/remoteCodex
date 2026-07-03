@@ -199,7 +199,6 @@ fun ThreadDetailScreen(
                     threadId,
                     ResumeThreadRequest(
                         model = currentDetail.thread.model,
-                        sandboxMode = currentDetail.thread.sandboxMode,
                     ),
                 )
             }

@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -86,6 +89,7 @@ enum class GraphDialogActionTone {
 }
 
 enum class GraphActionIcon {
+    Add,
     Cancel,
     Save,
     Export,
@@ -93,6 +97,11 @@ enum class GraphActionIcon {
     Open,
     Package,
     Settings,
+    Menu,
+    Refresh,
+    Home,
+    Devices,
+    Pin,
 }
 
 enum class GraphSelectionTone {
@@ -172,6 +181,38 @@ fun GraphIconButton(
             icon = icon,
             color = colors.foreground,
             modifier = Modifier.size(15.dp),
+        )
+    }
+}
+
+@Composable
+fun GraphFloatingIconButton(
+    icon: GraphActionIcon,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    emphasized: Boolean = false,
+    onClick: () -> Unit = {},
+) {
+    val background = if (emphasized) ThreadColors.Primary else ThreadColors.SurfaceStrong
+    val foreground = if (emphasized) ThreadColors.PrimaryForeground else ThreadColors.Foreground
+    val border = if (emphasized) ThreadColors.Primary else ThreadColors.Border
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .shadow(10.dp, CircleShape, clip = false)
+            .clip(CircleShape)
+            .background(background)
+            .border(1.dp, border, CircleShape)
+            .semantics { this.contentDescription = contentDescription }
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .alpha(if (enabled) 1f else 0.48f),
+        contentAlignment = Alignment.Center,
+    ) {
+        GraphActionGlyph(
+            icon = icon,
+            color = foreground,
+            modifier = Modifier.size(18.dp),
         )
     }
 }
@@ -365,7 +406,8 @@ fun GraphDialogOverlay(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(ThreadColors.Primary.copy(alpha = 0.72f))
+            .imePadding()
+            .background(ThreadColors.Background.copy(alpha = 0.58f))
             .padding(14.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -386,6 +428,7 @@ fun GraphDialogFrame(
     footer: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     wide: Boolean = false,
+    showFooter: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     Column(
@@ -437,14 +480,16 @@ fun GraphDialogFrame(
         ) {
             content()
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(ThreadColors.Surface.copy(alpha = 0.36f))
-                .border(1.dp, ThreadColors.Border)
-                .padding(14.dp),
-        ) {
-            footer()
+        if (showFooter) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ThreadColors.Surface.copy(alpha = 0.36f))
+                    .border(1.dp, ThreadColors.Border)
+                    .padding(14.dp),
+            ) {
+                footer()
+            }
         }
     }
 }
@@ -525,6 +570,10 @@ private fun GraphActionGlyph(
         }
 
         when (icon) {
+            GraphActionIcon.Add -> {
+                line(0.50f, 0.20f, 0.50f, 0.80f)
+                line(0.20f, 0.50f, 0.80f, 0.50f)
+            }
             GraphActionIcon.Cancel -> {
                 line(0.28f, 0.28f, 0.72f, 0.72f)
                 line(0.72f, 0.28f, 0.28f, 0.72f)
@@ -592,6 +641,43 @@ private fun GraphActionGlyph(
                 line(0.67f, 0.67f, 0.75f, 0.75f)
                 line(0.75f, 0.25f, 0.67f, 0.33f)
                 line(0.33f, 0.67f, 0.25f, 0.75f)
+            }
+            GraphActionIcon.Menu -> {
+                line(0.18f, 0.30f, 0.82f, 0.30f)
+                line(0.18f, 0.50f, 0.82f, 0.50f)
+                line(0.18f, 0.70f, 0.82f, 0.70f)
+            }
+            GraphActionIcon.Refresh -> {
+                line(0.70f, 0.24f, 0.82f, 0.24f)
+                line(0.82f, 0.24f, 0.82f, 0.38f)
+                drawArc(
+                    color = color,
+                    startAngle = 210f,
+                    sweepAngle = 250f,
+                    useCenter = false,
+                    style = stroke,
+                )
+                line(0.30f, 0.76f, 0.18f, 0.76f)
+                line(0.18f, 0.76f, 0.18f, 0.62f)
+            }
+            GraphActionIcon.Home -> {
+                line(0.18f, 0.46f, 0.50f, 0.20f)
+                line(0.50f, 0.20f, 0.82f, 0.46f)
+                rect(0.28f, 0.44f, 0.72f, 0.82f)
+                line(0.44f, 0.82f, 0.44f, 0.62f)
+                line(0.56f, 0.62f, 0.56f, 0.82f)
+            }
+            GraphActionIcon.Devices -> {
+                rect(0.20f, 0.28f, 0.56f, 0.76f)
+                rect(0.62f, 0.38f, 0.82f, 0.72f)
+                line(0.30f, 0.84f, 0.46f, 0.84f)
+                line(0.68f, 0.78f, 0.76f, 0.78f)
+            }
+            GraphActionIcon.Pin -> {
+                line(0.34f, 0.18f, 0.66f, 0.18f)
+                line(0.50f, 0.18f, 0.50f, 0.58f)
+                line(0.30f, 0.58f, 0.70f, 0.58f)
+                line(0.50f, 0.58f, 0.50f, 0.86f)
             }
         }
     }

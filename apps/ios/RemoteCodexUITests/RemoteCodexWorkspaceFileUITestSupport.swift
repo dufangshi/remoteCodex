@@ -14,6 +14,13 @@ extension RemoteCodexUITests {
             atomically: true,
             encoding: .utf8
         )
+        try "IOS_WORKSPACE_EDIT_ORIGINAL\n".write(
+            to: sourceDirectory.appendingPathComponent("Editable.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")!
+            .write(to: sourceDirectory.appendingPathComponent("Preview.png"), options: [.atomic])
     }
 
     static func assertLiveWorkspaceFilesRoundTrip(baseURL: URL, workspaceId: String) async throws {

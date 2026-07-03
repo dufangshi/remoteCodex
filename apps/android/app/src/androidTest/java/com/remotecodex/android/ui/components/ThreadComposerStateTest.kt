@@ -21,11 +21,13 @@ import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Legacy native composer is a debug-only fallback; production composer behavior is covered by shared thread-ui/WebView tests.")
 class ThreadComposerStateTest {
     @get:Rule
     val composeRule = createComposeRule()

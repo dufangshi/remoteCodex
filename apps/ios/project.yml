@@ -13,15 +13,31 @@ targets:
   RemoteCodex:
     type: application
     platform: iOS
+    info:
+      path: RemoteCodex/Info.plist
+      properties:
+        CFBundleDisplayName: Remote Codex
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSRequiresIPhoneOS: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations: {}
+        UILaunchScreen: {}
     sources:
-      - RemoteCodex
+      - path: RemoteCodex
+        excludes:
+          - Resources/WebThreadDist/**
+    preBuildScripts:
+      - name: Build iOS Thread Web Bundle
+        basedOnDependencyAnalysis: false
+        script: |
+          bash "$SRCROOT/scripts/build-thread-web-bundle.sh"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.ios
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Remote Codex
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   RemoteCodexTests:
     type: bundle.unit-test
