@@ -31,6 +31,7 @@ export interface IOSBootstrap {
   uiTestAutoLoadOlderHistory?: boolean;
   uiTestAutoVerifyImageAsset?: boolean;
   uiTestAutoVerifyTimelineContent?: boolean;
+  uiTestAutoVerifySlashToolbox?: boolean;
   uiTestDisableRefreshFallback?: boolean;
   uiTestAutoRenameTitle?: string | null;
   uiTestAutoDeleteThread?: boolean;
@@ -93,6 +94,8 @@ export function readIOSBootstrap(): IOSBootstrap {
     uiTestAutoVerifyImageAsset: value.uiTestAutoVerifyImageAsset ?? false,
     uiTestAutoVerifyTimelineContent:
       value.uiTestAutoVerifyTimelineContent ?? false,
+    uiTestAutoVerifySlashToolbox:
+      value.uiTestAutoVerifySlashToolbox ?? false,
     uiTestDisableRefreshFallback: value.uiTestDisableRefreshFallback ?? false,
     uiTestAutoRenameTitle: value.uiTestAutoRenameTitle ?? null,
     uiTestAutoDeleteThread: value.uiTestAutoDeleteThread ?? false,

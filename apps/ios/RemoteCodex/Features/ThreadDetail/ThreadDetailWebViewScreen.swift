@@ -24,6 +24,7 @@ struct ThreadDetailWebViewScreen: View {
     let uiTestAutoLoadOlderHistory: Bool
     let uiTestAutoVerifyImageAsset: Bool
     let uiTestAutoVerifyTimelineContent: Bool
+    let uiTestAutoVerifySlashToolbox: Bool
     let uiTestDisableRefreshFallback: Bool
     let uiTestAutoRenameTitle: String?
     let uiTestAutoDeleteThread: Bool
@@ -73,6 +74,7 @@ struct ThreadDetailWebViewScreen: View {
                         uiTestAutoLoadOlderHistory: uiTestAutoLoadOlderHistory,
                         uiTestAutoVerifyImageAsset: uiTestAutoVerifyImageAsset,
                         uiTestAutoVerifyTimelineContent: uiTestAutoVerifyTimelineContent,
+                        uiTestAutoVerifySlashToolbox: uiTestAutoVerifySlashToolbox,
                         uiTestDisableRefreshFallback: uiTestDisableRefreshFallback,
                         uiTestAutoRenameTitle: uiTestAutoRenameTitle,
                         uiTestAutoDeleteThread: uiTestAutoDeleteThread
@@ -531,6 +533,7 @@ struct ThreadDetailWebBootstrap: Codable, Equatable {
     var uiTestAutoLoadOlderHistory: Bool
     var uiTestAutoVerifyImageAsset: Bool
     var uiTestAutoVerifyTimelineContent: Bool
+    var uiTestAutoVerifySlashToolbox: Bool
     var uiTestDisableRefreshFallback: Bool
     var uiTestAutoRenameTitle: String?
     var uiTestAutoDeleteThread: Bool

@@ -65,6 +65,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
             uiTestAutoLoadOlderHistory: true,
             uiTestAutoVerifyImageAsset: true,
             uiTestAutoVerifyTimelineContent: true,
+            uiTestAutoVerifySlashToolbox: true,
             uiTestDisableRefreshFallback: true,
             uiTestAutoRenameTitle: "Renamed from test",
             uiTestAutoDeleteThread: true
@@ -78,6 +79,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
         XCTAssertEqual(payload["relayDeviceId"] as? String, "device-1")
         XCTAssertEqual(payload["threadId"] as? String, "thread-1")
         XCTAssertEqual(payload["theme"] as? String, "dark")
+        XCTAssertEqual(payload["uiTestAutoVerifySlashToolbox"] as? Bool, true)
         XCTAssertEqual(payload["fixture"] as? Bool, false)
         XCTAssertEqual(payload["uiTestAutoResolvePendingRequests"] as? Bool, true)
         XCTAssertEqual(payload["uiTestClickPendingRequestControls"] as? Bool, true)
@@ -133,6 +135,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
             uiTestAutoLoadOlderHistory: false,
             uiTestAutoVerifyImageAsset: false,
             uiTestAutoVerifyTimelineContent: false,
+            uiTestAutoVerifySlashToolbox: false,
             uiTestDisableRefreshFallback: false,
             uiTestAutoRenameTitle: nil,
             uiTestAutoDeleteThread: false

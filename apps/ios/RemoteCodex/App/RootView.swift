@@ -91,6 +91,7 @@ struct RootView: View {
                         uiTestAutoLoadOlderHistory: threadWebViewUITestAutoLoadOlderHistory,
                         uiTestAutoVerifyImageAsset: threadWebViewUITestAutoVerifyImageAsset,
                         uiTestAutoVerifyTimelineContent: threadWebViewUITestAutoVerifyTimelineContent,
+                        uiTestAutoVerifySlashToolbox: threadWebViewUITestAutoVerifySlashToolbox,
                         uiTestDisableRefreshFallback: threadWebViewUITestDisableRefreshFallback,
                         uiTestAutoRenameTitle: threadWebViewUITestAutoRenameTitle,
                         uiTestAutoDeleteThread: threadWebViewUITestAutoDeleteThread,
@@ -251,6 +252,11 @@ struct RootView: View {
     private var threadWebViewUITestAutoVerifyTimelineContent: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-auto-verify-timeline")
             || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_AUTO_VERIFY_TIMELINE"] == "1"
+    }
+
+    private var threadWebViewUITestAutoVerifySlashToolbox: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-auto-verify-slash-toolbox")
+            || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_AUTO_VERIFY_SLASH_TOOLBOX"] == "1"
     }
 
     private var threadWebViewUITestDisableRefreshFallback: Bool {

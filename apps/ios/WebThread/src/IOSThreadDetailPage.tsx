@@ -266,6 +266,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const uiTestOlderHistoryLoadedRef = useRef(false);
   const uiTestImageAssetLoadedRef = useRef(false);
   const uiTestTimelineContentVerifiedRef = useRef(false);
+  const uiTestSlashToolboxVerifiedRef = useRef(false);
   const uiTestAutoRenameStartedRef = useRef(false);
   const uiTestAutoDeleteStartedRef = useRef(false);
   const selectedHistoryDetailDebugRef = useRef('');
@@ -826,6 +827,128 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       workspaceId: detail.workspace.id,
     });
   }, [detail]);
+
+  useEffect(() => {
+    if (
+      bootstrap.fixture ||
+      !bootstrap.uiTestAutoVerifySlashToolbox ||
+      !detail ||
+      uiTestSlashToolboxVerifiedRef.current
+    ) {
+      return;
+    }
+
+    const provider = detail.thread.provider;
+    const commands = new Set(toolboxItems.map((item) => item.command));
+    if (provider === 'claude') {
+      if (!commands.has('/btw') || !commands.has('/mcp')) {
+        return;
+      }
+    } else if (provider === 'opencode') {
+      if (!commands.has('/compact') || !commands.has('/fork')) {
+        return;
+      }
+    } else {
+      return;
+    }
+
+    uiTestSlashToolboxVerifiedRef.current = true;
+    let cancelled = false;
+    let timer: number | null = null;
+    const sleep = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, milliseconds);
+      });
+    const buttons = () => Array.from(document.querySelectorAll('button'));
+    const buttonText = (button: HTMLButtonElement) =>
+      button.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    const findButton = (text: string) =>
+      buttons().find((button) => buttonText(button).includes(text));
+    const waitFor = async (predicate: () => boolean, label: string) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (cancelled) {
+          return false;
+        }
+        if (predicate()) {
+          return true;
+        }
+        await sleep(100);
+      }
+      postNativeMessage({
+        type: 'threadWebDebug',
+        message: `slash:${provider}:missing:${label}`,
+      });
+      return false;
+    };
+    const openSlashToolbox = async (mode: 'button' | 'typed') => {
+      if (mode === 'button') {
+        document
+          .querySelector<HTMLButtonElement>('button[aria-label="Open slash toolbox"]')
+          ?.click();
+      } else {
+        const editor = document.querySelector<HTMLElement>(
+          '[role="textbox"][aria-label="Prompt"]',
+        );
+        editor?.focus();
+        editor?.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '/',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+      const anchorCommand = provider === 'claude' ? '/mcp' : '/compact';
+      return waitFor(
+        () => Boolean(findButton(anchorCommand)),
+        `${mode}:${anchorCommand}`,
+      );
+    };
+    const closeSlashToolbox = async () => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Open slash toolbox"]')
+        ?.click();
+      await sleep(120);
+    };
+    const verifyOpenMenu = async (mode: 'button' | 'typed') => {
+      if (!(await openSlashToolbox(mode))) {
+        return false;
+      }
+      const mcp = findButton('/mcp');
+      const btw = findButton('/btw');
+      const compact = findButton('/compact');
+      const fork = findButton('/fork');
+      if (provider === 'claude') {
+        return Boolean(mcp && btw?.disabled);
+      }
+      return Boolean(compact && fork && !mcp && !btw);
+    };
+
+    void (async () => {
+      const buttonResult = await verifyOpenMenu('button');
+      await closeSlashToolbox();
+      const typedResult = await verifyOpenMenu('typed');
+      postNativeMessage({
+        type: 'threadWebDebug',
+        message:
+          `slash:${provider}:button=${buttonResult ? 'ok' : 'fail'}` +
+          `:typed=${typedResult ? 'ok' : 'fail'}` +
+          `:commands=${[...commands].join(',')}`,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [
+    bootstrap.fixture,
+    bootstrap.uiTestAutoVerifySlashToolbox,
+    detail,
+    toolboxItems,
+  ]);
 
   const submitPromptText = useCallback(
     async (prompt: string) => {

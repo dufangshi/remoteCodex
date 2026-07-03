@@ -692,6 +692,28 @@ final class RemoteCodexUITests: XCTestCase {
     }
 
     @MainActor
+    func testLiveLocalThreadWebViewShowsRealClaudeSlashToolbox() async throws {
+        try await runLiveLocalRealBackendSlashToolboxSmoke(
+            provider: "claude",
+            model: "haiku",
+            label: "Claude Haiku",
+            initMarkerPrefix: "IOS_CLAUDE_PHASE5_SLASH_INIT",
+            requiredBackendCommands: ["/mcp", "/btw"]
+        )
+    }
+
+    @MainActor
+    func testLiveLocalThreadWebViewShowsRealOpenCodeSlashToolbox() async throws {
+        try await runLiveLocalRealBackendSlashToolboxSmoke(
+            provider: "opencode",
+            model: "opencode/mimo-v2.5-free",
+            label: "OpenCode MiMo",
+            initMarkerPrefix: nil,
+            requiredBackendCommands: ["/compact", "/fork"]
+        )
+    }
+
+    @MainActor
     func testLiveLocalThreadWebViewOptimisticallyRendersSubmittedPrompt() async throws {
         let baseURL = try await Self.liveLocalBaseURL()
         try await Self.requireLiveE2EFakeRuntime(baseURL: baseURL)
@@ -752,6 +774,74 @@ final class RemoteCodexUITests: XCTestCase {
             text: "IOS_STREAM_COMPLETED"
         )
         XCTAssertTrue(scrollUntilElement(containing: "IOS_STREAM_COMPLETED", in: app, timeout: 45, maxSwipes: 12))
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
+
+    @MainActor
+    private func runLiveLocalRealBackendSlashToolboxSmoke(
+        provider: String,
+        model: String,
+        label: String,
+        initMarkerPrefix: String?,
+        requiredBackendCommands: [String]
+    ) async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "iOS \(label) Slash Toolbox E2E"
+        )
+        let suffix = UUID().uuidString.prefix(8)
+        let thread = try await Self.createLiveThread(
+            baseURL: baseURL,
+            workspaceId: workspace.id,
+            title: "iOS \(label) Slash Toolbox Thread",
+            provider: provider,
+            model: model
+        )
+
+        if let initMarkerPrefix {
+            let marker = "\(initMarkerPrefix)_\(suffix)"
+            try await Self.sendLivePrompt(
+                baseURL: baseURL,
+                threadId: thread.id,
+                prompt: "Reply with exactly \(marker).",
+                model: model
+            )
+            try await Self.waitForLiveThreadText(
+                baseURL: baseURL,
+                threadId: thread.id,
+                text: marker,
+                timeout: 90
+            )
+        }
+        try await Self.waitForLiveBackendToolbox(
+            baseURL: baseURL,
+            provider: provider,
+            commands: requiredBackendCommands
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-live-local-connection",
+            "--use-ios-thread-webview",
+            "--ui-test-ios-thread-webview-auto-verify-slash-toolbox",
+        ]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_THREAD_ID"] = thread.id
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        assertThreadWebViewReady(app, title: thread.title)
+        let debug = app.staticTexts["thread-webview-debug"]
+        XCTAssertTrue(
+            waitForElement(debug, containing: "slash:\(provider):button=ok:typed=ok", timeout: 30),
+            debug.exists ? debug.label : "WebView did not verify the slash toolbox."
+        )
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
@@ -2253,6 +2343,18 @@ extension RemoteCodexUITests {
         let status: String
     }
 
+    struct LiveRuntimeStatus: Decodable {
+        let managementSchema: LiveRuntimeManagementSchema
+    }
+
+    struct LiveRuntimeManagementSchema: Decodable {
+        let toolboxItems: [LiveRuntimeToolboxItem]
+    }
+
+    struct LiveRuntimeToolboxItem: Decodable {
+        let command: String
+    }
+
     struct LiveServerCredentials {
         let username: String
         let password: String
@@ -2549,6 +2651,7 @@ extension RemoteCodexUITests {
         baseURL: URL,
         threadId: String,
         prompt: String,
+        model: String = "ios-e2e-stream",
         collaborationMode: String? = nil,
         bearerToken: String? = nil
     ) async throws {
@@ -2561,7 +2664,7 @@ extension RemoteCodexUITests {
         var body = [
             "prompt": prompt,
             "clientRequestId": UUID().uuidString,
-            "model": "ios-e2e-stream"
+            "model": model
         ]
         if let collaborationMode {
             body["collaborationMode"] = collaborationMode
@@ -2657,6 +2760,33 @@ extension RemoteCodexUITests {
             domain: "RemoteCodexUITests",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for live thread text: \(text)"]
+        )
+    }
+
+    static func waitForLiveBackendToolbox(
+        baseURL: URL,
+        provider: String,
+        commands: [String],
+        timeout: TimeInterval = 30
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let status: LiveRuntimeStatus = try await getJSON(
+                baseURL: baseURL,
+                path: "/api/agent-runtimes/\(provider)/status"
+            )
+            let available = Set(status.managementSchema.toolboxItems.map(\.command))
+            if commands.allSatisfy({ available.contains($0) }) {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NSError(
+            domain: "RemoteCodexUITests",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Timed out waiting for \(provider) toolbox commands: \(commands.joined(separator: ", "))"
+            ]
         )
     }
 
