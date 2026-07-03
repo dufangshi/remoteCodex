@@ -25,7 +25,7 @@ Checklist:
 - [x] 明确当前 installer 命令：
   - Claude: `npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk`
   - OpenCode: `npm install -g opencode-ai @opencode-ai/sdk`
-- [ ] 评估 installer 是否应优先写入 workspace 依赖，而不是只依赖 global npm 可见性。
+- [x] 评估 installer 是否应优先写入 workspace 依赖，而不是只依赖 global npm 可见性。
 
 E2E gate:
 
@@ -272,6 +272,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] Android AOSP WebView Phase 5 slash command parity smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8936 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8936 pnpm exec node e2e/android-phase5-slash-command-parity.mjs`；Claude thread `a17a6ac9-12bc-440e-a560-12e577b5cb06`，model `haiku`；OpenCode thread `4591a8d9-18d9-4285-86f2-375cc0039fac`，model `opencode/mimo-v2.5-free`。
 - [x] Phase 2 capability controls 覆盖：外部 `@remote-codex/thread-ui` focused tests `composerToolbox.test.ts`、`ComposerSettingsToolbar.test.tsx`、`composerPresentation.test.ts`、`useComposerToolbarProps.test.ts` 通过，确认不支持 reasoning 的模型禁用 effort selector，且不支持 performance mode 时 `/fast` 不进入 slash toolbox。
 - [x] Phase 1 install recovery targeted 覆盖：Web `ThreadNewPage.test.tsx` 验证 unavailable Claude 置灰、点击 Install、刷新后自动选择 Claude `haiku` 并创建 thread；iOS `WorkspaceDetailViewModelTests/testInstallingUnavailableProviderSelectsItAndLoadsModels` 验证安装后选择刚安装 provider 并加载模型；Android native dialog 修复为安装成功后切换刚安装 provider，并在 backend 列表刷新时重新评估模型加载。
+- [x] Phase 0 installer 策略评估：Claude/OpenCode SDK 已作为 workspace package dependency 存在，runtime import 先走本地 package resolution、再 fallback 到 npm global；安装状态检测也会识别 workspace `packages/claude/node_modules` 与 `packages/opencode/node_modules`。安装/更新命令仍应保留全局 CLI+SDK 安装，因为 `claude`、`opencode` 可执行文件必须在 supervisor 所在设备的 configured command/PATH 中可见；不建议改成只写 workspace dependency。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
 - [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
 - [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
