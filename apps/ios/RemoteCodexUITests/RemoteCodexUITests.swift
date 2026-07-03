@@ -650,6 +650,26 @@ final class RemoteCodexUITests: XCTestCase {
     }
 
     @MainActor
+    func testLiveLocalThreadWebViewComposerSubmitsRealClaudeHaikuPrompt() async throws {
+        try await runLiveLocalRealBackendComposerSmoke(
+            provider: "claude",
+            model: "haiku",
+            label: "Claude Haiku",
+            markerPrefix: "IOS_CLAUDE_HAIKU_WEBVIEW_PROMPT_OK"
+        )
+    }
+
+    @MainActor
+    func testLiveLocalThreadWebViewComposerSubmitsRealOpenCodePrompt() async throws {
+        try await runLiveLocalRealBackendComposerSmoke(
+            provider: "opencode",
+            model: "opencode/mimo-v2.5-free",
+            label: "OpenCode MiMo",
+            markerPrefix: "IOS_OPENCODE_WEBVIEW_PROMPT_OK"
+        )
+    }
+
+    @MainActor
     func testLiveLocalThreadWebViewOptimisticallyRendersSubmittedPrompt() async throws {
         let baseURL = try await Self.liveLocalBaseURL()
         try await Self.requireLiveE2EFakeRuntime(baseURL: baseURL)
@@ -710,6 +730,69 @@ final class RemoteCodexUITests: XCTestCase {
             text: "IOS_STREAM_COMPLETED"
         )
         XCTAssertTrue(scrollUntilElement(containing: "IOS_STREAM_COMPLETED", in: app, timeout: 45, maxSwipes: 12))
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
+
+    @MainActor
+    private func runLiveLocalRealBackendComposerSmoke(
+        provider: String,
+        model: String,
+        label: String,
+        markerPrefix: String
+    ) async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "iOS \(label) WebView Prompt E2E"
+        )
+        let marker = "\(markerPrefix)_\(UUID().uuidString.prefix(8))"
+        let thread = try await Self.createLiveThread(
+            baseURL: baseURL,
+            workspaceId: workspace.id,
+            title: "iOS \(label) WebView Prompt Thread",
+            provider: provider,
+            model: model
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-live-local-connection",
+            "--use-ios-thread-webview",
+        ]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_THREAD_ID"] = thread.id
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        assertThreadWebViewReady(app, title: thread.title)
+
+        let prompt = "Reply with exactly: \(marker)"
+        XCTAssertTrue(typeIntoWebPrompt(prompt, in: app))
+        let sendButton = webElement("Send Prompt", in: app).firstMatch
+        if sendButton.waitForExistence(timeout: 3) {
+            sendButton.tap()
+        } else {
+            tapWebComposerSend(in: app)
+        }
+
+        try await Self.waitForLiveThreadText(
+            baseURL: baseURL,
+            threadId: thread.id,
+            text: prompt
+        )
+        try await Self.waitForLiveThreadText(
+            baseURL: baseURL,
+            threadId: thread.id,
+            text: marker,
+            timeout: 90
+        )
+
+        XCTAssertTrue(scrollUntilElement(containing: marker, in: app, timeout: 30, maxSwipes: 12))
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
@@ -1876,8 +1959,20 @@ final class RemoteCodexUITests: XCTestCase {
 
         var editor = webElement("Prompt", in: app).firstMatch
         if !editor.waitForExistence(timeout: 3) {
+            let showChat = webElement("Show chat", in: app).firstMatch
+            if showChat.waitForExistence(timeout: 2) {
+                showChat.tap()
+            } else {
+                let chat = webElement("Chat", in: app).firstMatch
+                if chat.waitForExistence(timeout: 2) {
+                    chat.tap()
+                }
+            }
+            editor = webElement("Prompt", in: app).firstMatch
+        }
+        if !editor.waitForExistence(timeout: 3) {
             let chat = webElement("Chat", in: app).firstMatch
-            if chat.waitForExistence(timeout: 3) {
+            if chat.waitForExistence(timeout: 2) {
                 chat.tap()
             }
             editor = webElement("Prompt", in: app).firstMatch
@@ -2443,9 +2538,10 @@ extension RemoteCodexUITests {
         baseURL: URL,
         threadId: String,
         text: String,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        timeout: TimeInterval = 30
     ) async throws {
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             let url = baseURL.appendingPathComponent("api/threads/\(threadId)")
             var request = URLRequest(url: url)
