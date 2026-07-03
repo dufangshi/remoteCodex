@@ -67,8 +67,8 @@ Checklist:
 - [x] 本轮真实测试默认使用 `haiku`，降低成本和延迟。
 - [x] Backend 切换到 OpenCode 时，模型列表来自 `/api/agent-runtimes/opencode/models`。
 - [x] OpenCode 模型显示 provider/model/variant，避免用户看不懂 `anthropic/sonnet-4.5@default` 这类 id。
-- [ ] 不支持 reasoning effort 的模型隐藏或禁用 reasoning selector。
-- [ ] 不支持 fast/performance mode 的 backend 不展示或禁用 fast mode。
+- [x] 不支持 reasoning effort 的模型隐藏或禁用 reasoning selector。
+- [x] 不支持 fast/performance mode 的 backend 不展示或禁用 fast mode。
 - [x] iOS、Android、Web 三端的默认模型选择逻辑一致：优先选 `isDefault`，否则选第一项。
 
 E2E gate:
@@ -270,6 +270,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] Web Phase 5 slash command parity smoke 通过：`REMOTE_CODEX_REAL_BACKEND_E2E=1 REMOTE_CODEX_E2E_BASE_URL=http://127.0.0.1:8935 pnpm --filter @remote-codex/supervisor-web exec playwright test ../../e2e/phase5-slash-command-parity.spec.ts --project=chromium`；Claude haiku 展示 SDK 动态 slash commands、禁用 unsupported `/btw`、`/compact` 插入 prompt、`/mcp` 打开 panel；OpenCode 展示 `/compact`、`/fork` 且不展示 `/mcp`/`/btw`。
 - [x] iOS WebView Phase 5 slash command parity smoke 通过：`REMOTE_CODEX_IOS_E2E_BASE_URL=http://127.0.0.1:8936 xcodebuild -project apps/ios/RemoteCodex.xcodeproj -scheme RemoteCodex -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewShowsRealClaudeSlashToolbox -only-testing:RemoteCodexUITests/RemoteCodexUITests/testLiveLocalThreadWebViewShowsRealOpenCodeSlashToolbox test`；Claude/OpenCode 两个真实 backend WebView 测试均通过。
 - [x] Android AOSP WebView Phase 5 slash command parity smoke 通过：`ANDROID_E2E_API_BASE=http://127.0.0.1:8936 ANDROID_E2E_ANDROID_BASE=http://10.0.2.2:8936 pnpm exec node e2e/android-phase5-slash-command-parity.mjs`；Claude thread `a17a6ac9-12bc-440e-a560-12e577b5cb06`，model `haiku`；OpenCode thread `4591a8d9-18d9-4285-86f2-375cc0039fac`，model `opencode/mimo-v2.5-free`。
+- [x] Phase 2 capability controls 覆盖：外部 `@remote-codex/thread-ui` focused tests `composerToolbox.test.ts`、`ComposerSettingsToolbar.test.tsx`、`composerPresentation.test.ts`、`useComposerToolbarProps.test.ts` 通过，确认不支持 reasoning 的模型禁用 effort selector，且不支持 performance mode 时 `/fast` 不进入 slash toolbox。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
 - [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
 - [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
