@@ -232,6 +232,7 @@ final class HomeViewModel: ObservableObject {
         defer { newThreadRuntimeBusyProvider = nil }
         do {
             _ = try await client.installOrUpdateAgentBackend(provider: backend.provider, action: action)
+            newThreadProvider = backend.provider
             await loadNewThreadOptions()
         } catch {
             newThreadOptionsError = error.localizedDescription

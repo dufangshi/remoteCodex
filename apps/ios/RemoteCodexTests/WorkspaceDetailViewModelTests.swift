@@ -91,6 +91,64 @@ final class WorkspaceDetailViewModelTests: XCTestCase {
         XCTAssertEqual(threadId, "t2")
     }
 
+    func testInstallingUnavailableProviderSelectsItAndLoadsModels() async throws {
+        var claudeInstalled = false
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch (request.method, request.url.path) {
+            case ("GET", "/api/agent-runtimes"):
+                let body = claudeInstalled
+                    ? Self.agentBackendsWithInstalledClaudeJSON
+                    : Self.agentBackendsWithUnavailableClaudeJSON
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(body.utf8), headers: [:])
+            case ("GET", "/api/agent-runtimes/codex/models"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.codexModelsJSON.utf8), headers: [:])
+            case ("POST", "/api/agent-runtimes/claude/install"):
+                XCTAssertEqual(request.jsonBodyString("action"), "install")
+                claudeInstalled = true
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.installedClaudeBackendJSON.utf8), headers: [:])
+            case ("GET", "/api/agent-runtimes/claude/models"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.claudeHaikuModelsJSON.utf8), headers: [:])
+            case ("POST", "/api/threads/start"):
+                XCTAssertEqual(request.jsonBodyString("workspaceId"), "w1")
+                XCTAssertEqual(request.jsonBodyString("provider"), "claude")
+                XCTAssertEqual(request.jsonBodyString("model"), "haiku")
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.startedHaikuThreadJSON.utf8), headers: [:])
+            default:
+                XCTFail("Unexpected request \(request.method) \(request.url)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let environment = try AppEnvironment(
+            settingsStore: AppSettingsStore(
+                defaults: XCTUnwrap(UserDefaults(suiteName: "WorkspaceDetailViewModelTests-\(UUID().uuidString)")),
+                tokenStore: MemoryTokenStore()
+            )
+        ) { config in
+            SupervisorAPIClient(config: config, transport: transport)
+        }
+        let model = WorkspaceDetailViewModel(
+            environment: environment,
+            connection: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            workspaceId: "w1"
+        )
+
+        await model.loadNewThreadOptions()
+
+        XCTAssertEqual(model.newThreadProvider, "codex")
+        XCTAssertEqual(model.newThreadModel, "gpt-5")
+        let claude = try XCTUnwrap(model.newThreadBackends.first { $0.provider == "claude" })
+        XCTAssertFalse(claude.canStartSession)
+        XCTAssertEqual(claude.runtimeActionLabel, "Install")
+
+        await model.installOrUpdateNewThreadBackend(claude)
+        let threadId = await model.startThread()
+
+        XCTAssertEqual(model.newThreadProvider, "claude")
+        XCTAssertEqual(model.newThreadModel, "haiku")
+        XCTAssertEqual(threadId, "t-haiku")
+    }
+
     func testRefreshStopsWhenWorkspaceNoLongerExists() async throws {
         let transport = MockSupervisorTransport()
         transport.handler = { request in
@@ -332,6 +390,151 @@ private extension WorkspaceDetailViewModelTests {
       "title": "Claude Sonnet 4",
       "status": "running",
       "model": "claude-sonnet-4",
+      "reasoningEffort": null,
+      "fastMode": false,
+      "collaborationMode": "default",
+      "sandboxMode": null,
+      "updatedAt": "2026-06-14T02:00:00Z",
+      "summaryText": null,
+      "isLoaded": true
+    }
+    """
+
+    static let codexBackendJSON = """
+    {
+      "provider": "codex",
+      "displayName": "Codex",
+      "description": "Codex runtime",
+      "enabled": true,
+      "isDefault": true,
+      "status": {"state": "ready"},
+      "capabilities": {},
+      "managementSchema": {
+        "hostConfigFiles": [],
+        "toolboxItems": [],
+        "hookCommandTemplates": [],
+        "providerConfigFormat": "toml",
+        "mcpConfigFormat": "codex-toml",
+        "configArchives": false,
+        "buildRestart": false
+      },
+      "installation": {
+        "packageName": "@openai/codex",
+        "installed": true,
+        "installedVersion": "1.0.0",
+        "latestVersion": null,
+        "installCommand": null,
+        "updateCommand": null,
+        "busy": false,
+        "lastError": null
+      }
+    }
+    """
+
+    static let unavailableClaudeBackendJSON = """
+    {
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "description": "Claude runtime",
+      "enabled": false,
+      "isDefault": false,
+      "status": {"state": "stopped", "detail": "Not installed"},
+      "capabilities": {},
+      "managementSchema": {
+        "hostConfigFiles": [],
+        "toolboxItems": [],
+        "hookCommandTemplates": [],
+        "providerConfigFormat": "json",
+        "mcpConfigFormat": "claude-json",
+        "configArchives": false,
+        "buildRestart": false
+      },
+      "installation": {
+        "packageName": "@anthropic-ai/claude-code",
+        "installed": false,
+        "installedVersion": null,
+        "latestVersion": null,
+        "installCommand": "npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk",
+        "updateCommand": null,
+        "busy": false,
+        "lastError": "Claude Code command is not available."
+      }
+    }
+    """
+
+    static let installedClaudeBackendJSON = """
+    {
+      "provider": "claude",
+      "displayName": "Claude Code",
+      "description": "Claude runtime",
+      "enabled": true,
+      "isDefault": false,
+      "status": {"state": "ready"},
+      "capabilities": {},
+      "managementSchema": {
+        "hostConfigFiles": [],
+        "toolboxItems": [],
+        "hookCommandTemplates": [],
+        "providerConfigFormat": "json",
+        "mcpConfigFormat": "claude-json",
+        "configArchives": false,
+        "buildRestart": false
+      },
+      "installation": {
+        "packageName": "@anthropic-ai/claude-code",
+        "installed": true,
+        "installedVersion": "2.1.197",
+        "latestVersion": null,
+        "installCommand": "npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk",
+        "updateCommand": "npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest",
+        "busy": false,
+        "lastError": null
+      }
+    }
+    """
+
+    static let agentBackendsWithUnavailableClaudeJSON = """
+    [\(codexBackendJSON), \(unavailableClaudeBackendJSON)]
+    """
+
+    static let agentBackendsWithInstalledClaudeJSON = """
+    [\(codexBackendJSON), \(installedClaudeBackendJSON)]
+    """
+
+    static let codexModelsJSON = """
+    [{
+      "id": "gpt-5",
+      "model": "gpt-5",
+      "displayName": "GPT-5",
+      "description": "Default Codex model",
+      "isDefault": true,
+      "hidden": false,
+      "supportedReasoningEfforts": [],
+      "defaultReasoningEffort": null
+    }]
+    """
+
+    static let claudeHaikuModelsJSON = """
+    [{
+      "id": "haiku",
+      "model": "haiku",
+      "displayName": "Claude Haiku",
+      "description": "Fast Claude model",
+      "isDefault": true,
+      "hidden": false,
+      "supportedReasoningEfforts": [],
+      "defaultReasoningEffort": null
+    }]
+    """
+
+    static let startedHaikuThreadJSON = """
+    {
+      "id": "t-haiku",
+      "workspaceId": "w1",
+      "provider": "claude",
+      "title": "Claude Haiku",
+      "status": "running",
+      "model": "haiku",
       "reasoningEffort": null,
       "fastMode": false,
       "collaborationMode": "default",

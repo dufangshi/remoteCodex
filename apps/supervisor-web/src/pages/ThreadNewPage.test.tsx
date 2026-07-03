@@ -419,6 +419,192 @@ describe('ThreadNewPage', () => {
     });
   });
 
+  it('installs an unavailable backend, refreshes runtime state, and creates with it', async () => {
+    const fetchMock = vi.mocked(fetch);
+    let claudeInstalled = false;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === '/api/workspaces' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: '2026-04-11T00:00:00.000Z',
+              lastOpenedAt: null,
+            },
+          ],
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/config/workspace-settings' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            workspaceRoot: '/tmp',
+            devHome: '/tmp/dev',
+            defaultBackend: 'claude',
+          }),
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/agent-runtimes' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            codexBackend,
+            claudeInstalled
+              ? {
+                  ...claudeBackend,
+                  enabled: true,
+                  status: {
+                    ...claudeBackend.status,
+                    state: 'ready',
+                    transport: 'sdk',
+                    lastError: null,
+                  },
+                  capabilities,
+                  installation: {
+                    ...claudeBackend.installation,
+                    installed: true,
+                    installedVersion: '2.1.197',
+                    lastError: null,
+                  },
+                }
+              : claudeBackend,
+          ],
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/agent-runtimes/codex/models' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 'gpt-5',
+              model: 'gpt-5',
+              displayName: 'GPT-5',
+              description: 'Default model',
+              isDefault: true,
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+            },
+          ],
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/agent-runtimes/claude/install' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ action: 'install' });
+        claudeInstalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...claudeBackend,
+            enabled: true,
+            capabilities,
+            installation: {
+              ...claudeBackend.installation,
+              installed: true,
+              installedVersion: '2.1.197',
+              lastError: null,
+            },
+          }),
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/agent-runtimes/claude/models' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 'haiku',
+              model: 'haiku',
+              displayName: 'Haiku',
+              description: 'Claude Haiku',
+              isDefault: true,
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+            },
+          ],
+        } satisfies Partial<Response> as Response);
+      }
+
+      if (url === '/api/threads/start' && init?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            provider: 'claude',
+            providerSessionId: 'claude-1',
+            source: 'supervisor',
+            title: 'Claude Thread',
+            model: 'haiku',
+            approvalMode: 'yolo',
+            status: 'idle',
+            summaryText: null,
+            lastError: null,
+            activeTurnId: null,
+            isLoaded: true,
+            isPinned: false,
+            createdAt: '2026-04-11T00:00:00.000Z',
+            updatedAt: '2026-04-11T00:00:00.000Z',
+            lastTurnStartedAt: null,
+            lastTurnCompletedAt: null,
+          }),
+        } satisfies Partial<Response> as Response);
+      }
+
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/threads/new']}>
+        <Harness defaultBackend="claude" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('option', {
+      name: 'Claude (not available)',
+    })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install Claude' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Backend')).toHaveValue('claude');
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Model')).toHaveValue('haiku');
+    });
+
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Claude Thread' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Thread' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('thread detail')).toBeInTheDocument();
+    });
+
+    const createCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === '/api/threads/start' && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      workspaceId: 'workspace-1',
+      provider: 'claude',
+      model: 'haiku',
+      approvalMode: 'yolo',
+      title: 'Claude Thread',
+    });
+  });
+
   it('clears stale model options when switching to a backend whose models fail to load', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {

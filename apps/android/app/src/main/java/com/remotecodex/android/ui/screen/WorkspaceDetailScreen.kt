@@ -431,7 +431,7 @@ private fun WorkspaceStartThreadDialog(
     var reasoningEffort by rememberSaveable(workspace.id, provider, model) { mutableStateOf<String?>(null) }
     var runtimeBusyProvider by remember { mutableStateOf<String?>(null) }
     val dialogScope = rememberCoroutineScope()
-    LaunchedEffect(provider) {
+    LaunchedEffect(provider, backends) {
         val backend = backends.firstOrNull { it.provider == provider }
         if (backend?.canStartSession != true) {
             models = emptyList()
@@ -508,9 +508,7 @@ private fun WorkspaceStartThreadDialog(
                         runtimeBusyProvider = null
                         result
                             .onSuccess {
-                                if (provider == backend.provider) {
-                                    provider = backend.provider
-                                }
+                                provider = backend.provider
                             }
                             .onFailure { throwable ->
                                 modelsError = throwable.message ?: "Runtime install/update failed."
