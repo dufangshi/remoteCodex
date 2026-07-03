@@ -20,7 +20,7 @@ Checklist:
 - [ ] 记录 `/api/agent-runtimes` 返回的三个 backend 状态字段：`enabled`、`installation.installed`、`installation.installedVersion`、`installation.lastError`。
 - [ ] 记录 `/api/agent-runtimes/claude/models` 在未启动 turn 和已启动 turn 时的返回差异。
 - [ ] 记录 `/api/agent-runtimes/opencode/models` 的返回和 provider/model id 格式。
-- [ ] 确认 Claude 本机依赖：`claude --version`、`@anthropic-ai/claude-agent-sdk` import、`ClaudeRuntimeAdapter.start()`。
+- [x] 确认 Claude 本机依赖：`claude --version`、`@anthropic-ai/claude-agent-sdk` import、`ClaudeRuntimeAdapter.start()`。
 - [ ] 确认 OpenCode 本机依赖：`opencode --version`、`@opencode-ai/sdk/v2` import、`OpenCodeRuntimeAdapter.start()`。
 - [ ] 明确当前 installer 命令：
   - Claude: `npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk`
@@ -149,8 +149,11 @@ E2E gate:
 ## Current Local Baseline
 
 - [x] 本机 `claude` CLI 存在，已验证版本为 `2.1.197 (Claude Code)`。
+- [x] 本机 `opencode` CLI 存在，已验证版本为 `1.17.11`。
 - [x] 已将 `@anthropic-ai/claude-agent-sdk` 加入 `@remote-codex/claude` workspace 依赖。
+- [x] 已将 `@opencode-ai/sdk` 加入 `@remote-codex/opencode` workspace 依赖。
 - [x] 已验证 `@anthropic-ai/claude-agent-sdk` 可以被 Node import。
+- [x] 已验证 `@opencode-ai/sdk/v2` 可以被 Node import。
 - [x] 已验证 `ClaudeRuntimeAdapter.start()` 可进入 `ready`。
 - [x] 已修复 supervisor-api 安装检测逻辑，使其能识别 pnpm workspace 下的 provider SDK。
 - [x] 已通过临时 local supervisor 验证 `/api/agent-runtimes` 返回 `claude.enabled=true`。
