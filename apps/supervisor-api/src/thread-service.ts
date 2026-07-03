@@ -303,6 +303,8 @@ export class ThreadService {
         this.invalidateThreadDetailCache(localThreadId),
       shouldPreserveCompletedPendingSteer: (localThreadId, turnId) =>
         this.shouldPreserveCompletedPendingSteer(localThreadId, turnId),
+      shouldPreserveMissingPendingSteer: (localThreadId, turnId) =>
+        this.shouldPreserveMissingPendingSteer(localThreadId, turnId),
     });
     this.requestCoordinator = new ProviderRequestCoordinator({
       emitThreadEvent: (type, threadId, payload) =>
@@ -912,7 +914,15 @@ export class ThreadService {
       providerSessionId,
     };
 
-    if (record.providerTurnId && record.status === 'running') {
+    const hasActiveProviderTurn =
+      Boolean(record.providerTurnId) &&
+      (
+        record.status === 'running' ||
+        (!turnConfig.supportsRunningTurnInput && !record.lastTurnCompletedAt)
+      ) &&
+      record.status !== 'failed' &&
+      record.status !== 'interrupted';
+    if (hasActiveProviderTurn && record.providerTurnId) {
       if (!turnConfig.supportsRunningTurnInput) {
         return this.promptTurnCoordinator.queueContinuationPromptTurn(localThreadId, {
           ...connectedRecord,
@@ -1321,6 +1331,24 @@ export class ThreadService {
       !this.runtimeSupportsLiveRunningTurnInput(record.provider) &&
       this.auxiliaryState.hasPendingSteersForTurn(localThreadId, turnId)
     );
+  }
+
+  private shouldPreserveMissingPendingSteer(localThreadId: string, turnId: string) {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record?.providerTurnId || record.lastTurnCompletedAt) {
+      return false;
+    }
+    if (record.status === 'failed' || record.status === 'interrupted') {
+      return false;
+    }
+    if (this.runtimeSupportsLiveRunningTurnInput(record.provider)) {
+      return false;
+    }
+    const activeDisplayTurnId = this.liveState.displayTurnIdForRuntimeTurn(
+      localThreadId,
+      record.providerTurnId,
+    );
+    return record.providerTurnId === turnId || activeDisplayTurnId === turnId;
   }
 
   private scheduleQueuedContinuationDrain(localThreadId: string, turnId: string) {

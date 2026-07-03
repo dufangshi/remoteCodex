@@ -23,6 +23,7 @@ interface ThreadAuxiliaryStateStoreCallbacks {
   emitPendingSteerUpdated(localThreadId: string, turnId?: string): void;
   invalidateThreadDetailCache(localThreadId: string): void;
   shouldPreserveCompletedPendingSteer?(localThreadId: string, turnId: string): boolean;
+  shouldPreserveMissingPendingSteer?(localThreadId: string, turnId: string): boolean;
 }
 
 export class ThreadAuxiliaryStateStore {
@@ -189,6 +190,9 @@ export class ThreadAuxiliaryStateStore {
     for (const record of records) {
       const turn = turnsById.get(record.turnId);
       if (!turn) {
+        if (this.callbacks.shouldPreserveMissingPendingSteer?.(localThreadId, record.turnId)) {
+          continue;
+        }
         deleteThreadPendingSteerRecordById(this.db, record.id);
         removed = true;
         continue;

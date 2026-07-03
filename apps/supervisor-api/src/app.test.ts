@@ -2136,6 +2136,9 @@ describe('supervisor api', () => {
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ],
     });
+    updateThreadRecord(app.services.database.db, createResponse.json().id, {
+      status: 'idle',
+    });
 
     const runningPromptResponse = await app.inject({
       method: 'POST',
