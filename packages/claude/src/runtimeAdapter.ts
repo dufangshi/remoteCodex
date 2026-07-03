@@ -513,6 +513,21 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
     defaultReasoningEffort: 'medium',
   },
   {
+    id: 'fable',
+    model: 'fable',
+    displayName: 'Claude Fable',
+    description: 'Claude Code Fable model alias.',
+    isDefault: false,
+    hidden: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'Low effort' },
+      { reasoningEffort: 'medium', description: 'Medium effort' },
+      { reasoningEffort: 'high', description: 'High effort' },
+      { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+    ],
+    defaultReasoningEffort: 'medium',
+  },
+  {
     id: 'opus',
     model: 'opus',
     displayName: 'Claude Opus',
@@ -589,12 +604,16 @@ function withClaudeCodeModelAliases(models: AgentModel[]) {
   const output = [...models];
   const defaultSonnet = DEFAULT_CLAUDE_MODELS[0]!;
   const oneMillionSonnet = DEFAULT_CLAUDE_MODELS[1]!;
+  const fable = DEFAULT_CLAUDE_MODELS[2]!;
   const hasSonnetAlias = output.some((model) => model.model === 'sonnet');
   if (!hasSonnetAlias) {
     output.unshift(defaultSonnet);
   }
   if (!output.some((model) => model.model === 'sonnet[1m]')) {
     output.splice(1, 0, oneMillionSonnet);
+  }
+  if (!output.some((model) => model.model === 'fable')) {
+    output.splice(2, 0, fable);
   }
   return output.map((model, index) => ({
     ...model,

@@ -575,7 +575,7 @@ describe('ClaudeRuntimeAdapter', () => {
     await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
   });
 
-  it('exposes the Claude Code Sonnet 1M option and enables the 1M context beta', async () => {
+  it('exposes Claude Code model aliases and enables the 1M context beta', async () => {
     const sdkOptions: Record<string, unknown>[] = [];
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
@@ -599,6 +599,11 @@ describe('ClaudeRuntimeAdapter', () => {
         expect.objectContaining({
           model: 'sonnet[1m]',
           displayName: 'Claude Sonnet 1M',
+        }),
+        expect.objectContaining({
+          model: 'fable',
+          displayName: 'Claude Fable',
+          defaultReasoningEffort: 'medium',
         }),
       ]),
     );

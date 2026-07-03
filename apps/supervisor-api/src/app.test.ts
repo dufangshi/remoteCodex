@@ -2181,6 +2181,19 @@ describe('supervisor api', () => {
       activeTurnId: 'claude-turn-1',
     });
 
+    const immediateDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(immediateDetailResponse.statusCode).toBe(200);
+    expect(immediateDetailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-1',
+      status: 'inProgress',
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: 'userMessage', text: 'Say hello.' }),
+      ]),
+    });
+
     await new Promise((resolve) => setTimeout(resolve, 0));
     const detailResponse = await app.inject({
       method: 'GET',

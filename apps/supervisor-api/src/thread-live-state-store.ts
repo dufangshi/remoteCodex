@@ -301,6 +301,15 @@ export class ThreadLiveStateStore {
     return visibleTurnIds.has(reconciled.turnId) ? reconciled : null;
   }
 
+  getLiveItemsForTurn(localThreadId: string, turnId: string | null | undefined) {
+    if (!turnId) {
+      return null;
+    }
+
+    const current = this.threadLiveItems.get(localThreadId);
+    return current?.turnId === turnId ? current : null;
+  }
+
   upsertLiveItem(
     localThreadId: string,
     turnId: string,

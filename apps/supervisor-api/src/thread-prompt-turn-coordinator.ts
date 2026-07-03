@@ -164,7 +164,6 @@ export class ThreadPromptTurnCoordinator {
 
     updateThreadRecord(this.db, localThreadId, patch);
     this.liveState.setLivePlan(localThreadId, null);
-    this.liveState.setLiveItems(localThreadId, null);
     if (
       shouldResetThreadContextUsageForTurnStart(
         this.callbacks.getThreadContextUsage(localThreadId),

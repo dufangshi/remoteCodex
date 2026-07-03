@@ -53,6 +53,7 @@ export interface ThreadDetailRecord {
   workspaceId: string;
   provider?: string | null;
   providerSessionId: string | null;
+  providerTurnId?: string | null;
   collaborationMode: string | null;
   model: string | null;
   reasoningEffort: string | null;
@@ -248,8 +249,15 @@ export class ThreadDetailAssembler {
     const visibleTurns = this.input.liveState
       .visibleRemoteTurns(input.localThreadId, remoteSession.turns)
       .map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails));
-    const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
+    const visibleTurnsWithActiveLiveTurn = appendActiveLiveTurnIfMissing(
       visibleTurns,
+      input.localThreadId,
+      updated.providerTurnId,
+      this.input.liveState,
+      input.turnMetadataById,
+    );
+    const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
+      visibleTurnsWithActiveLiveTurn,
       input.localThreadId,
       this.input.liveState,
     );
@@ -415,6 +423,37 @@ function applyLiveAgentMessageOrderingHints(
         }
       : turn;
   });
+}
+
+function appendActiveLiveTurnIfMissing(
+  turns: ThreadTurnDto[],
+  localThreadId: string,
+  providerTurnId: string | null | undefined,
+  liveState: ThreadLiveStateStore,
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+) {
+  const displayTurnId =
+    liveState.displayTurnIdForRuntimeTurn(localThreadId, providerTurnId) ??
+    providerTurnId;
+  if (!displayTurnId || turns.some((turn) => turn.id === displayTurnId)) {
+    return turns;
+  }
+
+  const liveItems = liveState.getLiveItemsForTurn(localThreadId, displayTurnId);
+  if (!liveItems || liveItems.items.length === 0) {
+    return turns;
+  }
+
+  return [
+    ...turns,
+    {
+      id: displayTurnId,
+      startedAt: metadataById.get(displayTurnId)?.createdAt ?? null,
+      status: 'inProgress' as const,
+      error: null,
+      items: sortHistoryItemsBySequence(liveItems.items),
+    },
+  ];
 }
 
 export function buildTurnDto(

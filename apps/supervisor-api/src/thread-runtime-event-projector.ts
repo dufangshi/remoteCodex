@@ -255,12 +255,20 @@ export class ThreadRuntimeEventProjector {
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
+        liveState.setLiveItems(record.id, null);
         liveState.resetRecordedTurnItemOrder(record.id, turnId);
         for (const item of event.turn.items) {
-          liveState.recordTurnItemOrder(record.id, turnId, item.id);
+          const sequence = liveState.recordTurnItemOrder(record.id, turnId, item.id);
+          const eventTimestamp = new Date().toISOString();
+          const orderedLiveItem = {
+            ...withHistoryItemCreatedAt(item, eventTimestamp),
+            sequence,
+          };
+          const transportLiveItem = deferHistoryItemDetailForTransport(orderedLiveItem);
+          callbacks.persistLiveHistoryItem(record.id, turnId, orderedLiveItem);
+          liveState.upsertLiveItem(record.id, turnId, transportLiveItem);
         }
         liveState.setLivePlan(record.id, null);
-        liveState.setLiveItems(record.id, null);
         if (shouldResetThreadContextUsageForTurnStart(callbacks.getThreadContextUsage(record.id))) {
           callbacks.resetThreadContextUsage(record.id, true);
         }
