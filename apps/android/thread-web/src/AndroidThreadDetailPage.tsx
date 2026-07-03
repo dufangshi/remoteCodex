@@ -580,6 +580,30 @@ export function AndroidThreadDetailPage({
     [client, deletingThread],
   );
 
+  const cancelPendingSteer = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      try {
+        const updatedDetail = await client.cancelPendingSteer(
+          threadId,
+          pendingSteerId,
+        );
+        detailRef.current = updatedDetail;
+        setDetail(updatedDetail);
+        setThreads((current) => replaceThread(current, updatedDetail.thread));
+        postAndroidMessage({
+          type: 'threadWebDebug',
+          message: `pending-steer:canceled:${pendingSteerId}`,
+        });
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postAndroidMessage({ type: 'reportFatalError', message });
+        throw caught;
+      }
+    },
+    [client],
+  );
+
   const loadExportTurns = useCallback(async () => {
     const currentDetail = detailRef.current;
     if (!currentDetail) {
@@ -751,6 +775,7 @@ export function AndroidThreadDetailPage({
       },
       renameThread,
       deleteThread: setDeletingThread,
+      cancelPendingSteer,
       updateSettings: updateThreadSettings,
       async loadHistoryItemDetail(itemId) {
         const currentDetail = detailRef.current;
@@ -787,6 +812,7 @@ export function AndroidThreadDetailPage({
     };
   }, [
     client,
+    cancelPendingSteer,
     renameThread,
     resolveWorkspaceId,
     submitPromptText,

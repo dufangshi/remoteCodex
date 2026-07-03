@@ -98,6 +98,34 @@ describe('IOSApiClient', () => {
     );
   });
 
+  it('cancels pending queued prompts through the supervisor API', async () => {
+    const payload = {
+      thread: {
+        id: 'thread-1',
+        title: 'Canceled queue',
+      },
+      turns: [],
+      pendingSteers: [],
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(payload));
+    const client = new IOSApiClient(bootstrap());
+
+    await expect(
+      client.cancelPendingSteer('thread-1', 'pending-steer-1'),
+    ).resolves.toEqual(payload);
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      'https://remote-codex.example.test/api/threads/thread-1/pending-steers/pending-steer-1',
+    );
+    expect(init?.method).toBe('DELETE');
+    expect((init?.headers as Headers).get('authorization')).toBe(
+      'Bearer ios-token',
+    );
+  });
+
   it('loads earlier thread detail pages with beforeTurnId', async () => {
     const payload = {
       thread: {

@@ -164,21 +164,29 @@ function mockRect({
 }
 
 function toolTrigger(title: string) {
-  return screen.getByRole('button', {
-    name: new RegExp(`${title}\\s+Status:`, 'i'),
-  });
+  const matches = toolTriggers(title);
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected one ${title} tool trigger, found ${matches.length}.`,
+    );
+  }
+  return matches[0]!;
 }
 
 function queryToolTrigger(title: string) {
-  return screen.queryByRole('button', {
-    name: new RegExp(`${title}\\s+Status:`, 'i'),
-  });
+  return toolTriggers(title)[0] ?? null;
+}
+
+function escapeRegExp(input: string) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function toolTriggers(title: string) {
-  return screen.getAllByRole('button', {
-    name: new RegExp(`${title}\\s+Status:`, 'i'),
-  });
+  const namePattern = new RegExp(
+    `(Expand|Collapse) ${escapeRegExp(title)} history item`,
+    'i',
+  );
+  return screen.queryAllByRole('button', { name: namePattern });
 }
 
 function expandTool(title: string) {
@@ -2176,6 +2184,61 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('Accepted')).toBeInTheDocument();
     expectBefore(command, acceptedSteer);
     expectBefore(acceptedSteer, optimisticSteer);
+  });
+
+  it('cancels accepted queued steer bubbles through the timeline adapter', async () => {
+    const cancelPendingSteer = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadTimeline
+        threadId="thread-1"
+        liveOutput=""
+        adapter={{ cancelPendingSteer }}
+        pendingSteers={[
+          {
+            id: 'pending-steer-1',
+            clientRequestId: 'client-steer-1',
+            turnId: 'turn-1',
+            prompt: 'Queued prompt to cancel',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+        optimisticSteers={[
+          {
+            id: 'optimistic-steer-1',
+            clientRequestId: 'client-steer-2',
+            turnId: 'turn-1',
+            prompt: 'Optimistic prompt cannot cancel yet',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 5)).toISOString(),
+            status: 'steering',
+          },
+        ]}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Original running prompt',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(cancelPendingSteer).toHaveBeenCalledWith(
+        'thread-1',
+        'pending-steer-1',
+      );
+    });
   });
 
   it('renders live command items before queued steer bubbles in the active turn', () => {

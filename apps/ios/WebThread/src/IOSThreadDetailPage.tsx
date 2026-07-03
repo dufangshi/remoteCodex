@@ -1031,6 +1031,51 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     [bootstrap.fixture, client],
   );
 
+  const cancelPendingSteer = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      if (bootstrap.fixture) {
+        setDetail((current) => {
+          if (!current || current.thread.id !== threadId) {
+            return current;
+          }
+          const updatedDetail = {
+            ...current,
+            pendingSteers: current.pendingSteers.filter(
+              (steer) => steer.id !== pendingSteerId,
+            ),
+          };
+          detailRef.current = updatedDetail;
+          return updatedDetail;
+        });
+        postNativeMessage({
+          type: 'threadWebDebug',
+          message: `pending-steer:canceled:${pendingSteerId}`,
+        });
+        return;
+      }
+
+      try {
+        const updatedDetail = await client.cancelPendingSteer(
+          threadId,
+          pendingSteerId,
+        );
+        detailRef.current = updatedDetail;
+        setDetail(updatedDetail);
+        setThreads((current) => replaceThread(current, updatedDetail.thread));
+        postNativeMessage({
+          type: 'threadWebDebug',
+          message: `pending-steer:canceled:${pendingSteerId}`,
+        });
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postNativeMessage({ type: 'reportFatalError', message });
+        throw caught;
+      }
+    },
+    [bootstrap.fixture, client],
+  );
+
   useEffect(() => {
     if (
       bootstrap.fixture ||
@@ -2103,6 +2148,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         },
         renameThread,
         deleteThread,
+        cancelPendingSteer,
         sendPrompt: async (input) => {
           if (bootstrap.fixture || !detailRef.current) {
             return;
@@ -2158,6 +2204,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     [
       bootstrap,
       client,
+      cancelPendingSteer,
       deleteThread,
       pickNativeFiles,
       recordWorkspaceDebug,

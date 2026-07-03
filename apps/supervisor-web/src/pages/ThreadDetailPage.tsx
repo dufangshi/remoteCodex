@@ -64,6 +64,7 @@ import {
   updateThreadSettings,
   terminateShell,
   buildThreadImageAssetUrl,
+  cancelPendingSteer,
 } from '../lib/api';
 import {
   appendLatestTurns,
@@ -2135,6 +2136,36 @@ export function ThreadDetailPage() {
     [id],
   );
 
+  async function handleCancelPendingSteer(
+    threadId: string,
+    pendingSteerId: string,
+  ) {
+    setError(null);
+    try {
+      const updated = await cancelPendingSteer(threadId, pendingSteerId);
+      setDetail((current) =>
+        current
+          ? {
+              ...updated,
+              turns: appendLatestTurns(current.turns, updated.turns),
+            }
+          : updated,
+      );
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === updated.thread.id ? updated.thread : entry,
+        ),
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to cancel queued prompt.',
+      );
+      throw caught;
+    }
+  }
+
   async function handleCompactThread() {
     if (!detail) {
       return;
@@ -2863,6 +2894,7 @@ export function ThreadDetailPage() {
       getNewThreadHref,
       renameThread: handleRenameThread,
       deleteThread: setDeletingThread,
+      cancelPendingSteer: handleCancelPendingSteer,
       sendPrompt: handlePrompt,
       interrupt: handleInterrupt,
       compact: handleCompactThread,
@@ -2878,6 +2910,7 @@ export function ThreadDetailPage() {
       getNewThreadHref,
       getThreadHref,
       handleCompactThread,
+      handleCancelPendingSteer,
       handleInterrupt,
       handleLoadHistoryItemDetail,
       handleOpenWorkspaceFile,

@@ -301,6 +301,15 @@ export class AndroidApiClient {
     );
   }
 
+  cancelPendingSteer(threadId: string, pendingSteerId: string) {
+    return this.requestJson<ThreadDetailDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/pending-steers/${encodeURIComponent(pendingSteerId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
+
   sendPrompt(threadId: string, prompt: string) {
     return this.requestJson<ThreadDto>(
       `/api/threads/${encodeURIComponent(threadId)}/prompt`,

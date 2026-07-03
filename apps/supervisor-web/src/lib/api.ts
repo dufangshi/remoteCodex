@@ -1058,6 +1058,15 @@ export function deleteThread(id: string) {
   });
 }
 
+export function cancelPendingSteer(id: string, pendingSteerId: string) {
+  return request<ThreadDetailDto>(
+    `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
 export function updateThreadSettings(id: string, input: UpdateThreadSettingsInput) {
   return request<ThreadDto>(`/api/threads/${id}/settings`, {
     method: 'PATCH',
