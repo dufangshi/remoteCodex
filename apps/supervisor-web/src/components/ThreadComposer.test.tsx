@@ -387,6 +387,35 @@ describe('ThreadComposer', () => {
     expect(screen.getByRole('button', { name: /\/btw/i })).toBeDisabled();
   });
 
+  it('opens backend slash commands when typing slash into an empty prompt', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={[
+          {
+            action: 'prompt',
+            command: '/compact',
+            label: '/compact',
+            description: 'Claude Code slash command discovered from the SDK session.',
+          },
+        ]}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt' }), {
+      key: '/',
+      code: 'Slash',
+    });
+
+    expect(screen.getByRole('button', { name: /\/compact/i })).toBeInTheDocument();
+  });
+
   it('does not expose backend tools before capabilities are available', () => {
     render(
       <ThreadComposer

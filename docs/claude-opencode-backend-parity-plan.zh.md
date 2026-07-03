@@ -175,7 +175,7 @@ Implementation notes 2026-07-03 Android UI update:
 Checklist:
 
 - [x] 列出当前 Claude Code CLI/SDK 支持的 slash commands，并记录哪些可通过普通 prompt 透传，哪些需要 runtime API 特殊处理。
-- [ ] 在 Web/iOS/Android composer 中，输入 `/` 时展示 backend-aware slash command 菜单。
+- [x] 在 Web/iOS/Android composer 中，输入 `/` 时展示 backend-aware slash command 菜单。
 - [x] Claude backend 下根据 SDK `system/init.slash_commands` 动态包含当前 session 实际支持的命令；`/mcp` 保留专用 panel。
 - [ ] OpenCode backend 下展示 OpenCode 自己支持的 slash commands，例如 `/compact`、`/fork`、`/mcp`。
 - [x] 不同 backend 的 slash command 菜单不可混用：菜单来自当前 runtime 的 `managementSchema.toolboxItems`。
@@ -202,7 +202,8 @@ Implementation notes 2026-07-03 Phase 5 update:
 - 当前 SDK session 未列出 `/btw`。Claude runtime 现在会把 `/btw` 下发为 disabled `unsupported` toolbox item，描述为当前 Claude Agent SDK session 未暴露，可能需要交互式 Claude TTY 或不同 Claude Code 版本。
 - Claude runtime 现在会在 `system/init` 时刷新 `managementSchema.toolboxItems`：发现的 slash commands 使用 `action: "prompt"`，点击后向 composer 插入命令文本；`/mcp` 继续使用专用 `action: "mcp"` panel。
 - 已同步外部 thread-ui shared schema 和 composer toolbox：新增 `prompt`、`unsupported` actions；`prompt` 插入命令文本，`unsupported` 显示 `Unavailable` 且禁用。
-- 已通过 focused tests 覆盖：Claude adapter 会从 SDK init 更新 slash toolbox；Web composer 会把 backend prompt slash command 插入 prompt，并禁用 unsupported item。
+- 已补齐空 prompt 输入 `/` 打开 backend-aware slash command 菜单；为避免误吞正文中的斜杠，只在 chat prompt 为空且菜单项可用时拦截。
+- 已通过 focused tests 覆盖：Claude adapter 会从 SDK init 更新 slash toolbox；Web composer 会把 backend prompt slash command 插入 prompt、禁用 unsupported item，并在空 prompt 输入 `/` 时打开菜单。
 
 ## Current Local Baseline
 
