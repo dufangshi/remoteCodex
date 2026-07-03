@@ -99,10 +99,10 @@ E2E gate:
 
 - [x] Web/API 真实 Claude smoke 通过。
 - [x] iOS 真实 Claude prompt smoke 通过。
-- [ ] Android 真实 Claude prompt smoke 通过。
+- [x] Android 真实 Claude prompt smoke 通过。
 - [x] Web/API 真实 OpenCode smoke 通过。
 - [x] iOS 真实 OpenCode prompt smoke 通过。
-- [ ] Android 真实 OpenCode prompt smoke 通过。
+- [x] Android 真实 OpenCode prompt smoke 通过。
 
 ## Phase 4: Running-Turn Steer Support
 
@@ -193,11 +193,12 @@ E2E gate:
 - [x] iOS targeted UI test `testLiveLocalThreadWebViewComposerSubmitsRealClaudeHaikuPrompt` 通过：thread `1baab8a1-265b-4f80-9ba5-28b15f4a8a48`，provider `claude`，model `haiku`，status `idle`，transcript 命中 `IOS_CLAUDE_HAIKU_WEBVIEW_PROMPT_OK_4A9DA817`。
 - [x] iOS targeted UI test `testLiveLocalThreadWebViewComposerSubmitsRealOpenCodePrompt` 通过：thread `b1422775-c7c3-4140-9ee1-e870178923ba`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`，transcript 命中 `IOS_OPENCODE_WEBVIEW_PROMPT_OK_EDEDA646`。
 - [x] Android debug APK 使用 `./gradlew --no-configuration-cache :app:assembleDebug` 构建通过，并安装到 `emulator-5554` 后完成 UI 创建 thread 验证。
+- [x] Android AOSP WebView fixture 真实 Claude prompt smoke 通过：thread `e72d1035-7f44-4f90-be28-6772fed85132`，provider `claude`，model `haiku`，status `idle`，transcript/UI 命中 `ANDROID_CLAUDE_HAIKU_WEBVIEW_PROMPT_OK_7C666B23`。
+- [x] Android AOSP WebView fixture 真实 OpenCode prompt smoke 通过：thread `0f388776-55da-452b-8d1b-ed0e32a7b600`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`，transcript/UI 命中 `ANDROID_OPENCODE_WEBVIEW_PROMPT_OK_9C6CD0A7`。
 
 ## Remaining High-Value Gaps
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Android 还需要跑真实 prompt smoke，不只验证创建 thread。
 - [ ] Claude/OpenCode running-turn steer 仍未实现或验证。
 - [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
