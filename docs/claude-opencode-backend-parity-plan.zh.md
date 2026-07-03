@@ -126,6 +126,15 @@ E2E gate:
 - [ ] Claude 长任务运行中，从 Android 输入追加信息，最终 transcript 包含并遵循追加信息。
 - [ ] OpenCode 同样三端通过。
 
+Implementation notes 2026-07-03:
+
+- 当前后端根因已定位：`ThreadService.sendPrompt` 在 `record.providerTurnId && record.status === "running"` 且 `resolvePromptTurnConfig().supportsRunningTurnInput === false` 时直接返回 409：`This backend does not support sending input while a turn is running.`。
+- `supportsRunningTurnInput` 当前只在 runtime 同时暴露 `sendInput` 且 capabilities `turns.steer=true` 时成立；Codex 满足，Claude/OpenCode 当前都不满足。
+- 现有架构已有 `thread_pending_steers`、`pendingSteers` DTO、Web/iOS/Android shared thread-ui 展示 pending steer 的基础能力；这些目前主要服务 Codex live steer。
+- 对 Claude/OpenCode 的最小可靠方案应在后端实现 queued continuation fallback：运行中 prompt 先写入 pending steer；当前 turn 完成后，由 turn completion path 启动 hidden continuation turn，并使用原 turn 作为 `displayTurnId`，让 UI 看起来仍属于同一个可见 turn。
+- 关键切入点：`ThreadRuntimeEventProjector` 的 `turn.completed` 分支目前会 `clearPendingSteersForTurn`；queued fallback 需要在清理前读取 pending steer，完成后按顺序启动 continuation，interrupt path 则继续清空 pending steer，避免过期指令自动执行。
+- 不建议只把 409 改成成功并保留 pending steer：这样 pending steer 会在 turn 完成 reconcile 时消失，但不会被 Claude/OpenCode 执行。
+
 ## Phase 5: Claude Slash Command Parity
 
 目标：支持 Claude Code 原生 slash command 体验，包含用户提到的 `/btw`。实施时需要用当前 Claude CLI/SDK 实际确认命令语义。
@@ -145,6 +154,13 @@ E2E gate:
 - [ ] Claude `/btw` 在 Web/iOS/Android 的行为一致。
 - [ ] Claude `/mcp` 在三端能打开或显示合理结果。
 - [ ] OpenCode `/compact` 或 `/mcp` 在三端行为一致。
+
+Implementation notes 2026-07-03:
+
+- 本机 `claude --help` 只列出 CLI 参数和子命令，没有列出交互式 slash command 清单；`/btw` 需要继续通过 Claude Code 交互模式或 SDK 能力确认。
+- 当前 runtime toolbox 暴露情况：Claude 只暴露 `/mcp`；OpenCode 暴露 `/compact`、`/fork`、`/mcp`。
+- Web/iOS/Android 的 thread composer 均消费 backend `managementSchema.toolboxItems`，因此 backend-aware slash command 菜单可以通过 runtime toolbox schema 统一下发。
+- thread composer 实现在外部本地依赖 `/Users/mac/dev/remote-codex-thread-ui/packages/thread-ui`。如果新增“prompt slash item”（例如点击 `/btw` 插入 `/btw ` 到输入框），需要同步更新该包及其 shared toolbox action/schema，再回到本 repo 重建 Web/iOS/Android thread bundle。
 
 ## Current Local Baseline
 
