@@ -149,6 +149,50 @@ final class WorkspaceDetailViewModelTests: XCTestCase {
         XCTAssertEqual(threadId, "t-haiku")
     }
 
+    func testUnavailableProviderCannotStartThreadFromViewModel() async throws {
+        var startThreadRequests = 0
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch (request.method, request.url.path) {
+            case ("GET", "/api/agent-runtimes"):
+                return SupervisorHTTPResponse(
+                    statusCode: 200,
+                    body: Data(Self.agentBackendsWithUnavailableClaudeOnlyJSON.utf8),
+                    headers: [:]
+                )
+            case ("POST", "/api/threads/start"):
+                startThreadRequests += 1
+                return SupervisorHTTPResponse(statusCode: 500, body: Data(), headers: [:])
+            default:
+                XCTFail("Unexpected request \(request.method) \(request.url)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let environment = try AppEnvironment(
+            settingsStore: AppSettingsStore(
+                defaults: XCTUnwrap(UserDefaults(suiteName: "WorkspaceDetailViewModelTests-\(UUID().uuidString)")),
+                tokenStore: MemoryTokenStore()
+            )
+        ) { config in
+            SupervisorAPIClient(config: config, transport: transport)
+        }
+        let model = WorkspaceDetailViewModel(
+            environment: environment,
+            connection: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            workspaceId: "w1"
+        )
+
+        await model.loadNewThreadOptions()
+        model.newThreadProvider = "claude"
+        model.newThreadModel = "haiku"
+        let threadId = await model.startThread()
+
+        XCTAssertNil(threadId)
+        XCTAssertFalse(model.canStartNewThread)
+        XCTAssertEqual(model.newThreadOptionsError, "Install this runtime before creating a thread.")
+        XCTAssertEqual(startThreadRequests, 0)
+    }
+
     func testRefreshStopsWhenWorkspaceNoLongerExists() async throws {
         let transport = MockSupervisorTransport()
         transport.handler = { request in
@@ -495,6 +539,10 @@ private extension WorkspaceDetailViewModelTests {
 
     static let agentBackendsWithUnavailableClaudeJSON = """
     [\(codexBackendJSON), \(unavailableClaudeBackendJSON)]
+    """
+
+    static let agentBackendsWithUnavailableClaudeOnlyJSON = """
+    [\(unavailableClaudeBackendJSON)]
     """
 
     static let agentBackendsWithInstalledClaudeJSON = """

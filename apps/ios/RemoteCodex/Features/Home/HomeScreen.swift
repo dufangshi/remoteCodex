@@ -148,6 +148,10 @@ final class HomeViewModel: ObservableObject {
     }
 
     func startThread() async -> String? {
+        guard canStartNewThread else {
+            newThreadOptionsError = "Install this runtime before creating a thread."
+            return nil
+        }
         var createdThreadId: String?
         await runBusy {
             let thread = try await client.startThread(

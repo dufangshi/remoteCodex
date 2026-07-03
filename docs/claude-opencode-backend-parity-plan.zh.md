@@ -30,7 +30,7 @@ Checklist:
 E2E gate:
 
 - [x] 本机 supervisor API 启动后，Web、iOS、Android 均能看到同一组 backend 状态。
-- [ ] 未安装 runtime 时，状态显示为不可用，且不会误允许创建 thread。
+- [x] 未安装 runtime 时，状态显示为不可用，且不会误允许创建 thread。
 
 ## Phase 1: Unified Backend Picker And Install/Update UI
 
@@ -277,6 +277,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] Phase 1 install recovery targeted 覆盖：Web `ThreadNewPage.test.tsx` 验证 unavailable Claude 置灰、点击 Install、刷新后自动选择 Claude `haiku` 并创建 thread；iOS `WorkspaceDetailViewModelTests/testInstallingUnavailableProviderSelectsItAndLoadsModels` 验证安装后选择刚安装 provider 并加载模型；Android native dialog 修复为安装成功后切换刚安装 provider，并在 backend 列表刷新时重新评估模型加载。
 - [x] Phase 1 relay device install path 覆盖：supervisor-api focused regression `runs backend install commands on the relayed device supervisor` 验证 relay mode 下直连 install 被 auth 拒绝，而 `createRelayRequestHandler` 转发的 `POST /api/agent-runtimes/claude/install` 会在 device supervisor 执行 fake install command 并返回 enabled backend；Android/iOS API client 单测已覆盖 relay device URL 拼接。
 - [x] Web Phase 1 runtime install availability E2E 通过：`REMOTE_CODEX_RUNTIME_INSTALL_E2E=1 ... pnpm exec playwright test e2e/runtime-install-availability.spec.ts --project=desktop-chromium` 使用临时 `CLAUDE_COMMAND` shim 和 `npm` shim 验证 Claude unavailable 灰态、Install 后恢复为可选 backend、Update 后仍保持 enabled；未修改本机全局 Claude/npm 安装。
+- [x] Phase 0 unavailable guard 覆盖：iOS `WorkspaceDetailViewModelTests/testUnavailableProviderCannotStartThreadFromViewModel` 通过，确认不可用 Claude 即使被设为当前 provider 也不会发出 `/api/threads/start`；Web/Android 创建 thread 按钮均以 `canStartSession` 禁用不可用 backend，相关 install recovery focused tests 已覆盖安装恢复后才能创建。
 - [x] Phase 0 installer 策略评估：Claude/OpenCode SDK 已作为 workspace package dependency 存在，runtime import 先走本地 package resolution、再 fallback 到 npm global；安装状态检测也会识别 workspace `packages/claude/node_modules` 与 `packages/opencode/node_modules`。安装/更新命令仍应保留全局 CLI+SDK 安装，因为 `claude`、`opencode` 可执行文件必须在 supervisor 所在设备的 configured command/PATH 中可见；不建议改成只写 workspace dependency。
 - [x] Phase 4 SDK live-input 调研：本地 `@anthropic-ai/claude-agent-sdk` 暴露的是单次 `query()`/`streamInput(prompt)` query flow，当前 adapter 无可复用的 running query input channel；本地 `@opencode-ai/sdk/v2` session surface 使用 `session.prompt(...)`、`abort(...)`、`wait(...)`、`messages(...)`，未暴露向运行中 prompt 注入 input 的方法。因此 Claude/OpenCode 保持 queued continuation fallback，暂不把 `turns.steer` 改为 true。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。

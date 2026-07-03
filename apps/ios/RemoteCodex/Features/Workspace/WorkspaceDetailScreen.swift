@@ -106,6 +106,10 @@ final class WorkspaceDetailViewModel: ObservableObject {
     }
 
     func startThread() async -> String? {
+        guard canStartNewThread else {
+            newThreadOptionsError = "Install this runtime before creating a thread."
+            return nil
+        }
         var threadId: String?
         await runAction {
             let thread = try await client.startThread(
