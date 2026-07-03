@@ -353,7 +353,7 @@ private fun LoadEarlierRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = if (loading) "Loading earlier..." else "Load 10 earlier",
+            text = if (loading) "Loading earlier..." else "Load 3 earlier",
             modifier = Modifier.weight(1f),
             color = ThreadColors.ForegroundSoft,
             style = MaterialTheme.typography.labelMedium,

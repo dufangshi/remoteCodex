@@ -42,7 +42,8 @@ interface AndroidThreadDetailPageProps {
   bootstrap: AndroidThreadBootstrap;
 }
 
-const THREAD_HISTORY_INITIAL_LIMIT = 30;
+const THREAD_HISTORY_INITIAL_LIMIT = 3;
+const THREAD_HISTORY_PAGE_SIZE = 3;
 
 type PanelState<T> = {
   status: 'idle' | 'loading' | 'ready' | 'failed';
@@ -66,6 +67,27 @@ function replaceThread(threads: ThreadDto[], updated: ThreadDto) {
 
 function removeThread(threads: ThreadDto[], threadId: string) {
   return threads.filter((thread) => thread.id !== threadId);
+}
+
+function mergeEarlierThreadHistory(
+  current: ThreadDetailDto,
+  earlier: ThreadDetailDto,
+) {
+  const existingIds = new Set(current.turns.map((turn) => turn.id));
+  const mergedTurns = [
+    ...earlier.turns.filter((turn) => !existingIds.has(turn.id)),
+    ...current.turns,
+  ];
+
+  return {
+    ...earlier,
+    turns: mergedTurns,
+    totalTurnCount: Math.max(
+      current.totalTurnCount ?? current.turns.length,
+      earlier.totalTurnCount ?? earlier.turns.length,
+      mergedTurns.length,
+    ),
+  };
 }
 
 function fileFromNativePick(
@@ -95,6 +117,9 @@ export function AndroidThreadDetailPage({
   const [exportBusy, setExportBusy] = useState(false);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const [historyLimit, setHistoryLimit] = useState(THREAD_HISTORY_INITIAL_LIMIT);
+  const historyLimitRef = useRef(THREAD_HISTORY_INITIAL_LIMIT);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const [exportTurnsState, setExportTurnsState] =
@@ -121,6 +146,15 @@ export function AndroidThreadDetailPage({
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  useEffect(() => {
+    historyLimitRef.current = historyLimit;
+  }, [historyLimit]);
+
+  useEffect(() => {
+    historyLimitRef.current = THREAD_HISTORY_INITIAL_LIMIT;
+    setHistoryLimit(THREAD_HISTORY_INITIAL_LIMIT);
+  }, [bootstrap.threadId]);
 
   useEffect(() => {
     setThemeMode(bootstrap.theme ?? 'system');
@@ -191,7 +225,7 @@ export function AndroidThreadDetailPage({
           client.listThreads(),
           client.fetchThreadDetail(
             bootstrap.threadId,
-            THREAD_HISTORY_INITIAL_LIMIT,
+            historyLimitRef.current,
           ),
         ]);
         detailRef.current = loadedDetail;
@@ -379,6 +413,51 @@ export function AndroidThreadDetailPage({
     },
     [client, refreshThreadDetail],
   );
+
+  const loadEarlierHistory = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail || loadingEarlier) {
+      return;
+    }
+    const beforeTurnId = currentDetail.turns[0]?.id;
+    const totalTurnCount =
+      currentDetail.totalTurnCount ?? currentDetail.turns.length;
+    if (
+      !bootstrap.threadId ||
+      !beforeTurnId ||
+      currentDetail.turns.length >= totalTurnCount
+    ) {
+      return;
+    }
+
+    setLoadingEarlier(true);
+    try {
+      const loadedDetail = await client.fetchThreadDetail(bootstrap.threadId, {
+        limit: THREAD_HISTORY_PAGE_SIZE,
+        beforeTurnId,
+      });
+      const mergedDetail = mergeEarlierThreadHistory(
+        detailRef.current ?? currentDetail,
+        loadedDetail,
+      );
+      historyLimitRef.current = mergedDetail.turns.length;
+      setHistoryLimit(mergedDetail.turns.length);
+      detailRef.current = mergedDetail;
+      setDetail(mergedDetail);
+      setThreads((current) => replaceThread(current, mergedDetail.thread));
+      setError(null);
+      postAndroidMessage({
+        type: 'threadWebDebug',
+        message: `history-page:loaded:${loadedDetail.turns.length}:${mergedDetail.totalTurnCount ?? mergedDetail.turns.length}`,
+      });
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      postAndroidMessage({ type: 'reportFatalError', message });
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }, [bootstrap.threadId, client, loadingEarlier]);
 
   const updateThreadSettings = useCallback(
     async (input: UpdateThreadSettingsInput) => {
@@ -920,6 +999,8 @@ export function AndroidThreadDetailPage({
         timelineProps={{
           scrollRequestKey,
           onTailVisibilityChange: setFollowTail,
+          loadingEarlier,
+          onLoadEarlier: loadEarlierHistory,
         }}
         shellUnavailableContent={
           <div className="android-thread-message">

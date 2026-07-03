@@ -86,6 +86,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
 
+private const val THREAD_DETAIL_INITIAL_TURN_LIMIT = 3
+private const val THREAD_DETAIL_PAGE_TURN_LIMIT = 3
+
 @Composable
 fun ThreadDetailScreen(
     threadId: String,
@@ -1021,7 +1024,11 @@ fun ThreadDetailScreen(
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                client.fetchThreadDetail(threadId, limit = 10, beforeTurnId = beforeTurnId)
+                client.fetchThreadDetail(
+                    threadId,
+                    limit = THREAD_DETAIL_PAGE_TURN_LIMIT,
+                    beforeTurnId = beforeTurnId,
+                )
             }
         }
         pendingLoadEarlier = false
@@ -1529,7 +1536,7 @@ private fun SupervisorApiClient.fetchThreadDetailBundle(
     overrideWorkspaceTruncated: Boolean? = null,
     includeShell: Boolean = AndroidFeatureFlags.ShellEnabled,
 ): ThreadDetailBundle {
-    val detail = fetchThreadDetail(threadId, limit = 30)
+    val detail = fetchThreadDetail(threadId, limit = THREAD_DETAIL_INITIAL_TURN_LIMIT)
     val tree = runCatching { fetchWorkspaceTree(detail.workspace.id) }.getOrNull()
     val previewPath = selectedWorkspaceFilePath?.takeIf { it.isNotBlank() } ?: tree?.firstFilePath()
     val filePreview = previewPath?.let { path ->

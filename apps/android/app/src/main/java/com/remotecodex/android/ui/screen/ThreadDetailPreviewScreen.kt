@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -64,6 +65,7 @@ import com.remotecodex.android.ui.components.WorkspacePanel
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @Composable
@@ -170,6 +172,38 @@ fun ThreadDetailSurface(
         if (timelineTailVisible) {
             timelineListState.scrollToItem(timelineLastIndex(displayedDetail))
         }
+    }
+    var timelineUserScrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(timelineListState) {
+        snapshotFlow { timelineListState.isScrollInProgress }
+            .collect { scrolling ->
+                if (scrolling) {
+                    timelineUserScrolled = true
+                }
+            }
+    }
+    LaunchedEffect(
+        timelineListState,
+        timelineUserScrolled,
+        displayedDetail.timelineAuxiliary.canLoadEarlier,
+        displayedDetail.timelineAuxiliary.loadingEarlier,
+        onLoadEarlier,
+    ) {
+        if (!timelineUserScrolled || onLoadEarlier == null) {
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            displayedDetail.timelineAuxiliary.canLoadEarlier &&
+                !displayedDetail.timelineAuxiliary.loadingEarlier &&
+                timelineListState.firstVisibleItemIndex == 0 &&
+                timelineListState.firstVisibleItemScrollOffset <= 8
+        }
+            .distinctUntilChanged()
+            .collect { shouldLoadEarlier ->
+                if (shouldLoadEarlier) {
+                    onLoadEarlier()
+                }
+            }
     }
     GraphChatShellRoot {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {

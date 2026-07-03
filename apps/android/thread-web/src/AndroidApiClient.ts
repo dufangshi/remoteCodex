@@ -246,8 +246,19 @@ export class AndroidApiClient {
     });
   }
 
-  fetchThreadDetail(threadId: string, limit = 30) {
-    const params = new URLSearchParams({ limit: String(limit) });
+  fetchThreadDetail(
+    threadId: string,
+    input: number | { limit?: number; beforeTurnId?: string | null } = 3,
+  ) {
+    const params = new URLSearchParams();
+    if (typeof input === 'number') {
+      params.set('limit', String(input));
+    } else {
+      params.set('limit', String(input.limit ?? 3));
+      if (input.beforeTurnId) {
+        params.set('beforeTurnId', input.beforeTurnId);
+      }
+    }
     return this.requestJson<ThreadDetailDto>(
       `/api/threads/${encodeURIComponent(threadId)}?${params}`,
       { cache: 'no-store' },
