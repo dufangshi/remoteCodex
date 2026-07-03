@@ -101,7 +101,7 @@ import { useThreadListPolling } from './useThreadListPolling';
 import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
 
 const INITIAL_DETAIL_TURN_PAGE_SIZE = 3;
-const DETAIL_TURN_PAGE_SIZE = 10;
+const DETAIL_TURN_PAGE_SIZE = 3;
 const SUPERVISOR_SOCKET_RECONNECT_DELAY_MS = 1_000;
 const SUPERVISOR_HEALTHCHECK_INTERVAL_MS = 2_000;
 const SUPERVISOR_CONNECTION_STALE_MS = 5_500;

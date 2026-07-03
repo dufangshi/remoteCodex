@@ -1460,7 +1460,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
   });
 
-  it('loads three latest turns first, auto-loads one earlier page on upward scroll, then requires manual loading', async () => {
+  it('loads three latest turns first and pages older turns in three-turn chunks', async () => {
     const allTurns = Array.from({ length: 15 }, (_, index) => ({
       id: `turn-${index + 1}`,
       startedAt: new Date(Date.UTC(2026, 3, 10, 0, index, 0)).toISOString(),
@@ -1613,19 +1613,23 @@ describe('ThreadDetailPage', () => {
     FakeIntersectionObserver.triggerAll();
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-13'))).toBe(true);
     await waitFor(() => {
-      expect(screen.getByText('Prompt 3')).toBeInTheDocument();
+      expect(screen.getByText('Prompt 10')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Prompt 2')).not.toBeInTheDocument();
-    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
+    expect(screen.queryByText('Prompt 9')).not.toBeInTheDocument();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-10'))).toBe(false);
 
     FakeIntersectionObserver.triggerAll();
-    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
     await waitFor(() => {
-      expect(screen.getByText('Prompt 1')).toBeInTheDocument();
+      expect(screen.getByText('Prompt 7')).toBeInTheDocument();
     });
-    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(true);
+    expect(screen.queryByText('Prompt 6')).not.toBeInTheDocument();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-10'))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 3 earlier' }));
+    await waitFor(() => {
+      expect(screen.getByText('Prompt 4')).toBeInTheDocument();
+    });
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-7'))).toBe(true);
   });
 
   it('surfaces imported thread warnings before resume', async () => {

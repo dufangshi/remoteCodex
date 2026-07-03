@@ -213,27 +213,27 @@ describe('ThreadTimeline', () => {
     });
   });
 
-  it('shows the latest ten turns first and can load more history progressively', () => {
+  it('shows the latest three turns first and can load more history progressively', () => {
     const turns = Array.from({ length: 35 }, (_, index) => makeTurn(index + 1));
 
     render(<ThreadTimeline turns={turns} liveOutput="" />);
 
-    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 3 of 35 turns/)).toBeInTheDocument();
     expect(screen.queryByText('Turn 1')).not.toBeInTheDocument();
-    expect(screen.getByText('Turn 26')).toBeInTheDocument();
+    expect(screen.getByText('Turn 33')).toBeInTheDocument();
     expect(screen.getByText('Turn 35')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load 3 earlier' }));
 
-    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
-    expect(screen.getByText('Turn 16')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 6 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 30')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Load full history' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load 3 earlier' }));
 
-    expect(screen.getByText(/Showing 30 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 9 of 35 turns/)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Load full history' }),
     ).toBeInTheDocument();
@@ -249,8 +249,8 @@ describe('ThreadTimeline', () => {
 
   it('requests earlier turns from the server when history is paged remotely', () => {
     const onLoadEarlier = vi.fn();
-    const latestTurns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 26));
-    const earlierTurns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 16));
+    const latestTurns = Array.from({ length: 3 }, (_, index) => makeTurn(index + 33));
+    const earlierTurns = Array.from({ length: 3 }, (_, index) => makeTurn(index + 30));
     const { rerender } = render(
       <ThreadTimeline
         turns={latestTurns}
@@ -260,15 +260,15 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
-    expect(screen.getByText('Turn 26')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 3 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 33')).toBeInTheDocument();
     expect(screen.getByText('Turn 35')).toBeInTheDocument();
-    expect(screen.queryByText('Turn 25')).not.toBeInTheDocument();
+    expect(screen.queryByText('Turn 32')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load 3 earlier' }));
 
     expect(onLoadEarlier).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 3 of 35 turns/)).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Load full history' }),
     ).not.toBeInTheDocument();
@@ -282,17 +282,17 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
-    expect(screen.getByText('Turn 26')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 6 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 33')).toBeInTheDocument();
     expect(screen.getByText('Turn 35')).toBeInTheDocument();
-    expect(screen.getByText('Turn 16')).toBeInTheDocument();
+    expect(screen.getByText('Turn 30')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load 3 earlier' }));
 
     expect(onLoadEarlier).toHaveBeenCalledTimes(2);
-    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
-    expect(screen.getByText('Turn 16')).toBeInTheDocument();
-    expect(screen.queryByText('Turn 15')).not.toBeInTheDocument();
+    expect(screen.getByText(/Showing 6 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 30')).toBeInTheDocument();
+    expect(screen.queryByText('Turn 29')).not.toBeInTheDocument();
   });
 
   it('auto-loads one page of older remote history after the user scrolls to the loaded top', () => {
