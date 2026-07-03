@@ -112,12 +112,12 @@ Checklist:
 
 - [ ] 调研 Claude Agent SDK 是否支持向运行中 query/session 注入 input、request answer、或 continuation。
 - [ ] 如果 Claude SDK 支持 live input，实现 `sendInput` 并将 capabilities `turns.steer` 改为 true。
-- [ ] 如果 Claude SDK 不支持 live input，实现明确的 fallback：排队 continuation，在当前 turn 完成后自动开启隐藏 continuation turn，并保持 UI 看起来属于同一个可见 turn。
+- [x] 如果 Claude SDK 不支持 live input，实现明确的 fallback：排队 continuation，在当前 turn 完成后自动开启隐藏 continuation turn，并保持 UI 看起来属于同一个可见 turn。
 - [ ] 调研 OpenCode SDK 是否支持 running-turn input。
-- [ ] 对 OpenCode 实现 live steer 或同样的 queued continuation fallback。
-- [ ] UI 中运行中发送 prompt 时，不再直接报 “This backend does not support sending input while a turn is running.”。
+- [x] 对 OpenCode 实现 live steer 或同样的 queued continuation fallback。
+- [x] UI 中运行中发送 prompt 时，不再直接报 “This backend does not support sending input while a turn is running.”。
 - [ ] Pending queued steer 在 thread detail、WebView、native shell 中可见且可取消。
-- [ ] 中断后 pending steer 必须清空或标记取消，避免自动执行过期指令。
+- [x] 中断后 pending steer 必须清空或标记取消，避免自动执行过期指令。
 
 E2E gate:
 
@@ -134,6 +134,15 @@ Implementation notes 2026-07-03:
 - 对 Claude/OpenCode 的最小可靠方案应在后端实现 queued continuation fallback：运行中 prompt 先写入 pending steer；当前 turn 完成后，由 turn completion path 启动 hidden continuation turn，并使用原 turn 作为 `displayTurnId`，让 UI 看起来仍属于同一个可见 turn。
 - 关键切入点：`ThreadRuntimeEventProjector` 的 `turn.completed` 分支目前会 `clearPendingSteersForTurn`；queued fallback 需要在清理前读取 pending steer，完成后按顺序启动 continuation，interrupt path 则继续清空 pending steer，避免过期指令自动执行。
 - 不建议只把 409 改成成功并保留 pending steer：这样 pending steer 会在 turn 完成 reconcile 时消失，但不会被 Claude/OpenCode 执行。
+
+Implementation notes 2026-07-03 update:
+
+- 已实现通用 non-steer backend queued continuation fallback：当 runtime 没有 `sendInput` 或 `turns.steer=true` 时，`sendPrompt` 不再返回 409，而是写入 `thread_pending_steers`。
+- `ThreadRuntimeEventProjector` 在 completed turn 上按 provider 能力决定是否保留 pending steers；Claude/OpenCode 这类 non-steer runtime 会保留队列并触发 drain，Codex live steer 仍沿用完成后清理逻辑。
+- drain 逻辑会逐条消费 pending steer，启动 hidden continuation turn，并用原可见 turn 作为 `displayTurnId`；queued prompt 会作为本地 user message 投影回原 turn，最终 transcript 能看到用户追加输入。
+- interrupt path 会同时清理 runtime turn id 和 display turn id 上的 pending steers，避免中断后继续自动执行旧输入。
+- 已覆盖 supervisor-api fake Claude runtime：running 时第二条 prompt 返回 200、pending steer 可见、当前 turn 完成后自动启动 hidden continuation、最终同一可见 turn 包含两条 user message。
+- 尚未完成真实 Web/iOS/Android 长任务运行中追加输入 E2E；下一轮应优先用 Claude haiku 和 OpenCode 各跑一条长任务，确认真实 runtime transcript 遵循 queued prompt。
 
 ## Phase 5: Claude Slash Command Parity
 
@@ -186,6 +195,8 @@ Implementation notes 2026-07-03:
 - [x] 已运行 iOS `SupervisorAPIClientTests` 和 `WorkspaceDetailViewModelTests` targeted test，19 个测试通过。
 - [x] 已运行 Android `:app:compileDebugKotlin`。
 - [x] 已运行 Android `SupervisorApiClientTest` targeted unit test。
+- [x] 已运行 `pnpm --filter @remote-codex/supervisor-api run typecheck`。
+- [x] 已运行 `pnpm --filter @remote-codex/supervisor-api test -- app.test.ts`，171 个测试通过。
 - [x] 已完成真实 Claude `haiku` prompt smoke，回复命中 `CLAUDE_HAIKU_SMOKE_OK`。
 - [x] 已完成真实 OpenCode prompt smoke，回复命中 `OPENCODE_SMOKE_OK`。
 - [x] 已完成 Web/iOS/Android 三端真实 Claude 创建 thread E2E。
@@ -216,5 +227,5 @@ Implementation notes 2026-07-03:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode running-turn steer 仍未实现或验证。
+- [ ] Claude/OpenCode running-turn queued continuation 已有后端覆盖，但真实 Web/iOS/Android 长任务追加输入 E2E 仍未完成。
 - [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
