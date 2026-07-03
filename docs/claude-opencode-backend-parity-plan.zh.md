@@ -116,7 +116,7 @@ Checklist:
 - [ ] 调研 OpenCode SDK 是否支持 running-turn input。
 - [x] 对 OpenCode 实现 live steer 或同样的 queued continuation fallback。
 - [x] UI 中运行中发送 prompt 时，不再直接报 “This backend does not support sending input while a turn is running.”。
-- [ ] Pending queued steer 在 thread detail、WebView、native shell 中可见且可取消。
+- [x] Pending queued steer 在 thread detail、WebView、native shell 中可见且可取消。
 - [x] 中断后 pending steer 必须清空或标记取消，避免自动执行过期指令。
 
 E2E gate:
@@ -144,6 +144,8 @@ Implementation notes 2026-07-03 update:
 - 已覆盖 supervisor-api fake Claude runtime：running 时第二条 prompt 返回 200、pending steer 可见、当前 turn 完成后自动启动 hidden continuation、最终同一可见 turn 包含两条 user message。
 - 已修复 OpenCode 特有状态漂移：OpenCode 开始运行后可能出现 `providerTurnId` 非空但 thread `status=idle`，且历史 transcript turn id 会从 live UUID 变成 `opencode-turn-msg...`。queued fallback 现在只对 non-steer backend 放宽 active-turn 判定，并在 active turn 的远端历史 id 暂不匹配时保留 pending steer。
 - 已完成真实 API queued continuation smoke：Claude haiku 和 OpenCode 均能在运行中接收第二条 prompt，detail 中出现 pending steer，当前 turn 完成后自动 hidden continuation，最终 transcript 命中 start/append marker。
+- 已补齐 pending queued steer cancel：新增 supervisor API `DELETE /api/threads/:id/pending-steers/:pendingSteerId`，Web/iOS/Android WebThread client 均接入，shared thread-ui 对真实 pending steer 显示 `Cancel`，取消后不会触发 hidden continuation。
+- 同步修复 pending request option/submit 按钮的 accessible name，避免内部 control id 覆盖用户可见文案；`ThreadTimeline.test.tsx` 已覆盖 101 个 timeline 用例。
 - 尚未完成真实 Web/iOS/Android UI 长任务运行中追加输入 E2E；下一轮应优先复用本 API smoke 的 marker 方案，在三端 WebView composer 上验证同一行为。
 
 ## Phase 5: Claude Slash Command Parity
@@ -226,6 +228,11 @@ Implementation notes 2026-07-03:
 - [x] Android AOSP WebView fixture 真实 OpenCode prompt smoke 通过：thread `0f388776-55da-452b-8d1b-ed0e32a7b600`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`，transcript/UI 命中 `ANDROID_OPENCODE_WEBVIEW_PROMPT_OK_9C6CD0A7`。
 - [x] API Phase 4 Claude queued continuation smoke 通过：thread `ba0b7a62-286c-46d1-86b4-92543970d93f`，provider `claude`，model `haiku`，transcript 命中 `PHASE4_CLAUDE_QUEUE_START_944D1CF5` 和 `PHASE4_CLAUDE_QUEUE_APPEND_944D1CF5`。
 - [x] API Phase 4 OpenCode queued continuation smoke 通过：thread `a595a387-3c5c-4acb-b466-1f97d39e4942`，provider `opencode`，model `opencode/mimo-v2.5-free`，transcript 命中 `PHASE4_OPENCODE_QUEUE_START_A70D8ECF` 和 `PHASE4_OPENCODE_QUEUE_APPEND_A70D8ECF`。
+- [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
+- [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
+- [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
+- [x] 已运行 `pnpm --filter @remote-codex/supervisor-api run typecheck`、`pnpm --filter @remote-codex/supervisor-web run typecheck`、`pnpm --filter @remote-codex/ios-thread-web run typecheck`、`pnpm --filter @remote-codex/android-thread-web run typecheck`。
+- [x] 已运行 `pnpm --filter @remote-codex/supervisor-web run build`、`pnpm --filter @remote-codex/ios-thread-web run build`、`pnpm --filter @remote-codex/android-thread-web run build`，确认 shared thread-ui 新 dist 可被三端打包。
 
 ## Remaining High-Value Gaps
 
