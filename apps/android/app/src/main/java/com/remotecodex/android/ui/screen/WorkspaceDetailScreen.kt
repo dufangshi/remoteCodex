@@ -493,6 +493,7 @@ private fun WorkspaceStartThreadDialog(
         ) {
             WorkspaceBackendSelector(
                 backends = backends,
+                loading = backendsLoading,
                 selected = provider,
                 enabled = !busy && !backendsLoading && runtimeBusyProvider == null,
                 busyProvider = runtimeBusyProvider,
@@ -589,6 +590,7 @@ private fun WorkspaceStartThreadDialog(
 @OptIn(ExperimentalLayoutApi::class)
 private fun WorkspaceBackendSelector(
     backends: List<SupervisorAgentBackend>,
+    loading: Boolean,
     selected: String,
     enabled: Boolean,
     busyProvider: String?,
@@ -603,34 +605,27 @@ private fun WorkspaceBackendSelector(
             fontWeight = FontWeight.SemiBold,
         )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            backends.ifEmpty {
-                listOf(
-                    SupervisorAgentBackend(
-                        provider = "codex",
-                        displayName = "Codex",
-                        description = "",
-                        enabled = true,
-                        isDefault = true,
-                        statusState = "ready",
-                        statusDetail = null,
-                        installed = true,
-                        installedVersion = null,
-                        latestVersion = null,
-                        installAvailable = false,
-                        updateAvailable = false,
-                        busy = false,
-                        lastError = null,
-                        configArchives = false,
-                        buildRestart = false,
-                    ),
+            if (loading && backends.isEmpty()) {
+                Text(
+                    text = "Loading backend list...",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
                 )
-            }.forEach { backend ->
+            } else if (backends.isEmpty()) {
+                Text(
+                    text = "No agent providers are configured.",
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            backends.forEach { backend ->
                 val active = backend.provider == selected
                 val canStart = backend.canStartSession
                 val action = backend.runtimeActionLabel
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .semantics { contentDescription = "Workspace thread backend ${backend.provider}" }
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (active) ThreadColors.Surface else ThreadColors.SurfaceStrong)
                         .border(
@@ -709,6 +704,7 @@ private fun WorkspaceOptionSelector(
                 val active = value == selected
                 Box(
                     modifier = Modifier
+                        .semantics { contentDescription = "Workspace thread ${label.lowercase()} $value" }
                         .clip(RoundedCornerShape(999.dp))
                         .background(if (active) ThreadColors.Primary else ThreadColors.Surface)
                         .border(

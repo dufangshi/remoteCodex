@@ -445,6 +445,9 @@ fun SupervisorHomeScreen(
                         onStartThread = {
                             workspaceActionError = null
                             workspaceDialog = WorkspaceActionDialog.StartThread(workspace)
+                            if (agentBackends == null && !backendSettingsLoading) {
+                                refreshBackendSettings()
+                            }
                         },
                         onDeleteWorkspace = {
                             workspaceActionError = null
@@ -517,6 +520,8 @@ fun SupervisorHomeScreen(
             WorkspaceActionDialogOverlay(
                 dialog = dialog,
                 backends = agentBackends.orEmpty(),
+                backendsLoading = backendSettingsLoading,
+                backendsError = backendSettingsError,
                 loadModels = { provider -> client.listAgentModels(provider) },
                 installOrUpdateBackend = { backend ->
                     val action = if (backend.installed) "update" else "install"
@@ -1044,6 +1049,8 @@ private sealed class WorkspaceActionDialog {
 private fun WorkspaceActionDialogOverlay(
     dialog: WorkspaceActionDialog,
     backends: List<SupervisorAgentBackend>,
+    backendsLoading: Boolean,
+    backendsError: String?,
     loadModels: suspend (String) -> List<SupervisorModelOption>,
     installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
@@ -1081,6 +1088,8 @@ private fun WorkspaceActionDialogOverlay(
             is WorkspaceActionDialog.StartThread -> StartThreadDialog(
                 workspace = dialog.workspace,
                 backends = backends,
+                backendsLoading = backendsLoading,
+                backendsError = backendsError,
                 loadModels = loadModels,
                 installOrUpdateBackend = installOrUpdateBackend,
                 busy = busy,
@@ -1168,6 +1177,8 @@ private fun CreateWorkspaceDialog(
 private fun StartThreadDialog(
     workspace: SupervisorWorkspaceSummary,
     backends: List<SupervisorAgentBackend>,
+    backendsLoading: Boolean,
+    backendsError: String?,
     loadModels: suspend (String) -> List<SupervisorModelOption>,
     installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
@@ -1248,6 +1259,7 @@ private fun StartThreadDialog(
     ) {
         BackendSelector(
             backends = backends,
+            loading = backendsLoading,
             selected = provider,
             enabled = !busy && runtimeBusyProvider == null,
             busyProvider = runtimeBusyProvider,
@@ -1272,6 +1284,13 @@ private fun StartThreadDialog(
                 }
             },
         )
+        backendsError?.let { message ->
+            Text(
+                text = message,
+                color = ThreadColors.Warning,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
         if (models.isNotEmpty()) {
             OptionSelector(
                 label = "Model",
@@ -1307,7 +1326,9 @@ private fun StartThreadDialog(
             value = title,
             onValueChange = { title = it },
             enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "New thread title" },
             label = { Text("Thread title") },
             singleLine = true,
             colors = workspaceTextFieldColors(),
@@ -1400,6 +1421,7 @@ private fun ImportThreadDialog(
 @OptIn(ExperimentalLayoutApi::class)
 private fun BackendSelector(
     backends: List<SupervisorAgentBackend>,
+    loading: Boolean,
     selected: String,
     enabled: Boolean,
     busyProvider: String?,
@@ -1414,34 +1436,27 @@ private fun BackendSelector(
             fontWeight = FontWeight.SemiBold,
         )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            backends.ifEmpty {
-                listOf(
-                    SupervisorAgentBackend(
-                        provider = "codex",
-                        displayName = "Codex",
-                        description = "",
-                        enabled = true,
-                        isDefault = true,
-                        statusState = "ready",
-                        statusDetail = null,
-                        installed = true,
-                        installedVersion = null,
-                        latestVersion = null,
-                        installAvailable = false,
-                        updateAvailable = false,
-                        busy = false,
-                        lastError = null,
-                        configArchives = false,
-                        buildRestart = false,
-                    ),
+            if (loading && backends.isEmpty()) {
+                Text(
+                    text = "Loading backend list...",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
                 )
-            }.forEach { backend ->
+            } else if (backends.isEmpty()) {
+                Text(
+                    text = "No agent providers are configured.",
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            backends.forEach { backend ->
                 val active = backend.provider == selected
                 val canStart = backend.canStartSession
                 val action = backend.runtimeActionLabel
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .semantics { contentDescription = "New thread backend ${backend.provider}" }
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (active) ThreadColors.Surface else ThreadColors.SurfaceStrong)
                         .border(
@@ -1520,6 +1535,7 @@ private fun OptionSelector(
                 val active = value == selected
                 Box(
                     modifier = Modifier
+                        .semantics { contentDescription = "New thread ${label.lowercase()} $value" }
                         .clip(RoundedCornerShape(999.dp))
                         .background(if (active) ThreadColors.Primary else ThreadColors.Surface)
                         .border(
