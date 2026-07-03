@@ -38,6 +38,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val settingsRepository = AppSettingsRepository(applicationContext)
+        intent?.getStringExtra(E2EConnectionBaseUrlExtra)?.takeIf { it.isNotBlank() }?.let { baseUrl ->
+            settingsRepository.writeSupervisorConnection(
+                SupervisorConnectionConfig(
+                    mode = SupervisorConnectionMode.Local,
+                    baseUrl = baseUrl,
+                ),
+            )
+        }
         val launchThreadWebFixture = intent?.getBooleanExtra(ThreadWebFixtureExtra, false) == true
         val threadWebFixtureBaseUrl = intent?.getStringExtra(ThreadWebFixtureBaseUrlExtra)
         val threadWebFixtureThreadId = intent?.getStringExtra(ThreadWebFixtureThreadIdExtra)
@@ -502,6 +510,7 @@ private const val ThreadWebFixtureExtra = "remote_codex_thread_web_fixture"
 private const val ThreadWebFixtureBaseUrlExtra = "remote_codex_thread_web_base_url"
 private const val ThreadWebFixtureThreadIdExtra = "remote_codex_thread_web_thread_id"
 private const val ThreadWebFixtureDataExtra = "remote_codex_thread_web_fixture_data"
+private const val E2EConnectionBaseUrlExtra = "remote_codex_e2e_connection_base_url"
 
 private sealed interface ConnectionRoute {
     data object ModeSelect : ConnectionRoute
