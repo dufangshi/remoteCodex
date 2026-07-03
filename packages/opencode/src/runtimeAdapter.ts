@@ -777,7 +777,6 @@ export class OpenCodeRuntimeAdapter extends EventEmitter implements AgentRuntime
     toolboxItems: [
       { action: 'compact', command: '/compact', label: 'Compact' },
       { action: 'fork', command: '/fork', label: 'Fork', panel: 'fork' },
-      { action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' },
     ],
     hookCommandTemplates: [],
     providerConfigFormat: 'json',

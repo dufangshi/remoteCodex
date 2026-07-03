@@ -22,6 +22,18 @@ afterEach(async () => {
 });
 
 describe('OpenCodeRuntimeAdapter', () => {
+  it('does not expose MCP toolbox affordances until the runtime supports MCP status', async () => {
+    const adapter = new OpenCodeRuntimeAdapter({
+      home: await tempHome(),
+    });
+
+    expect(adapter.capabilities.management.mcpStatus).toBe(false);
+    expect(adapter.managementSchema.toolboxItems.map((item) => item.command)).toEqual([
+      '/compact',
+      '/fork',
+    ]);
+  });
+
   it('keeps provider and variant in model selections', async () => {
     const sessionCreate = vi.fn(async () => ({
       id: 'session-1',
