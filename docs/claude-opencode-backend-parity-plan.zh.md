@@ -170,17 +170,17 @@ Implementation notes 2026-07-03 Android UI update:
 
 ## Phase 5: Claude Slash Command Parity
 
-目标：支持 Claude Code 原生 slash command 体验，包含用户提到的 `/btw`。实施时需要用当前 Claude CLI/SDK 实际确认命令语义。
+目标：支持 Claude Code 原生 slash command 体验。用户提到的 `/btw` 必须以当前 Claude CLI/SDK 的真实能力为准：如果当前 SDK session 不暴露它，UI 需要明确显示不可用，而不是假装可执行。
 
 Checklist:
 
-- [ ] 列出当前 Claude Code CLI/SDK 支持的 slash commands，并记录哪些可通过普通 prompt 透传，哪些需要 runtime API 特殊处理。
+- [x] 列出当前 Claude Code CLI/SDK 支持的 slash commands，并记录哪些可通过普通 prompt 透传，哪些需要 runtime API 特殊处理。
 - [ ] 在 Web/iOS/Android composer 中，输入 `/` 时展示 backend-aware slash command 菜单。
-- [ ] Claude backend 下包含 Claude Code 支持的命令，包括 `/btw`、`/mcp` 以及当前 CLI 实际支持的其它命令。
+- [x] Claude backend 下根据 SDK `system/init.slash_commands` 动态包含当前 session 实际支持的命令；`/mcp` 保留专用 panel。
 - [ ] OpenCode backend 下展示 OpenCode 自己支持的 slash commands，例如 `/compact`、`/fork`、`/mcp`。
-- [ ] 不同 backend 的 slash command 菜单不可混用。
+- [x] 不同 backend 的 slash command 菜单不可混用：菜单来自当前 runtime 的 `managementSchema.toolboxItems`。
 - [ ] slash command 执行结果进入 timeline 或 settings panel，而不是静默失败。
-- [ ] 如果某条 slash command 只能在 Claude TTY 里使用，文档和 UI 要明确显示“不支持当前远程运行模式”。
+- [x] 如果某条 slash command 只能在 Claude TTY 里使用，文档和 UI 要明确显示“不支持当前远程运行模式”。
 
 E2E gate:
 
@@ -194,6 +194,15 @@ Implementation notes 2026-07-03:
 - 当前 runtime toolbox 暴露情况：Claude 只暴露 `/mcp`；OpenCode 暴露 `/compact`、`/fork`、`/mcp`。
 - Web/iOS/Android 的 thread composer 均消费 backend `managementSchema.toolboxItems`，因此 backend-aware slash command 菜单可以通过 runtime toolbox schema 统一下发。
 - thread composer 实现在外部本地依赖 `/Users/mac/dev/remote-codex-thread-ui/packages/thread-ui`。如果新增“prompt slash item”（例如点击 `/btw` 插入 `/btw ` 到输入框），需要同步更新该包及其 shared toolbox action/schema，再回到本 repo 重建 Web/iOS/Android thread bundle。
+
+Implementation notes 2026-07-03 Phase 5 update:
+
+- 已参考 Claude Agent SDK slash command 文档：SDK 会在 `system/init` message 中返回当前 session 可用的 `slash_commands`；只有不需要交互式终端的 commands 才能通过 SDK dispatch，命令可作为 prompt 发送，例如 `/compact`。
+- 本机 Claude Code `2.1.197` 通过 SDK `system/init.slash_commands` 返回了 40+ 条当前 session 可用命令，包括 `/compact`、`/clear`、`/context`、`/usage`、`/goal`、`/review`、`/code-review` 等；后端会直接使用 SDK 返回值动态下发，不在代码里维护静态清单。
+- 当前 SDK session 未列出 `/btw`。Claude runtime 现在会把 `/btw` 下发为 disabled `unsupported` toolbox item，描述为当前 Claude Agent SDK session 未暴露，可能需要交互式 Claude TTY 或不同 Claude Code 版本。
+- Claude runtime 现在会在 `system/init` 时刷新 `managementSchema.toolboxItems`：发现的 slash commands 使用 `action: "prompt"`，点击后向 composer 插入命令文本；`/mcp` 继续使用专用 `action: "mcp"` panel。
+- 已同步外部 thread-ui shared schema 和 composer toolbox：新增 `prompt`、`unsupported` actions；`prompt` 插入命令文本，`unsupported` 显示 `Unavailable` 且禁用。
+- 已通过 focused tests 覆盖：Claude adapter 会从 SDK init 更新 slash toolbox；Web composer 会把 backend prompt slash command 插入 prompt，并禁用 unsupported item。
 
 ## Current Local Baseline
 
@@ -264,4 +273,4 @@ Implementation notes 2026-07-03:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
+- [ ] Claude/OpenCode slash command parity 仍需三端真实 E2E；当前已实现 Claude SDK 动态发现和 `/btw` unsupported 展示，但尚未跑 Web/iOS/Android 实机一致性 gate。

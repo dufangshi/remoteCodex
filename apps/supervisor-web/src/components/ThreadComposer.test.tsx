@@ -349,6 +349,44 @@ describe('ThreadComposer', () => {
     });
   });
 
+  it('inserts backend prompt slash commands into the prompt editor', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={[
+          {
+            action: 'prompt',
+            command: '/compact',
+            label: '/compact',
+            description: 'Claude Code slash command discovered from the SDK session.',
+          },
+          {
+            action: 'unsupported',
+            command: '/btw',
+            label: '/btw',
+            description: 'Not available in this SDK session.',
+          },
+        ]}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/compact/i }));
+
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveTextContent(
+      '/compact',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    expect(screen.getByRole('button', { name: /\/btw/i })).toBeDisabled();
+  });
+
   it('does not expose backend tools before capabilities are available', () => {
     render(
       <ThreadComposer
