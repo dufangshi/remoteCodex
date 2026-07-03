@@ -6,7 +6,6 @@ import {
   AgentBackendManagementSchemaDto,
   AgentRuntimeStatusDto,
   ModelOptionDto,
-  SandboxModeDto,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadHistoryItemDto,
@@ -70,7 +69,6 @@ import {
   appendLatestTurns,
   applyLiveItemTimestampsToTurns,
   createClientRequestId,
-  effectiveSandboxMode,
   findTurnWithUserMessage,
   formatGoalRuntime,
   formatGoalTokenUsage,
@@ -99,6 +97,7 @@ import {
 } from '../lib/relayRoutes';
 import { useMobileComposerLayout } from './useMobileComposerLayout';
 import { useThreadAuxiliaryActions } from './useThreadAuxiliaryActions';
+import { useThreadListPolling } from './useThreadListPolling';
 import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
 
 const INITIAL_DETAIL_TURN_PAGE_SIZE = 3;
@@ -111,11 +110,6 @@ const SOCKET_CONNECTING = 0;
 
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
-const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
-  'read-only',
-  'workspace-write',
-  'danger-full-access',
-];
 const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
   ThreadDetailDto['answeredRequestNotes']
 > = [];
@@ -184,7 +178,7 @@ interface WorkspaceFocusPathRequest {
 type PendingThreadSettings = Partial<
   Pick<
     ThreadDto,
-    'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode' | 'sandboxMode'
+    'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode'
   >
 >;
 
@@ -494,6 +488,10 @@ export function ThreadDetailPage() {
     navigate,
     setDetail,
     setError,
+    setThreads,
+  });
+  useThreadListPolling({
+    enabled: Boolean(id),
     setThreads,
   });
 
@@ -1697,9 +1695,6 @@ export function ThreadDetailPage() {
           id,
           {
             ...(currentDetail.thread.model ? { model: currentDetail.thread.model } : {}),
-            ...(currentDetail.thread.sandboxMode
-              ? { sandboxMode: currentDetail.thread.sandboxMode }
-              : {}),
           },
         );
         const resumedDetail = {
@@ -1712,8 +1707,6 @@ export function ThreadDetailPage() {
             collaborationMode:
               resumeSeedThread.collaborationMode ??
               resumed.thread.collaborationMode,
-            sandboxMode:
-              resumeSeedThread.sandboxMode ?? resumed.thread.sandboxMode ?? null,
           },
         };
         currentDetail = resumedDetail;
@@ -1792,9 +1785,6 @@ export function ThreadDetailPage() {
           : {}),
         ...(currentEffectiveThread?.collaborationMode
           ? { collaborationMode: currentEffectiveThread.collaborationMode }
-          : {}),
-        ...(currentEffectiveThread?.sandboxMode
-          ? { sandboxMode: currentEffectiveThread.sandboxMode }
           : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
@@ -1955,9 +1945,6 @@ export function ThreadDetailPage() {
         id,
         {
           ...(detail.thread.model ? { model: detail.thread.model } : {}),
-          ...(detail.thread.sandboxMode
-            ? { sandboxMode: detail.thread.sandboxMode }
-            : {}),
         },
       );
       setDetail((current) =>
@@ -2023,7 +2010,6 @@ export function ThreadDetailPage() {
     reasoningEffort?: ThreadDto['reasoningEffort'];
     fastMode?: boolean;
     collaborationMode?: ThreadDto['collaborationMode'];
-    sandboxMode?: ThreadDto['sandboxMode'];
   }) {
     if (!detail) {
       return;
@@ -2039,9 +2025,6 @@ export function ThreadDetailPage() {
       ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
       ...(input.collaborationMode !== undefined
         ? { collaborationMode: input.collaborationMode }
-        : {}),
-      ...(input.sandboxMode !== undefined
-        ? { sandboxMode: input.sandboxMode }
         : {}),
     };
     const optimisticThread = {
@@ -2078,9 +2061,6 @@ export function ThreadDetailPage() {
         ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
         ...(input.collaborationMode !== undefined
           ? { collaborationMode: input.collaborationMode }
-          : {}),
-        ...(input.sandboxMode !== undefined
-          ? { sandboxMode: input.sandboxMode }
           : {}),
       });
       pendingThreadSettingsRef.current = null;
@@ -2412,35 +2392,7 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
-  const settingsContent = detail && backendCapabilities?.controls.sandboxMode ? (
-    <div className="space-y-3">
-      <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
-          Sandbox Mode
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {SANDBOX_MODE_OPTIONS.map((entry) => {
-            const selected = effectiveSandboxMode(detail.thread) === entry;
-            return (
-              <button
-                key={entry}
-                type="button"
-                disabled={settingsBusy}
-                onClick={() => void handleUpdateThreadSettings({ sandboxMode: entry })}
-                className={`block w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
-                  selected
-                    ? 'ui-status-warning'
-                    : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
-                } disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                {entry}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const settingsContent = null;
 
   const optimisticServerTurnId = optimisticTurn?.serverTurnId ?? null;
   const optimisticMaterializedTurn =
@@ -2783,6 +2735,7 @@ export function ThreadDetailPage() {
         reasoningEffort: detail.thread.reasoningEffort,
         fastMode: detail.thread.fastMode ?? false,
         collaborationMode: detail.thread.collaborationMode,
+        sandboxMode: null,
         modelOptions,
         contextUsage: detail.thread.contextUsage,
         capabilities: backendCapabilities,

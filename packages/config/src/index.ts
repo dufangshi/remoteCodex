@@ -41,9 +41,6 @@ export interface AgentProviderConfigMap {
 
 export interface RuntimeConfig {
   nodeEnv: 'development' | 'test' | 'production';
-  runtimeRole: 'supervisor' | 'worker';
-  sandboxId: string | null;
-  userId: string | null;
   mode: RuntimeMode;
   host: string;
   port: number;
@@ -51,17 +48,6 @@ export interface RuntimeConfig {
   disableRequestLogging: boolean;
   managementRoutesEnabled: boolean;
   agentRuntimeManagementEnabled: boolean;
-  workerAuthToken: string | null;
-  workerIdentitySecret: string | null;
-  controlPlaneBaseUrl: string | null;
-  controlPlaneServiceToken: string | null;
-  llmGatewayBaseUrl: string | null;
-  llmGatewayToken: string | null;
-  harnessBaseUrl: string | null;
-  harnessEnabled: boolean;
-  chemistryToolsEnabled: boolean;
-  harnessWakeupCallbackBaseUrl: string | null;
-  workerRuntimeManifestPath: string | null;
   appName: string;
   appVersion: string;
   workspaceRoot: string;
@@ -81,9 +67,6 @@ export interface RuntimeConfig {
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).optional(),
-  REMOTE_CODEX_RUNTIME_ROLE: z.enum(['supervisor', 'worker']).optional(),
-  REMOTE_CODEX_SANDBOX_ID: z.string().min(1).optional(),
-  REMOTE_CODEX_USER_ID: z.string().min(1).optional(),
   REMOTE_CODEX_MODE: z.enum(['local', 'server', 'relay']).optional(),
   HOST: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().optional(),
@@ -93,17 +76,6 @@ const envSchema = z.object({
   DISABLE_REQUEST_LOGGING: z.string().optional(),
   REMOTE_CODEX_MANAGEMENT_ROUTES_ENABLED: z.string().optional(),
   REMOTE_CODEX_AGENT_RUNTIME_MANAGEMENT_ENABLED: z.string().optional(),
-  REMOTE_CODEX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
-  REMOTE_CODEX_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
-  REMOTE_CODEX_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
-  REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(1).optional(),
-  REMOTE_CODEX_LLM_GATEWAY_BASE_URL: z.string().url().optional(),
-  REMOTE_CODEX_LLM_GATEWAY_TOKEN: z.string().min(1).optional(),
-  ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
-  INACT_X_APP_KEY: z.string().min(1).optional(),
-  REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: z.string().optional(),
-  REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL: z.string().url().optional(),
-  REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: z.string().min(1).optional(),
   APP_NAME: z.string().min(1).optional(),
   APP_VERSION: z.string().min(1).optional(),
   WORKSPACE_ROOT: z.string().optional(),
@@ -165,16 +137,12 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export function resolveDatabaseUrl(
   nodeEnv: RuntimeConfig['nodeEnv'],
   value?: string,
-  runtimeRole: RuntimeConfig['runtimeRole'] = 'supervisor',
 ): string {
   if (value && value.trim()) {
     return path.resolve(value);
   }
 
   if (nodeEnv === 'production') {
-    if (runtimeRole === 'worker') {
-      return path.join('/home/agent', '.remote-codex', 'worker.sqlite');
-    }
     return path.join(os.homedir(), '.remote-codex', 'supervisor.sqlite');
   }
 
@@ -184,13 +152,10 @@ export function resolveDatabaseUrl(
 export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const parsed = envSchema.parse(normalizeOptionalEnv(env));
   const nodeEnv = parsed.NODE_ENV ?? 'development';
-  const runtimeRole = parsed.REMOTE_CODEX_RUNTIME_ROLE ?? 'supervisor';
   const mode = parsed.REMOTE_CODEX_MODE ?? 'local';
   const workspaceRoot = parsed.WORKSPACE_ROOT?.trim()
     ? path.resolve(parsed.WORKSPACE_ROOT)
-    : runtimeRole === 'worker'
-      ? '/workspace'
-      : os.homedir();
+    : os.homedir();
   const disableRequestLogging = parseBoolean(
     parsed.DISABLE_REQUEST_LOGGING,
     nodeEnv === 'production',
@@ -201,7 +166,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)
   );
-  const defaultAgentHomeRoot = runtimeRole === 'worker' ? '/home/agent' : os.homedir();
+  const defaultAgentHomeRoot = os.homedir();
   const codexHome = parsed.CODEX_HOME?.trim()
     ? path.resolve(parsed.CODEX_HOME)
     : path.join(defaultAgentHomeRoot, agentBackendMetadata.codex.defaultHomeDir);
@@ -214,44 +179,25 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
 
   return {
     nodeEnv,
-    runtimeRole,
-    sandboxId: parsed.REMOTE_CODEX_SANDBOX_ID ?? null,
-    userId: parsed.REMOTE_CODEX_USER_ID ?? null,
     host: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_HOST ??
       parsed.HOST ??
-      (runtimeRole === 'worker' ? '0.0.0.0' : '127.0.0.1'),
+      '127.0.0.1',
     mode,
     port: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_PORT ?? parsed.PORT ?? 8787,
     logLevel: parsed.LOG_LEVEL ?? (nodeEnv === 'production' ? 'warn' : 'info'),
     disableRequestLogging,
     managementRoutesEnabled: parseBoolean(
       parsed.REMOTE_CODEX_MANAGEMENT_ROUTES_ENABLED,
-      runtimeRole !== 'worker',
+      true,
     ),
     agentRuntimeManagementEnabled: parseBoolean(
       parsed.REMOTE_CODEX_AGENT_RUNTIME_MANAGEMENT_ENABLED,
-      runtimeRole !== 'worker',
+      true,
     ),
-    workerAuthToken: parsed.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? null,
-    workerIdentitySecret: parsed.REMOTE_CODEX_WORKER_IDENTITY_SECRET ?? null,
-    controlPlaneBaseUrl: parsed.REMOTE_CODEX_CONTROL_PLANE_BASE_URL ?? null,
-    controlPlaneServiceToken: parsed.REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN ?? null,
-    llmGatewayBaseUrl: parsed.REMOTE_CODEX_LLM_GATEWAY_BASE_URL ?? null,
-    llmGatewayToken: parsed.REMOTE_CODEX_LLM_GATEWAY_TOKEN ?? null,
-    harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
-    harnessEnabled: Boolean(parsed.ELAGENTE_HARNESS_BASE_URL && parsed.INACT_X_APP_KEY),
-    chemistryToolsEnabled: parseBoolean(parsed.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED, false),
-    harnessWakeupCallbackBaseUrl:
-      parsed.REMOTE_CODEX_HARNESS_WAKEUP_CALLBACK_BASE_URL?.replace(/\/+$/, '') ?? null,
-    workerRuntimeManifestPath: parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST
-      ? path.resolve(parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST)
-      : runtimeRole === 'worker'
-        ? '/opt/remote-codex/worker-runtime-manifest.json'
-        : null,
-    appName: parsed.APP_NAME ?? (runtimeRole === 'worker' ? 'Remote Codex Worker' : 'Remote Codex Supervisor'),
+    appName: parsed.APP_NAME ?? 'Remote Codex Supervisor',
     appVersion: parsed.APP_VERSION ?? '0.1.0',
     workspaceRoot,
-    databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL, runtimeRole),
+    databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL),
     auth: {
       adminUsername: parsed.REMOTE_CODEX_ADMIN_USERNAME ?? null,
       adminPassword: parsed.REMOTE_CODEX_ADMIN_PASSWORD ?? null,

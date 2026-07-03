@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 import {
@@ -24,6 +25,13 @@ const providerParamSchema = z.object({
 const installActionSchema = z.object({
   action: z.enum(['install', 'update']),
 });
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  '..',
+);
 const npmManagedPackageNames: Partial<Record<AgentBackendIdDto, string[]>> = {
   codex: ['@openai/codex'],
   claude: ['@anthropic-ai/claude-code', '@anthropic-ai/claude-agent-sdk'],
@@ -226,7 +234,9 @@ async function refreshBackendInstallation(
     const command = app.services.config.agentProviders.claude.command;
     const [cliVersion, sdkVersion, latestCliVersion] = await Promise.all([
       commandVersion(command, ['--version']),
-      installedPackageVersion('@anthropic-ai/claude-agent-sdk'),
+      installedPackageVersion('@anthropic-ai/claude-agent-sdk', [
+        path.join(repositoryRoot, 'packages', 'claude', 'node_modules'),
+      ]),
       latestPackageVersion('@anthropic-ai/claude-code'),
     ]);
     runtime.installation.installed = Boolean(cliVersion && sdkVersion);
@@ -252,7 +262,9 @@ async function refreshBackendInstallation(
     const [cliVersion, latestVersion, sdkVersion] = await Promise.all([
       commandVersion(command, ['--version']),
       latestPackageVersion('opencode-ai'),
-      installedPackageVersion('@opencode-ai/sdk'),
+      installedPackageVersion('@opencode-ai/sdk', [
+        path.join(repositoryRoot, 'packages', 'opencode', 'node_modules'),
+      ]),
     ]);
     runtime.installation.installed = Boolean(cliVersion && sdkVersion);
     runtime.installation.installedVersion = cliVersion
@@ -272,12 +284,18 @@ async function refreshBackendInstallation(
   }
 }
 
-async function installedPackageVersion(packageName: string) {
+async function installedPackageVersion(packageName: string, extraNodeModuleRoots: string[] = []) {
   const globalRoot = await npmGlobalRoot();
   if (globalRoot) {
     const global = await packageVersionFromPath(path.join(globalRoot, packageName, 'package.json'));
     if (global) {
       return global;
+    }
+  }
+  for (const root of extraNodeModuleRoots) {
+    const local = await packageVersionFromPath(path.join(root, packageName, 'package.json'));
+    if (local) {
+      return local;
     }
   }
   return packageVersionFromNode(packageName);
@@ -356,9 +374,6 @@ async function packageVersionFromPath(packageJsonPath: string) {
 }
 
 async function latestPackageVersion(packageName: string) {
-  if (process.env.REMOTE_CODEX_RUNTIME_ROLE === 'worker') {
-    return null;
-  }
   const result = await runShellCommand(`npm view ${shellQuote(packageName)} version`, 4_000);
   return result.code === 0 ? firstLine(result.stdout) : null;
 }

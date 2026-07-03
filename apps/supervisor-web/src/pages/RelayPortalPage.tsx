@@ -79,8 +79,11 @@ export function RelayPortalPage() {
     await load();
   }
 
-  async function handleDeleteDevice(deviceId: string) {
-    await deleteRelayDevice(deviceId);
+  async function handleDeleteDevice(device: { id: string; name: string }) {
+    if (!window.confirm(`Delete relay device "${device.name}"?`)) {
+      return;
+    }
+    await deleteRelayDevice(device.id);
     await load();
   }
 
@@ -214,7 +217,7 @@ export function RelayPortalPage() {
                       </button>
                       <button
                         className="relay-button-secondary"
-                        onClick={() => void handleDeleteDevice(device.id)}
+                        onClick={() => void handleDeleteDevice(device)}
                         type="button"
                       >
                         Delete

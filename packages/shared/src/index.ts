@@ -19,6 +19,7 @@ export type ApiErrorCode =
   | 'unauthorized'
   | 'not_found'
   | 'conflict'
+  | 'confirmation_required'
   | 'provider_goal_error'
   | 'forbidden'
   | 'unauthorized'

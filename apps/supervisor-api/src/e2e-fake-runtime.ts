@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type {
   AgentActionRequestResponseInput,
   AgentPendingProviderRequest,
@@ -21,9 +23,15 @@ type StoredProviderRequest = {
 const provider = 'claude' as const;
 const firstDelta = 'IOS_STREAM_DELTA_READY';
 const secondDelta = ' IOS_STREAM_COMPLETED';
+const androidSentinelPattern = /\bANDROID_WEB_THREAD_[A-Z0-9_]+\b/;
 const approvalPromptMarker = 'IOS_PENDING_APPROVAL';
 const questionPromptMarker = 'IOS_PENDING_QUESTION';
 const planPromptMarker = 'IOS_PENDING_PLAN';
+const historyDetailPromptMarker = 'IOS_HISTORY_DETAIL';
+const historyPagePromptMarker = 'IOS_HISTORY_PAGE';
+const imageAssetPromptMarker = 'IOS_IMAGE_ASSET';
+const imageAssetPngBase64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
   readonly provider = provider;
@@ -32,11 +40,11 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
   readonly capabilities: AgentRuntime['capabilities'] = {
     sessions: { list: true, read: true, resume: true, importLocal: false },
     turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
-    branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
+    branching: { fork: true, hardRollback: false, resumeAt: false, rewindFiles: false },
     controls: {
-      planMode: false,
+      planMode: true,
       permissionRequests: false,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: false,
       goals: false,
     },
@@ -53,7 +61,15 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
   };
   readonly managementSchema: AgentRuntime['managementSchema'] = {
     hostConfigFiles: [],
-    toolboxItems: [],
+    toolboxItems: [
+      {
+        action: 'fork',
+        command: '/fork',
+        label: 'Fork',
+        description: 'Fork this thread.',
+        panel: 'fork',
+      },
+    ],
     hookCommandTemplates: [],
     providerConfigFormat: 'none',
     mcpConfigFormat: 'none',
@@ -109,6 +125,20 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
           { reasoningEffort: 'high', description: 'High' },
         ],
         defaultReasoningEffort: 'medium',
+      },
+      {
+        id: 'ios-e2e-alt',
+        model: 'ios-e2e-alt',
+        displayName: 'iOS E2E Alt',
+        description: 'Alternate deterministic model for settings control tests.',
+        isDefault: false,
+        hidden: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Low' },
+          { reasoningEffort: 'medium', description: 'Medium' },
+          { reasoningEffort: 'high', description: 'High' },
+        ],
+        defaultReasoningEffort: 'low',
       },
     ];
   }
@@ -298,11 +328,139 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
       return turn;
     }
 
+    if (input.prompt.includes(historyDetailPromptMarker)) {
+      const commandItem: AgentHistoryItem = {
+        id: `${providerTurnId}:command-detail`,
+        createdAt: now,
+        kind: 'commandExecution',
+        text: 'pnpm ios-history-detail',
+        previewText: 'IOS_HISTORY_DETAIL_SUMMARY',
+        detailText: [
+          'pnpm ios-history-detail',
+          'IOS_HISTORY_DETAIL_FULL_OUTPUT line 1',
+          'IOS_HISTORY_DETAIL_FULL_OUTPUT line 2',
+        ].join('\n'),
+        status: 'completed',
+      };
+      setTimeout(() => {
+        if (turn.status !== 'inProgress') {
+          return;
+        }
+        turn.items.push(commandItem);
+        this.emitRuntimeEvent({
+          type: 'item.started',
+          provider,
+          providerSessionId: input.providerSessionId,
+          providerTurnId,
+          item: { ...commandItem },
+        });
+        this.emitRuntimeEvent({
+          type: 'item.completed',
+          provider,
+          providerSessionId: input.providerSessionId,
+          providerTurnId,
+          item: { ...commandItem },
+        });
+        this.completeTurn(input.providerSessionId, providerTurnId);
+      }, 250);
+      return turn;
+    }
+
+    if (input.prompt.includes(historyPagePromptMarker)) {
+      const requestedCount = input.prompt.match(/IOS_HISTORY_PAGE_(\d+)/)?.[1];
+      const turnCount = Math.max(
+        31,
+        Math.min(Number(requestedCount ?? 45) || 45, 100),
+      );
+      const generatedTurns: AgentTurn[] = Array.from(
+        { length: turnCount },
+        (_, index) => {
+          const turnNumber = index + 1;
+          const generatedTurnId = `e2e-history-page-turn-${turnNumber}`;
+          return {
+            providerTurnId: generatedTurnId,
+            startedAt: new Date(Date.now() + index).toISOString(),
+            status: 'completed' as const,
+            error: null,
+            items: [
+              {
+                id: `${generatedTurnId}:user`,
+                createdAt: now,
+                kind: 'userMessage' as const,
+                text: `IOS_HISTORY_PAGE_TURN_${turnNumber}`,
+              },
+              {
+                id: `${generatedTurnId}:assistant`,
+                createdAt: now,
+                kind: 'agentMessage' as const,
+                text: `IOS_HISTORY_PAGE_DONE_${turnNumber}`,
+                status: 'completed' as const,
+              },
+            ],
+            rawTurn: null,
+          };
+        },
+      );
+      session.turns = generatedTurns;
+      session.totalTurnCount = generatedTurns.length;
+      session.status = 'idle';
+      session.updatedAt = new Date().toISOString();
+      session.preview = `IOS_HISTORY_PAGE_TURN_${turnCount}`;
+      this.activeTurnId = null;
+      const latestTurn = generatedTurns.at(-1)!;
+      this.emitRuntimeEvent({
+        type: 'turn.completed',
+        provider,
+        providerSessionId: input.providerSessionId,
+        turn: latestTurn,
+      });
+      return latestTurn;
+    }
+
+    if (input.prompt.includes(imageAssetPromptMarker)) {
+      const relativeImagePath = `./.temp/threads/${providerTurnId}/ios-webview-image.png`;
+      const absoluteImagePath = path.join(session.cwd, relativeImagePath);
+      await mkdir(path.dirname(absoluteImagePath), { recursive: true });
+      await writeFile(absoluteImagePath, Buffer.from(imageAssetPngBase64, 'base64'));
+
+      const imageItem: AgentHistoryItem = {
+        id: `${providerTurnId}:image-asset`,
+        createdAt: now,
+        kind: 'image',
+        text: 'IOS_IMAGE_ASSET_READY',
+        assetPath: relativeImagePath,
+        status: 'completed',
+      };
+      setTimeout(() => {
+        if (turn.status !== 'inProgress') {
+          return;
+        }
+        turn.items.push(imageItem);
+        this.emitRuntimeEvent({
+          type: 'item.started',
+          provider,
+          providerSessionId: input.providerSessionId,
+          providerTurnId,
+          item: { ...imageItem },
+        });
+        this.emitRuntimeEvent({
+          type: 'item.completed',
+          provider,
+          providerSessionId: input.providerSessionId,
+          providerTurnId,
+          item: { ...imageItem },
+        });
+        this.completeTurn(input.providerSessionId, providerTurnId);
+      }, 250);
+      return turn;
+    }
+
+    const responseDeltas = deltasForPrompt(input.prompt);
     setTimeout(() => {
       if (turn.status !== 'inProgress') {
         return;
       }
-      assistantItem.text = firstDelta;
+      assistantItem.text = responseDeltas.first;
       turn.items.push(assistantItem);
       this.emitRuntimeEvent({
         type: 'item.started',
@@ -317,7 +475,7 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
         providerSessionId: input.providerSessionId,
         providerTurnId,
         itemId: assistantItem.id,
-        delta: firstDelta,
+        delta: responseDeltas.first,
       });
     }, 250);
 
@@ -325,20 +483,22 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
       if (turn.status !== 'inProgress') {
         return;
       }
-      assistantItem.text = `${firstDelta}${secondDelta}`;
+      assistantItem.text = `${responseDeltas.first}${responseDeltas.second}`;
       assistantItem.status = 'completed';
       turn.status = 'completed';
       session.status = 'idle';
       session.updatedAt = new Date().toISOString();
       this.activeTurnId = null;
-      this.emitRuntimeEvent({
-        type: 'output.delta',
-        provider,
-        providerSessionId: input.providerSessionId,
-        providerTurnId,
-        itemId: assistantItem.id,
-        delta: secondDelta,
-      });
+      if (responseDeltas.second) {
+        this.emitRuntimeEvent({
+          type: 'output.delta',
+          provider,
+          providerSessionId: input.providerSessionId,
+          providerTurnId,
+          itemId: assistantItem.id,
+          delta: responseDeltas.second,
+        });
+      }
       this.emitRuntimeEvent({
         type: 'item.completed',
         provider,
@@ -367,6 +527,38 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
     session.status = 'interrupted';
     this.activeTurnId = null;
     return turn;
+  }
+
+  async forkSession(input: { providerSessionId: string; atTurnId?: string | null }) {
+    const source = await this.readSession(input.providerSessionId);
+    const providerSessionId = `e2e-session-${this.sessions.size + 1}`;
+    const now = new Date().toISOString();
+    const forked: StoredE2ESession = {
+      ...JSON.parse(JSON.stringify(source)),
+      providerSessionId,
+      title: source.title,
+      preview: source.preview,
+      createdAt: now,
+      updatedAt: now,
+      status: 'idle',
+      rawSession: null,
+    };
+    this.sessions.set(providerSessionId, forked);
+    return forked;
+  }
+
+  async rollbackSession(input: { providerSessionId: string; count: number }) {
+    const session = await this.readSession(input.providerSessionId);
+    if (input.count > 0) {
+      session.turns = session.turns.slice(
+        0,
+        Math.max(0, session.turns.length - input.count),
+      );
+      session.totalTurnCount = session.turns.length;
+      session.updatedAt = new Date().toISOString();
+      session.preview = latestUserPromptPreview(session) ?? session.preview;
+    }
+    return session;
   }
 
   async listMcpServers() {
@@ -539,4 +731,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' ? value : null;
+}
+
+function deltasForPrompt(prompt: string) {
+  const androidSentinel = prompt.match(androidSentinelPattern)?.[0];
+  if (androidSentinel) {
+    return { first: androidSentinel, second: '' };
+  }
+  return { first: firstDelta, second: secondDelta };
+}
+
+function latestUserPromptPreview(session: StoredE2ESession) {
+  const lastTurn = session.turns.at(-1);
+  const userItem = lastTurn?.items.find((item) => item.kind === 'userMessage');
+  return userItem?.text ?? null;
 }

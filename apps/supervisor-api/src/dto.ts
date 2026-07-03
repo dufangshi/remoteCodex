@@ -35,22 +35,15 @@ export function toWorkspaceDto(record: {
 }
 
 export function defaultSandboxModeForApprovalMode(
-  approvalMode: ApprovalMode | null | undefined,
+  _approvalMode: ApprovalMode | null | undefined,
 ): SandboxModeDto {
-  return approvalMode === 'guarded' ? 'workspace-write' : 'danger-full-access';
+  return 'danger-full-access';
 }
 
 export function normalizeSandboxMode(
-  value: string | null | undefined,
+  _value: string | null | undefined,
 ): SandboxModeDto | null {
-  switch (value) {
-    case 'read-only':
-    case 'workspace-write':
-    case 'danger-full-access':
-      return value;
-    default:
-      return null;
-  }
+  return 'danger-full-access';
 }
 
 export function normalizeCollaborationMode(

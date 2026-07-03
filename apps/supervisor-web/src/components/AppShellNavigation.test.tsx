@@ -30,7 +30,7 @@ const codexBackendResponse: AgentBackendDto = {
     controls: {
       planMode: true,
       permissionRequests: true,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: true,
       goals: true,
     },
@@ -116,7 +116,7 @@ const claudeBackendResponse = {
     controls: {
       planMode: true,
       permissionRequests: true,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: false,
       goals: false,
     },
@@ -421,17 +421,6 @@ describe('AppShellNavigation', () => {
     expect(screen.queryByRole('button', { name: 'Control Plane' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Threads' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New Thread' })).not.toBeInTheDocument();
-  });
-
-  it('omits the control-plane menu item when the control-plane base URL is not configured', () => {
-    render(
-      <MemoryRouter initialEntries={['/control-plane']}>
-        <NavigationHarness />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole('button', { name: 'Workspaces' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Control Plane' })).not.toBeInTheDocument();
   });
 
   it('closes the navigation menu when clicking outside it', () => {

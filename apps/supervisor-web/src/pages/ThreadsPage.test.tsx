@@ -25,7 +25,7 @@ const codexBackendResponse = {
     controls: {
       planMode: true,
       permissionRequests: true,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: true,
       goals: true,
     },

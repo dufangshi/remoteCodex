@@ -28,6 +28,7 @@ import {
   currentThreadHref,
   currentWorkspacesHref,
 } from '../lib/relayRoutes';
+import { useThreadListPolling } from './useThreadListPolling';
 
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
@@ -128,6 +129,10 @@ export function ThreadsPage() {
   const newThreadHref = selectedWorkspaceId
     ? currentNewThreadHref(selectedWorkspaceId)
     : currentNewThreadHref();
+  useThreadListPolling({
+    enabled: selectedWorkspaceId !== null,
+    setThreads,
+  });
 
   if (selectedWorkspaceId === null) {
     return <Navigate to={currentWorkspacesHref()} replace />;

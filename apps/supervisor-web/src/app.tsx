@@ -28,12 +28,6 @@ import {
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
 import { RelayUserMenu } from './components/RelayUserMenu';
-import { ControlPlanePage } from './pages/ControlPlanePage';
-import {
-  ControlPlaneAuthGuard,
-  ControlPlaneLoginPage,
-} from './pages/ControlPlaneLoginPage';
-import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
 import { LoginPage } from './pages/LoginPage';
 import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
@@ -62,30 +56,15 @@ const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
 const AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY =
   'remote-codex-auto-collapse-completed-turns';
 
-function controlPlaneDefaultEnabled() {
-  return Boolean(import.meta.env.VITE_CONTROL_PLANE_BASE_URL);
-}
-
-function RootPage() {
-  return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <Navigate to="/workspaces" replace />;
-}
-
 function RoutePluginProvider({ children }: { children: ReactNode }) {
-  const location = useLocation();
-  const isControlPlaneRoute =
-    location.pathname.startsWith('/control-plane') ||
-    (location.pathname === '/' && controlPlaneDefaultEnabled());
   const adapter = useMemo(
-    () =>
-      isControlPlaneRoute
-        ? {}
-        : {
-            fetchPlugins,
-            importPlugin,
-            updatePlugin,
-            deletePlugin,
-          },
-    [isControlPlaneRoute],
+    () => ({
+      fetchPlugins,
+      importPlugin,
+      updatePlugin,
+      deletePlugin,
+    }),
+    [],
   );
 
   return <PluginProvider adapter={adapter}>{children}</PluginProvider>;
@@ -156,19 +135,17 @@ function AppShell({
     !isThreadUtilityRoute &&
     (/^\/threads\/[^/]+$/.test(location.pathname) ||
       /^\/devices\/[^/]+\/threads\/[^/]+$/.test(location.pathname));
-  const isControlPlaneSessionRoute = /^\/control-plane\/sessions\/[^/]+$/.test(location.pathname);
   const isThreadsRoute =
     location.pathname === '/threads' ||
     /^\/devices\/[^/]+\/threads$/.test(location.pathname);
-  const isViewportLockedRoute = isThreadDetailRoute || isControlPlaneSessionRoute || isThreadsRoute;
+  const isViewportLockedRoute = isThreadDetailRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
-    isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
-  const ownsNavigationShell = isThreadDetailRoute || isControlPlaneSessionRoute;
+    isThreadsRoute || isThreadDetailRoute;
+  const ownsNavigationShell = isThreadDetailRoute;
   const isWorkspacesRoute =
     location.pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
-  const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
-  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
+  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute;
 
   useEffect(() => {
     setNavOpen(false);
@@ -231,17 +208,17 @@ function AppShell({
             isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
           } ${
             isThreadWorkspaceRoute
-              ? isThreadDetailRoute || isControlPlaneSessionRoute
+              ? isThreadDetailRoute
                 ? 'pt-0'
                 : isThreadsRoute
                   ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                   : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
-              : isWorkspacesRoute || isControlPlaneRoute
+              : isWorkspacesRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                 : 'pt-4'
           } ${
             isViewportLockedRoute
-              ? isThreadDetailRoute || isControlPlaneSessionRoute
+              ? isThreadDetailRoute
                 ? 'overflow-hidden overscroll-none px-0'
                 : 'overflow-hidden overscroll-none px-0 sm:px-6'
               : 'px-4 sm:px-6'
@@ -250,7 +227,7 @@ function AppShell({
           <section
             className={`min-w-0 ${
               isViewportLockedRoute
-                ? isThreadDetailRoute || isControlPlaneSessionRoute
+                ? isThreadDetailRoute
                   ? 'h-full min-h-0 overflow-hidden overscroll-none'
                   : 'h-full overflow-hidden overscroll-none'
                 : ''
@@ -422,11 +399,6 @@ function RelayGate({ children }: { children: React.ReactNode }) {
 }
 
 function SupervisorAccessGate({ children }: { children: React.ReactNode }) {
-  const location = useLocation();
-  if (location.pathname.startsWith('/control-plane')) {
-    return children;
-  }
-
   return relayModeActive() ? <RelayGate>{children}</RelayGate> : <AuthGate>{children}</AuthGate>;
 }
 
@@ -455,23 +427,6 @@ function SupervisorRoutes({
         <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
         <Route path="/relay-account" element={<RelayAccountPage />} />
         <Route path="/relay-devices" element={<RelayDevicesPage />} />
-        <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
-        <Route
-          path="/control-plane"
-          element={
-            <ControlPlaneAuthGuard>
-              <ControlPlanePage />
-            </ControlPlaneAuthGuard>
-          }
-        />
-        <Route
-          path="/control-plane/sessions/:sessionId"
-          element={
-            <ControlPlaneAuthGuard>
-              <ControlPlaneSessionPage />
-            </ControlPlaneAuthGuard>
-          }
-        />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/import" element={<ThreadImportPage />} />
         <Route path="/threads/new" element={<ThreadNewPage />} />
@@ -539,7 +494,7 @@ export function App() {
       <BrowserRouter>
         <RoutePluginProvider>
           <Routes>
-            <Route path="/" element={<RootPage />} />
+            <Route path="/" element={<Navigate to="/workspaces" replace />} />
             <Route path="/relay-portal" element={<RelayPortalPage />} />
             <Route path="/relay-admin" element={<RelayAdminPage />} />
             <Route

@@ -1,6 +1,13 @@
 # iOS Native App Implementation Plan
 
-本文档定义一个与现有 Android app 功能等同的原生 iOS app 实施计划。目标是在 `apps/ios` 下新增 Swift/SwiftUI 客户端，复用 supervisor/relay 现有 HTTP、WebSocket、文件、导出和线程事件协议，不引入跨平台 UI 或 WebView 主壳。
+本文档定义一个与现有 Android app 功能等同的原生 iOS app 实施计划。目标是在 `apps/ios` 下新增 Swift/SwiftUI 客户端，复用 supervisor/relay 现有 HTTP、WebSocket、文件、导出和线程事件协议。
+
+状态更新（2026-07-01）：Thread detail 的原生 SwiftUI 主界面已被
+[iOS Thread WebView Migration Plan](./ios-thread-webview-migration-plan.zh.md)
+取代。Home、Workspace、Connection、Relay、持久化、协议 client 和部分
+native support 代码仍沿用本文档；Thread detail 后续功能演进以 bundled
+WebView + shared `@remote-codex/thread-ui` 为主，原生 Thread detail fallback
+已移除。
 
 ## 目标与边界
 
@@ -63,14 +70,17 @@ apps/ios
 ## 平台与技术选择
 
 - 最低版本：iOS 17。这样可以使用现代 SwiftUI navigation、observation、file importer/exporter、async/await 和 URLSession WebSocket。若后续必须兼容更老设备，再降到 iOS 16 并补齐兼容代码。
-- UI：SwiftUI 原生实现。
+- UI：Home、Workspace、Connection、Relay 和设置继续使用 SwiftUI 原生实现；
+  Thread detail 默认使用 bundled WebView 承载 shared thread UI。
 - 网络：`URLSession` + async/await；WebSocket 使用 `URLSessionWebSocketTask`。
 - JSON：`Codable` 为主，对动态 JSON、tool block、history detail 使用 `JSONValue` 枚举保留未知字段。
 - 本地持久化：非敏感设置用 `UserDefaults`；token 使用 Keychain。
 - 文件导入导出：`fileImporter`、`UIDocumentPickerViewController` bridge、`ShareLink`/`UIActivityViewController`。
 - 图片解码：`Image`/`UIImage`，线程图片通过 authenticated API fetch 后本地解码。
-- 富文本：首版用 SwiftUI `Text`/自研轻量 block renderer；不把 Web markdown renderer 嵌入 WebView。
-- 分子/图/插件 renderer：与 Android 等同先提供 native fallback 和元数据视图，不实现完整 3D/Web plugin renderer。
+- 富文本：Thread detail 使用 WebView 中的 shared renderer；原生页面不再维护
+  独立 SwiftUI rich renderer。
+- 分子/图/插件 renderer：Thread detail 由 shared WebView renderer 负责；非
+  Thread 原生页面如需展示元数据，可按各自页面单独补齐。
 
 ## 功能等同范围
 

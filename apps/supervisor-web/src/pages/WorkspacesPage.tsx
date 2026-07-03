@@ -185,7 +185,10 @@ export function WorkspacesPage() {
 
     setDeletingWorkspaceBusy(true);
     try {
-      await deleteWorkspace(deletingWorkspace.id);
+      await deleteWorkspace(deletingWorkspace.id, {
+        confirmWorkspaceId: deletingWorkspace.id,
+        confirmLabel: deletingWorkspace.label,
+      });
       setWorkspaces((current) =>
         current.filter((workspace) => workspace.id !== deletingWorkspace.id),
       );

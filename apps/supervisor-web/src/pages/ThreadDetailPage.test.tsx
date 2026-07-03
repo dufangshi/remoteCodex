@@ -365,7 +365,7 @@ const codexBackendResponse = {
     controls: {
       planMode: true,
       permissionRequests: true,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: true,
       goals: true,
     },
@@ -402,7 +402,7 @@ const claudeBackendResponse = {
     controls: {
       planMode: false,
       permissionRequests: false,
-      sandboxMode: true,
+      sandboxMode: false,
       performanceMode: false,
       goals: false,
     },
@@ -1012,7 +1012,7 @@ describe('ThreadDetailPage', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
-    expect(screen.getByText('Sandbox Mode')).toBeInTheDocument();
+    expect(screen.queryByText('Sandbox Mode')).not.toBeInTheDocument();
   });
 
   it('opens transcript export selection and starts a native PDF download', async () => {

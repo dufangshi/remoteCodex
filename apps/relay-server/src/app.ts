@@ -77,7 +77,34 @@ const updatePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
-export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
+interface RelayServerBuildOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
+const DEFAULT_WEBVIEW_CORS_ORIGINS = new Set([
+  'null',
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
+]);
+const WEBVIEW_CORS_ALLOW_HEADERS = [
+  'authorization',
+  'content-type',
+].join(', ');
+const WEBVIEW_CORS_ALLOW_METHODS = [
+  'GET',
+  'POST',
+  'PATCH',
+  'PUT',
+  'DELETE',
+  'OPTIONS',
+].join(', ');
+
+export function buildRelayServer(
+  config: RelayServerConfig,
+  options: RelayServerBuildOptions = {},
+): FastifyInstance {
   const app = Fastify({ logger: false });
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
     done(null, body);
@@ -99,6 +126,21 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   const state: RelayState = {
     supervisors: new Map(),
   };
+  const allowedWebViewCorsOrigins = webViewCorsOrigins(options.env ?? process.env);
+
+  app.addHook('onRequest', async (request, reply) => {
+    if (!allowedWebViewCorsOrigins) {
+      return;
+    }
+    const origin = request.headers.origin;
+    if (typeof origin !== 'string' || !allowedWebViewCorsOrigins.has(origin)) {
+      return;
+    }
+    applyWebViewCorsHeaders(reply, origin);
+    if (request.method === 'OPTIONS') {
+      return reply.code(204).send();
+    }
+  });
 
   app.get('/healthz', async () => {
     const primary = [...state.supervisors.values()][0] ?? null;
@@ -485,6 +527,25 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
   });
 
   return app;
+}
+
+function webViewCorsOrigins(env: NodeJS.ProcessEnv) {
+  if (env.REMOTE_CODEX_ENABLE_WEBVIEW_CORS !== 'true') {
+    return null;
+  }
+  const configured = env.REMOTE_CODEX_WEBVIEW_CORS_ORIGINS
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return new Set(configured?.length ? configured : DEFAULT_WEBVIEW_CORS_ORIGINS);
+}
+
+function applyWebViewCorsHeaders(reply: FastifyReply, origin: string) {
+  reply.header('access-control-allow-origin', origin);
+  reply.header('access-control-allow-methods', WEBVIEW_CORS_ALLOW_METHODS);
+  reply.header('access-control-allow-headers', WEBVIEW_CORS_ALLOW_HEADERS);
+  reply.header('access-control-max-age', '600');
+  reply.header('vary', 'Origin');
 }
 
 async function forwardRelayHttp(input: {

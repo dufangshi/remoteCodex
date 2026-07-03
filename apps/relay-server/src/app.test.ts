@@ -90,6 +90,49 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('adds WebView CORS headers only when explicitly enabled', async () => {
+    const disabled = buildRelayServer(testConfig());
+    await disabled.ready();
+
+    const disabledResponse = await disabled.inject({
+      method: 'OPTIONS',
+      url: '/relay/devices/11111111-1111-4111-8111-111111111111/api/threads',
+      headers: {
+        origin: 'null',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+
+    expect(disabledResponse.headers['access-control-allow-origin']).toBeUndefined();
+    await disabled.close();
+
+    const enabled = buildRelayServer(testConfig(), {
+      env: {
+        REMOTE_CODEX_ENABLE_WEBVIEW_CORS: 'true',
+      } as NodeJS.ProcessEnv,
+    });
+    await enabled.ready();
+
+    const enabledResponse = await enabled.inject({
+      method: 'OPTIONS',
+      url: '/relay/devices/11111111-1111-4111-8111-111111111111/api/threads',
+      headers: {
+        origin: 'null',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+
+    expect(enabledResponse.statusCode).toBe(204);
+    expect(enabledResponse.headers['access-control-allow-origin']).toBe('null');
+    expect(enabledResponse.headers['access-control-allow-methods']).toContain('GET');
+    expect(enabledResponse.headers['access-control-allow-headers']).toContain('authorization');
+    expect(enabledResponse.headers.vary).toBe('Origin');
+
+    await enabled.close();
+  });
+
   it('normalizes relayed request headers and parsed JSON bodies', () => {
     expect(
       relayRequestHeaders({

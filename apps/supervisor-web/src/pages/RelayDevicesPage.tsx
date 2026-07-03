@@ -70,6 +70,9 @@ export function RelayDevicesPage() {
   }
 
   async function removeDevice(device: RelayDeviceDto) {
+    if (!window.confirm(`Delete relay device "${device.name}"?`)) {
+      return;
+    }
     setBusy(device.id);
     setError(null);
     try {

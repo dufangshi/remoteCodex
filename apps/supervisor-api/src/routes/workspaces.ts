@@ -61,7 +61,6 @@ import {
   toWorkspaceDto,
   toWorkspaceFileDto,
 } from '../workspace-file-service';
-import { requireWorkerScope } from '../worker-identity';
 import { getWorkspaceSettings } from '../workspace-settings';
 
 type MultipartUploadFile = {
@@ -103,6 +102,11 @@ const updateFavoriteSchema = z.object({
 
 const updateWorkspaceSchema = z.object({
   label: z.string().min(1)
+});
+
+const deleteWorkspaceSchema = z.object({
+  confirmWorkspaceId: z.string().uuid(),
+  confirmLabel: z.string().min(1)
 });
 
 const workspaceFilePathSchema = z.string().trim().min(1).max(4096);
@@ -213,7 +217,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.put('/api/workspaces/:id/files', async (request) => {
-    requireWorkerScope(request, 'file:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = writeWorkspaceFileSchema.parse(request.body) satisfies WriteWorkspaceFileInput;
     const record = requireWorkspaceRecord(app, params.id);
@@ -326,7 +329,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/workspaces/:id/files/upload', async (request) => {
-    requireWorkerScope(request, 'file:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const record = requireWorkspaceRecord(app, params.id);
     const rootPath = await fs.realpath(record.absPath);
@@ -401,7 +403,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.patch('/api/workspaces/:id/files/move', async (request) => {
-    requireWorkerScope(request, 'file:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = moveWorkspaceFileSchema.parse(request.body);
     const record = requireWorkspaceRecord(app, params.id);
@@ -417,7 +418,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/workspaces/:id/files', async (request) => {
-    requireWorkerScope(request, 'file:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = deleteWorkspaceFileSchema.parse(request.body);
     const record = requireWorkspaceRecord(app, params.id);
@@ -430,7 +430,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/workspaces/:id/artifacts', async (request) => {
-    requireWorkerScope(request, 'artifact:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = createWorkspaceArtifactSchema.parse(request.body);
     const record = requireWorkspaceRecord(app, params.id);
@@ -448,14 +447,12 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/workspaces/:id/artifacts', async (request) => {
-    requireWorkerScope(request, 'artifact:read');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const record = requireWorkspaceRecord(app, params.id);
     return { artifacts: await listWorkspaceArtifacts(record) };
   });
 
   app.get('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
-    requireWorkerScope(request, 'artifact:read');
     const params = z
       .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
       .parse(request.params);
@@ -464,7 +461,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/workspaces/:id/artifacts/:artifactId/download', async (request, reply) => {
-    requireWorkerScope(request, 'artifact:read');
     const params = z
       .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
       .parse(request.params);
@@ -479,7 +475,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
-    requireWorkerScope(request, 'artifact:write');
     const params = z
       .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
       .parse(request.params);
@@ -573,6 +568,18 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Workspace was not found.'
+      });
+    }
+
+    const confirmation = deleteWorkspaceSchema.safeParse(request.body ?? {});
+    if (
+      !confirmation.success ||
+      confirmation.data.confirmWorkspaceId !== params.id ||
+      confirmation.data.confirmLabel.trim() !== record.label
+    ) {
+      throw new HttpError(400, {
+        code: 'confirmation_required',
+        message: 'Workspace deletion requires confirmation.'
       });
     }
 

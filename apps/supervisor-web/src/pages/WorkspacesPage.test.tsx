@@ -308,5 +308,9 @@ describe('WorkspacesPage', () => {
         init?.method === 'DELETE',
     );
     expect(deleteCall).toBeTruthy();
+    expect(JSON.parse(String(deleteCall?.[1]?.body))).toEqual({
+      confirmWorkspaceId: 'workspace-1',
+      confirmLabel: 'Demo Workspace',
+    });
   });
 });

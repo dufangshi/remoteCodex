@@ -9,9 +9,6 @@ describe('loadRuntimeConfig', () => {
     const config = loadRuntimeConfig({});
 
     expect(config.nodeEnv).toBe('development');
-    expect(config.runtimeRole).toBe('supervisor');
-    expect(config.sandboxId).toBeNull();
-    expect(config.userId).toBeNull();
     expect(config.mode).toBe('local');
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(8787);
@@ -19,13 +16,6 @@ describe('loadRuntimeConfig', () => {
     expect(config.disableRequestLogging).toBe(false);
     expect(config.managementRoutesEnabled).toBe(true);
     expect(config.agentRuntimeManagementEnabled).toBe(true);
-    expect(config.workerAuthToken).toBeNull();
-    expect(config.workerIdentitySecret).toBeNull();
-    expect(config.controlPlaneBaseUrl).toBeNull();
-    expect(config.controlPlaneServiceToken).toBeNull();
-    expect(config.llmGatewayBaseUrl).toBeNull();
-    expect(config.llmGatewayToken).toBeNull();
-    expect(config.workerRuntimeManifestPath).toBeNull();
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
     expect(config.auth).toEqual({
@@ -111,47 +101,6 @@ describe('loadRuntimeConfig', () => {
     expect(config.disableRequestLogging).toBe(true);
   });
 
-  it('uses container worker defaults when requested', () => {
-    const config = loadRuntimeConfig({
-      NODE_ENV: 'production',
-      REMOTE_CODEX_RUNTIME_ROLE: 'worker',
-      REMOTE_CODEX_SANDBOX_ID: 'sbx_123',
-      REMOTE_CODEX_USER_ID: 'user_123',
-      REMOTE_CODEX_WORKER_AUTH_TOKEN: 'worker-token',
-      REMOTE_CODEX_WORKER_IDENTITY_SECRET: 'identity-secret',
-      REMOTE_CODEX_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.com',
-      REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN: 'control-plane-service-token',
-      REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
-      REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gw-token',
-      ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.com',
-      INACT_X_APP_KEY: 'harness-app-key',
-      REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
-    });
-
-    expect(config.runtimeRole).toBe('worker');
-    expect(config.sandboxId).toBe('sbx_123');
-    expect(config.userId).toBe('user_123');
-    expect(config.host).toBe('0.0.0.0');
-    expect(config.workspaceRoot).toBe('/workspace');
-    expect(config.databaseUrl).toBe('/home/agent/.remote-codex/worker.sqlite');
-    expect(config.managementRoutesEnabled).toBe(false);
-    expect(config.agentRuntimeManagementEnabled).toBe(false);
-    expect(config.workerAuthToken).toBe('worker-token');
-    expect(config.workerIdentitySecret).toBe('identity-secret');
-    expect(config.controlPlaneBaseUrl).toBe('https://control-plane.example.com');
-    expect(config.controlPlaneServiceToken).toBe('control-plane-service-token');
-    expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.com');
-    expect(config.llmGatewayToken).toBe('gw-token');
-    expect(config.harnessBaseUrl).toBe('https://harness.example.com');
-    expect(config.harnessEnabled).toBe(true);
-    expect(config.chemistryToolsEnabled).toBe(true);
-    expect(config.workerRuntimeManifestPath).toBe('/opt/remote-codex/worker-runtime-manifest.json');
-    expect(config.appName).toBe('Remote Codex Worker');
-    expect(config.agentProviders.codex.home).toBe('/home/agent/.codex');
-    expect(config.agentProviders.claude.home).toBe('/home/agent/.claude');
-    expect(config.agentProviders.opencode.home).toBe('/home/agent/.opencode');
-  });
-
   it('honors explicit overrides', () => {
     const config = loadRuntimeConfig({
       NODE_ENV: 'test',
@@ -179,7 +128,6 @@ describe('loadRuntimeConfig', () => {
     });
 
     expect(config.nodeEnv).toBe('test');
-    expect(config.runtimeRole).toBe('supervisor');
     expect(config.mode).toBe('server');
     expect(config.host).toBe('0.0.0.0');
     expect(config.port).toBe(9999);

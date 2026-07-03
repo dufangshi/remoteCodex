@@ -108,10 +108,6 @@ import {
   ProviderFeatureCoordinator,
   type ProviderGoalFeatureAdapter,
 } from './provider-feature-coordinator';
-import {
-  combineDeveloperInstructions,
-  harnessDeveloperInstructions,
-} from './harness-developer-instructions';
 import type { PluginService } from './plugins/plugin-service';
 import { listThreadTurnMetadataMap } from './thread-turn-metadata';
 
@@ -121,6 +117,11 @@ const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
 const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
 const FAST_MODE_NOTE_ON = 'Fast mode on';
 const FAST_MODE_NOTE_OFF = 'Fast mode off';
+
+function combineDeveloperInstructions(parts: Array<string | null | undefined>) {
+  const combined = parts.filter((part): part is string => Boolean(part?.trim())).join('\n\n');
+  return combined || null;
+}
 
 interface SendPromptOptions {
   displayPrompt?: string | null;
@@ -878,7 +879,6 @@ export class ThreadService {
     this.clearPendingPlanDecisionRequests(localThreadId, true);
     const developerInstructions = combineDeveloperInstructions([
       pluginDeveloperInstructions(this.pluginService),
-      this.config ? harnessDeveloperInstructions(this.config) : null,
     ]);
 
     const workspace = getWorkspaceRecordById(this.db, record.workspaceId);

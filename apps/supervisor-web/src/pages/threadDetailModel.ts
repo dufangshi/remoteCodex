@@ -1,6 +1,5 @@
 import {
   type ModelOptionDto,
-  type SandboxModeDto,
   type ThreadDetailDto,
   type ThreadDto,
   type ThreadHistoryItemDto,
@@ -9,9 +8,9 @@ import {
 } from '@remote-codex/shared';
 
 export function effectiveSandboxMode(
-  thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,
-): SandboxModeDto {
-  return thread.sandboxMode ?? (thread.approvalMode === 'guarded' ? 'workspace-write' : 'danger-full-access');
+  _thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,
+): 'danger-full-access' {
+  return 'danger-full-access';
 }
 
 export function prependTurns(

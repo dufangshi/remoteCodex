@@ -1,5 +1,6 @@
 import Fastify, {
   FastifyInstance,
+  type FastifyReply,
   type FastifyPluginCallback,
   type FastifyRequest,
   type RouteOptions,
@@ -50,16 +51,11 @@ import type { ShellBackend } from './shell/shell-backend';
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
 import { PluginSettingsStore } from './plugins/plugin-settings-store';
-import { configureWorkerProviderGateway } from './worker-bootstrap';
 import { BackendPluginHost } from './plugins/backend-plugin-host';
 import {
   createTerminalShellBackend,
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
-import { WorkerIdentityError } from './worker-identity';
-import { WorkerHarnessClient } from './worker-harness-client';
-import { HarnessWakeupService } from './harness-wakeup-service';
-import { WorkerControlPlaneSyncClient } from './worker-control-plane-sync';
 import { AuthService, unauthorizedPayload } from './auth';
 import { RelayTunnelClient } from './relay-tunnel-client';
 
@@ -77,32 +73,54 @@ type WebsocketRouteOptions = RouteOptions & {
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const WORKER_AUTH_EXEMPT_PATHS = new Set(['/healthz', '/readyz']);
-const WORKER_AUTH_HOOK_PATH_PREFIX = '/api/hooks/';
-const WORKER_AUTH_LOOPBACK_PATHS = new Set([
-  '/api/harness/wakeup',
-  '/api/harness/job-watches',
+const DEFAULT_WEBVIEW_CORS_ORIGINS = new Set([
+  'null',
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
+  'https://appassets.androidplatform.net',
 ]);
+const WEBVIEW_CORS_ALLOW_HEADERS = [
+  'authorization',
+  'content-type',
+].join(', ');
+const WEBVIEW_CORS_ALLOW_METHODS = [
+  'GET',
+  'POST',
+  'PATCH',
+  'PUT',
+  'DELETE',
+  'OPTIONS',
+].join(', ');
 
-function isLoopbackAddress(ip: string | undefined) {
-  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+function webViewCorsOrigins(env: NodeJS.ProcessEnv) {
+  if (env.REMOTE_CODEX_ENABLE_WEBVIEW_CORS !== 'true') {
+    return null;
+  }
+  const configured = env.REMOTE_CODEX_WEBVIEW_CORS_ORIGINS
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return new Set(configured?.length ? configured : DEFAULT_WEBVIEW_CORS_ORIGINS);
 }
+
+function applyWebViewCorsHeaders(
+  reply: FastifyReply,
+  origin: string,
+) {
+  reply.header('access-control-allow-origin', origin);
+  reply.header('access-control-allow-methods', WEBVIEW_CORS_ALLOW_METHODS);
+  reply.header('access-control-allow-headers', WEBVIEW_CORS_ALLOW_HEADERS);
+  reply.header('access-control-max-age', '600');
+  reply.header('vary', 'Origin');
+}
+
 const RELAY_FORWARD_HEADER = 'x-remote-codex-relay-forwarded';
 export const SUPERVISOR_LOG_REDACTION_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
-  'req.headers["x-remote-codex-worker-token"]',
   'res.headers["set-cookie"]',
-  'REMOTE_CODEX_WORKER_AUTH_TOKEN',
-  'REMOTE_CODEX_WORKER_IDENTITY_SECRET',
-  'REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN',
-  'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
-  'ANTHROPIC_AUTH_TOKEN',
-  'INACT_X_APP_KEY',
-  'workerAuthToken',
-  'workerIdentitySecret',
-  'controlPlaneServiceToken',
-  'llmGatewayToken',
   'keyCiphertext',
   '*.keyCiphertext',
 ];
@@ -129,10 +147,6 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
-  harnessClient: WorkerHarnessClient;
-  harnessWakeupService: HarnessWakeupService;
-  controlPlaneSyncClient: Pick<WorkerControlPlaneSyncClient, 'checkpointSession' | 'recordHarnessUsageEvent'> &
-    Partial<Pick<WorkerControlPlaneSyncClient, 'checkHarnessQuota'>>;
   authService: AuthService;
   relayTunnelClient: RelayTunnelClient | null;
   repoRoot: string;
@@ -207,7 +221,6 @@ export function buildApp(
     shellService?: ShellSessionService;
     shellBackend?: ShellBackend;
     serviceLifecycle?: AppServices['serviceLifecycle'];
-    controlPlaneSyncClient?: AppServices['controlPlaneSyncClient'];
     relayTunnelClient?: RelayTunnelClient;
   } = {}
 ): FastifyInstance {
@@ -245,11 +258,6 @@ export function buildApp(
     agentRuntimes,
     runtimeBootstrap.providerHostHomes,
   );
-  const harnessClient = new WorkerHarnessClient(config, {
-    env: options.env ?? process.env,
-  });
-  const controlPlaneSyncClient =
-    options.controlPlaneSyncClient ?? new WorkerControlPlaneSyncClient(config);
 
   const app = Fastify({
     logger:
@@ -264,28 +272,19 @@ export function buildApp(
           },
     disableRequestLogging: config.disableRequestLogging
   });
+  const allowedWebViewCorsOrigins = webViewCorsOrigins(options.env ?? process.env);
 
-  app.addHook('onRequest', async (request) => {
-    const requestPath = request.url.split('?')[0] ?? request.url;
-    if (
-      config.runtimeRole !== 'worker' ||
-      !config.workerAuthToken ||
-      WORKER_AUTH_EXEMPT_PATHS.has(requestPath) ||
-      requestPath.startsWith(WORKER_AUTH_HOOK_PATH_PREFIX) ||
-      (WORKER_AUTH_LOOPBACK_PATHS.has(requestPath) && isLoopbackAddress(request.ip))
-    ) {
+  app.addHook('onRequest', async (request, reply) => {
+    if (!allowedWebViewCorsOrigins) {
       return;
     }
-
-    const headerToken = request.headers['x-remote-codex-worker-token'];
-    const authorization = request.headers.authorization;
-    const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
-    const token = typeof headerToken === 'string' ? headerToken : bearer;
-    if (token !== config.workerAuthToken) {
-      throw new HttpError(401, {
-        code: 'forbidden',
-        message: 'Worker access requires a valid router token.',
-      });
+    const origin = request.headers.origin;
+    if (typeof origin !== 'string' || !allowedWebViewCorsOrigins.has(origin)) {
+      return;
+    }
+    applyWebViewCorsHeaders(reply, origin);
+    if (request.method === 'OPTIONS') {
+      return reply.code(204).send();
     }
   });
 
@@ -312,14 +311,6 @@ export function buildApp(
       : null;
   relayTunnelClient?.validateConfig();
 
-  const harnessWakeupService = new HarnessWakeupService(
-    config,
-    database.db,
-    harnessClient,
-    threadService,
-    app.log,
-  );
-
   app.decorate('services', {
     config,
     database,
@@ -331,9 +322,6 @@ export function buildApp(
     providerHostConfigService,
     pluginRegistry,
     pluginService,
-    harnessClient,
-    harnessWakeupService,
-    controlPlaneSyncClient,
     authService,
     relayTunnelClient,
     repoRoot
@@ -355,14 +343,6 @@ export function buildApp(
       requestPath === '/api/auth/logout' ||
       requestPath === '/api/auth/session'
     ) {
-      return;
-    }
-
-    if (requestPath.startsWith(WORKER_AUTH_HOOK_PATH_PREFIX)) {
-      return;
-    }
-
-    if (WORKER_AUTH_LOOPBACK_PATHS.has(requestPath) && isLoopbackAddress(request.ip)) {
       return;
     }
 
@@ -436,11 +416,6 @@ export function buildApp(
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
-      reply.status(error.statusCode).send(error.payload);
-      return;
-    }
-
-    if (error instanceof WorkerIdentityError) {
       reply.status(error.statusCode).send(error.payload);
       return;
     }
@@ -590,7 +565,6 @@ export function buildApp(
 
   app.addHook('onReady', async () => {
     try {
-      await configureWorkerProviderGateway(config);
       await pluginService.syncManagedCodexMcpConfig({
         codexHome: runtimeBootstrap.providerHostHomes.codex ?? null,
         repoRoot,
