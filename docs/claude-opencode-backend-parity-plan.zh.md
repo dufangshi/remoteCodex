@@ -21,7 +21,7 @@ Checklist:
 - [ ] 记录 `/api/agent-runtimes/claude/models` 在未启动 turn 和已启动 turn 时的返回差异。
 - [ ] 记录 `/api/agent-runtimes/opencode/models` 的返回和 provider/model id 格式。
 - [x] 确认 Claude 本机依赖：`claude --version`、`@anthropic-ai/claude-agent-sdk` import、`ClaudeRuntimeAdapter.start()`。
-- [ ] 确认 OpenCode 本机依赖：`opencode --version`、`@opencode-ai/sdk/v2` import、`OpenCodeRuntimeAdapter.start()`。
+- [x] 确认 OpenCode 本机依赖：`opencode --version`、`@opencode-ai/sdk/v2` import、`OpenCodeRuntimeAdapter.start()`。
 - [ ] 明确当前 installer 命令：
   - Claude: `npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk`
   - OpenCode: `npm install -g opencode-ai @opencode-ai/sdk`
@@ -86,21 +86,21 @@ Checklist:
 
 - [ ] 准备独立测试数据库和 workspace，避免污染正式数据。
 - [ ] 启动 supervisor API，启用 `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,claude,opencode`。
-- [ ] Claude 使用 `haiku` 创建 thread。
-- [ ] Claude 发送短 prompt，确认收到真实 assistant 回复。
+- [x] Claude 使用 `haiku` 创建 thread。
+- [x] Claude 发送短 prompt，确认收到真实 assistant 回复。
 - [ ] Claude 发送文件读写类 prompt，确认默认 full-access 路径可真实读写 workspace。
 - [ ] Claude 发送 plan mode prompt，确认 plan 状态和视觉状态正确。
 - [ ] Claude 中断长任务，确认 turn 状态变为 interrupted。
-- [ ] OpenCode 创建 thread 并发送短 prompt，确认真实 assistant 回复。
+- [x] OpenCode 创建 thread 并发送短 prompt，确认真实 assistant 回复。
 - [ ] OpenCode 文件读写和中断路径通过。
 - [ ] 所有真实 smoke 的 transcript 可重新打开并恢复。
 
 E2E gate:
 
-- [ ] Web 真实 Claude smoke 通过。
+- [x] Web/API 真实 Claude smoke 通过。
 - [ ] iOS 真实 Claude smoke 通过。
 - [ ] Android 真实 Claude smoke 通过。
-- [ ] Web 真实 OpenCode smoke 通过。
+- [x] Web/API 真实 OpenCode smoke 通过。
 - [ ] iOS 真实 OpenCode smoke 通过。
 - [ ] Android 真实 OpenCode smoke 通过。
 
@@ -154,7 +154,11 @@ E2E gate:
 - [x] 已将 `@opencode-ai/sdk` 加入 `@remote-codex/opencode` workspace 依赖。
 - [x] 已验证 `@anthropic-ai/claude-agent-sdk` 可以被 Node import。
 - [x] 已验证 `@opencode-ai/sdk/v2` 可以被 Node import。
+- [x] 已验证 local supervisor `/api/agent-runtimes` 返回 `codex`、`claude`、`opencode` 均 `enabled=true` 且 `installed=true`。
+- [x] 已验证 local supervisor `/api/agent-runtimes/claude/models` 返回 `sonnet`、`sonnet[1m]`、`opus`、`haiku`。
+- [x] 已验证 local supervisor `/api/agent-runtimes/opencode/models` 返回非空模型列表。
 - [x] 已验证 `ClaudeRuntimeAdapter.start()` 可进入 `ready`。
+- [x] 已修复 Claude adapter 默认覆盖 `CLAUDE_CONFIG_DIR`/`CLAUDE_HOME` 导致 SDK 路径看不到现有登录态的问题。
 - [x] 已修复 supervisor-api 安装检测逻辑，使其能识别 pnpm workspace 下的 provider SDK。
 - [x] 已通过临时 local supervisor 验证 `/api/agent-runtimes` 返回 `claude.enabled=true`。
 - [x] 已通过临时 local supervisor 验证 `/api/agent-runtimes/claude/models` 返回 `haiku`。
@@ -166,7 +170,7 @@ E2E gate:
 - [x] 已运行 iOS `SupervisorAPIClientTests` 和 `WorkspaceDetailViewModelTests` targeted test，19 个测试通过。
 - [x] 已运行 Android `:app:compileDebugKotlin`。
 - [x] 已运行 Android `SupervisorApiClientTest` targeted unit test。
-- [x] 已尝试真实 Claude `haiku` prompt smoke，链路到达 Claude Code，但当前本机 Claude 未登录。
-- [ ] 登录 Claude Code 后重跑真实 `haiku` prompt smoke。当前错误：`Not logged in · Please run /login`。
+- [x] 已完成真实 Claude `haiku` prompt smoke，回复命中 `CLAUDE_HAIKU_SMOKE_OK`。
+- [x] 已完成真实 OpenCode prompt smoke，回复命中 `OPENCODE_SMOKE_OK`。
 - [ ] 尚未完成 Web/iOS/Android 三端真实 Claude 创建 thread E2E。
 - [ ] 尚未完成 Web/iOS/Android 三端真实 OpenCode 创建 thread E2E。

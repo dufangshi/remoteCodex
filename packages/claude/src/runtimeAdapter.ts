@@ -959,8 +959,6 @@ function queryOptionsForRuntime(
     },
     env: {
       ...process.env,
-      CLAUDE_CONFIG_DIR: input.home,
-      CLAUDE_HOME: input.home,
       CLAUDE_AGENT_SDK_CLIENT_APP: input.clientApp,
     },
   };
@@ -2084,24 +2082,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   private async withClaudeConfigEnv<T>(callback: () => Promise<T>): Promise<T> {
-    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
-    const previousClaudeHome = process.env.CLAUDE_HOME;
-    process.env.CLAUDE_CONFIG_DIR = this.options.home;
-    process.env.CLAUDE_HOME = this.options.home;
-    try {
-      return await callback();
-    } finally {
-      if (previousConfigDir === undefined) {
-        delete process.env.CLAUDE_CONFIG_DIR;
-      } else {
-        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
-      }
-      if (previousClaudeHome === undefined) {
-        delete process.env.CLAUDE_HOME;
-      } else {
-        process.env.CLAUDE_HOME = previousClaudeHome;
-      }
-    }
+    return callback();
   }
 
   private markFailed(error: unknown) {
