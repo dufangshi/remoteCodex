@@ -51,9 +51,11 @@ Checklist:
 
 E2E gate:
 
-- [ ] 在本机临时禁用或移除某个 runtime 后，Web/iOS/Android 都显示灰态和安装按钮。
-- [ ] 点击安装后能恢复为可选 backend。
-- [ ] 点击更新后状态保持可用，失败时不破坏已有可用 runtime。
+- [x] Web：在本机临时禁用某个 runtime 后显示灰态和安装按钮。
+- [x] Web：点击安装后能恢复为可选 backend。
+- [x] Web：点击更新后状态保持可用，失败时不破坏已有可用 runtime。
+- [ ] iOS：在本机临时禁用某个 runtime 后显示灰态和安装按钮，安装后恢复，更新后保持可用。
+- [ ] Android：在本机临时禁用某个 runtime 后显示灰态和安装按钮，安装后恢复，更新后保持可用。
 - [x] Relay 连接到某个 device 后，安装/更新请求命中该 device 背后的 supervisor，而不是 relay server 本身。
 
 ## Phase 2: Model Selection Parity
@@ -274,6 +276,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] Phase 2 capability controls 覆盖：外部 `@remote-codex/thread-ui` focused tests `composerToolbox.test.ts`、`ComposerSettingsToolbar.test.tsx`、`composerPresentation.test.ts`、`useComposerToolbarProps.test.ts` 通过，确认不支持 reasoning 的模型禁用 effort selector，且不支持 performance mode 时 `/fast` 不进入 slash toolbox。
 - [x] Phase 1 install recovery targeted 覆盖：Web `ThreadNewPage.test.tsx` 验证 unavailable Claude 置灰、点击 Install、刷新后自动选择 Claude `haiku` 并创建 thread；iOS `WorkspaceDetailViewModelTests/testInstallingUnavailableProviderSelectsItAndLoadsModels` 验证安装后选择刚安装 provider 并加载模型；Android native dialog 修复为安装成功后切换刚安装 provider，并在 backend 列表刷新时重新评估模型加载。
 - [x] Phase 1 relay device install path 覆盖：supervisor-api focused regression `runs backend install commands on the relayed device supervisor` 验证 relay mode 下直连 install 被 auth 拒绝，而 `createRelayRequestHandler` 转发的 `POST /api/agent-runtimes/claude/install` 会在 device supervisor 执行 fake install command 并返回 enabled backend；Android/iOS API client 单测已覆盖 relay device URL 拼接。
+- [x] Web Phase 1 runtime install availability E2E 通过：`REMOTE_CODEX_RUNTIME_INSTALL_E2E=1 ... pnpm exec playwright test e2e/runtime-install-availability.spec.ts --project=desktop-chromium` 使用临时 `CLAUDE_COMMAND` shim 和 `npm` shim 验证 Claude unavailable 灰态、Install 后恢复为可选 backend、Update 后仍保持 enabled；未修改本机全局 Claude/npm 安装。
 - [x] Phase 0 installer 策略评估：Claude/OpenCode SDK 已作为 workspace package dependency 存在，runtime import 先走本地 package resolution、再 fallback 到 npm global；安装状态检测也会识别 workspace `packages/claude/node_modules` 与 `packages/opencode/node_modules`。安装/更新命令仍应保留全局 CLI+SDK 安装，因为 `claude`、`opencode` 可执行文件必须在 supervisor 所在设备的 configured command/PATH 中可见；不建议改成只写 workspace dependency。
 - [x] Phase 4 SDK live-input 调研：本地 `@anthropic-ai/claude-agent-sdk` 暴露的是单次 `query()`/`streamInput(prompt)` query flow，当前 adapter 无可复用的 running query input channel；本地 `@opencode-ai/sdk/v2` session surface 使用 `session.prompt(...)`、`abort(...)`、`wait(...)`、`messages(...)`，未暴露向运行中 prompt 注入 input 的方法。因此 Claude/OpenCode 保持 queued continuation fallback，暂不把 `turns.steer` 改为 true。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
@@ -284,6 +287,6 @@ Implementation notes 2026-07-03 Phase 5 update:
 
 ## Remaining High-Value Gaps
 
-- [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
+- [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，还需在 iOS/Android 各跑一次真实 E2E；Web 已由 `runtime-install-availability.spec.ts` 覆盖。
 - [x] Relay device 模式下的安装/更新请求路径已单独验证，确认命中 device supervisor 而不是 relay server。
 - [x] slash command 执行结果落入 timeline/settings panel 的产品形态已补 Web focused regression：prompt command 经正常 prompt/timeline 路径显示结果，panel command 进入对应 panel，unsupported item 禁用。
