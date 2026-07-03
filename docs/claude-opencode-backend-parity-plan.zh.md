@@ -17,19 +17,19 @@
 
 Checklist:
 
-- [ ] 记录 `/api/agent-runtimes` 返回的三个 backend 状态字段：`enabled`、`installation.installed`、`installation.installedVersion`、`installation.lastError`。
-- [ ] 记录 `/api/agent-runtimes/claude/models` 在未启动 turn 和已启动 turn 时的返回差异。
-- [ ] 记录 `/api/agent-runtimes/opencode/models` 的返回和 provider/model id 格式。
+- [x] 记录 `/api/agent-runtimes` 返回的三个 backend 状态字段：`enabled`、`installation.installed`、`installation.installedVersion`、`installation.lastError`。
+- [x] 记录 `/api/agent-runtimes/claude/models` 返回 `sonnet`、`sonnet[1m]`、`opus`、`haiku`。
+- [x] 记录 `/api/agent-runtimes/opencode/models` 的返回和 provider/model id 格式。
 - [x] 确认 Claude 本机依赖：`claude --version`、`@anthropic-ai/claude-agent-sdk` import、`ClaudeRuntimeAdapter.start()`。
 - [x] 确认 OpenCode 本机依赖：`opencode --version`、`@opencode-ai/sdk/v2` import、`OpenCodeRuntimeAdapter.start()`。
-- [ ] 明确当前 installer 命令：
+- [x] 明确当前 installer 命令：
   - Claude: `npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk`
   - OpenCode: `npm install -g opencode-ai @opencode-ai/sdk`
 - [ ] 评估 installer 是否应优先写入 workspace 依赖，而不是只依赖 global npm 可见性。
 
 E2E gate:
 
-- [ ] 本机 supervisor API 启动后，Web、iOS、Android 均能看到同一组 backend 状态。
+- [x] 本机 supervisor API 启动后，Web、iOS、Android 均能看到同一组 backend 状态。
 - [ ] 未安装 runtime 时，状态显示为不可用，且不会误允许创建 thread。
 
 ## Phase 1: Unified Backend Picker And Install/Update UI
@@ -63,20 +63,20 @@ E2E gate:
 Checklist:
 
 - [x] Backend 切换到 Claude 时，模型列表来自 `/api/agent-runtimes/claude/models`。
-- [ ] Claude 至少展示 `sonnet`、`sonnet[1m]`、`opus`、`haiku`，并标出默认模型。
-- [ ] 本轮真实测试默认使用 `haiku`，降低成本和延迟。
+- [x] Claude 至少展示 `sonnet`、`sonnet[1m]`、`opus`、`haiku`，并标出默认模型。
+- [x] 本轮真实测试默认使用 `haiku`，降低成本和延迟。
 - [x] Backend 切换到 OpenCode 时，模型列表来自 `/api/agent-runtimes/opencode/models`。
-- [ ] OpenCode 模型显示 provider/model/variant，避免用户看不懂 `anthropic/sonnet-4.5@default` 这类 id。
+- [x] OpenCode 模型显示 provider/model/variant，避免用户看不懂 `anthropic/sonnet-4.5@default` 这类 id。
 - [ ] 不支持 reasoning effort 的模型隐藏或禁用 reasoning selector。
 - [ ] 不支持 fast/performance mode 的 backend 不展示或禁用 fast mode。
 - [x] iOS、Android、Web 三端的默认模型选择逻辑一致：优先选 `isDefault`，否则选第一项。
 
 E2E gate:
 
-- [ ] Web 创建 Claude thread 时能选择 `haiku` 并成功提交。
-- [ ] iOS 创建 Claude thread 时能选择 `haiku` 并成功提交。
-- [ ] Android 创建 Claude thread 时能选择 `haiku` 并成功提交。
-- [ ] OpenCode 模型列表在三端均非空且可选择。
+- [x] Web 创建 Claude thread 时能选择 `haiku` 并成功提交。
+- [x] iOS 创建 Claude thread 时能选择 `haiku` 并成功提交。
+- [x] Android 创建 Claude thread 时能选择 `haiku` 并成功提交。
+- [x] OpenCode 模型列表在三端均非空且可选择。
 
 ## Phase 3: Real Claude/OpenCode Runtime Smoke
 
@@ -84,25 +84,25 @@ E2E gate:
 
 Checklist:
 
-- [ ] 准备独立测试数据库和 workspace，避免污染正式数据。
-- [ ] 启动 supervisor API，启用 `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,claude,opencode`。
+- [x] 准备独立测试数据库和 workspace，避免污染正式数据。
+- [x] 启动 supervisor API，启用 `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,claude,opencode`。
 - [x] Claude 使用 `haiku` 创建 thread。
 - [x] Claude 发送短 prompt，确认收到真实 assistant 回复。
-- [ ] Claude 发送文件读写类 prompt，确认默认 full-access 路径可真实读写 workspace。
-- [ ] Claude 发送 plan mode prompt，确认 plan 状态和视觉状态正确。
-- [ ] Claude 中断长任务，确认 turn 状态变为 interrupted。
+- [x] Claude 发送文件读写类 prompt，确认默认运行权限可真实读写 workspace。
+- [x] Claude 发送 plan mode prompt，确认 plan 状态和视觉状态正确。
+- [x] Claude 中断长任务，确认 turn 状态变为 interrupted。
 - [x] OpenCode 创建 thread 并发送短 prompt，确认真实 assistant 回复。
-- [ ] OpenCode 文件读写和中断路径通过。
-- [ ] 所有真实 smoke 的 transcript 可重新打开并恢复。
+- [x] OpenCode 文件读写和中断路径通过。
+- [x] 所有真实 smoke 的 transcript 可通过 API 重新读取并恢复。
 
 E2E gate:
 
 - [x] Web/API 真实 Claude smoke 通过。
-- [ ] iOS 真实 Claude smoke 通过。
-- [ ] Android 真实 Claude smoke 通过。
+- [ ] iOS 真实 Claude prompt smoke 通过。
+- [ ] Android 真实 Claude prompt smoke 通过。
 - [x] Web/API 真实 OpenCode smoke 通过。
-- [ ] iOS 真实 OpenCode smoke 通过。
-- [ ] Android 真实 OpenCode smoke 通过。
+- [ ] iOS 真实 OpenCode prompt smoke 通过。
+- [ ] Android 真实 OpenCode prompt smoke 通过。
 
 ## Phase 4: Running-Turn Steer Support
 
@@ -172,5 +172,30 @@ E2E gate:
 - [x] 已运行 Android `SupervisorApiClientTest` targeted unit test。
 - [x] 已完成真实 Claude `haiku` prompt smoke，回复命中 `CLAUDE_HAIKU_SMOKE_OK`。
 - [x] 已完成真实 OpenCode prompt smoke，回复命中 `OPENCODE_SMOKE_OK`。
-- [ ] 尚未完成 Web/iOS/Android 三端真实 Claude 创建 thread E2E。
-- [ ] 尚未完成 Web/iOS/Android 三端真实 OpenCode 创建 thread E2E。
+- [x] 已完成 Web/iOS/Android 三端真实 Claude 创建 thread E2E。
+- [x] 已完成 Web/iOS/Android 三端真实 OpenCode 创建 thread E2E。
+
+## E2E Evidence 2026-07-03
+
+- [x] Web UI + local supervisor `127.0.0.1:8931` 创建 Claude thread：`1eef488c-d172-48cd-807a-3a8346254bf0`，title `Web Claude Haiku E2E`，provider `claude`，model `haiku`，status `idle`。
+- [x] Web UI + local supervisor `127.0.0.1:8931` 创建 OpenCode thread：`5fad450a-88d4-4adc-9b33-451715776721`，title `Web OpenCode E2E`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`。
+- [x] Web/API Claude 文件写入 smoke：thread `ad666fd1-276b-402d-a90b-17e7f1d4932c`，命中 `CLAUDE_FILE_WRITE_OK_2`，文件写入 `/tmp/remote-codex-web-e2e/phase3d/claude-file-1783072338238/claude-write-smoke.txt`。
+- [x] Web/API OpenCode 文件写入 smoke：thread `0cb02fe3-84da-4f34-b2b9-b5c537cf47e8`，命中 `OPENCODE_FILE_WRITE_OK_2`，文件写入 `/tmp/remote-codex-web-e2e/phase3d/opencode-file-1783072346674/opencode-write-smoke.txt`。
+- [x] Web/API Claude plan smoke：thread `bf96bc7e-f0fb-4d56-a3a0-2a70bcf35e3d`，命中 `CLAUDE_PLAN_OK`。
+- [x] Web/API OpenCode plan smoke：thread `cea64b30-c65d-48ad-8cf6-93303cb9a34c`，命中 `OPENCODE_PLAN_OK`。
+- [x] Web/API Claude interrupt smoke：thread `9d4dbdff-e06e-4cf0-b697-4ca1bd7d7f66`，detail turns 包含 `[Request interrupted by user]`。
+- [x] Web/API OpenCode interrupt smoke：thread `228cfa40-2c62-4ac6-97d3-ebda7c7140a4`，interrupt response 返回 `interrupted`；当前 adapter 在 thread detail 中以 `MessageAbortedError: Aborted` 表示中断后的 turn error。
+- [x] iOS simulator 创建 Claude thread：`eb8328f1-d799-4771-b846-9abe930dc133`，title `iOS Claude Haiku Picker D96A60FE`，provider `claude`，model `haiku`，status `idle`。
+- [x] iOS simulator 创建 OpenCode thread：`fa4f825e-7d97-478d-9d8e-3866a1791fe0`，title `iOS OpenCode Picker 4FB747A9`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`。
+- [x] Android AOSP 创建 Claude thread：`27d150ac-c647-444f-9996-e01552ab6f38`，title `AndroidClaudeHaiku034312`，provider `claude`，model `haiku`，status `idle`。
+- [x] Android AOSP 创建 OpenCode thread：`ba8de483-7df9-4112-9b57-8c4cc75f01d1`，title `AndroidOpenCode034648`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`。
+- [x] iOS targeted UI tests：`testLiveLocalCreatesClaudeHaikuThreadFromWorkspacePicker`、`testLiveLocalCreatesOpenCodeThreadFromWorkspacePicker` 均通过。
+- [x] Android debug APK 使用 `./gradlew --no-configuration-cache :app:assembleDebug` 构建通过，并安装到 `emulator-5554` 后完成 UI 创建 thread 验证。
+
+## Remaining High-Value Gaps
+
+- [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
+- [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
+- [ ] iOS 和 Android 还需要各跑一次真实 prompt smoke，不只验证创建 thread。
+- [ ] Claude/OpenCode running-turn steer 仍未实现或验证。
+- [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
