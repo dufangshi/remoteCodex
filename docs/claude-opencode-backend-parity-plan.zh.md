@@ -110,10 +110,10 @@ E2E gate:
 
 Checklist:
 
-- [ ] 调研 Claude Agent SDK 是否支持向运行中 query/session 注入 input、request answer、或 continuation。
+- [x] 调研 Claude Agent SDK 是否支持向运行中 query/session 注入 input、request answer、或 continuation。
 - [ ] 如果 Claude SDK 支持 live input，实现 `sendInput` 并将 capabilities `turns.steer` 改为 true。
 - [x] 如果 Claude SDK 不支持 live input，实现明确的 fallback：排队 continuation，在当前 turn 完成后自动开启隐藏 continuation turn，并保持 UI 看起来属于同一个可见 turn。
-- [ ] 调研 OpenCode SDK 是否支持 running-turn input。
+- [x] 调研 OpenCode SDK 是否支持 running-turn input。
 - [x] 对 OpenCode 实现 live steer 或同样的 queued continuation fallback。
 - [x] UI 中运行中发送 prompt 时，不再直接报 “This backend does not support sending input while a turn is running.”。
 - [x] Pending queued steer 在 thread detail、WebView、native shell 中可见且可取消。
@@ -273,6 +273,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - [x] Phase 2 capability controls 覆盖：外部 `@remote-codex/thread-ui` focused tests `composerToolbox.test.ts`、`ComposerSettingsToolbar.test.tsx`、`composerPresentation.test.ts`、`useComposerToolbarProps.test.ts` 通过，确认不支持 reasoning 的模型禁用 effort selector，且不支持 performance mode 时 `/fast` 不进入 slash toolbox。
 - [x] Phase 1 install recovery targeted 覆盖：Web `ThreadNewPage.test.tsx` 验证 unavailable Claude 置灰、点击 Install、刷新后自动选择 Claude `haiku` 并创建 thread；iOS `WorkspaceDetailViewModelTests/testInstallingUnavailableProviderSelectsItAndLoadsModels` 验证安装后选择刚安装 provider 并加载模型；Android native dialog 修复为安装成功后切换刚安装 provider，并在 backend 列表刷新时重新评估模型加载。
 - [x] Phase 0 installer 策略评估：Claude/OpenCode SDK 已作为 workspace package dependency 存在，runtime import 先走本地 package resolution、再 fallback 到 npm global；安装状态检测也会识别 workspace `packages/claude/node_modules` 与 `packages/opencode/node_modules`。安装/更新命令仍应保留全局 CLI+SDK 安装，因为 `claude`、`opencode` 可执行文件必须在 supervisor 所在设备的 configured command/PATH 中可见；不建议改成只写 workspace dependency。
+- [x] Phase 4 SDK live-input 调研：本地 `@anthropic-ai/claude-agent-sdk` 暴露的是单次 `query()`/`streamInput(prompt)` query flow，当前 adapter 无可复用的 running query input channel；本地 `@opencode-ai/sdk/v2` session surface 使用 `session.prompt(...)`、`abort(...)`、`wait(...)`、`messages(...)`，未暴露向运行中 prompt 注入 input 的方法。因此 Claude/OpenCode 保持 queued continuation fallback，暂不把 `turns.steer` 改为 true。
 - [x] Pending queued steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` 通过 172 个测试；新增 fake Claude cancel 用例确认取消后不会启动 hidden continuation。
 - [x] Shared thread-ui pending steer cancel 覆盖：`pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ThreadTimeline.test.tsx` 通过 101 个测试；包含真实 pending steer `Cancel` adapter 调用和 pending request accessible name 回归。
 - [x] iOS WebThread API cancel 覆盖：`pnpm --filter @remote-codex/ios-thread-web test -- IOSApiClient.test.ts` 通过 38 个测试。
