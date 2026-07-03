@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android APK Build"
+  short_description: "Build Remote Codex Android APK"
+  default_prompt: "Use $android-apk-build to build the latest Remote Codex Android APK and report the output path."
