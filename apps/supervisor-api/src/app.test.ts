@@ -841,6 +841,65 @@ describe('supervisor api', () => {
     expect(response.headers['content-type']).toContain('application/json');
   });
 
+  it('runs backend install commands on the relayed device supervisor', async () => {
+    await app.close();
+    const binDir = path.join(tempDir, 'bin');
+    await fs.mkdir(binDir, { recursive: true });
+    const claudeCommand = path.join(binDir, 'claude-relay-device');
+    await fs.writeFile(
+      claudeCommand,
+      '#!/usr/bin/env node\nconsole.log("2.1.197 (Claude Code)")\n',
+      { mode: 0o755 },
+    );
+    const installMarker = path.join(tempDir, 'relay-device-install.txt');
+    const runtime = new FakeInstallRuntime({
+      installCommand: `node -e "require('fs').writeFileSync(process.argv[1], 'relay-device-install')" ${installMarker}`,
+    });
+    app = buildTestApp(fakeCodexManager, {
+      claudeRuntime: runtime,
+      env: {
+        REMOTE_CODEX_MODE: 'relay',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+        REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+        REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
+        CLAUDE_COMMAND: claudeCommand,
+      },
+      relayTunnelClient: {
+        validateConfig: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      } as any,
+    });
+    await app.ready();
+
+    const directResponse = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/claude/install',
+      payload: { action: 'install' },
+    });
+    expect(directResponse.statusCode).toBe(401);
+
+    const relayResponse = await createRelayRequestHandler(app)({
+      method: 'POST',
+      path: '/api/agent-runtimes/claude/install',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'install' }),
+    });
+
+    expect(relayResponse.statusCode).toBe(200);
+    expect(await fs.readFile(installMarker, 'utf8')).toBe('relay-device-install');
+    expect(JSON.parse(relayResponse.body)).toMatchObject({
+      provider: 'claude',
+      enabled: true,
+      installation: {
+        installed: true,
+        installedVersion: expect.stringContaining('SDK'),
+      },
+    });
+  });
+
   it('decodes base64 relayed HTTP request bodies before Fastify inject', async () => {
     const relayApp = Fastify({ logger: false });
     relayApp.post('/echo', async (request) => ({
