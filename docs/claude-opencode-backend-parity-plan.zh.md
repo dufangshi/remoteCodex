@@ -142,7 +142,9 @@ Implementation notes 2026-07-03 update:
 - drain 逻辑会逐条消费 pending steer，启动 hidden continuation turn，并用原可见 turn 作为 `displayTurnId`；queued prompt 会作为本地 user message 投影回原 turn，最终 transcript 能看到用户追加输入。
 - interrupt path 会同时清理 runtime turn id 和 display turn id 上的 pending steers，避免中断后继续自动执行旧输入。
 - 已覆盖 supervisor-api fake Claude runtime：running 时第二条 prompt 返回 200、pending steer 可见、当前 turn 完成后自动启动 hidden continuation、最终同一可见 turn 包含两条 user message。
-- 尚未完成真实 Web/iOS/Android 长任务运行中追加输入 E2E；下一轮应优先用 Claude haiku 和 OpenCode 各跑一条长任务，确认真实 runtime transcript 遵循 queued prompt。
+- 已修复 OpenCode 特有状态漂移：OpenCode 开始运行后可能出现 `providerTurnId` 非空但 thread `status=idle`，且历史 transcript turn id 会从 live UUID 变成 `opencode-turn-msg...`。queued fallback 现在只对 non-steer backend 放宽 active-turn 判定，并在 active turn 的远端历史 id 暂不匹配时保留 pending steer。
+- 已完成真实 API queued continuation smoke：Claude haiku 和 OpenCode 均能在运行中接收第二条 prompt，detail 中出现 pending steer，当前 turn 完成后自动 hidden continuation，最终 transcript 命中 start/append marker。
+- 尚未完成真实 Web/iOS/Android UI 长任务运行中追加输入 E2E；下一轮应优先复用本 API smoke 的 marker 方案，在三端 WebView composer 上验证同一行为。
 
 ## Phase 5: Claude Slash Command Parity
 
@@ -222,10 +224,12 @@ Implementation notes 2026-07-03:
 - [x] Android debug APK 使用 `./gradlew --no-configuration-cache :app:assembleDebug` 构建通过，并安装到 `emulator-5554` 后完成 UI 创建 thread 验证。
 - [x] Android AOSP WebView fixture 真实 Claude prompt smoke 通过：thread `e72d1035-7f44-4f90-be28-6772fed85132`，provider `claude`，model `haiku`，status `idle`，transcript/UI 命中 `ANDROID_CLAUDE_HAIKU_WEBVIEW_PROMPT_OK_7C666B23`。
 - [x] Android AOSP WebView fixture 真实 OpenCode prompt smoke 通过：thread `0f388776-55da-452b-8d1b-ed0e32a7b600`，provider `opencode`，model `opencode/mimo-v2.5-free`，status `idle`，transcript/UI 命中 `ANDROID_OPENCODE_WEBVIEW_PROMPT_OK_9C6CD0A7`。
+- [x] API Phase 4 Claude queued continuation smoke 通过：thread `ba0b7a62-286c-46d1-86b4-92543970d93f`，provider `claude`，model `haiku`，transcript 命中 `PHASE4_CLAUDE_QUEUE_START_944D1CF5` 和 `PHASE4_CLAUDE_QUEUE_APPEND_944D1CF5`。
+- [x] API Phase 4 OpenCode queued continuation smoke 通过：thread `a595a387-3c5c-4acb-b466-1f97d39e4942`，provider `opencode`，model `opencode/mimo-v2.5-free`，transcript 命中 `PHASE4_OPENCODE_QUEUE_START_A70D8ECF` 和 `PHASE4_OPENCODE_QUEUE_APPEND_A70D8ECF`。
 
 ## Remaining High-Value Gaps
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode running-turn queued continuation 已有后端覆盖，但真实 Web/iOS/Android 长任务追加输入 E2E 仍未完成。
+- [ ] Claude/OpenCode running-turn queued continuation 已有后端覆盖和真实 API smoke，但 Web/iOS/Android UI 长任务追加输入 E2E 仍未完成。
 - [ ] Claude/OpenCode slash command parity 仍未实现或验证，尤其 `/btw`。
