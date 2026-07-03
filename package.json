@@ -62,6 +62,8 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.3",
     "@fastify/websocket": "^11.0.2",
+    "@fontsource/noto-sans": "^5.2.10",
+    "@fontsource/noto-sans-sc": "^5.2.9",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",

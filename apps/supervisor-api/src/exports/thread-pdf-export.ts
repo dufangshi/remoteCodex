@@ -1,8 +1,6 @@
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import puppeteer from 'puppeteer-core';
 import { marked } from 'marked';
@@ -29,18 +27,40 @@ const MAX_TEXT_CHARS = 12_000;
 const MAX_COMMAND_OUTPUT_CHARS = 2_400;
 const MAX_DETAIL_LINES = 8;
 const EXPORT_FONT_FAMILY =
-  '"Segoe UI", "RemoteCodexCJK", "Microsoft YaHei", "DengXian", "SimSun", "Noto Sans CJK SC", "Noto Sans CJK", "DejaVu Sans", Arial, sans-serif';
+  '"Noto Sans", "Noto Sans SC", "Segoe UI", "RemoteCodexCJK", "Microsoft YaHei", "DengXian", "SimSun", "Noto Sans CJK SC", "Noto Sans CJK", "DejaVu Sans", Arial, sans-serif';
 const EXPORT_MONO_FONT_FAMILY =
-  '"SFMono-Regular", Consolas, "Liberation Mono", "DejaVu Sans Mono", "RemoteCodexCJK", monospace';
+  '"SFMono-Regular", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Noto Sans SC", "RemoteCodexCJK", monospace';
 const EMBEDDED_CJK_FONT_CANDIDATES = [
+  { path: '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', format: 'truetype', weight: 400 },
+  { path: '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf', format: 'opentype', weight: 400 },
+  { path: '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc', format: 'truetype', weight: 400 },
+  { path: '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc', format: 'truetype', weight: 400 },
+  { path: '/System/Library/Fonts/PingFang.ttc', format: 'truetype', weight: 400 },
+  { path: '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', format: 'truetype', weight: 400 },
   { path: '/mnt/c/Windows/Fonts/simhei.ttf', format: 'truetype', weight: 400 },
   { path: '/mnt/c/Windows/Fonts/Deng.ttf', format: 'truetype', weight: 400 },
   { path: '/mnt/c/Windows/Fonts/msyh.ttc', format: 'truetype', weight: 400 },
 ];
+const BUNDLED_LATIN_FONT_CSS_FILES = [
+  { packageName: '@fontsource/noto-sans', cssFile: 'latin-400.css' },
+  { packageName: '@fontsource/noto-sans', cssFile: 'latin-700.css' },
+];
+const BUNDLED_CJK_FONT_CSS_FILES = [
+  { packageName: '@fontsource/noto-sans-sc', cssFile: '400.css' },
+  { packageName: '@fontsource/noto-sans-sc', cssFile: '700.css' },
+];
 const PUPPETEER_CHANNEL = 'chrome' as const;
 const PDF_EXPORT_TIMEOUT_MS = 45_000;
-const MAX_CHROME_STDERR_CHARS = 4_000;
-let embeddedCjkFontCss: string | null = null;
+const require = createRequire(import.meta.url);
+let embeddedSystemCjkFontCss: string | null = null;
+const packageRootCache = new Map<string, string>();
+const fontFaceBlockCache = new Map<string, FontFaceBlock[]>();
+
+interface FontFaceBlock {
+  block: string;
+  ranges: Array<{ start: number; end: number }>;
+  fontPath: string;
+}
 
 function escapeHtml(value: string) {
   return value
@@ -57,16 +77,16 @@ marked.use({
   gfm: true,
 });
 
-function renderEmbeddedCjkFontCss() {
+function renderEmbeddedSystemCjkFontCss() {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
     return '';
   }
 
-  if (embeddedCjkFontCss !== null) {
-    return embeddedCjkFontCss;
+  if (embeddedSystemCjkFontCss !== null) {
+    return embeddedSystemCjkFontCss;
   }
 
-  embeddedCjkFontCss = '';
+  embeddedSystemCjkFontCss = '';
   for (const candidate of EMBEDDED_CJK_FONT_CANDIDATES) {
     try {
       if (!fs.existsSync(candidate.path)) {
@@ -74,7 +94,7 @@ function renderEmbeddedCjkFontCss() {
       }
 
       const font = fs.readFileSync(candidate.path);
-      embeddedCjkFontCss = `
+      embeddedSystemCjkFontCss = `
       @font-face {
         font-family: "RemoteCodexCJK";
         src: url("data:font/${candidate.format};base64,${font.toString('base64')}") format("${candidate.format}");
@@ -83,11 +103,155 @@ function renderEmbeddedCjkFontCss() {
       }`;
       break;
     } catch {
-      embeddedCjkFontCss = '';
+      embeddedSystemCjkFontCss = '';
     }
   }
 
-  return embeddedCjkFontCss;
+  return embeddedSystemCjkFontCss;
+}
+
+function renderPdfEmbeddedFontCss(snapshot: ThreadPdfExportSnapshot) {
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return '';
+  }
+
+  const usedCodePoints = collectSnapshotCodePoints(snapshot);
+  const latinCss = BUNDLED_LATIN_FONT_CSS_FILES.flatMap((source) => renderBundledFontCss(source));
+  const cjkCss = BUNDLED_CJK_FONT_CSS_FILES.flatMap((source) => renderBundledFontCss(source, usedCodePoints));
+  const bundledCss = [...latinCss, ...cjkCss].join('\n');
+  const needsCjkFallback = containsCjkCodePoint(usedCodePoints) && cjkCss.length === 0;
+
+  return [bundledCss, needsCjkFallback ? renderEmbeddedSystemCjkFontCss() : ''].filter(Boolean).join('\n');
+}
+
+function collectSnapshotCodePoints(snapshot: ThreadPdfExportSnapshot) {
+  const values = [
+    snapshot.thread.title,
+    snapshot.workspace.label,
+    snapshot.workspace.absPath,
+    snapshot.thread.model ?? '',
+    snapshot.exportedAt,
+    ...snapshot.turns.flatMap((turn) => [
+      turn.error ?? '',
+      turn.status,
+      turn.startedAt,
+      ...turn.items.flatMap((item) => [
+        item.text ?? '',
+        item.previewText ?? '',
+        item.detailText ?? '',
+        item.status ?? '',
+      ]),
+    ]),
+  ].filter((value): value is string => typeof value === 'string');
+  const codePoints = new Set<number>();
+  for (const value of values) {
+    for (const character of value) {
+      codePoints.add(character.codePointAt(0)!);
+    }
+  }
+  return codePoints;
+}
+
+function containsCjkCodePoint(codePoints: Set<number>) {
+  for (const codePoint of codePoints) {
+    if (
+      (codePoint >= 0x3400 && codePoint <= 0x9fff) ||
+      (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+      (codePoint >= 0x20000 && codePoint <= 0x2fa1f)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function renderBundledFontCss(
+  source: { packageName: string; cssFile: string },
+  usedCodePoints?: Set<number>,
+) {
+  const packageRoot = resolvePackageRoot(source.packageName);
+  const cssPath = path.join(packageRoot, source.cssFile);
+  const blocks = getFontFaceBlocks(cssPath);
+
+  return blocks
+    .filter((block) => !usedCodePoints || fontFaceIntersects(block.ranges, usedCodePoints))
+    .map((block) => inlineFontFaceBlock(block, packageRoot))
+    .filter(Boolean);
+}
+
+function resolvePackageRoot(packageName: string) {
+  const cached = packageRootCache.get(packageName);
+  if (cached) {
+    return cached;
+  }
+
+  const packageRoot = path.dirname(require.resolve(`${packageName}/package.json`));
+  packageRootCache.set(packageName, packageRoot);
+  return packageRoot;
+}
+
+function getFontFaceBlocks(cssPath: string) {
+  const cached = fontFaceBlockCache.get(cssPath);
+  if (cached) {
+    return cached;
+  }
+
+  const css = fs.readFileSync(cssPath, 'utf8');
+  const blocks = Array.from(css.matchAll(/@font-face\s*{[\s\S]*?}/g)).map((match) => {
+    const block = match[0];
+    const fontPath = block.match(/url\((['"]?)(\.\/files\/[^)'"]+\.woff2)\1\)\s*format\((['"]?)woff2\3\)/)?.[2] ?? '';
+    return {
+      block,
+      fontPath,
+      ranges: parseUnicodeRanges(block.match(/unicode-range:\s*([^;]+);/)?.[1]),
+    };
+  }).filter((block) => block.fontPath);
+
+  fontFaceBlockCache.set(cssPath, blocks);
+  return blocks;
+}
+
+function parseUnicodeRanges(value: string | undefined) {
+  if (!value) {
+    return [{ start: 0x0000, end: 0x10ffff }];
+  }
+
+  return value.split(',').flatMap((part) => {
+    const match = part.trim().match(/^U\+([0-9a-f?]+)(?:-([0-9a-f]+))?$/i);
+    if (!match) {
+      return [];
+    }
+    const startText = match[1]!.replace(/\?/g, '0');
+    const endText = (match[2] ?? match[1]!.replace(/\?/g, 'F'));
+    return [{
+      start: Number.parseInt(startText, 16),
+      end: Number.parseInt(endText, 16),
+    }];
+  });
+}
+
+function fontFaceIntersects(
+  ranges: Array<{ start: number; end: number }>,
+  usedCodePoints: Set<number>,
+) {
+  for (const codePoint of usedCodePoints) {
+    if (ranges.some((range) => codePoint >= range.start && codePoint <= range.end)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function inlineFontFaceBlock(block: FontFaceBlock, packageRoot: string) {
+  const fontPath = path.join(packageRoot, block.fontPath);
+  try {
+    const font = fs.readFileSync(fontPath);
+    return block.block
+      .replace(/font-display:\s*swap;/g, 'font-display: block;')
+      .replace(/src:\s*[^;]+;/, `src: url("data:font/woff2;base64,${font.toString('base64')}") format("woff2");`);
+  } catch {
+    return '';
+  }
 }
 
 function formatDateTime(value: string | null) {
@@ -558,7 +722,10 @@ function totalPrice(snapshot: ThreadPdfExportSnapshot) {
   );
 }
 
-export function renderThreadExportHtml(snapshot: ThreadPdfExportSnapshot) {
+export function renderThreadExportHtml(
+  snapshot: ThreadPdfExportSnapshot,
+  options: { embedFonts?: boolean } = {},
+) {
   const turnNumbers = snapshot.turns
     .map((turn) => snapshot.selectedTurnNumbers.get(turn.id))
     .filter((value): value is number => typeof value === 'number');
@@ -584,7 +751,7 @@ export function renderThreadExportHtml(snapshot: ThreadPdfExportSnapshot) {
     <meta charset="utf-8" />
     <title>${escapeHtml(snapshot.thread.title)} transcript</title>
     <style>
-      ${renderEmbeddedCjkFontCss()}
+      ${options.embedFonts ? renderPdfEmbeddedFontCss(snapshot) : ''}
       @page { margin: 0.46in 0.45in 0.5in; }
       * { box-sizing: border-box; }
       body {
@@ -880,7 +1047,6 @@ export function renderThreadExportStandaloneHtml(snapshot: ThreadPdfExportSnapsh
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(snapshot.thread.title)} transcript</title>
     <style>
-      ${renderEmbeddedCjkFontCss()}
       :root {
         color-scheme: light;
         --page: rgb(244 239 231);
@@ -1203,7 +1369,7 @@ export async function renderThreadExportPdf(snapshot: ThreadPdfExportSnapshot) {
     );
   }
 
-  return renderPdfWithChromeCli(renderThreadExportHtml(snapshot));
+  return renderPdfWithChrome(renderThreadExportHtml(snapshot, { embedFonts: true }));
 }
 
 function resolvePdfBrowserExecutablePath() {
@@ -1225,100 +1391,54 @@ function resolvePdfBrowserExecutablePath() {
   }
 }
 
-async function renderPdfWithChromeCli(html: string) {
+async function renderPdfWithChrome(html: string) {
   const executablePath = resolvePdfBrowserExecutablePath();
-  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pdf-'));
-  const htmlPath = path.join(tempDir, 'thread-export.html');
-  const pdfPath = path.join(tempDir, 'thread-export.pdf');
+  const browser = await puppeteer.launch({
+    executablePath,
+    headless: true,
+    timeout: PDF_EXPORT_TIMEOUT_MS,
+    args: [
+      '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--font-render-hinting=none',
+    ],
+  });
 
   try {
-    await fs.promises.writeFile(htmlPath, html, 'utf8');
-    await printHtmlToPdf({
-      executablePath,
-      htmlPath,
-      pdfPath,
+    const page = await browser.newPage();
+    page.setDefaultTimeout(PDF_EXPORT_TIMEOUT_MS);
+    await page.setContent(html, {
+      waitUntil: 'load',
+      timeout: PDF_EXPORT_TIMEOUT_MS,
+    });
+    await page.evaluate(async () => {
+      const fonts = (document as any).fonts;
+      if (fonts?.ready) {
+        await fonts.ready;
+      }
     });
 
-    const pdf = await fs.promises.readFile(pdfPath);
+    const pdf = Buffer.from(await page.pdf({
+      format: 'Letter',
+      margin: {
+        top: '0px',
+        right: '0px',
+        bottom: '0px',
+        left: '0px',
+      },
+      preferCSSPageSize: true,
+      printBackground: true,
+      timeout: PDF_EXPORT_TIMEOUT_MS,
+    }));
+
     if (pdf.length === 0 || !pdf.subarray(0, 4).equals(Buffer.from('%PDF'))) {
       throw new Error('Chrome did not produce a valid PDF file.');
     }
 
     return pdf;
   } finally {
-    await fs.promises.rm(tempDir, { force: true, recursive: true });
+    await browser.close();
   }
-}
-
-async function printHtmlToPdf(input: {
-  executablePath: string;
-  htmlPath: string;
-  pdfPath: string;
-}) {
-  const args = [
-    '--headless',
-    '--disable-gpu',
-    '--disable-dev-shm-usage',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--font-render-hinting=none',
-    '--no-pdf-header-footer',
-    '--print-to-pdf-no-header',
-    `--print-to-pdf=${input.pdfPath}`,
-    pathToFileURL(input.htmlPath).href,
-  ];
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(input.executablePath, args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    let settled = false;
-    let stderr = '';
-
-    const complete = (error?: Error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      child.kill('SIGTERM');
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    };
-    const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      complete(new Error(`Chrome PDF export timed out after ${PDF_EXPORT_TIMEOUT_MS}ms.`));
-    }, PDF_EXPORT_TIMEOUT_MS);
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = truncateChromeStderr(`${stderr}${chunk.toString('utf8')}`);
-      if (stderr.includes('bytes written to file')) {
-        complete();
-      }
-    });
-    child.on('error', (error) => {
-      complete(error);
-    });
-    child.on('close', (code, signal) => {
-      if (code === 0) {
-        complete();
-        return;
-      }
-
-      const reason = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
-      const detail = stderr ? ` ${stderr}` : '';
-      complete(new Error(`Chrome PDF export failed with ${reason}.${detail}`));
-    });
-  });
-}
-
-function truncateChromeStderr(value: string) {
-  if (value.length <= MAX_CHROME_STDERR_CHARS) {
-    return value;
-  }
-
-  return value.slice(value.length - MAX_CHROME_STDERR_CHARS);
 }

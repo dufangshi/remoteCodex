@@ -116,6 +116,7 @@ describe('thread PDF export rendering', () => {
     expect(html).not.toContain('item-fileChange');
     expect(html).not.toContain('item-plan');
     expect(html).not.toContain('item-toolCall');
+    expect(html).not.toContain('data:font/');
   });
 
   it('renders standalone HTML as a shareable timeline without raw command output', () => {
@@ -135,5 +136,6 @@ describe('thread PDF export rendering', () => {
     expect(html).not.toContain('RAW_OUTPUT_SHOULD_NOT_EXPORT');
     expect(html).not.toContain('Thread list');
     expect(html).not.toContain('Ask Codex');
+    expect(html).not.toContain('data:font/');
   });
 });

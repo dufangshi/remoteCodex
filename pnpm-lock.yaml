@@ -14,6 +14,12 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.2.0
+      '@fontsource/noto-sans':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource/noto-sans-sc':
+        specifier: ^5.2.9
+        version: 5.2.9
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
@@ -236,6 +242,12 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.2.0
+      '@fontsource/noto-sans':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource/noto-sans-sc':
+        specifier: ^5.2.9
+        version: 5.2.9
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
@@ -1116,6 +1128,12 @@ packages:
 
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
+
+  '@fontsource/noto-sans-sc@5.2.9':
+    resolution: {integrity: sha512-bTUIWGBgJDpwi5qAr+x0/lcgv80IHTB9vl6s2f6EymZEa7qYV99yNRBZuKFT+SYDKVunZrjCEhWtpxqmbXWl5Q==}
+
+  '@fontsource/noto-sans@5.2.10':
+    resolution: {integrity: sha512-J58RVfS/C0Z2VBF+PoU260Tx8cdRGYuS+e3yQe4hYaIYDl0sEVn5CzlLo5zVRvQD0HaIUTV8AZMfqR7rtdEpqQ==}
 
   '@homebridge/node-pty-prebuilt-multiarch@0.13.1':
     resolution: {integrity: sha512-ccQ60nMcbEGrQh0U9E6x0ajW9qJNeazpcM/9CH6J8leyNtJgb+gu24WTBAfBUVeO486ZhscnaxLEITI2HXwhow==}
@@ -5584,6 +5602,10 @@ snapshots:
       react-dom: 19.2.7(react@19.2.7)
 
   '@floating-ui/utils@0.2.11': {}
+
+  '@fontsource/noto-sans-sc@5.2.9': {}
+
+  '@fontsource/noto-sans@5.2.10': {}
 
   '@homebridge/node-pty-prebuilt-multiarch@0.13.1':
     dependencies:
