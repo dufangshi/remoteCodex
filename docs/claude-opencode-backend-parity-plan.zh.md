@@ -177,7 +177,7 @@ Checklist:
 - [x] 列出当前 Claude Code CLI/SDK 支持的 slash commands，并记录哪些可通过普通 prompt 透传，哪些需要 runtime API 特殊处理。
 - [x] 在 Web/iOS/Android composer 中，输入 `/` 时展示 backend-aware slash command 菜单。
 - [x] Claude backend 下根据 SDK `system/init.slash_commands` 动态包含当前 session 实际支持的命令；`/mcp` 保留专用 panel。
-- [ ] OpenCode backend 下展示 OpenCode 自己支持的 slash commands，例如 `/compact`、`/fork`、`/mcp`。
+- [x] OpenCode backend 下展示 OpenCode 自己支持的 slash commands：当前为 `/compact`、`/fork`。
 - [x] 不同 backend 的 slash command 菜单不可混用：菜单来自当前 runtime 的 `managementSchema.toolboxItems`。
 - [ ] slash command 执行结果进入 timeline 或 settings panel，而不是静默失败。
 - [x] 如果某条 slash command 只能在 Claude TTY 里使用，文档和 UI 要明确显示“不支持当前远程运行模式”。
@@ -185,13 +185,13 @@ Checklist:
 E2E gate:
 
 - [ ] Claude `/btw` 在 Web/iOS/Android 的行为一致。
-- [ ] Claude `/mcp` 在三端能打开或显示合理结果。
-- [ ] OpenCode `/compact` 或 `/mcp` 在三端行为一致。
+- [x] Web Claude `/mcp` 能打开或显示合理结果；iOS/Android 待补真实 gate。
+- [x] Web OpenCode `/compact`、`/fork` 可见，且当前 runtime 不支持 MCP status 时不会展示会 409 的 `/mcp` 假入口；iOS/Android 待补真实 gate。
 
 Implementation notes 2026-07-03:
 
 - 本机 `claude --help` 只列出 CLI 参数和子命令，没有列出交互式 slash command 清单；`/btw` 需要继续通过 Claude Code 交互模式或 SDK 能力确认。
-- 当前 runtime toolbox 暴露情况：Claude 只暴露 `/mcp`；OpenCode 暴露 `/compact`、`/fork`、`/mcp`。
+- 当前 runtime toolbox 初始暴露情况：Claude 至少暴露 `/mcp`，并会在 session init 后动态补充 SDK `slash_commands`；OpenCode 暴露 `/compact`、`/fork`。当前 `@opencode-ai/sdk` 没有 MCP status/list API，因此 OpenCode 暂不展示 `/mcp`。
 - Web/iOS/Android 的 thread composer 均消费 backend `managementSchema.toolboxItems`，因此 backend-aware slash command 菜单可以通过 runtime toolbox schema 统一下发。
 - thread composer 实现在外部本地依赖 `/Users/mac/dev/remote-codex-thread-ui/packages/thread-ui`。如果新增“prompt slash item”（例如点击 `/btw` 插入 `/btw ` 到输入框），需要同步更新该包及其 shared toolbox action/schema，再回到本 repo 重建 Web/iOS/Android thread bundle。
 
@@ -204,6 +204,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - 已同步外部 thread-ui shared schema 和 composer toolbox：新增 `prompt`、`unsupported` actions；`prompt` 插入命令文本，`unsupported` 显示 `Unavailable` 且禁用。
 - 已补齐空 prompt 输入 `/` 打开 backend-aware slash command 菜单；为避免误吞正文中的斜杠，只在 chat prompt 为空且菜单项可用时拦截。
 - 已通过 focused tests 覆盖：Claude adapter 会从 SDK init 更新 slash toolbox；Web composer 会把 backend prompt slash command 插入 prompt、禁用 unsupported item，并在空 prompt 输入 `/` 时打开菜单。
+- 已补 Web real-backend Phase 5 gate `e2e/phase5-slash-command-parity.spec.ts`：Claude haiku 真实启动后，Web composer 展示 SDK 动态 slash commands、禁用 unsupported `/btw`，`/compact` 会插入 prompt，`/mcp` 可打开 panel；OpenCode Web composer 展示 `/compact`、`/fork`，且不会展示当前 runtime 不支持的 `/mcp`。
 
 ## Current Local Baseline
 
@@ -274,4 +275,4 @@ Implementation notes 2026-07-03 Phase 5 update:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] Claude/OpenCode slash command parity 仍需三端真实 E2E；当前已实现 Claude SDK 动态发现和 `/btw` unsupported 展示，但尚未跑 Web/iOS/Android 实机一致性 gate。
+- [ ] Claude/OpenCode slash command parity 已有 Web real-backend gate；iOS/Android 仍需补真实 UI E2E，确认 `/` 菜单、unsupported `/btw` 和 backend-specific toolbox 行为一致。
