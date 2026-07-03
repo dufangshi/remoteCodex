@@ -6034,4 +6034,168 @@ describe('ThreadDetailPage', () => {
     expect(composerHost?.contains(slashMenu)).toBe(true);
   });
 
+  it('sends composed Claude slash commands through the prompt path so the result lands in the timeline', async () => {
+    let sentPrompt: string | null = null;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/claude/status')) {
+          return okJsonResponse({
+            ...claudeBackendResponse,
+            managementSchema: {
+              ...claudeBackendResponse.managementSchema,
+              toolboxItems: [
+                ...claudeBackendResponse.managementSchema.toolboxItems,
+                { action: 'prompt', command: '/usage', label: '/usage' },
+              ],
+            },
+          });
+        }
+
+        if (url.includes('/api/agent-runtimes/claude/models')) {
+          return okJsonResponse(claudeModelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          sentPrompt = JSON.parse(String(init.body)).prompt;
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            provider: 'claude',
+            providerSessionId: 'claude-session-1',
+            source: 'supervisor',
+            title: 'Claude Thread',
+            model: 'sonnet',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: sentPrompt,
+            lastError: null,
+            activeTurnId: 'slash-turn-1',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              provider: 'claude',
+              providerSessionId: 'claude-session-1',
+              source: 'supervisor',
+              title: 'Claude Thread',
+              model: 'sonnet',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: sentPrompt ?? 'Claude preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: sentPrompt ? new Date().toISOString() : null,
+              lastTurnCompletedAt: sentPrompt ? new Date().toISOString() : null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: sentPrompt
+              ? [
+                  {
+                    id: 'slash-turn-1',
+                    startedAt: new Date().toISOString(),
+                    status: 'completed',
+                    error: null,
+                    items: [
+                      {
+                        id: 'slash-turn-1:user',
+                        kind: 'userMessage',
+                        text: sentPrompt,
+                      },
+                      {
+                        id: 'slash-turn-1:agent',
+                        kind: 'agentMessage',
+                        text: 'Usage command completed.',
+                      },
+                    ],
+                  },
+                ]
+              : [],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Claude Thread');
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(await screen.findByRole('button', { name: /\/usage/i }));
+
+    const editor = screen.getByLabelText('Prompt');
+    expect(editor).toHaveTextContent('/usage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(sentPrompt).toBe('/usage');
+    });
+    await screen.findByText('/usage');
+
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.output.delta',
+      threadId: 'thread-1',
+      timestamp: new Date().toISOString(),
+      payload: {
+        turnId: 'slash-turn-1',
+        delta: 'Usage command completed.',
+      },
+    });
+    await screen.findByText('Usage command completed.');
+
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.turn.completed',
+      threadId: 'thread-1',
+      timestamp: new Date().toISOString(),
+      payload: {
+        turnId: 'slash-turn-1',
+      },
+    });
+
+    await screen.findByText('Usage command completed.');
+  });
+
 });

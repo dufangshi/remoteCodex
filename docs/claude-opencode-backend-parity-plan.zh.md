@@ -179,7 +179,7 @@ Checklist:
 - [x] Claude backend 下根据 SDK `system/init.slash_commands` 动态包含当前 session 实际支持的命令；`/mcp` 保留专用 panel。
 - [x] OpenCode backend 下展示 OpenCode 自己支持的 slash commands：当前为 `/compact`、`/fork`。
 - [x] 不同 backend 的 slash command 菜单不可混用：菜单来自当前 runtime 的 `managementSchema.toolboxItems`。
-- [ ] slash command 执行结果进入 timeline 或 settings panel，而不是静默失败。
+- [x] slash command 执行结果进入 timeline 或 settings panel，而不是静默失败。
 - [x] 如果某条 slash command 只能在 Claude TTY 里使用，文档和 UI 要明确显示“不支持当前远程运行模式”。
 
 E2E gate:
@@ -207,6 +207,7 @@ Implementation notes 2026-07-03 Phase 5 update:
 - 已补 Web real-backend Phase 5 gate `e2e/phase5-slash-command-parity.spec.ts`：Claude haiku 真实启动后，Web composer 展示 SDK 动态 slash commands、禁用 unsupported `/btw`，`/compact` 会插入 prompt，`/mcp` 可打开 panel；OpenCode Web composer 展示 `/compact`、`/fork`，且不会展示当前 runtime 不支持的 `/mcp`。
 - 已补 iOS WebView Phase 5 gate：`testLiveLocalThreadWebViewShowsRealClaudeSlashToolbox` 和 `testLiveLocalThreadWebViewShowsRealOpenCodeSlashToolbox` 会创建真实 backend thread，打开 app 内 WebView，验证 slash toolbox 按钮和空 prompt 输入 `/` 都能打开 backend-aware 菜单；Claude 验证 `/mcp` 可见、`/btw` disabled，OpenCode 验证 `/compact`、`/fork` 可见且不展示 `/mcp`/`/btw`。
 - 已补 Android AOSP WebView Phase 5 gate `e2e/android-phase5-slash-command-parity.mjs`：通过 ADB 启动真实 Android app WebView fixture，再用 WebView DevTools/CDP 验证 slash toolbox 按钮和键入 `/` 的行为；Claude/OpenCode 断言与 iOS gate 保持一致。
+- 已补 Web focused regression：Claude prompt 型 slash command（例如 `/usage`）从 backend-aware toolbox 进入 composer 后，经 `/api/threads/:id/prompt` 发送，并通过 WebSocket delta/turn completion 落入 timeline；专用命令如 `/mcp` 仍进入 settings/panel，unsupported 命令保持禁用。
 
 ## Current Local Baseline
 
@@ -284,4 +285,4 @@ Implementation notes 2026-07-03 Phase 5 update:
 
 - [ ] 未安装 runtime 的灰态、安装按钮、安装后恢复，在 Web/iOS/Android 三端各跑一次真实 E2E。
 - [ ] Relay device 模式下的安装/更新请求路径需要单独验证，确认命中 device supervisor 而不是 relay server。
-- [ ] slash command 执行结果落入 timeline/settings panel 的产品形态仍需补齐；当前三端 Phase 5 gate 覆盖的是 backend-aware 菜单、prompt command 插入和 unsupported item 状态。
+- [x] slash command 执行结果落入 timeline/settings panel 的产品形态已补 Web focused regression：prompt command 经正常 prompt/timeline 路径显示结果，panel command 进入对应 panel，unsupported item 禁用。
