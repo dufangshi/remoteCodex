@@ -42,6 +42,7 @@ import {
   ThreadGoalDto,
   ThreadHooksDto,
   TrustThreadHookInput,
+  ThreadHistoryItemDto,
   ThreadHistoryItemDetailDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
@@ -156,6 +157,7 @@ function canUseRuntimePagedTurns(
 
 export class ThreadService {
   private readonly liveState = new ThreadLiveStateStore();
+  private readonly queuedContinuationDrains = new Set<string>();
   private readonly detailAssembler: ThreadDetailAssembler;
   private readonly usageAccounting: ThreadUsageAccounting;
   private readonly requestCoordinator: ProviderRequestCoordinator;
@@ -299,6 +301,8 @@ export class ThreadService {
         }),
       invalidateThreadDetailCache: (localThreadId) =>
         this.invalidateThreadDetailCache(localThreadId),
+      shouldPreserveCompletedPendingSteer: (localThreadId, turnId) =>
+        this.shouldPreserveCompletedPendingSteer(localThreadId, turnId),
     });
     this.requestCoordinator = new ProviderRequestCoordinator({
       emitThreadEvent: (type, threadId, payload) =>
@@ -392,6 +396,11 @@ export class ThreadService {
         normalizeReasoningEffort,
         normalizeThreadGoalStatusForThread: (goal, record) =>
           this.goalCoordinator.normalizeThreadGoalStatusForThread(goal, record),
+        shouldPreservePendingSteersForCompletedTurn: (record, turnId) =>
+          !this.runtimeSupportsLiveRunningTurnInput(record.provider) &&
+          this.auxiliaryState.hasPendingSteersForTurn(record.id, turnId),
+        scheduleQueuedContinuationDrain: (localThreadId, turnId) =>
+          this.scheduleQueuedContinuationDrain(localThreadId, turnId),
         persistLiveHistoryItem: (localThreadId, turnId, item) =>
           this.historyPersistence.persistLiveHistoryItem(localThreadId, turnId, item),
         persistFinalTurnOrderingHints: (localThreadId, turnId, items) =>
@@ -905,9 +914,20 @@ export class ThreadService {
 
     if (record.providerTurnId && record.status === 'running') {
       if (!turnConfig.supportsRunningTurnInput) {
-        throw new HttpError(409, {
-          code: 'conflict',
-          message: 'This backend does not support sending input while a turn is running.',
+        return this.promptTurnCoordinator.queueContinuationPromptTurn(localThreadId, {
+          ...connectedRecord,
+          providerTurnId: record.providerTurnId,
+        }, {
+          prompt,
+          displayPrompt,
+          developerInstructions,
+          clientRequestId: input.clientRequestId ?? null,
+          effectiveModel: turnConfig.effectiveModel,
+          normalizedReasoning: turnConfig.normalizedReasoning,
+          collaborationMode: turnConfig.collaborationMode,
+          sandboxMode: turnConfig.sandboxMode,
+          performanceMode: turnConfig.performanceMode,
+          workspacePath: workspace.absPath,
         });
       }
       return this.promptTurnCoordinator.steerOrStartPromptTurn(localThreadId, {
@@ -1172,6 +1192,12 @@ export class ThreadService {
     this.liveState.setLivePlan(localThreadId, null);
     this.liveState.setLiveItems(localThreadId, null);
     this.auxiliaryState.clearPendingSteersForTurn(localThreadId, interruption.turnId);
+    const displayTurnId = record.providerTurnId
+      ? this.liveState.displayTurnIdForRuntimeTurn(localThreadId, record.providerTurnId)
+      : null;
+    if (displayTurnId && displayTurnId !== interruption.turnId) {
+      this.auxiliaryState.clearPendingSteersForTurn(localThreadId, displayTurnId);
+    }
     this.invalidateThreadDetailCache(localThreadId);
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
@@ -1279,6 +1305,109 @@ export class ThreadService {
 
   private async handleRuntimeEvent(event: AgentRuntimeEvent) {
     await this.runtimeEventProjector.handleRuntimeEvent(event);
+  }
+
+  private runtimeSupportsLiveRunningTurnInput(provider: string | null | undefined) {
+    const runtime = this.runtimeForProvider(provider);
+    return Boolean(runtime.sendInput && runtime.capabilities.turns.steer);
+  }
+
+  private shouldPreserveCompletedPendingSteer(localThreadId: string, turnId: string) {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      return false;
+    }
+    return (
+      !this.runtimeSupportsLiveRunningTurnInput(record.provider) &&
+      this.auxiliaryState.hasPendingSteersForTurn(localThreadId, turnId)
+    );
+  }
+
+  private scheduleQueuedContinuationDrain(localThreadId: string, turnId: string) {
+    const key = `${localThreadId}:${turnId}`;
+    if (this.queuedContinuationDrains.has(key)) {
+      return;
+    }
+    this.queuedContinuationDrains.add(key);
+    queueMicrotask(() => {
+      void this.drainQueuedContinuation(localThreadId, turnId)
+        .catch((error) => {
+          const message =
+            error instanceof Error ? error.message : 'Failed to run queued prompt.';
+          updateThreadRecord(this.db, localThreadId, {
+            lastError: message,
+          });
+          this.invalidateThreadDetailCache(localThreadId);
+        })
+        .finally(() => {
+          this.queuedContinuationDrains.delete(key);
+        });
+    });
+  }
+
+  private async drainQueuedContinuation(localThreadId: string, turnId: string) {
+    const pending = this.auxiliaryState.listPendingSteerRecordsForTurn(
+      localThreadId,
+      turnId,
+    )[0];
+    if (!pending) {
+      return;
+    }
+
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || record.status === 'running') {
+      return;
+    }
+
+    const providerSessionId = this.requireProviderSessionId(record);
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found.',
+      });
+    }
+
+    const developerInstructions = combineDeveloperInstructions([
+      pluginDeveloperInstructions(this.pluginService),
+    ]);
+    const turnConfig = await this.sessionCoordinator.resolvePromptTurnConfig({
+      provider: record.provider,
+      currentModel: record.model,
+      currentReasoningEffort: record.reasoningEffort,
+      currentFastMode: record.fastMode,
+      currentCollaborationMode: record.collaborationMode,
+      currentSandboxMode: record.sandboxMode,
+      approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
+      promptInput: {},
+    });
+
+    const queuedUserItemId = `queued-continuation:${pending.id}:user`;
+    this.historyPersistence.persistProjectedHistoryItem(localThreadId, turnId, {
+      id: queuedUserItemId,
+      kind: 'userMessage',
+      text: pending.displayPrompt,
+      createdAt: new Date().toISOString(),
+      sequence: this.liveState.recordTurnItemOrder(localThreadId, turnId, queuedUserItemId),
+    } as ThreadHistoryItemDto);
+
+    await this.promptTurnCoordinator.startPromptTurn(localThreadId, {
+      ...record,
+      providerSessionId,
+    }, {
+      prompt: pending.submittedPrompt,
+      displayPrompt: pending.displayPrompt,
+      developerInstructions,
+      effectiveModel: turnConfig.effectiveModel,
+      normalizedReasoning: turnConfig.normalizedReasoning,
+      collaborationMode: turnConfig.collaborationMode,
+      sandboxMode: turnConfig.sandboxMode,
+      performanceMode: turnConfig.performanceMode,
+      workspacePath: workspace.absPath,
+      hidden: true,
+      displayTurnId: turnId,
+    });
+    this.auxiliaryState.deletePendingSteerRecord(localThreadId, pending.id, turnId);
   }
 
   private async handleProviderRuntimeRequest(request: AgentProviderRequest) {

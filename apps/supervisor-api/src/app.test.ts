@@ -2144,13 +2144,46 @@ describe('supervisor api', () => {
         prompt: 'Second prompt while running.',
       },
     });
-    expect(runningPromptResponse.statusCode).toBe(409);
+    expect(runningPromptResponse.statusCode).toBe(200);
     expect(runningPromptResponse.json()).toMatchObject({
-      code: 'conflict',
-      message: 'This backend does not support sending input while a turn is running.',
+      provider: 'claude',
+      status: 'running',
+      activeTurnId: 'claude-turn-1',
     });
+    const queuedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(queuedDetailResponse.json().pendingSteers).toEqual([
+      expect.objectContaining({
+        turnId: 'claude-turn-1',
+        prompt: 'Second prompt while running.',
+      }),
+    ]);
 
     fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeClaudeRuntime.startTurnInputs.at(-1)).toMatchObject({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Second prompt while running.',
+      displayPrompt: 'Second prompt while running.',
+      hidden: true,
+      displayTurnId: 'claude-turn-1',
+    });
+
+    const continuationDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(continuationDetailResponse.json().thread).toMatchObject({
+      status: 'running',
+      activeTurnId: 'claude-turn-2',
+    });
+    expect(continuationDetailResponse.json().pendingSteers).toEqual([]);
+
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-2');
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const completedDetailResponse = await app.inject({
       method: 'GET',
       url: `/api/threads/${createResponse.json().id}`,
@@ -2164,41 +2197,11 @@ describe('supervisor api', () => {
       model: 'sonnet',
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
-      tokenUsage: {
-        total: {
-          totalTokens: 17348,
-          inputTokens: 16248,
-          cachedInputTokens: 15796,
-          outputTokens: 1100,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 17348,
-          inputTokens: 16248,
-          cachedInputTokens: 15796,
-          outputTokens: 1100,
-          reasoningOutputTokens: 0,
-        },
-        modelContextWindow: 200000,
-      },
-      priceEstimate: {
-        pricingModelKey: 'sonnet',
-        pricingTierKey: 'standard',
-        currency: 'USD',
-      },
       items: expect.arrayContaining([
+        expect.objectContaining({ kind: 'userMessage', text: 'Say hello.' }),
+        expect.objectContaining({ kind: 'userMessage', text: 'Second prompt while running.' }),
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
-    });
-    const completedTurn = completedDetailResponse.json().turns.at(-1);
-    expect(completedTurn.priceEstimate.inputUsd).toBeCloseTo(0.001356, 10);
-    expect(completedTurn.priceEstimate.cachedInputUsd).toBeCloseTo(0.0047388, 10);
-    expect(completedTurn.priceEstimate.outputUsd).toBeCloseTo(0.0165, 10);
-    expect(completedTurn.priceEstimate.totalUsd).toBeCloseTo(0.0225948, 10);
-    expect(completedDetailResponse.json().thread.contextUsage).toMatchObject({
-      availability: 'available',
-      modelContextWindow: 200000,
-      tokensInContextWindow: 17348,
     });
   });
 

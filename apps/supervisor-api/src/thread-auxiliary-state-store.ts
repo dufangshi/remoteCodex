@@ -22,6 +22,7 @@ interface ThreadAuxiliaryStateStoreCallbacks {
   cachedTurns(localThreadId: string): ThreadTurnDto[];
   emitPendingSteerUpdated(localThreadId: string, turnId?: string): void;
   invalidateThreadDetailCache(localThreadId: string): void;
+  shouldPreserveCompletedPendingSteer?(localThreadId: string, turnId: string): boolean;
 }
 
 export class ThreadAuxiliaryStateStore {
@@ -130,6 +131,22 @@ export class ThreadAuxiliaryStateStore {
     }));
   }
 
+  listPendingSteerRecordsForTurn(localThreadId: string, turnId: string) {
+    return listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).filter(
+      (record) => record.turnId === turnId,
+    );
+  }
+
+  hasPendingSteersForTurn(localThreadId: string, turnId: string) {
+    return this.listPendingSteerRecordsForTurn(localThreadId, turnId).length > 0;
+  }
+
+  deletePendingSteerRecord(localThreadId: string, id: string, turnId?: string) {
+    deleteThreadPendingSteerRecordById(this.db, id);
+    this.callbacks.invalidateThreadDetailCache(localThreadId);
+    this.callbacks.emitPendingSteerUpdated(localThreadId, turnId);
+  }
+
   clearPendingSteersForTurn(localThreadId: string, turnId: string) {
     const records = listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).filter(
       (record) => record.turnId === turnId,
@@ -192,7 +209,10 @@ export class ThreadAuxiliaryStateStore {
         turnMessages.includes(record.submittedPrompt) ||
         turnMessages.includes(record.displayPrompt) ||
         persistedLocalImagePrompt ||
-        turn.status !== 'inProgress'
+        (
+          turn.status !== 'inProgress' &&
+          !this.callbacks.shouldPreserveCompletedPendingSteer?.(localThreadId, record.turnId)
+        )
       ) {
         deleteThreadPendingSteerRecordById(this.db, record.id);
         removed = true;

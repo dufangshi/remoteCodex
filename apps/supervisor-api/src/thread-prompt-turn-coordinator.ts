@@ -257,4 +257,34 @@ export class ThreadPromptTurnCoordinator {
       developerInstructions: input.developerInstructions ?? null,
     });
   }
+
+  async queueContinuationPromptTurn(
+    localThreadId: string,
+    record: RunningPromptTurnRecord,
+    input: SteerPromptTurnInput,
+  ): Promise<ThreadDto> {
+    const displayTurnId =
+      this.liveState.displayTurnIdForRuntimeTurn(localThreadId, record.providerTurnId) ??
+      record.providerTurnId;
+
+    updateThreadRecord(this.db, localThreadId, {
+      providerTurnId: record.providerTurnId,
+      status: 'running',
+      lastError: null,
+    });
+    createThreadPendingSteerRecord(this.db, {
+      threadId: localThreadId,
+      turnId: displayTurnId,
+      clientRequestId: input.clientRequestId,
+      displayPrompt: input.displayPrompt,
+      submittedPrompt: input.prompt,
+    });
+    this.callbacks.invalidateThreadDetailCache(localThreadId);
+    this.callbacks.emitThreadUpdated(localThreadId, {
+      reason: 'pending_steer_updated',
+    });
+
+    const updated = getThreadRecordById(this.db, localThreadId)!;
+    return this.callbacks.toThreadDto(updated, new Set([record.providerSessionId]));
+  }
 }

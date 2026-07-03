@@ -65,6 +65,15 @@ export interface ThreadRuntimeEventProjectorCallbacks {
   normalizeCollaborationMode(value: string | null | undefined): 'default' | 'plan';
   normalizeReasoningEffort(value: string | null | undefined): any;
   normalizeThreadGoalStatusForThread(goal: ThreadGoalDto, record: ThreadRecord): ThreadGoalDto;
+  shouldPreservePendingSteersForCompletedTurn(
+    record: ThreadRecord,
+    displayTurnId: string,
+    runtimeTurnId: string,
+  ): boolean;
+  scheduleQueuedContinuationDrain(
+    localThreadId: string,
+    displayTurnId: string,
+  ): void;
   persistLiveHistoryItem(
     localThreadId: string,
     turnId: string,
@@ -448,9 +457,14 @@ export class ThreadRuntimeEventProjector {
           liveState.resetRecordedTurnItemOrder(record.id, rawTurnId);
         }
         callbacks.copyRuntimeTurnTokenUsageToDisplayTurn(record.id, rawTurnId, turnId);
-        callbacks.clearPendingSteersForTurn(record.id, turnId);
-        if (rawTurnId !== turnId) {
-          callbacks.clearPendingSteersForTurn(record.id, rawTurnId);
+        const preservePendingSteers =
+          event.turn.status === 'completed' &&
+          callbacks.shouldPreservePendingSteersForCompletedTurn(record, turnId, rawTurnId);
+        if (!preservePendingSteers) {
+          callbacks.clearPendingSteersForTurn(record.id, turnId);
+          if (rawTurnId !== turnId) {
+            callbacks.clearPendingSteersForTurn(record.id, rawTurnId);
+          }
         }
         callbacks.clearTerminalPendingRequests(record.id, true);
         if (
@@ -475,6 +489,9 @@ export class ThreadRuntimeEventProjector {
           }
         );
         liveState.clearRuntimeDisplayTurnMapping(record.id, rawTurnId);
+        if (preservePendingSteers) {
+          callbacks.scheduleQueuedContinuationDrain(record.id, turnId);
+        }
         return;
       }
       case 'turn.failed': {

@@ -59,6 +59,19 @@ export class ThreadHistoryPersistenceCoordinator {
     });
   }
 
+  persistProjectedHistoryItem(
+    localThreadId: string,
+    turnId: string,
+    item: ThreadHistoryItemDto,
+  ) {
+    upsertThreadHistoryItemRecord(this.db, {
+      threadId: localThreadId,
+      turnId,
+      itemId: item.id,
+      itemJson: JSON.stringify(item),
+    });
+  }
+
   deletePersistedHistoryItemsForTurn(localThreadId: string, turnId: string) {
     deleteThreadHistoryItemRecordsByThreadAndTurnId(this.db, localThreadId, turnId);
   }
@@ -148,17 +161,32 @@ export class ThreadHistoryPersistenceCoordinator {
       return;
     }
 
-    upsertThreadTurnMetadata(this.db, {
+    const metadataPatch: Parameters<typeof upsertThreadTurnMetadata>[1] = {
       threadId: localThreadId,
       turnId: displayTurnId,
-      model: runtimeMetadata.model ?? null,
-      reasoningEffort: runtimeMetadata.reasoningEffort ?? null,
-      reasoningEffortAvailable: runtimeMetadata.reasoningEffortAvailable ?? null,
-      pricingModelKey: runtimeMetadata.pricingModelKey ?? null,
-      pricingTierKey: runtimeMetadata.pricingTierKey ?? null,
-      tokenUsageJson: runtimeMetadata.tokenUsageJson ?? null,
-      displayPrompt: runtimeMetadata.displayPrompt ?? null,
-    });
+    };
+    if (runtimeMetadata.model !== null) {
+      metadataPatch.model = runtimeMetadata.model;
+    }
+    if (runtimeMetadata.reasoningEffort !== null) {
+      metadataPatch.reasoningEffort = runtimeMetadata.reasoningEffort;
+    }
+    if (runtimeMetadata.reasoningEffortAvailable !== null) {
+      metadataPatch.reasoningEffortAvailable = runtimeMetadata.reasoningEffortAvailable;
+    }
+    if (runtimeMetadata.pricingModelKey !== null) {
+      metadataPatch.pricingModelKey = runtimeMetadata.pricingModelKey;
+    }
+    if (runtimeMetadata.pricingTierKey !== null) {
+      metadataPatch.pricingTierKey = runtimeMetadata.pricingTierKey;
+    }
+    if (runtimeMetadata.tokenUsageJson !== null) {
+      metadataPatch.tokenUsageJson = runtimeMetadata.tokenUsageJson;
+    }
+    if (runtimeMetadata.displayPrompt !== null) {
+      metadataPatch.displayPrompt = runtimeMetadata.displayPrompt;
+    }
+    upsertThreadTurnMetadata(this.db, metadataPatch);
     deleteThreadTurnMetadataByThreadAndTurnId(this.db, localThreadId, runtimeTurnId);
   }
 }
