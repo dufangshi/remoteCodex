@@ -1328,6 +1328,55 @@ final class RemoteCodexUITests: XCTestCase {
     }
 
     @MainActor
+    func testLiveLocalRuntimeInstallAvailabilityFromWorkspacePicker() async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let initialClaude = try await Self.liveAgentBackend(baseURL: baseURL, provider: "claude")
+        guard initialClaude.enabled == false, initialClaude.installation?.installed == false else {
+            throw XCTSkip("Start the supervisor with a temporarily unavailable Claude runtime to run this smoke.")
+        }
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "iOS Runtime Install Workspace"
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--reset-settings", "--ui-test-live-local-connection"]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_WORKSPACE_ID"] = workspace.id
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["iOS Runtime Install Workspace"].waitForExistence(timeout: 10))
+        XCTAssertTrue(tapElement(app.buttons["New"], in: app, maxSwipes: 6))
+
+        let claudeProvider = app.buttons["new-thread-provider-claude"]
+        XCTAssertTrue(scrollUntilExists(claudeProvider, in: app, maxSwipes: 8))
+        XCTAssertFalse(claudeProvider.isEnabled)
+        let claudeAction = app.buttons["new-thread-provider-action-claude"]
+        XCTAssertTrue(waitForElement(claudeAction, containing: "Install", timeout: 10), claudeAction.label)
+
+        claudeAction.tap()
+        let installedClaude = try await Self.waitForLiveAgentBackendInstalled(
+            baseURL: baseURL,
+            provider: "claude",
+            timeout: 30
+        )
+        XCTAssertEqual(installedClaude.provider, "claude")
+        XCTAssertTrue(waitForElement(claudeAction, containing: "Update", timeout: 30), claudeAction.label)
+
+        claudeAction.tap()
+        _ = try await Self.waitForLiveAgentBackendInstalled(
+            baseURL: baseURL,
+            provider: "claude",
+            timeout: 30
+        )
+        XCTAssertTrue(waitForElement(claudeAction, containing: "Update", timeout: 30), claudeAction.label)
+        XCTAssertTrue(waitForAndTapElement(app.buttons["new-thread-model-haiku"], in: app, timeout: 30, maxSwipes: 8))
+        XCTAssertTrue(app.buttons["new-thread-start"].isEnabled)
+    }
+
+    @MainActor
     func testLiveLocalCreatesOpenCodeThreadFromWorkspacePicker() async throws {
         try await runLiveLocalWorkspacePickerCreateThread(
             providerButtonId: "new-thread-provider-opencode",
@@ -2355,6 +2404,18 @@ extension RemoteCodexUITests {
         let command: String
     }
 
+    struct LiveAgentBackend: Decodable {
+        let provider: String
+        let enabled: Bool
+        let installation: LiveAgentInstallation?
+    }
+
+    struct LiveAgentInstallation: Decodable {
+        let installed: Bool
+        let installedVersion: String?
+        let lastError: String?
+    }
+
     struct LiveServerCredentials {
         let username: String
         let password: String
@@ -2786,6 +2847,42 @@ extension RemoteCodexUITests {
             code: 1,
             userInfo: [
                 NSLocalizedDescriptionKey: "Timed out waiting for \(provider) toolbox commands: \(commands.joined(separator: ", "))"
+            ]
+        )
+    }
+
+    static func liveAgentBackend(baseURL: URL, provider: String) async throws -> LiveAgentBackend {
+        let backends: [LiveAgentBackend] = try await getJSON(baseURL: baseURL, path: "/api/agent-runtimes")
+        guard let backend = backends.first(where: { $0.provider == provider }) else {
+            throw NSError(
+                domain: "RemoteCodexUITests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Backend \(provider) was not reported by /api/agent-runtimes."]
+            )
+        }
+        return backend
+    }
+
+    static func waitForLiveAgentBackendInstalled(
+        baseURL: URL,
+        provider: String,
+        timeout: TimeInterval = 30
+    ) async throws -> LiveAgentBackend {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastBackend: LiveAgentBackend?
+        while Date() < deadline {
+            let backend = try await liveAgentBackend(baseURL: baseURL, provider: provider)
+            lastBackend = backend
+            if backend.enabled, backend.installation?.installed == true {
+                return backend
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NSError(
+            domain: "RemoteCodexUITests",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Timed out waiting for \(provider) to become installed. Last backend: \(String(describing: lastBackend))"
             ]
         )
     }
