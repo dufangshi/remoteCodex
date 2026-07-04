@@ -21,6 +21,8 @@ import {
   buildAndRestartService,
   login,
   enableRelayMode,
+  fetchRelayAdmin,
+  relayAdminLogin,
   renameProviderHostConfigArchive,
   restartAgentBackend,
   revokeRelayShare,
@@ -81,6 +83,58 @@ describe('api request helper', () => {
     const call = vi.mocked(fetch).mock.calls.at(-1);
     expect(call?.[0]).toBe('/api/auth/login');
     expect(call?.[1]?.credentials).toBe('same-origin');
+  });
+
+  it('uses the dedicated admin token for relay admin requests', async () => {
+    enableRelayMode();
+    window.localStorage.setItem('remote-codex-relay-token', 'normal-token');
+    window.localStorage.setItem('remote-codex-relay-admin-token', 'admin-token');
+
+    await fetchRelayAdmin();
+
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/relay/admin');
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer admin-token');
+  });
+
+  it('stores admin login separately from the normal relay token', async () => {
+    enableRelayMode();
+    window.localStorage.setItem('remote-codex-relay-token', 'normal-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          token: 'admin-token',
+          session: {
+            authenticated: true,
+            user: {
+              id: 'admin-user',
+              username: 'admin',
+              email: 'admin@example.test',
+              role: 'admin',
+              enabled: true,
+              createdAt: '2026-07-04T00:00:00.000Z',
+            },
+            registrationEnabled: true,
+          },
+        }),
+      }),
+    );
+
+    await relayAdminLogin({ username: 'admin', password: 'secret' });
+
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('normal-token');
+    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBe('admin-token');
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/relay/auth/login');
+    expect(call?.[1]?.body).toBe(JSON.stringify({
+      identifier: 'admin',
+      password: 'secret',
+    }));
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.has('Authorization')).toBe(false);
   });
 
   it('does not force a JSON content type for body-less post requests', async () => {

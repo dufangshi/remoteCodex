@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, Clock3, Database, RefreshCw, Settings, Share2, ShieldCheck, Users } from 'lucide-react';
+import { Check, Clock3, Database, RefreshCw, Settings, Share2, Users } from 'lucide-react';
 
 import type {
   RelayAdminDeviceDto,
@@ -10,12 +10,14 @@ import type {
   RelayUserDto,
 } from '@remote-codex/shared';
 import { RelayUserMenu } from '../components/RelayUserMenu';
+import { LoginPage } from './LoginPage';
 import {
   ApiError,
   approveRelayRegistration,
   enableRelayMode,
   fetchRelayAdmin,
   rejectRelayRegistration,
+  relayAdminLogin,
   setRelayUserEnabled,
   updateRelayRegistrationSettings,
 } from '../lib/api';
@@ -34,6 +36,7 @@ export function RelayAdminPage() {
   const [summary, setSummary] = useState<RelayAdminSummaryDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loginRequired, setLoginRequired] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [days, setDays] = useState(7);
@@ -50,8 +53,18 @@ export function RelayAdminPage() {
       setSummary(result);
       setSettingsDraft(result.settings);
       setDays(result.conversationWindowDays);
+      setLoginRequired(false);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (
+        caught instanceof ApiError &&
+        (caught.statusCode === 401 || caught.statusCode === 403)
+      ) {
+        setSummary(null);
+        setLoginRequired(true);
+        setError(null);
+      } else {
+        setError(errorMessage(caught));
+      }
     } finally {
       setLoading(false);
     }
@@ -128,6 +141,21 @@ export function RelayAdminPage() {
     } finally {
       setBusyKey(null);
     }
+  }
+
+  async function handleAdminLogin(input: { username: string; password: string }) {
+    await relayAdminLogin(input);
+    await load(days);
+  }
+
+  if (loginRequired) {
+    return (
+      <LoginPage
+        description="Use the relay admin credentials for this server. This does not replace your normal relay account."
+        eyebrow="Relay Admin"
+        onLogin={handleAdminLogin}
+      />
+    );
   }
 
   return (

@@ -3,8 +3,12 @@ import { FormEvent, useState } from 'react';
 import { ApiError } from '../lib/api';
 
 export function LoginPage({
+  eyebrow = 'Supervisor Access',
+  description = 'Use the admin credentials configured on this Remote Codex server.',
   onLogin,
 }: {
+  eyebrow?: string;
+  description?: string;
   onLogin: (input: { username: string; password: string }) => Promise<void>;
 }) {
   const [username, setUsername] = useState('');
@@ -37,13 +41,13 @@ export function LoginPage({
       <section className="w-full max-w-sm rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_14%,transparent)] sm:p-6">
         <div className="mb-5">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-muted)]">
-            Supervisor Access
+            {eyebrow}
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
             Sign in
           </h1>
           <p className="mt-2 text-sm leading-6 text-[var(--theme-muted)]">
-            Use the admin credentials configured on this Remote Codex server.
+            {description}
           </p>
         </div>
 

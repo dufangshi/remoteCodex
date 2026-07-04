@@ -91,9 +91,11 @@ export class ApiError extends Error {
 
 const AUTH_TOKEN_STORAGE_KEY = 'remote-codex-auth-token';
 const RELAY_TOKEN_STORAGE_KEY = 'remote-codex-relay-token';
+const RELAY_ADMIN_TOKEN_STORAGE_KEY = 'remote-codex-relay-admin-token';
 const RELAY_MODE_STORAGE_KEY = 'remote-codex-relay-mode';
 const RELAY_DEVICE_STORAGE_KEY = 'remote-codex-relay-device-id';
 const RELAY_THREAD_STORAGE_KEY = 'remote-codex-relay-thread-id';
+type RequestAuthMode = 'default' | 'relay-admin' | 'none';
 
 declare global {
   interface Window {
@@ -133,6 +135,14 @@ function readStoredRelayToken() {
   return window.localStorage.getItem(RELAY_TOKEN_STORAGE_KEY);
 }
 
+function readStoredRelayAdminToken() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage.getItem(RELAY_ADMIN_TOKEN_STORAGE_KEY);
+}
+
 export function setStoredRelayToken(token: string | null) {
   if (typeof window === 'undefined') {
     return;
@@ -144,6 +154,19 @@ export function setStoredRelayToken(token: string | null) {
   }
 
   window.localStorage.removeItem(RELAY_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredRelayAdminToken(token: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(RELAY_ADMIN_TOKEN_STORAGE_KEY, token);
+    return;
+  }
+
+  window.localStorage.removeItem(RELAY_ADMIN_TOKEN_STORAGE_KEY);
 }
 
 function relayModeEnabled() {
@@ -351,16 +374,23 @@ async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
   }
 }
 
-async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+async function request<T>(
+  input: RequestInfo,
+  init?: RequestInit,
+  options: { auth?: RequestAuthMode } = {},
+): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(apiPath(String(input)), withAuthInit({
-    ...init,
-    headers,
-  }));
+  const response = await fetch(
+    apiPath(String(input)),
+    withAuthInit({
+      ...init,
+      headers,
+    }, options.auth),
+  );
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -422,14 +452,23 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   };
 }
 
-function withAuthInit(init: RequestInit = {}): RequestInit {
+function withAuthInit(init: RequestInit = {}, authMode: RequestAuthMode = 'default'): RequestInit {
   const headers = new Headers(init.headers);
-  const relayToken = readStoredRelayToken();
-  const token = readStoredAuthToken();
-  if (relayModeEnabled() && relayToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${relayToken}`);
-  } else if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
+  if (authMode !== 'none' && !headers.has('Authorization')) {
+    if (authMode === 'relay-admin') {
+      const relayAdminToken = readStoredRelayAdminToken();
+      if (relayAdminToken) {
+        headers.set('Authorization', `Bearer ${relayAdminToken}`);
+      }
+    } else {
+      const relayToken = readStoredRelayToken();
+      const token = readStoredAuthToken();
+      if (relayModeEnabled() && relayToken) {
+        headers.set('Authorization', `Bearer ${relayToken}`);
+      } else if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+    }
   }
 
   return {
@@ -497,6 +536,19 @@ export async function relayLogin(input: { identifier: string; password: string }
     body: JSON.stringify(input),
   });
   setStoredRelayToken(result.token);
+  return result;
+}
+
+export async function relayAdminLogin(input: { username: string; password: string }) {
+  enableRelayMode();
+  const result = await request<RelayLoginResultDto>('/relay/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({
+      identifier: input.username,
+      password: input.password,
+    }),
+  }, { auth: 'none' });
+  setStoredRelayAdminToken(result.token);
   return result;
 }
 
@@ -598,7 +650,7 @@ export function revokeRelayShare(shareId: string) {
 
 export function fetchRelayAdmin(days?: number) {
   const query = days ? `?days=${encodeURIComponent(String(days))}` : '';
-  return request<RelayAdminSummaryDto>(`/relay/admin${query}`);
+  return request<RelayAdminSummaryDto>(`/relay/admin${query}`, undefined, { auth: 'relay-admin' });
 }
 
 export function setRelayRegistrationEnabled(enabled: boolean) {
@@ -609,26 +661,26 @@ export function updateRelayRegistrationSettings(input: Partial<RelayRegistration
   return request<{ registrationEnabled: boolean; settings: RelayRegistrationSettingsDto }>('/relay/admin/settings/registration', {
     method: 'PATCH',
     body: JSON.stringify(input),
-  });
+  }, { auth: 'relay-admin' });
 }
 
 export function setRelayUserEnabled(userId: string, enabled: boolean) {
   return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ enabled }),
-  });
+  }, { auth: 'relay-admin' });
 }
 
 export function approveRelayRegistration(requestId: string) {
   return request<RelayUserDto>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/approve`, {
     method: 'POST',
-  });
+  }, { auth: 'relay-admin' });
 }
 
 export function rejectRelayRegistration(requestId: string) {
   return request<{ id: string }>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/reject`, {
     method: 'POST',
-  });
+  }, { auth: 'relay-admin' });
 }
 
 export function fetchWorkspaceSettings() {

@@ -197,4 +197,73 @@ describe('RelayAdminPage', () => {
       );
     });
   });
+
+  it('allows admin login without replacing the normal relay account token', async () => {
+    window.localStorage.setItem('remote-codex-relay-token', 'normal-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        if (url.startsWith('/relay/admin') && headers.get('Authorization') !== 'Bearer admin-token') {
+          return Promise.resolve({
+            ok: false,
+            status: 403,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              code: 'forbidden',
+              message: 'Admin access is required.',
+            }),
+          });
+        }
+        if (url === '/relay/auth/login') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              token: 'admin-token',
+              session: {
+                authenticated: true,
+                user: {
+                  id: 'admin-user',
+                  username: 'admin',
+                  email: 'admin@example.test',
+                  role: 'admin',
+                  enabled: true,
+                  createdAt: '2026-07-04T00:00:00.000Z',
+                },
+                registrationEnabled: true,
+              },
+            }),
+          });
+        }
+        if (url.startsWith('/relay/admin')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => adminSummary,
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({ code: 'not_found', message: `Unhandled test URL: ${url}` }),
+        });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('Use the relay admin credentials for this server. This does not replace your normal relay account.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'admin' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByText('Operations panel')).toBeInTheDocument();
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('normal-token');
+    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBe('admin-token');
+  });
 });
