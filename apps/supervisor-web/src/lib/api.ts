@@ -671,6 +671,19 @@ export function setRelayUserEnabled(userId: string, enabled: boolean) {
   }, { auth: 'relay-admin' });
 }
 
+export function deleteRelayAdminUser(userId: string) {
+  return request<{ id: string }>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  }, { auth: 'relay-admin' });
+}
+
+export function resetRelayAdminUserPassword(userId: string, password: string) {
+  return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  }, { auth: 'relay-admin' });
+}
+
 export function approveRelayRegistration(requestId: string) {
   return request<RelayUserDto>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/approve`, {
     method: 'POST',

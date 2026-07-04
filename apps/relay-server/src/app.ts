@@ -97,6 +97,9 @@ const updateShareSchema = z.object({
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
 });
+const adminResetPasswordSchema = z.object({
+  password: z.string().min(8),
+});
 const adminQuerySchema = z.object({
   days: z.coerce.number().int().positive().max(365).optional(),
 });
@@ -432,6 +435,26 @@ export function buildRelayServer(
     const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
     const body = setEnabledSchema.parse(request.body ?? {});
     return store.setUserEnabled(userId, body.enabled);
+  });
+
+  app.delete('/relay/admin/users/:userId', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+    store.deleteUser(userId);
+    return { id: userId };
+  });
+
+  app.post('/relay/admin/users/:userId/reset-password', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+    const body = adminResetPasswordSchema.parse(request.body ?? {});
+    return store.adminResetUserPassword(userId, body.password);
   });
 
   app.post('/relay/admin/registrations/:requestId/approve', async (request, reply) => {
@@ -995,6 +1018,13 @@ function requireRelayUser(
     reply.status(403).send({
       code: 'forbidden',
       message: 'Admin access is required.',
+    } satisfies ApiErrorShape);
+    return null;
+  }
+  if (!options.admin && session.user.role === 'admin') {
+    reply.status(403).send({
+      code: 'forbidden',
+      message: 'Use the relay admin panel for this account.',
     } satisfies ApiErrorShape);
     return null;
   }

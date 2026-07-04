@@ -634,6 +634,34 @@ export class RelayStore {
     return this.publicUser({ ...user, enabled });
   }
 
+  deleteUser(userId: string) {
+    const user = this.requireUser(userId);
+    if (user.role === 'admin') {
+      throw new RelayStoreError(400, 'bad_request', 'The admin user cannot be deleted.');
+    }
+    this.sqlite.prepare('DELETE FROM relay_users WHERE id = ?').run(userId);
+  }
+
+  adminResetUserPassword(userId: string, password: string) {
+    const user = this.requireUser(userId);
+    if (user.role === 'admin') {
+      throw new RelayStoreError(400, 'bad_request', 'The admin user password cannot be reset here.');
+    }
+    if (password.length < 8) {
+      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+    }
+    const passwordSalt = crypto.randomBytes(16).toString('base64url');
+    const passwordHash = hashSecret(password, passwordSalt);
+    this.sqlite
+      .prepare('UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?')
+      .run(passwordSalt, passwordHash, user.id);
+    return this.publicUser({
+      ...user,
+      passwordSalt,
+      passwordHash,
+    });
+  }
+
   updateAccount(userId: string, input: { username?: string }) {
     const user = this.requireUser(userId);
     const username =

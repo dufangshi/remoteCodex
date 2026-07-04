@@ -1,6 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, Clock3, Database, RefreshCw, Settings, Share2, Users } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  Clock3,
+  Database,
+  KeyRound,
+  RefreshCw,
+  Search,
+  Settings,
+  Share2,
+  Trash2,
+  Users,
+} from 'lucide-react';
 
 import type {
   RelayAdminDeviceDto,
@@ -14,15 +28,33 @@ import { LoginPage } from './LoginPage';
 import {
   ApiError,
   approveRelayRegistration,
+  deleteRelayAdminUser,
   enableRelayMode,
   fetchRelayAdmin,
   rejectRelayRegistration,
   relayAdminLogin,
+  resetRelayAdminUserPassword,
   setRelayUserEnabled,
   updateRelayRegistrationSettings,
 } from '../lib/api';
 
 type AdminTab = 'overview' | 'users' | 'devices' | 'shares' | 'settings';
+type SortDirection = 'asc' | 'desc';
+type UserSortKey =
+  | 'username'
+  | 'enabled'
+  | 'lastSeenAt'
+  | 'conversationCount'
+  | 'deviceCount'
+  | 'createdAt';
+type DeviceSortKey =
+  | 'name'
+  | 'ownerUsername'
+  | 'connected'
+  | 'lastActivity'
+  | 'createdAt'
+  | 'workspaceCount'
+  | 'threadCount';
 
 function errorMessage(caught: unknown) {
   return caught instanceof ApiError
@@ -92,6 +124,32 @@ export function RelayAdminPage() {
     setError(null);
     try {
       const updated = await setRelayUserEnabled(userId, enabled);
+      setSummary((current) => replaceAdminUser(current, updated));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function deleteUser(userId: string) {
+    setBusyKey(`delete:${userId}`);
+    setError(null);
+    try {
+      await deleteRelayAdminUser(userId);
+      await load(days, { showLoading: false });
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function resetUserPassword(userId: string, password: string) {
+    setBusyKey(`reset:${userId}`);
+    setError(null);
+    try {
+      const updated = await resetRelayAdminUserPassword(userId, password);
       setSummary((current) => replaceAdminUser(current, updated));
     } catch (caught) {
       setError(errorMessage(caught));
@@ -236,9 +294,15 @@ export function RelayAdminPage() {
 
             {tab === 'overview' ? <Overview summary={summary} /> : null}
             {tab === 'users' ? (
-              <UsersTable busyKey={busyKey} onUpdateUser={updateUser} users={summary.users} />
+              <UsersTable
+                busyKey={busyKey}
+                onDeleteUser={deleteUser}
+                onResetPassword={resetUserPassword}
+                onUpdateUser={updateUser}
+                users={summary.users}
+              />
             ) : null}
-            {tab === 'devices' ? <DevicesPanel devices={summary.devices} /> : null}
+            {tab === 'devices' ? <DevicesPanel devices={summary.devices} users={summary.users} /> : null}
             {tab === 'shares' ? <SharesTable shares={summary.shares} /> : null}
             {tab === 'settings' && settingsDraft ? (
               <SettingsPanel
@@ -325,88 +389,268 @@ function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
 
 function UsersTable({
   busyKey,
+  onDeleteUser,
+  onResetPassword,
   onUpdateUser,
   users,
 }: {
   busyKey: string | null;
+  onDeleteUser: (userId: string) => Promise<void>;
+  onResetPassword: (userId: string, password: string) => Promise<void>;
   onUpdateUser: (userId: string, enabled: boolean) => void;
   users: RelayAdminSummaryDto['users'];
 }) {
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<{ key: UserSortKey; direction: SortDirection }>({
+    key: 'lastSeenAt',
+    direction: 'desc',
+  });
+  const [resetTarget, setResetTarget] = useState<RelayAdminSummaryDto['users'][number] | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RelayAdminSummaryDto['users'][number] | null>(null);
+  const filteredUsers = useMemo(() => {
+    const normalized = normalizeSearch(query);
+    return users
+      .filter((user) => {
+        if (!normalized) {
+          return true;
+        }
+        return normalizeSearch(`${user.username} ${user.email}`).includes(normalized);
+      })
+      .sort((left, right) => compareUsers(left, right, sort));
+  }, [query, sort, users]);
+
+  function updateSort(key: UserSortKey) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc',
+    }));
+  }
+
   return (
-    <Panel title="Users" detail="Registered relay accounts and usage in the selected window.">
-      <ResponsiveTable minWidth="58rem">
+    <>
+      <Panel title="Users" detail="Registered relay accounts. Admin accounts are excluded from workspace and device operations.">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <label className="relative block min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--theme-fg-muted)]" />
+            <input
+              className="relay-input w-full pl-9"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search username or email"
+              value={query}
+            />
+          </label>
+          <p className="text-sm text-[var(--theme-fg-muted)]">
+            {filteredUsers.length.toLocaleString()} of {users.length.toLocaleString()} users
+          </p>
+        </div>
+        <ResponsiveTable minWidth="68rem">
+          <thead>
+            <tr>
+              <SortableTh active={sort.key === 'username'} direction={sort.direction} onClick={() => updateSort('username')}>User</SortableTh>
+              <SortableTh active={sort.key === 'enabled'} direction={sort.direction} onClick={() => updateSort('enabled')}>Status</SortableTh>
+              <SortableTh active={sort.key === 'lastSeenAt'} direction={sort.direction} onClick={() => updateSort('lastSeenAt')}>Last used</SortableTh>
+              <SortableTh active={sort.key === 'conversationCount'} direction={sort.direction} onClick={() => updateSort('conversationCount')}>Conversations</SortableTh>
+              <SortableTh active={sort.key === 'deviceCount'} direction={sort.direction} onClick={() => updateSort('deviceCount')}>Devices</SortableTh>
+              <Th>Role</Th>
+              <Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredUsers.map((user) => (
+              <tr key={user.id}>
+                <Td strong>{user.username}<div className="text-xs font-normal text-[var(--theme-fg-muted)]">{user.email}</div></Td>
+                <Td><StatusPill active={user.enabled}>{user.enabled ? 'Enabled' : 'Disabled'}</StatusPill></Td>
+                <Td>{formatTimestamp(user.lastSeenAt)}</Td>
+                <Td>{user.conversationCount.toLocaleString()}</Td>
+                <Td>{user.deviceCount.toLocaleString()}</Td>
+                <Td>{user.role}</Td>
+                <Td>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="relay-button-secondary"
+                      disabled={busyKey === user.id || user.role === 'admin'}
+                      onClick={() => onUpdateUser(user.id, !user.enabled)}
+                      type="button"
+                    >
+                      {user.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      className="relay-button-secondary inline-flex items-center gap-2"
+                      disabled={busyKey === `reset:${user.id}` || user.role === 'admin'}
+                      onClick={() => setResetTarget(user)}
+                      type="button"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      Reset
+                    </button>
+                    <button
+                      className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
+                      disabled={busyKey === `delete:${user.id}` || user.role === 'admin'}
+                      onClick={() => setDeleteTarget(user)}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </ResponsiveTable>
+        {!filteredUsers.length ? <EmptyState>No users match the current search.</EmptyState> : null}
+      </Panel>
+      {resetTarget ? (
+        <PasswordResetDialog
+          busy={busyKey === `reset:${resetTarget.id}`}
+          onClose={() => setResetTarget(null)}
+          onSubmit={async (password) => {
+            await onResetPassword(resetTarget.id, password);
+            setResetTarget(null);
+          }}
+          user={resetTarget}
+        />
+      ) : null}
+      {deleteTarget ? (
+        <DangerConfirmDialog
+          busy={busyKey === `delete:${deleteTarget.id}`}
+          confirmLabel="Delete user"
+          description={`Delete ${deleteTarget.username}, their devices, shares, and access history. This cannot be undone.`}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={async () => {
+            await onDeleteUser(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+          title="Delete relay user"
+        />
+      ) : null}
+    </>
+  );
+}
+
+function DevicesPanel({
+  devices,
+  users,
+}: {
+  devices: RelayAdminDeviceDto[];
+  users: RelayAdminSummaryDto['users'];
+}) {
+  const [ownerId, setOwnerId] = useState('all');
+  const [status, setStatus] = useState<'all' | 'online' | 'offline'>('all');
+  const [activity, setActivity] = useState<'all' | '24h' | '7d' | '30d'>('all');
+  const [sortKey, setSortKey] = useState<DeviceSortKey>('lastActivity');
+  const [direction, setDirection] = useState<SortDirection>('desc');
+  const ownerUsers = useMemo(
+    () => users.filter((user) => devices.some((device) => device.ownerUserId === user.id)),
+    [devices, users],
+  );
+  const filteredDevices = useMemo(
+    () =>
+      devices
+        .filter((device) => ownerId === 'all' || device.ownerUserId === ownerId)
+        .filter((device) => status === 'all' || (status === 'online' ? device.connected : !device.connected))
+        .filter((device) => activity === 'all' || isAfterActivityWindow(deviceLastActivity(device), activity))
+        .sort((left, right) => compareDevices(left, right, sortKey, direction)),
+    [activity, devices, direction, ownerId, sortKey, status],
+  );
+
+  return (
+    <Panel title="Devices" detail="Supervisor devices grouped by owner, connection state, activity, and loaded workspace metadata.">
+      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <label className="block text-sm text-[var(--theme-fg-soft)]">
+          Owner
+          <select className="relay-input mt-2 w-full" onChange={(event) => setOwnerId(event.target.value)} value={ownerId}>
+            <option value="all">All users</option>
+            {ownerUsers.map((user) => (
+              <option key={user.id} value={user.id}>{user.username}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm text-[var(--theme-fg-soft)]">
+          Status
+          <select className="relay-input mt-2 w-full" onChange={(event) => setStatus(event.target.value as typeof status)} value={status}>
+            <option value="all">All devices</option>
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+          </select>
+        </label>
+        <label className="block text-sm text-[var(--theme-fg-soft)]">
+          Last activity
+          <select className="relay-input mt-2 w-full" onChange={(event) => setActivity(event.target.value as typeof activity)} value={activity}>
+            <option value="all">Any time</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+          </select>
+        </label>
+        <label className="block text-sm text-[var(--theme-fg-soft)]">
+          Sort by
+          <select className="relay-input mt-2 w-full" onChange={(event) => setSortKey(event.target.value as DeviceSortKey)} value={sortKey}>
+            <option value="lastActivity">Last activity</option>
+            <option value="name">Device name</option>
+            <option value="ownerUsername">Owner</option>
+            <option value="connected">Connection</option>
+            <option value="createdAt">Created</option>
+            <option value="workspaceCount">Workspaces</option>
+            <option value="threadCount">Threads</option>
+          </select>
+        </label>
+        <label className="block text-sm text-[var(--theme-fg-soft)]">
+          Direction
+          <select className="relay-input mt-2 w-full" onChange={(event) => setDirection(event.target.value as SortDirection)} value={direction}>
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
+      </div>
+      <ResponsiveTable minWidth="74rem">
         <thead>
           <tr>
-            <Th>User</Th>
+            <Th>Device</Th>
+            <Th>Owner</Th>
             <Th>Status</Th>
-            <Th>Last used</Th>
-            <Th>Conversations</Th>
-            <Th>Devices</Th>
-            <Th>Role</Th>
-            <Th>Actions</Th>
+            <Th>Last activity</Th>
+            <Th>Inventory</Th>
+            <Th>Network</Th>
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
-            <tr key={user.id}>
-              <Td strong>{user.username}<div className="text-xs font-normal text-[var(--theme-fg-muted)]">{user.email}</div></Td>
-              <Td>{user.enabled ? 'Enabled' : 'Disabled'}</Td>
-              <Td>{formatTimestamp(user.lastSeenAt)}</Td>
-              <Td>{user.conversationCount.toLocaleString()}</Td>
-              <Td>{user.deviceCount}</Td>
-              <Td>{user.role}</Td>
+          {filteredDevices.map((device) => (
+            <tr key={device.id}>
+              <Td strong>
+                {device.name}
+                <div className="text-xs font-normal text-[var(--theme-fg-muted)]">{device.tokenPreview}</div>
+              </Td>
               <Td>
-                <button
-                  className="relay-button-secondary"
-                  disabled={busyKey === user.id || user.role === 'admin'}
-                  onClick={() => onUpdateUser(user.id, !user.enabled)}
-                  type="button"
-                >
-                  {user.enabled ? 'Disable' : 'Enable'}
-                </button>
+                <span className="font-medium text-[var(--theme-fg-soft)]">{device.ownerUsername}</span>
+                <div className="text-xs text-[var(--theme-fg-muted)]">{device.ownerEmail}</div>
+              </Td>
+              <Td><StatusPill active={device.connected}>{device.connected ? 'Online' : 'Offline'}</StatusPill></Td>
+              <Td>
+                {formatTimestamp(deviceLastActivity(device))}
+                <div className="text-xs text-[var(--theme-fg-muted)]">created {formatTimestamp(device.createdAt)}</div>
+              </Td>
+              <Td>
+                <span>{device.workspaces.length.toLocaleString()} workspaces</span>
+                <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
+                <span>{device.threads.length.toLocaleString()} threads</span>
+                <div className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
+                  {device.workspaces[0]?.label ?? 'No workspace metadata'}
+                </div>
+                <div className="truncate text-xs text-[var(--theme-fg-muted)]">
+                  {device.threads[0]?.title ?? 'No thread metadata'}
+                </div>
+              </Td>
+              <Td>
+                {device.ipAddress ?? 'IP unavailable'}
+                <div className="text-xs text-[var(--theme-fg-muted)]">heartbeat {formatTimestamp(device.lastHeartbeatAt)}</div>
               </Td>
             </tr>
           ))}
         </tbody>
       </ResponsiveTable>
+      {!filteredDevices.length ? <EmptyState>No devices match the selected filters.</EmptyState> : null}
     </Panel>
-  );
-}
-
-function DevicesPanel({ devices }: { devices: RelayAdminDeviceDto[] }) {
-  return (
-    <section className="grid gap-4 lg:grid-cols-2">
-      {devices.map((device) => (
-        <Panel
-          detail={`${device.ownerUsername} · ${device.ipAddress ?? 'IP unavailable'}`}
-          key={device.id}
-          title={device.name}
-          aside={<StatusPill active={device.connected}>{device.connected ? 'Online' : 'Offline'}</StatusPill>}
-        >
-          <DeviceSummary device={device} />
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <ResourceList
-              empty="No workspace list available."
-              items={device.workspaces.map((workspace) => ({
-                id: workspace.id,
-                primary: workspace.label,
-                secondary: workspace.absPath ?? workspace.id,
-              }))}
-              title="Workspaces"
-            />
-            <ResourceList
-              empty="No thread list available."
-              items={device.threads.map((thread) => ({
-                id: thread.id,
-                primary: thread.title,
-                secondary: `${thread.workspaceLabel ?? 'Workspace unavailable'} · ${thread.status ?? 'unknown'}`,
-              }))}
-              title="Threads"
-            />
-          </div>
-        </Panel>
-      ))}
-    </section>
   );
 }
 
@@ -543,34 +787,6 @@ function DeviceSummary({ device }: { device: RelayAdminDeviceDto }) {
   );
 }
 
-function ResourceList({
-  empty,
-  items,
-  title,
-}: {
-  empty: string;
-  items: Array<{ id: string; primary: string; secondary: string }>;
-  title: string;
-}) {
-  return (
-    <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
-      <h3 className="text-sm font-semibold text-[var(--theme-fg)]">{title}</h3>
-      {items.length ? (
-        <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
-          {items.map((item) => (
-            <li className="min-w-0" key={item.id}>
-              <p className="truncate text-sm text-[var(--theme-fg)]">{item.primary}</p>
-              <p className="truncate text-xs text-[var(--theme-fg-muted)]">{item.secondary}</p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-[var(--theme-fg-muted)]">{empty}</p>
-      )}
-    </div>
-  );
-}
-
 function Panel({
   aside,
   children,
@@ -610,6 +826,34 @@ function Th({ children }: { children: React.ReactNode }) {
   return (
     <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
       {children}
+    </th>
+  );
+}
+
+function SortableTh({
+  active,
+  children,
+  direction,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  direction: SortDirection;
+  onClick: () => void;
+}) {
+  const Icon = !active ? ArrowUpDown : direction === 'asc' ? ArrowUp : ArrowDown;
+  return (
+    <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+      <button
+        className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)] ${
+          active ? 'text-[var(--theme-fg)]' : ''
+        }`}
+        onClick={onClick}
+        type="button"
+      >
+        {children}
+        <Icon className="h-3.5 w-3.5" />
+      </button>
     </th>
   );
 }
@@ -662,6 +906,181 @@ function EmptyState({ children }: { children: React.ReactNode }) {
       {children}
     </p>
   );
+}
+
+function PasswordResetDialog({
+  busy,
+  onClose,
+  onSubmit,
+  user,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (password: string) => Promise<void>;
+  user: RelayAdminSummaryDto['users'][number];
+}) {
+  const [password, setPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalError(null);
+    if (password.length < 8) {
+      setLocalError('Password must be at least 8 characters.');
+      return;
+    }
+    await onSubmit(password);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
+      <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
+        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">Reset password</h2>
+        <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+          Set a new relay password for {user.username}.
+        </p>
+        <form className="mt-5 space-y-4" onSubmit={submit}>
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            New password
+            <input
+              autoFocus
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              value={password}
+            />
+          </label>
+          {localError ? (
+            <p className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+              {localError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <button className="relay-button-secondary" onClick={onClose} type="button">
+              Cancel
+            </button>
+            <button className="relay-button-primary inline-flex items-center gap-2" disabled={busy} type="submit">
+              <KeyRound className="h-4 w-4" />
+              Save password
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function DangerConfirmDialog({
+  busy,
+  confirmLabel,
+  description,
+  onClose,
+  onConfirm,
+  title,
+}: {
+  busy: boolean;
+  confirmLabel: string;
+  description: string;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  title: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
+      <section className="w-full max-w-md rounded-lg border border-[var(--status-danger-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
+        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">{description}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="relay-button-secondary" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-[var(--action-danger-bg)] px-4 text-sm font-semibold text-[var(--action-danger-fg)] transition hover:bg-[var(--action-danger-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+            {confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function compareUsers(
+  left: RelayAdminSummaryDto['users'][number],
+  right: RelayAdminSummaryDto['users'][number],
+  sort: { key: UserSortKey; direction: SortDirection },
+) {
+  const direction = sort.direction === 'asc' ? 1 : -1;
+  let value = 0;
+  if (sort.key === 'username') {
+    value = left.username.localeCompare(right.username);
+  } else if (sort.key === 'enabled') {
+    value = Number(left.enabled) - Number(right.enabled);
+  } else if (sort.key === 'lastSeenAt') {
+    value = compareDateValues(left.lastSeenAt, right.lastSeenAt);
+  } else if (sort.key === 'conversationCount') {
+    value = left.conversationCount - right.conversationCount;
+  } else if (sort.key === 'deviceCount') {
+    value = left.deviceCount - right.deviceCount;
+  } else {
+    value = compareDateValues(left.createdAt, right.createdAt);
+  }
+  return value * direction || left.username.localeCompare(right.username);
+}
+
+function compareDevices(
+  left: RelayAdminDeviceDto,
+  right: RelayAdminDeviceDto,
+  key: DeviceSortKey,
+  direction: SortDirection,
+) {
+  const multiplier = direction === 'asc' ? 1 : -1;
+  let value = 0;
+  if (key === 'name') {
+    value = left.name.localeCompare(right.name);
+  } else if (key === 'ownerUsername') {
+    value = left.ownerUsername.localeCompare(right.ownerUsername);
+  } else if (key === 'connected') {
+    value = Number(left.connected) - Number(right.connected);
+  } else if (key === 'lastActivity') {
+    value = compareDateValues(deviceLastActivity(left), deviceLastActivity(right));
+  } else if (key === 'createdAt') {
+    value = compareDateValues(left.createdAt, right.createdAt);
+  } else if (key === 'workspaceCount') {
+    value = left.workspaces.length - right.workspaces.length;
+  } else {
+    value = left.threads.length - right.threads.length;
+  }
+  return value * multiplier || left.name.localeCompare(right.name);
+}
+
+function compareDateValues(left: string | null | undefined, right: string | null | undefined) {
+  const leftTime = Date.parse(left ?? '');
+  const rightTime = Date.parse(right ?? '');
+  const normalizedLeft = Number.isFinite(leftTime) ? leftTime : -Infinity;
+  const normalizedRight = Number.isFinite(rightTime) ? rightTime : -Infinity;
+  return normalizedLeft - normalizedRight;
+}
+
+function deviceLastActivity(device: RelayAdminDeviceDto) {
+  return device.lastHeartbeatAt ?? device.connectedAt ?? device.createdAt;
+}
+
+function isAfterActivityWindow(value: string | null | undefined, window: '24h' | '7d' | '30d') {
+  const timestamp = Date.parse(value ?? '');
+  if (!Number.isFinite(timestamp)) {
+    return false;
+  }
+  const hours = window === '24h' ? 24 : window === '7d' ? 24 * 7 : 24 * 30;
+  return timestamp >= Date.now() - hours * 60 * 60 * 1000;
 }
 
 function replaceAdminUser(summary: RelayAdminSummaryDto | null, updated: RelayUserDto) {

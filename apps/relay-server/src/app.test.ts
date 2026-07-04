@@ -710,6 +710,131 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('keeps admin accounts out of normal relay workspace and device flows', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'admin',
+        password: 'password123',
+      },
+    });
+    const token = loginResponse.json().token as string;
+
+    const portalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(portalResponse.statusCode).toBe(403);
+    expect(portalResponse.json()).toMatchObject({
+      message: 'Use the relay admin panel for this account.',
+    });
+
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        name: 'Admin workstation',
+      },
+    });
+    expect(deviceResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('lets admin reset and delete ordinary relay users', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const adminLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'admin',
+        password: 'password123',
+      },
+    });
+    const adminToken = adminLoginResponse.json().token as string;
+
+    const userResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'managed@example.test',
+        username: 'managed',
+        password: 'password123',
+      },
+    });
+    const userId = userResponse.json().session.user.id as string;
+
+    const resetResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/admin/users/${userId}/reset-password`,
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        password: 'new-password-123',
+      },
+    });
+    expect(resetResponse.statusCode).toBe(200);
+    expect(resetResponse.json()).toMatchObject({
+      id: userId,
+      username: 'managed',
+    });
+
+    const oldLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'managed',
+        password: 'password123',
+      },
+    });
+    expect(oldLoginResponse.statusCode).toBe(401);
+
+    const newLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'managed',
+        password: 'new-password-123',
+      },
+    });
+    expect(newLoginResponse.statusCode).toBe(200);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/relay/admin/users/${userId}`,
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toEqual({ id: userId });
+
+    const deletedLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'managed',
+        password: 'new-password-123',
+      },
+    });
+    expect(deletedLoginResponse.statusCode).toBe(401);
+
+    await app.close();
+  });
+
   it('lets explicit config override a persisted registration setting on restart', async () => {
     const dataDir = `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`;
     const firstApp = buildRelayServer(

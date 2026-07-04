@@ -395,6 +395,10 @@ function RelayGate({ children }: { children: React.ReactNode }) {
     return <RelayPortalPage />;
   }
 
+  if (state.session.user?.role === 'admin') {
+    return <Navigate to="/relay-admin" replace />;
+  }
+
   return children;
 }
 

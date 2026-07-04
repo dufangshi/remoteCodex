@@ -54,6 +54,10 @@ export function RelayPortalPage() {
       const nextSession = await fetchRelaySession();
       setSession(nextSession);
       if (nextSession.authenticated) {
+        if (nextSession.user?.role === 'admin') {
+          navigate('/relay-admin', { replace: true });
+          return;
+        }
         setPortal(await fetchRelayPortal());
       } else {
         setPortal(null);

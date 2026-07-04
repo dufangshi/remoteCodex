@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +6,17 @@ import { RelayAdminPage } from './RelayAdminPage';
 
 const adminSummary = {
   users: [
+    {
+      id: 'admin-user',
+      email: 'admin@example.test',
+      username: 'admin',
+      role: 'admin' as const,
+      enabled: true,
+      createdAt: '2026-06-17T00:00:00.000Z',
+      lastSeenAt: '2026-06-18T00:20:00.000Z',
+      deviceCount: 0,
+      conversationCount: 0,
+    },
     {
       id: 'user-1',
       email: 'owner@example.test',
@@ -16,6 +27,17 @@ const adminSummary = {
       lastSeenAt: '2026-06-18T00:10:00.000Z',
       deviceCount: 1,
       conversationCount: 4,
+    },
+    {
+      id: 'user-2',
+      email: 'quiet@example.test',
+      username: 'quiet',
+      role: 'user' as const,
+      enabled: false,
+      createdAt: '2026-06-16T00:00:00.000Z',
+      lastSeenAt: null,
+      deviceCount: 0,
+      conversationCount: 1,
     },
   ],
   devices: [
@@ -142,6 +164,25 @@ describe('RelayAdminPage', () => {
             }),
           });
         }
+        if (url === '/relay/admin/users/user-1/reset-password' && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'user-1',
+              email: 'owner@example.test',
+              username: 'owner',
+              role: 'user',
+              enabled: true,
+              createdAt: '2026-06-18T00:00:00.000Z',
+            }),
+          });
+        }
+        if (url === '/relay/admin/users/user-1' && init?.method === 'DELETE') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ id: 'user-1' }),
+          });
+        }
         return Promise.resolve({
           ok: false,
           status: 404,
@@ -196,6 +237,76 @@ describe('RelayAdminPage', () => {
         }),
       );
     });
+  });
+
+  it('filters users and performs reset/delete actions for ordinary users', async () => {
+    renderPage();
+    await screen.findByText('Operations panel');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Users' }));
+    fireEvent.change(screen.getByPlaceholderText('Search username or email'), {
+      target: { value: 'owner' },
+    });
+
+    expect(screen.getByText('owner@example.test')).toBeInTheDocument();
+    expect(screen.queryByText('quiet@example.test')).not.toBeInTheDocument();
+
+    const ownerRow = screen.getByText('owner@example.test').closest('tr');
+    expect(ownerRow).not.toBeNull();
+    fireEvent.click(within(ownerRow!).getByRole('button', { name: /Reset/ }));
+    fireEvent.change(screen.getByLabelText('New password'), {
+      target: { value: 'new-password-123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/users/user-1/reset-password',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ password: 'new-password-123' }),
+        }),
+      );
+    });
+
+    fireEvent.click(within(ownerRow!).getByRole('button', { name: /Delete/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete user' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/users/user-1',
+        expect.objectContaining({
+          method: 'DELETE',
+        }),
+      );
+    });
+  });
+
+  it('filters devices by owner, status, and activity window', async () => {
+    renderPage();
+    await screen.findByText('Operations panel');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }));
+    expect(screen.getByText('Owner Mac')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Owner'), {
+      target: { value: 'user-2' },
+    });
+    expect(screen.queryByText('Owner Mac')).not.toBeInTheDocument();
+    expect(screen.getByText('No devices match the selected filters.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Owner'), {
+      target: { value: 'all' },
+    });
+    fireEvent.change(screen.getByLabelText('Status'), {
+      target: { value: 'online' },
+    });
+    expect(screen.getByText('Owner Mac')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Last activity'), {
+      target: { value: '24h' },
+    });
+    expect(screen.queryByText('Owner Mac')).not.toBeInTheDocument();
   });
 
   it('allows admin login without replacing the normal relay account token', async () => {
