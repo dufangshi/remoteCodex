@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { RelaySessionShareDto } from '@remote-codex/shared';
 import { RelayDevicesPage } from './RelayDevicesPage';
 
 const baseUser = {
@@ -27,7 +28,7 @@ function device(input: { id: string; name: string; connected?: boolean; token?: 
   };
 }
 
-const sharedSession = {
+const sharedSession: RelaySessionShareDto = {
   id: 'share-1',
   ownerUserId: 'owner-1',
   ownerUsername: 'owner',
@@ -43,15 +44,19 @@ const sharedSession = {
   createdAt: '2026-06-18T00:00:00.000Z',
   revokedAt: null,
   expiresAt: null,
+  lastAccessedAt: null,
+  lastAccessedByUsername: null,
+  accessEvents: [],
 };
 
 function renderPage(
   devices: ReturnType<typeof device>[],
   sharedWithMe: Array<typeof sharedSession> = [],
+  sharedByMe: Array<typeof sharedSession> = [],
 ) {
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: RequestInfo | URL) => {
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/relay/portal') {
         return Promise.resolve({
@@ -60,8 +65,25 @@ function renderPage(
             user: baseUser,
             devices,
             sharedWithMe,
-            sharedByMe: [],
+            sharedByMe,
           }),
+        });
+      }
+      if (url === '/relay/shares/share-1' && init?.method === 'PATCH') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...sharedSession,
+            label: 'Review session updated',
+            threadAccess: 'control',
+            workspaceAccess: 'read',
+          }),
+        });
+      }
+      if (url === '/relay/shares/share-1' && init?.method === 'DELETE') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...sharedSession, revokedAt: '2026-06-18T00:05:00.000Z' }),
         });
       }
 
@@ -216,5 +238,50 @@ describe('RelayDevicesPage', () => {
     });
     expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
     expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
+  });
+
+  it('manages sessions shared by the current relay account', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderPage([], [], [
+      {
+        ...sharedSession,
+        ownerUserId: 'user-1',
+        ownerUsername: 'user',
+        targetUserId: 'friend-1',
+        targetUsername: 'friend',
+        workspaceId: 'workspace-1',
+        workspaceAccess: 'read',
+      },
+    ]);
+
+    await screen.findByText('Review session');
+    expect(screen.getByText('Thread:')).toBeInTheDocument();
+    expect(screen.getByText('thread-shared')).toBeInTheDocument();
+    expect(screen.getByText('To friend')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Permissions' }));
+    fireEvent.change(screen.getByLabelText('Thread access'), {
+      target: { value: 'control' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save permissions' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/shares/share-1',
+        expect.objectContaining({
+          method: 'PATCH',
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/shares/share-1',
+        expect.objectContaining({
+          method: 'DELETE',
+        }),
+      );
+    });
   });
 });

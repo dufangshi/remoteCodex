@@ -104,6 +104,8 @@ fun SupervisorConnectionSetupScreen(
     var createdDevice by remember { mutableStateOf<RelayCreateDeviceResult?>(null) }
     var newDeviceName by remember { mutableStateOf("Android workstation") }
     var revokeDeviceTarget by remember { mutableStateOf<RelayDeviceSummary?>(null) }
+    var editShareTarget by remember { mutableStateOf<RelaySessionShareSummary?>(null) }
+    var revokeShareTarget by remember { mutableStateOf<RelaySessionShareSummary?>(null) }
     var relayDeviceCardTarget by remember { mutableStateOf<SavedSupervisorDevice?>(null) }
     var createRelayDeviceDialogOpen by remember { mutableStateOf(false) }
     var relayRegisterDialogOpen by remember { mutableStateOf(false) }
@@ -667,6 +669,8 @@ fun SupervisorConnectionSetupScreen(
                         onToggleShareAccess = { share ->
                             expandedShareId = if (expandedShareId == share.id) null else share.id
                         },
+                        onEditShare = { share -> editShareTarget = share },
+                        onRevokeShare = { share -> revokeShareTarget = share },
                         onRevokeDevice = { revokeDeviceTarget = it },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -745,6 +749,100 @@ fun SupervisorConnectionSetupScreen(
                                 } else {
                                     "Device revoked. ${relayPortalStatusMessage(portal.devices, relayDeviceId)}"
                                 }
+                            }
+                            .onFailure { error ->
+                                errorMessage = userFacingConnectionError(error)
+                            }
+                    }
+                },
+            )
+        }
+
+        editShareTarget?.let { target ->
+            RelaySharePermissionsDialog(
+                share = target,
+                busy = busy,
+                onClose = {
+                    if (!busy) {
+                        editShareTarget = null
+                    }
+                },
+                onSave = { label, threadAccess, workspaceAccess ->
+                    val token = authToken
+                    if (token.isBlank()) {
+                        errorMessage = "Log in to the relay before managing shared threads."
+                        statusMessage = null
+                        editShareTarget = null
+                        return@RelaySharePermissionsDialog
+                    }
+                    busy = true
+                    errorMessage = null
+                    statusMessage = null
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val client = SupervisorApiClient(buildBaseConfig(token))
+                                client.updateRelayShare(
+                                    shareId = target.id,
+                                    label = label,
+                                    threadAccess = threadAccess,
+                                    workspaceAccess = if (target.workspaceId == null) "none" else workspaceAccess,
+                                    workspaceId = target.workspaceId,
+                                    expiresAt = target.expiresAt,
+                                )
+                                client.fetchRelayPortal()
+                            }
+                        }
+                        busy = false
+                        result
+                            .onSuccess { portal ->
+                                editShareTarget = null
+                                relayPortal = portal
+                                statusMessage = "Shared thread permissions updated."
+                            }
+                            .onFailure { error ->
+                                errorMessage = userFacingConnectionError(error)
+                            }
+                    }
+                },
+            )
+        }
+
+        revokeShareTarget?.let { target ->
+            RevokeRelayShareDialog(
+                share = target,
+                busy = busy,
+                onClose = {
+                    if (!busy) {
+                        revokeShareTarget = null
+                    }
+                },
+                onConfirm = {
+                    val token = authToken
+                    if (token.isBlank()) {
+                        errorMessage = "Log in to the relay before managing shared threads."
+                        statusMessage = null
+                        revokeShareTarget = null
+                        return@RevokeRelayShareDialog
+                    }
+                    busy = true
+                    errorMessage = null
+                    statusMessage = null
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val client = SupervisorApiClient(buildBaseConfig(token))
+                                client.revokeRelayShare(target.id)
+                                client.fetchRelayPortal()
+                            }
+                        }
+                        busy = false
+                        result
+                            .onSuccess { portal ->
+                                revokeShareTarget = null
+                                expandedShareId = expandedShareId.takeIf { it != target.id }
+                                relayPortal = portal
+                                statusMessage = "Shared thread access removed."
                             }
                             .onFailure { error ->
                                 errorMessage = userFacingConnectionError(error)
@@ -1370,6 +1468,8 @@ private fun RelayDevicesPanel(
     onConnectDevice: (String) -> Unit,
     onOpenSharedSession: (RelaySessionShareSummary) -> Unit,
     onToggleShareAccess: (RelaySessionShareSummary) -> Unit,
+    onEditShare: (RelaySessionShareSummary) -> Unit,
+    onRevokeShare: (RelaySessionShareSummary) -> Unit,
     onRevokeDevice: (RelayDeviceSummary) -> Unit,
 ) {
     ConnectionPanel(
@@ -1443,6 +1543,8 @@ private fun RelayDevicesPanel(
                     mode = RelayShareRowMode.Outgoing,
                     onOpen = {},
                     onToggleAccess = { onToggleShareAccess(share) },
+                    onEdit = { onEditShare(share) },
+                    onRevoke = { onRevokeShare(share) },
                 )
             }
         }
@@ -1533,6 +1635,8 @@ private fun RelaySharedSessionRow(
     expanded: Boolean = false,
     onOpen: () -> Unit,
     onToggleAccess: () -> Unit,
+    onEdit: () -> Unit = {},
+    onRevoke: () -> Unit = {},
 ) {
     val shareTitle = share.label?.takeIf { it.isNotBlank() } ?: share.threadId
     Row(
@@ -1570,23 +1674,25 @@ private fun RelaySharedSessionRow(
                         contentDescription = "Open shared thread $shareTitle",
                         onClick = onOpen,
                     )
-                } else {
-                    GraphButton(
-                        label = "Access",
-                        enabled = !busy,
-                        variant = GraphButtonVariant.Outline,
-                        size = GraphButtonSize.Small,
-                        contentDescription = "Show access history for $shareTitle",
-                        onClick = onToggleAccess,
-                    )
                 }
             }
             Text(
-                text = if (mode == RelayShareRowMode.Incoming) {
-                    "${share.ownerUsername} / ${share.deviceName}"
-                } else {
-                    "To ${share.targetUsername} / ${share.deviceName}"
-                },
+                text = "Thread: ${share.threadId}",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (mode == RelayShareRowMode.Incoming) "From ${share.ownerUsername}" else "To ${share.targetUsername}",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Device: ${share.deviceName}",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -1610,6 +1716,34 @@ private fun RelaySharedSessionRow(
                     label = workspaceAccessLabel(share.workspaceAccess),
                     variant = GraphBadgeVariant.Secondary,
                 )
+            }
+            if (mode == RelayShareRowMode.Outgoing) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GraphButton(
+                        label = "Permissions",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Edit permissions for $shareTitle",
+                        onClick = onEdit,
+                    )
+                    GraphButton(
+                        label = "Access",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Show access history for $shareTitle",
+                        onClick = onToggleAccess,
+                    )
+                    GraphButton(
+                        label = "Revoke",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Destructive,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Revoke shared thread $shareTitle",
+                        onClick = onRevoke,
+                    )
+                }
             }
             if (mode == RelayShareRowMode.Outgoing && expanded) {
                 ShareAccessHistory(events = share.accessEvents)
@@ -1706,6 +1840,181 @@ private fun RevokeRelayDeviceDialog(
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RelaySharePermissionsDialog(
+    share: RelaySessionShareSummary,
+    busy: Boolean,
+    onClose: () -> Unit,
+    onSave: (String?, String, String) -> Unit,
+) {
+    var label by remember(share.id) { mutableStateOf(share.label.orEmpty()) }
+    var threadAccess by remember(share.id) { mutableStateOf(share.threadAccess) }
+    var workspaceAccess by remember(share.id) { mutableStateOf(share.workspaceAccess) }
+    val workspaceLocked = share.workspaceId == null
+    GraphDialogOverlay(onDismiss = onClose) {
+        GraphDialogFrame(
+            title = "Shared thread permissions",
+            subtitle = "Manage ${share.targetUsername}'s access to this thread.",
+            onClose = onClose,
+            footer = {
+                GraphDialogFooter(
+                    primaryLabel = if (busy) "Saving..." else "Save",
+                    primaryTone = GraphDialogActionTone.Success,
+                    primaryEnabled = !busy,
+                    onCancel = onClose,
+                    onPrimary = {
+                        onSave(
+                            label.trim().takeIf { it.isNotBlank() },
+                            threadAccess,
+                            if (workspaceLocked) "none" else workspaceAccess,
+                        )
+                    },
+                )
+            },
+        ) {
+            ConnectionTextField(
+                label = "Label",
+                value = label,
+                onValueChange = { label = it },
+                contentDescription = "Shared thread label",
+                placeholder = share.threadId,
+            )
+            ConnectionSettingText(label = "Thread", value = share.threadId)
+            ConnectionSettingText(label = "Device", value = share.deviceName)
+            Text(
+                text = "Thread access",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            RelayShareOptionRow(
+                title = "View only",
+                detail = "Can read the transcript but cannot send prompts.",
+                selected = threadAccess == "read",
+                onClick = { threadAccess = "read" },
+            )
+            RelayShareOptionRow(
+                title = "Collaborator",
+                detail = "Can send prompts and continue the shared thread.",
+                selected = threadAccess == "control",
+                onClick = { threadAccess = "control" },
+            )
+            Text(
+                text = "Workspace access",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            RelayShareOptionRow(
+                title = "No workspace",
+                detail = "Workspace panel is not available.",
+                selected = workspaceLocked || workspaceAccess == "none",
+                enabled = !workspaceLocked,
+                onClick = { workspaceAccess = "none" },
+            )
+            RelayShareOptionRow(
+                title = "Workspace read",
+                detail = "Can browse and download workspace files.",
+                selected = workspaceAccess == "read" && !workspaceLocked,
+                enabled = !workspaceLocked,
+                onClick = { workspaceAccess = "read" },
+            )
+            RelayShareOptionRow(
+                title = "Workspace write",
+                detail = "Can edit files and use writable workspace actions.",
+                selected = workspaceAccess == "write" && !workspaceLocked,
+                enabled = !workspaceLocked,
+                onClick = { workspaceAccess = "write" },
+            )
+            if (workspaceLocked) {
+                Text(
+                    text = "This share was created without a workspace scope.",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RelayShareOptionRow(
+    title: String,
+    detail: String,
+    selected: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
+            .border(1.dp, if (selected) ThreadColors.Info.copy(alpha = 0.42f) else ThreadColors.Border, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        GraphSelectionGlyph(selected = selected)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                color = if (enabled) ThreadColors.Foreground else ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = detail,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RevokeRelayShareDialog(
+    share: RelaySessionShareSummary,
+    busy: Boolean,
+    onClose: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val title = share.label?.takeIf { it.isNotBlank() } ?: share.threadId
+    GraphDialogOverlay(onDismiss = onClose) {
+        GraphDialogFrame(
+            title = "Revoke shared thread",
+            subtitle = "Remove ${share.targetUsername}'s access to this thread.",
+            onClose = onClose,
+            footer = {
+                GraphDialogFooter(
+                    primaryLabel = if (busy) "Revoking..." else "Revoke",
+                    primaryTone = GraphDialogActionTone.Danger,
+                    primaryEnabled = !busy,
+                    onCancel = onClose,
+                    onPrimary = onConfirm,
+                )
+            },
+        ) {
+            Text(
+                text = title,
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            ConnectionSettingText(label = "Thread", value = share.threadId)
+            ConnectionSettingText(label = "Device", value = share.deviceName)
+            Text(
+                text = "The recipient will lose transcript and workspace access granted by this share.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }

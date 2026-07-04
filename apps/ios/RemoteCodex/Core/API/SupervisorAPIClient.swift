@@ -21,6 +21,14 @@ struct SupervisorMultipartPart: Equatable {
     var bytes: Data
 }
 
+private struct UpdateRelayShareRequest: Encodable {
+    var label: String?
+    var threadAccess: String
+    var workspaceAccess: String
+    var workspaceId: String?
+    var expiresAt: String?
+}
+
 protocol SupervisorHTTPTransport {
     func request(_ request: SupervisorHTTPRequest) async throws -> SupervisorHTTPResponse
 }
@@ -320,6 +328,34 @@ final class SupervisorAPIClient: @unchecked Sendable {
     func deleteRelayDevice(deviceId: String) async throws -> DeletedResource {
         try await requestJSON(
             "/relay/devices/\(deviceId.urlPathEncoded)",
+            method: "DELETE"
+        )
+    }
+
+    func updateRelayShare(
+        shareId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        workspaceId: String?,
+        expiresAt: String?
+    ) async throws -> RelaySessionShareSummary {
+        try await requestJSON(
+            "/relay/shares/\(shareId.urlPathEncoded)",
+            method: "PATCH",
+            body: UpdateRelayShareRequest(
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: workspaceAccess,
+                workspaceId: workspaceId,
+                expiresAt: expiresAt
+            )
+        )
+    }
+
+    func revokeRelayShare(shareId: String) async throws -> RelaySessionShareSummary {
+        try await requestJSON(
+            "/relay/shares/\(shareId.urlPathEncoded)",
             method: "DELETE"
         )
     }

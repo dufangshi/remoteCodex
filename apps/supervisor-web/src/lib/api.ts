@@ -12,6 +12,7 @@ import type {
   RelayRegisterResultDto,
   RelaySessionDto,
   RelaySessionShareDto,
+  UpdateRelaySessionShareInput,
   RelayUserDto,
   ProviderHostConfigArchiveDto,
   ProviderHostFileDto,
@@ -577,6 +578,13 @@ export function updateRelayPassword(input: {
 export function createRelayShare(input: CreateRelaySessionShareInput) {
   return request<RelaySessionShareDto>('/relay/shares', {
     method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateRelayShare(shareId: string, input: UpdateRelaySessionShareInput) {
+  return request<RelaySessionShareDto>(`/relay/shares/${encodeURIComponent(shareId)}`, {
+    method: 'PATCH',
     body: JSON.stringify(input),
   });
 }

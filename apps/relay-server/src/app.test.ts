@@ -1279,6 +1279,64 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('lets share owners update shared thread permissions', async () => {
+    const { app, ownerToken, friendToken, shareId } = await setupSharedRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+
+    const friendUpdateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/relay/shares/${shareId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+      },
+    });
+    expect(friendUpdateResponse.statusCode).toBe(404);
+
+    const ownerUpdateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/relay/shares/${shareId}`,
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        label: 'Pair review',
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+      },
+    });
+    expect(ownerUpdateResponse.statusCode).toBe(200);
+    expect(ownerUpdateResponse.json()).toMatchObject({
+      id: shareId,
+      label: 'Pair review',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      threadId: SHARED_THREAD_ID,
+    });
+
+    const friendPortalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(friendPortalResponse.json().sharedWithMe[0]).toMatchObject({
+      id: shareId,
+      label: 'Pair review',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      threadId: SHARED_THREAD_ID,
+    });
+
+    await app.close();
+  });
+
   it('keeps expired shares out of portal summaries and shared HTTP access', async () => {
     const { app, friendToken, deviceId, shareId } = await setupSharedRelaySession({
       threadAccess: 'read',

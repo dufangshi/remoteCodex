@@ -17,6 +17,7 @@ import type {
   RelayUserDto,
   RelayUserRoleDto,
   RelayWorkspaceAccessDto,
+  UpdateRelaySessionShareInput,
 } from '../../../packages/shared/src/index';
 
 interface StoredUser extends RelayUserDto {
@@ -223,7 +224,7 @@ export class RelayStore {
         .get(ownerUserId, target.id, input.deviceId, input.threadId) as ShareRow | undefined,
     );
     if (existing) {
-      return this.updateShare(existing.id, {
+      return this.updateShareRecord(existing.id, {
         label: input.label?.trim() || null,
         workspaceId: input.workspaceId?.trim() || null,
         threadAccess: normalizeThreadAccess(input.threadAccess),
@@ -254,6 +255,28 @@ export class RelayStore {
     };
     this.insertShare(share);
     return share;
+  }
+
+  updateShare(userId: string, shareId: string, input: UpdateRelaySessionShareInput) {
+    const share = this.rowToShare(
+      this.sqlite
+        .prepare('SELECT * FROM relay_shares WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL')
+        .get(shareId, userId) as ShareRow | undefined,
+    );
+    if (!share) {
+      throw new RelayStoreError(404, 'not_found', 'Share was not found.');
+    }
+    return this.publicShare(
+      this.updateShareRecord(shareId, {
+        label: input.label !== undefined ? input.label?.trim() || null : share.label,
+        workspaceId: input.workspaceId !== undefined ? input.workspaceId?.trim() || null : share.workspaceId,
+        threadAccess: input.threadAccess !== undefined ? normalizeThreadAccess(input.threadAccess) : share.threadAccess,
+        workspaceAccess: input.workspaceAccess !== undefined
+          ? normalizeWorkspaceAccess(input.workspaceAccess)
+          : share.workspaceAccess,
+        expiresAt: input.expiresAt !== undefined ? normalizeExpiresAt(input.expiresAt) : share.expiresAt,
+      }),
+    );
   }
 
   revokeShare(userId: string, shareId: string) {
@@ -831,7 +854,7 @@ export class RelayStore {
     }));
   }
 
-  private updateShare(
+  private updateShareRecord(
     shareId: string,
     input: {
       label: string | null;

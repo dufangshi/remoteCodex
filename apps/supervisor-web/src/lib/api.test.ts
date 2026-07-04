@@ -28,6 +28,7 @@ import {
   sendThreadPrompt,
   setSelectedRelayDeviceId,
   terminateShell,
+  updateRelayShare,
   updateProviderHostFile,
 } from './api';
 
@@ -217,6 +218,12 @@ describe('api request helper', () => {
       threadAccess: 'control',
       workspaceAccess: 'write',
     });
+    await updateRelayShare('share-1', {
+      label: 'Pairing updated',
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+      workspaceId: 'workspace-1',
+    });
     await revokeRelayShare('share-1');
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -232,7 +239,15 @@ describe('api request helper', () => {
       workspaceAccess: 'write',
     });
     expect(calls[1]?.[0]).toBe('/relay/shares/share-1');
-    expect(calls[1]?.[1]?.method).toBe('DELETE');
+    expect(calls[1]?.[1]?.method).toBe('PATCH');
+    expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
+      label: 'Pairing updated',
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+      workspaceId: 'workspace-1',
+    });
+    expect(calls[2]?.[0]).toBe('/relay/shares/share-1');
+    expect(calls[2]?.[1]?.method).toBe('DELETE');
   });
 
   it('preserves non-JSON upstream error status and body text', async () => {

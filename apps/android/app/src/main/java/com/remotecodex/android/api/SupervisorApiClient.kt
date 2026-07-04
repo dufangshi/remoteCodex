@@ -326,6 +326,35 @@ class SupervisorApiClient(
         return response.optString("id", deviceId)
     }
 
+    fun updateRelayShare(
+        shareId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        workspaceId: String?,
+        expiresAt: String?,
+    ): RelaySessionShareSummary {
+        val body = JSONObject()
+            .put("label", label ?: JSONObject.NULL)
+            .put("threadAccess", threadAccess)
+            .put("workspaceAccess", workspaceAccess)
+            .put("workspaceId", workspaceId ?: JSONObject.NULL)
+            .put("expiresAt", expiresAt ?: JSONObject.NULL)
+            .toString()
+        return requestJson(
+            "/relay/shares/${urlEncodePathSegment(shareId)}",
+            method = "PATCH",
+            body = body,
+        ).toRelaySessionShareSummary()
+    }
+
+    fun revokeRelayShare(shareId: String): RelaySessionShareSummary {
+        return requestJson(
+            "/relay/shares/${urlEncodePathSegment(shareId)}",
+            method = "DELETE",
+        ).toRelaySessionShareSummary()
+    }
+
     fun fetchThreadDetail(threadId: String, limit: Int? = null, beforeTurnId: String? = null): SupervisorThreadDetail {
         val query = buildQuery(
             "limit" to limit?.toString(),

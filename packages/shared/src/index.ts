@@ -126,6 +126,14 @@ export interface CreateRelaySessionShareInput {
   expiresAt?: string | null;
 }
 
+export interface UpdateRelaySessionShareInput {
+  workspaceId?: string | null | undefined;
+  label?: string | null | undefined;
+  threadAccess?: RelayThreadAccessDto | undefined;
+  workspaceAccess?: RelayWorkspaceAccessDto | undefined;
+  expiresAt?: string | null | undefined;
+}
+
 export interface RelaySessionShareDto {
   id: string;
   ownerUserId: string;

@@ -697,6 +697,42 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun managesRelaySharesOnRelayControlPlane() {
+        val shareJson = """{"id":"share-1","ownerUserId":"u1","ownerUsername":"dev","targetUsername":"friend","targetUserId":"u2","deviceId":"device-1","deviceName":"Home workstation","threadId":"thread-1","workspaceId":"workspace-1","label":"Pairing","threadAccess":"control","workspaceAccess":"write","createdAt":"2026-01-01T00:00:00.000Z","revokedAt":null,"expiresAt":null,"lastAccessedAt":null,"lastAccessedByUsername":null,"accessEvents":[]}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, shareJson),
+            SupervisorHttpResponse(200, shareJson.replace("null,\"expiresAt\"", "\"2026-01-01T00:05:00.000Z\",\"expiresAt\"")),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+            ),
+            transport,
+        )
+
+        val updated = client.updateRelayShare(
+            shareId = "share-1",
+            label = "Pairing",
+            threadAccess = "control",
+            workspaceAccess = "write",
+            workspaceId = "workspace-1",
+            expiresAt = null,
+        )
+        val revoked = client.revokeRelayShare("share-1")
+
+        assertEquals("control", updated.threadAccess)
+        assertEquals("share-1", revoked.id)
+        assertEquals("https://relay.example.test/relay/shares/share-1", transport.requests[0].url)
+        assertEquals("PATCH", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertTrue(transport.requests[0].body!!.contains("\"threadAccess\":\"control\""))
+        assertEquals("https://relay.example.test/relay/shares/share-1", transport.requests[1].url)
+        assertEquals("DELETE", transport.requests[1].method)
+    }
+
+    @Test
     fun workspaceThreadDetailAndPromptUseRelayDevicePath() {
         val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
         val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail","contextUsage":{"availability":"available","remainingPercent":38,"tokensInContextWindow":160000,"modelContextWindow":258400,"updatedAt":"2026-01-03T00:00:04.000Z"}}"""

@@ -209,6 +209,36 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    func updateRelayShare(
+        _ share: RelaySessionShareSummary,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String
+    ) async {
+        await runBusy {
+            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+            _ = try await environment.apiClientFactory(config).updateRelayShare(
+                shareId: share.id,
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: share.workspaceId == nil ? "none" : workspaceAccess,
+                workspaceId: share.workspaceId,
+                expiresAt: share.expiresAt
+            )
+            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            lastRelayRefreshAt = Date()
+        }
+    }
+
+    func revokeRelayShare(_ share: RelaySessionShareSummary) async {
+        await runBusy {
+            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+            _ = try await environment.apiClientFactory(config).revokeRelayShare(shareId: share.id)
+            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            lastRelayRefreshAt = Date()
+        }
+    }
+
     func connectRelayDevice(_ device: RelayDeviceSummary) async {
         await runBusy {
             let config = SupervisorConnectionConfig(
@@ -343,6 +373,8 @@ struct ConnectionScreen: View {
     @StateObject private var model: ConnectionViewModel
     @State private var offlineDevice: RelayDeviceSummary?
     @State private var revokeDevice: RelayDeviceSummary?
+    @State private var editingShare: RelaySessionShareSummary?
+    @State private var revokeShare: RelaySessionShareSummary?
     @State private var deleteDevice: SavedSupervisorDevice?
     @State private var expandedShareId: String?
     @State private var showingAddDevice = false
@@ -417,6 +449,24 @@ struct ConnectionScreen: View {
         .sheet(item: $model.editingDevice) { _ in
             editDeviceSheet
         }
+        .sheet(item: $editingShare) { share in
+            RelaySharePermissionsSheet(
+                busy: model.busy,
+                share: share,
+                onCancel: { editingShare = nil },
+                onSave: { label, threadAccess, workspaceAccess in
+                    Task {
+                        await model.updateRelayShare(
+                            share,
+                            label: label,
+                            threadAccess: threadAccess,
+                            workspaceAccess: workspaceAccess
+                        )
+                        editingShare = nil
+                    }
+                }
+            )
+        }
         .onChange(of: model.route) { _, route in
             if route == .relayDevices {
                 showingAddDevice = false
@@ -458,6 +508,20 @@ struct ConnectionScreen: View {
             }
         } message: {
             Text(revokeDevice?.name ?? "This device")
+        }
+        .alert("Revoke Shared Thread?", isPresented: revokeShareAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                revokeShare = nil
+            }
+            Button("Revoke", role: .destructive) {
+                guard let share = revokeShare else { return }
+                Task {
+                    await model.revokeRelayShare(share)
+                    revokeShare = nil
+                }
+            }
+        } message: {
+            Text("Remove access to \(revokeShare?.label?.trimmedNonEmpty ?? revokeShare?.threadId ?? "this thread").")
         }
     }
 
@@ -510,6 +574,17 @@ struct ConnectionScreen: View {
             set: { presented in
                 if !presented {
                     revokeDevice = nil
+                }
+            }
+        )
+    }
+
+    private var revokeShareAlertPresented: Binding<Bool> {
+        Binding(
+            get: { revokeShare != nil },
+            set: { presented in
+                if !presented {
+                    revokeShare = nil
                 }
             }
         )
@@ -675,6 +750,8 @@ struct ConnectionScreen: View {
                         mode: .outgoing,
                         expanded: expandedShareId == share.id,
                         onOpen: {},
+                        onEdit: { editingShare = share },
+                        onRevoke: { revokeShare = share },
                         onToggleAccess: {
                             expandedShareId = expandedShareId == share.id ? nil : share.id
                         }
@@ -838,12 +915,14 @@ private struct RelaySharedSessionRow: View {
     let mode: RelayShareRowMode
     var expanded = false
     let onOpen: () -> Void
+    var onEdit: () -> Void = {}
+    var onRevoke: () -> Void = {}
     var onToggleAccess: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(share.label?.trimmedNonEmpty ?? share.threadId)
+                Text(shareTitle(share))
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
@@ -851,11 +930,22 @@ private struct RelaySharedSessionRow: View {
                     Button("Open", action: onOpen)
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Button("Access", action: onToggleAccess)
-                        .buttonStyle(.bordered)
+                    Menu {
+                        Button("Permissions", action: onEdit)
+                        Button("Access history", action: onToggleAccess)
+                        Button("Revoke", role: .destructive, action: onRevoke)
+                    } label: {
+                        Text("Manage")
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
-            Text(mode == .incoming ? "\(share.ownerUsername) / \(share.deviceName)" : "To \(share.targetUsername) / \(share.deviceName)")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Thread: \(share.threadId)")
+                    .fontDesign(.monospaced)
+                Text(mode == .incoming ? "From \(share.ownerUsername)" : "To \(share.targetUsername)")
+                Text("Device: \(share.deviceName)")
+            }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -879,9 +969,87 @@ private struct RelaySharedSessionRow: View {
     }
 }
 
+private struct RelaySharePermissionsSheet: View {
+    let busy: Bool
+    let share: RelaySessionShareSummary
+    let onCancel: () -> Void
+    let onSave: (String?, String, String) -> Void
+    @State private var label: String
+    @State private var threadAccess: String
+    @State private var workspaceAccess: String
+
+    init(
+        busy: Bool,
+        share: RelaySessionShareSummary,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping (String?, String, String) -> Void
+    ) {
+        self.busy = busy
+        self.share = share
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _label = State(initialValue: share.label ?? "")
+        _threadAccess = State(initialValue: share.threadAccess)
+        _workspaceAccess = State(initialValue: share.workspaceAccess)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("To \(share.targetUsername)")
+                    Text("Thread: \(share.threadId)")
+                        .fontDesign(.monospaced)
+                    Text("Device: \(share.deviceName)")
+                }
+                Section("Label") {
+                    TextField("Thread label", text: $label)
+                }
+                Section("Thread access") {
+                    Picker("Thread access", selection: $threadAccess) {
+                        Text("View only").tag("read")
+                        Text("Collaborator").tag("control")
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section("Workspace access") {
+                    Picker("Workspace access", selection: $workspaceAccess) {
+                        Text("None").tag("none")
+                        Text("Read").tag("read")
+                        Text("Write").tag("write")
+                    }
+                    .disabled(share.workspaceId == nil)
+                    if share.workspaceId == nil {
+                        Text("This share was created without a workspace scope.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Permissions")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(label.trimmedNonEmpty, threadAccess, share.workspaceId == nil ? "none" : workspaceAccess)
+                    }
+                    .disabled(busy)
+                }
+            }
+        }
+    }
+}
+
 private enum RelayShareRowMode {
     case incoming
     case outgoing
+}
+
+private func shareTitle(_ share: RelaySessionShareSummary) -> String {
+    share.label?.trimmedNonEmpty ?? share.threadId
 }
 
 private struct ShareAccessHistory: View {

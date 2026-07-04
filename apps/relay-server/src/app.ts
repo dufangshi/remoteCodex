@@ -80,6 +80,13 @@ const createShareSchema = z
     message: 'targetIdentifier is required.',
     path: ['targetIdentifier'],
   });
+const updateShareSchema = z.object({
+  workspaceId: z.string().uuid().nullable().optional(),
+  label: z.string().trim().min(1).max(160).nullable().optional(),
+  threadAccess: threadAccessSchema.optional(),
+  workspaceAccess: workspaceAccessSchema.optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
 });
@@ -341,6 +348,16 @@ export function buildRelayServer(
       workspaceAccess: body.workspaceAccess,
       expiresAt: body.expiresAt ?? null,
     });
+  });
+
+  app.patch('/relay/shares/:shareId', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const { shareId } = z.object({ shareId: z.string().uuid() }).parse(request.params);
+    const body = updateShareSchema.parse(request.body ?? {});
+    return store.updateShare(user.id, shareId, body);
   });
 
   app.delete('/relay/shares/:shareId', async (request, reply) => {
