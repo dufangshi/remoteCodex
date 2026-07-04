@@ -4,11 +4,14 @@ import { RelayTunnelClient } from './relay-tunnel-client';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
+  static readonly CONNECTING = 0;
   static readonly OPEN = 1;
+  static readonly CLOSED = 3;
 
   readonly listeners = new Map<string, Array<(event?: any) => void>>();
   readonly sent: string[] = [];
-  readyState = FakeWebSocket.OPEN;
+  readyState = FakeWebSocket.CONNECTING;
+  failSends = false;
 
   constructor(readonly url: URL) {
     FakeWebSocket.instances.push(this);
@@ -21,15 +24,24 @@ class FakeWebSocket {
   }
 
   send(message: string) {
+    if (this.failSends) {
+      throw new Error('send failed');
+    }
     this.sent.push(message);
   }
 
   close() {
-    this.readyState = 3;
+    this.readyState = FakeWebSocket.CLOSED;
     this.emit('close');
   }
 
   emit(type: string, event?: any) {
+    if (type === 'open') {
+      this.readyState = FakeWebSocket.OPEN;
+    }
+    if (type === 'close') {
+      this.readyState = FakeWebSocket.CLOSED;
+    }
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }
@@ -66,6 +78,7 @@ describe('RelayTunnelClient', () => {
     expect(String(FakeWebSocket.instances[0]!.url)).toBe(
       'wss://relay.example.test/supervisor/tunnel?token=agent-token&deviceToken=agent-token',
     );
+    FakeWebSocket.instances[0]!.emit('open');
 
     FakeWebSocket.instances[0]!.emit('message', {
       data: JSON.stringify({
@@ -85,6 +98,72 @@ describe('RelayTunnelClient', () => {
     client.stop();
   });
 
+  it('reconnects after tunnel error even when close is not emitted by the websocket implementation', async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as any;
+    const client = new RelayTunnelClient(
+      {
+        serverUrl: 'wss://relay.example.test',
+        agentToken: 'agent-token',
+      },
+      vi.fn(),
+      vi.fn(() => vi.fn()),
+      vi.fn(),
+    );
+
+    client.start();
+    FakeWebSocket.instances[0]!.emit('error');
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    client.stop();
+  });
+
+  it('reconnects when the tunnel never finishes opening', async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as any;
+    const client = new RelayTunnelClient(
+      {
+        serverUrl: 'wss://relay.example.test',
+        agentToken: 'agent-token',
+      },
+      vi.fn(),
+      vi.fn(() => vi.fn()),
+      vi.fn(),
+    );
+
+    client.start();
+
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    client.stop();
+  });
+
+  it('reconnects when heartbeat sends fail on a stale open socket', async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as any;
+    const client = new RelayTunnelClient(
+      {
+        serverUrl: 'wss://relay.example.test',
+        agentToken: 'agent-token',
+      },
+      vi.fn(),
+      vi.fn(() => vi.fn()),
+      vi.fn(),
+    );
+
+    client.start();
+    FakeWebSocket.instances[0]!.emit('open');
+    FakeWebSocket.instances[0]!.failSends = true;
+
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    client.stop();
+  });
+
   it('does not reconnect after stop', async () => {
     vi.useFakeTimers();
     globalThis.WebSocket = FakeWebSocket as any;
@@ -99,6 +178,7 @@ describe('RelayTunnelClient', () => {
     );
 
     client.start();
+    FakeWebSocket.instances[0]!.emit('open');
     client.stop();
 
     await vi.advanceTimersByTimeAsync(30_000);

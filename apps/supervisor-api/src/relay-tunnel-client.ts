@@ -7,6 +7,7 @@ import type {
 } from '../../../packages/shared/src/index';
 
 const RELAY_HEARTBEAT_INTERVAL_MS = 30_000;
+const RELAY_CONNECT_TIMEOUT_MS = 15_000;
 const RELAY_RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RELAY_RECONNECT_MAX_DELAY_MS = 30_000;
 
@@ -26,6 +27,7 @@ export type RelayClientMessageHandler = (
 export class RelayTunnelClient {
   private socket: WebSocket | null = null;
   private heartbeatHandle: NodeJS.Timeout | null = null;
+  private connectTimeoutHandle: NodeJS.Timeout | null = null;
   private reconnectHandle: NodeJS.Timeout | null = null;
   private reconnectDelayMs = RELAY_RECONNECT_INITIAL_DELAY_MS;
   private stopped = false;
@@ -58,24 +60,33 @@ export class RelayTunnelClient {
     const url = new URL('/supervisor/tunnel', this.config.serverUrl ?? undefined);
     url.searchParams.set('token', this.config.agentToken ?? '');
     url.searchParams.set('deviceToken', this.config.agentToken ?? '');
-    this.socket = new WebSocket(url);
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    this.connectTimeoutHandle = setTimeout(() => {
+      if (this.socket === socket && socket.readyState !== WebSocket.OPEN) {
+        this.closeAndReconnect(socket);
+      }
+    }, RELAY_CONNECT_TIMEOUT_MS);
 
-    this.socket.addEventListener('open', () => {
+    socket.addEventListener('open', () => {
+      this.clearConnectTimeout();
       this.reconnectDelayMs = RELAY_RECONNECT_INITIAL_DELAY_MS;
       this.sendHeartbeat();
+      this.clearHeartbeat();
       this.heartbeatHandle = setInterval(() => {
         this.sendHeartbeat();
       }, RELAY_HEARTBEAT_INTERVAL_MS);
     });
 
-    this.socket.addEventListener('close', () => {
-      this.clearHeartbeat();
-      this.cleanupRelayClients();
-      this.socket = null;
-      this.scheduleReconnect();
+    socket.addEventListener('close', () => {
+      this.closeAndReconnect(socket);
     });
 
-    this.socket.addEventListener('message', (event) => {
+    socket.addEventListener('error', () => {
+      this.closeAndReconnect(socket);
+    });
+
+    socket.addEventListener('message', (event) => {
       void this.handleMessage(String(event.data));
     });
   }
@@ -83,6 +94,7 @@ export class RelayTunnelClient {
   stop() {
     this.stopped = true;
     this.clearHeartbeat();
+    this.clearConnectTimeout();
     this.clearReconnect();
     this.cleanupRelayClients();
     this.socket?.close();
@@ -90,16 +102,15 @@ export class RelayTunnelClient {
   }
 
   private sendHeartbeat() {
-    if (this.socket?.readyState !== WebSocket.OPEN) {
+    const socket = this.socket;
+    if (socket?.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    this.socket.send(
-      JSON.stringify({
-        type: 'relay.heartbeat',
-        timestamp: new Date().toISOString(),
-      } satisfies RelaySupervisorEnvelope),
-    );
+    this.sendEnvelope(socket, {
+      type: 'relay.heartbeat',
+      timestamp: new Date().toISOString(),
+    } satisfies RelaySupervisorEnvelope);
   }
 
   private async handleMessage(rawMessage: string) {
@@ -136,13 +147,18 @@ export class RelayTunnelClient {
     }
 
     const response = await this.handleRequest(parsed.payload);
-    this.socket?.send(
-      JSON.stringify({
+    const socket = this.socket;
+    if (socket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.sendEnvelope(
+      socket,
+      {
         type: 'relay.response',
         timestamp: new Date().toISOString(),
         requestId: parsed.requestId,
         payload: response,
-      } satisfies RelaySupervisorEnvelope),
+      } satisfies RelaySupervisorEnvelope,
     );
   }
 
@@ -150,24 +166,54 @@ export class RelayTunnelClient {
     clientId: string,
     message: SupervisorSocketServerEnvelope,
   ) {
-    if (this.socket?.readyState !== WebSocket.OPEN) {
+    const socket = this.socket;
+    if (socket?.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    this.socket.send(
-      JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: new Date().toISOString(),
-        clientId,
-        payload: message,
-      } satisfies RelaySupervisorEnvelope),
-    );
+    this.sendEnvelope(socket, {
+      type: 'relay.server.message',
+      timestamp: new Date().toISOString(),
+      clientId,
+      payload: message,
+    } satisfies RelaySupervisorEnvelope);
+  }
+
+  private sendEnvelope(socket: WebSocket, message: RelaySupervisorEnvelope) {
+    try {
+      socket.send(JSON.stringify(message));
+    } catch {
+      this.closeAndReconnect(socket);
+    }
+  }
+
+  private closeAndReconnect(socket: WebSocket) {
+    if (this.socket !== socket) {
+      return;
+    }
+    this.clearHeartbeat();
+    this.clearConnectTimeout();
+    this.cleanupRelayClients();
+    this.socket = null;
+    try {
+      socket.close();
+    } catch {
+      // Some websocket implementations throw when closing an already failed socket.
+    }
+    this.scheduleReconnect();
   }
 
   private clearHeartbeat() {
     if (this.heartbeatHandle) {
       clearInterval(this.heartbeatHandle);
       this.heartbeatHandle = null;
+    }
+  }
+
+  private clearConnectTimeout() {
+    if (this.connectTimeoutHandle) {
+      clearTimeout(this.connectTimeoutHandle);
+      this.connectTimeoutHandle = null;
     }
   }
 
