@@ -82,6 +82,28 @@ extension RemoteCodexUITests {
     }
 
     @MainActor
+    func testThreadWebViewFixtureOpensVisibleShareTab() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-ios-thread-webview-fixture",
+            "--ui-test-ios-thread-webview-click-visible-share",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-webview-screen"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
+        let debug = app.staticTexts["thread-webview-debug"]
+        XCTAssertTrue(
+            waitForElement(debug, containing: "visible-share:tab-open:available=false", timeout: 20),
+            debug.exists ? debug.label : "WebView did not open the visible Share tab."
+        )
+        let error = app.staticTexts["thread-webview-error"]
+        XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
+    }
+
+    @MainActor
     func testLiveLocalThreadWebViewExportsPDFToNativeShareLink() async throws {
         let baseURL = try await Self.liveLocalBaseURL()
         try await Self.requireLiveE2EFakeRuntime(baseURL: baseURL)

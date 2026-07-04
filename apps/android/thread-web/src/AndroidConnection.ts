@@ -8,6 +8,9 @@ export function supervisorRestPath(
   if (bootstrap.mode !== 'relay') {
     return normalizedPath;
   }
+  if (normalizedPath.startsWith('/relay/')) {
+    return normalizedPath;
+  }
   if (bootstrap.relayDeviceId) {
     return `/relay/devices/${encodeURIComponent(bootstrap.relayDeviceId)}${normalizedPath}`;
   }

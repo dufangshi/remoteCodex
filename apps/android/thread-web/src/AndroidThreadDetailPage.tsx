@@ -4,20 +4,23 @@ import type {
   AgentProviderCapabilitiesDto,
   ExportThreadPdfInput,
   ModelOptionDto,
+  RelayEffectiveAccessDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadExportTurnOptionsDto,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
+  CreateThreadShareInput,
   ThreadDetailUiAdapter,
+  ThreadShareSummary,
   ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import {
   ConfirmDialog,
-  ExportTranscriptDialog,
   formatLongTimestamp,
   PluginProvider,
+  ThreadActionsDialog,
   ThreadDetailSurface,
   threadStatusLabel,
 } from '@remote-codex/thread-ui';
@@ -69,6 +72,22 @@ function removeThread(threads: ThreadDto[], threadId: string) {
   return threads.filter((thread) => thread.id !== threadId);
 }
 
+function relayThreadAccessLabel(access: RelayEffectiveAccessDto['threadAccess']) {
+  return access === 'read' ? 'View only' : 'Collaborator';
+}
+
+function relayWorkspaceAccessLabel(access: RelayEffectiveAccessDto['workspaceAccess']) {
+  switch (access) {
+    case 'write':
+      return 'Workspace write';
+    case 'read':
+      return 'Workspace read';
+    case 'none':
+    default:
+      return 'No workspace';
+  }
+}
+
 function mergeEarlierThreadHistory(
   current: ThreadDetailDto,
   earlier: ThreadDetailDto,
@@ -115,6 +134,7 @@ export function AndroidThreadDetailPage({
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [historyLimit, setHistoryLimit] = useState(THREAD_HISTORY_INITIAL_LIMIT);
@@ -124,6 +144,24 @@ export function AndroidThreadDetailPage({
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const [exportTurnsState, setExportTurnsState] =
     useState<PanelState<ThreadExportTurnOptionsDto>>(idleExportTurnsState);
+  const [threadShareState, setThreadShareState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    shares: ThreadShareSummary[];
+    error: string | null;
+  }>({
+    status: 'idle',
+    shares: [],
+    error: null,
+  });
+  const [relayAccessState, setRelayAccessState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    access: RelayEffectiveAccessDto | null;
+    error: string | null;
+  }>({
+    status: 'idle',
+    access: null,
+    error: null,
+  });
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +180,8 @@ export function AndroidThreadDetailPage({
     applyAndroidTheme(bootstrap.theme ?? 'system'),
   );
   const client = useMemo(() => new AndroidApiClient(bootstrap), [bootstrap]);
+  const relayDeviceId = bootstrap.mode === 'relay' ? bootstrap.relayDeviceId : null;
+  const relayShareAvailable = Boolean(relayDeviceId);
 
   useEffect(() => {
     detailRef.current = detail;
@@ -672,6 +712,194 @@ export function AndroidThreadDetailPage({
     [client],
   );
 
+  const loadThreadShares = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+      setThreadShareState({
+        status: 'ready',
+        shares: [],
+        error: null,
+      });
+      return;
+    }
+
+    setThreadShareState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    try {
+      const portal = await client.fetchRelayPortal();
+      const shares = portal.sharedByMe
+        .filter(
+          (share) =>
+            share.deviceId === relayDeviceId &&
+            share.threadId === currentDetail.thread.id,
+        )
+        .map((share) => ({
+          id: share.id,
+          targetUsername: share.targetUsername,
+          label: share.label,
+          threadAccess: share.threadAccess,
+          workspaceAccess: share.workspaceAccess,
+          createdAt: share.createdAt,
+        }));
+      setThreadShareState({
+        status: 'ready',
+        shares,
+        error: null,
+      });
+    } catch (caught) {
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error:
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load active shares.',
+      }));
+    }
+  }, [client, relayDeviceId, relayShareAvailable]);
+
+  const createThreadShare = useCallback(async (input: CreateThreadShareInput) => {
+    const currentDetail = detailRef.current;
+    if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: 'Relay sharing is only available from a relay device route.',
+      }));
+      return;
+    }
+
+    const workspaceId =
+      input.workspaceAccess === 'none'
+        ? null
+        : currentDetail.workspace.id ?? currentDetail.thread.workspaceId ?? null;
+    if (input.workspaceAccess !== 'none' && !workspaceId) {
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: 'This thread is not attached to a workspace.',
+      }));
+      return;
+    }
+
+    setShareBusy(true);
+    setThreadShareState((current) => ({
+      ...current,
+      error: null,
+    }));
+    try {
+      await client.createRelayShare({
+        targetIdentifier: input.targetIdentifier,
+        deviceId: relayDeviceId,
+        threadId: currentDetail.thread.id,
+        workspaceId,
+        label: input.label ?? null,
+        threadAccess: input.threadAccess,
+        workspaceAccess: input.workspaceAccess,
+      });
+      await loadThreadShares();
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : 'Unable to create share.';
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: message,
+      }));
+      setError(message);
+    } finally {
+      setShareBusy(false);
+    }
+  }, [client, loadThreadShares, relayDeviceId, relayShareAvailable]);
+
+  const revokeThreadShare = useCallback(async (shareId: string) => {
+    setShareBusy(true);
+    setThreadShareState((current) => ({
+      ...current,
+      error: null,
+    }));
+    try {
+      await client.revokeRelayShare(shareId);
+      await loadThreadShares();
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : 'Unable to revoke share.';
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: message,
+      }));
+      setError(message);
+    } finally {
+      setShareBusy(false);
+    }
+  }, [client, loadThreadShares]);
+
+  useEffect(() => {
+    if (exportDialogOpen) {
+      void loadThreadShares();
+    }
+  }, [exportDialogOpen, loadThreadShares]);
+
+  useEffect(() => {
+    const currentDetail = detailRef.current;
+    if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+      setRelayAccessState({
+        status: 'idle',
+        access: null,
+        error: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setRelayAccessState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    client
+      .fetchRelayAccess({
+        deviceId: relayDeviceId,
+        threadId: currentDetail.thread.id,
+        workspaceId: currentDetail.workspace.id ?? currentDetail.thread.workspaceId ?? null,
+      })
+      .then((access) => {
+        if (!cancelled) {
+          setRelayAccessState({
+            status: 'ready',
+            access,
+            error: null,
+          });
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setRelayAccessState({
+            status: 'failed',
+            access: null,
+            error:
+              caught instanceof Error
+                ? caught.message
+                : 'Unable to load relay permissions.',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    client,
+    detail?.thread.id,
+    detail?.thread.workspaceId,
+    detail?.workspace.id,
+    relayDeviceId,
+    relayShareAvailable,
+  ]);
+
   const resolveWorkspaceId = useCallback(
     (workspaceId?: string | null) =>
       workspaceId ??
@@ -681,87 +909,133 @@ export function AndroidThreadDetailPage({
     [],
   );
 
+  const currentWorkspaceId =
+    detail?.workspace.id ?? detail?.thread.workspaceId ?? null;
+  const relayAccess = relayAccessState.access;
+  const effectiveThreadIsOwner =
+    !relayShareAvailable || relayAccess?.kind === 'owner';
+  const effectiveThreadCanControl =
+    effectiveThreadIsOwner ||
+    (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'control');
+  const effectiveThreadCanShare =
+    relayShareAvailable && relayAccess?.kind === 'owner';
+  const effectiveWorkspaceAccess: 'none' | 'read' | 'write' =
+    !relayShareAvailable
+      ? 'write'
+      : relayAccess?.kind === 'owner'
+        ? 'write'
+        : relayAccess?.kind === 'shared' &&
+            relayAccess.workspaceId &&
+            relayAccess.workspaceId === currentWorkspaceId
+          ? relayAccess.workspaceAccess
+          : 'none';
+  const relayAccessBadge = useMemo(
+    () =>
+      relayAccess?.kind === 'shared' ? (
+        <div
+          className="inline-flex max-w-[10rem] items-center gap-1.5 rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-2.5 py-1 text-[11px] font-medium text-[var(--theme-fg-soft)]"
+          title={`${relayThreadAccessLabel(relayAccess.threadAccess)} / ${relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}`}
+        >
+          <span>{relayThreadAccessLabel(relayAccess.threadAccess)}</span>
+          <span className="text-[var(--theme-fg-muted)]">/</span>
+          <span className="truncate">
+            {relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}
+          </span>
+        </div>
+      ) : null,
+    [relayAccess],
+  );
+
   const adapter = useMemo<ThreadDetailUiAdapter>(() => {
-    const workspaceAdapter: ThreadWorkspaceAdapter | null = {
-      async listTree(input) {
-        const workspaceId = resolveWorkspaceId(input.workspaceId);
-        if (!workspaceId) {
-          throw new Error('No workspace id is available.');
-        }
-        return client.fetchWorkspaceTree(workspaceId, input.path ?? '');
-      },
-      async readFile(input) {
-        const workspaceId = resolveWorkspaceId(input.workspaceId);
-        if (!workspaceId) {
-          throw new Error('No workspace id is available.');
-        }
-        return client.fetchWorkspaceFilePreview(workspaceId, {
-          path: input.path,
-          ...(input.offset !== undefined ? { offset: input.offset } : {}),
-          ...(input.limit !== undefined ? { limit: input.limit } : {}),
-        });
-      },
-      getRawFileUrl(input) {
-        const workspaceId = resolveWorkspaceId(input.workspaceId);
-        if (!workspaceId) {
-          return '';
-        }
-        return client.buildWorkspaceRawFileUrl(workspaceId, {
-          path: input.path,
-        });
-      },
-      async downloadNode(input) {
-        const workspaceId = resolveWorkspaceId(input.workspaceId);
-        if (!workspaceId) {
-          throw new Error('No workspace id is available.');
-        }
-        const downloaded = await client.downloadWorkspaceNode(workspaceId, {
-          path: input.path,
-        });
-        postAndroidMessage({
-          type: 'shareDownloadedFile',
-          filename: downloaded.filename,
-          contentType: downloaded.contentType,
-          base64: downloaded.base64,
-        });
-      },
-      async uploadFile(input) {
-        const workspaceId = resolveWorkspaceId(input.workspaceId);
-        if (!workspaceId) {
-          throw new Error('No workspace id is available.');
-        }
-        return client.uploadWorkspaceFile(workspaceId, {
-          path: input.path,
-          file: input.file,
-        });
-      },
-      async pickUploadFile(input) {
-        if (!hasNativeFilePickerBridge()) {
-          input.defaultPick();
-          return;
-        }
-        postAndroidMessage({
-          type: 'threadWebDebug',
-          message: 'workspace-upload-picker:requested',
-        });
-        const result = await pickNativeFile();
-        if (result.cancelled) {
-          postAndroidMessage({
-            type: 'threadWebDebug',
-            message: `workspace-upload-picker:cancelled:${result.requestId}`,
-          });
-          return;
-        }
-        if (!result.file) {
-          return;
-        }
-        await input.upload(fileFromNativePick(result.file));
-        postAndroidMessage({
-          type: 'threadWebDebug',
-          message: `workspace-upload-picker:received:${result.file.filename}`,
-        });
-      },
-    };
+    const workspaceAdapter: ThreadWorkspaceAdapter | null =
+      effectiveWorkspaceAccess === 'none'
+        ? null
+        : {
+            async listTree(input) {
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                throw new Error('No workspace id is available.');
+              }
+              return client.fetchWorkspaceTree(workspaceId, input.path ?? '');
+            },
+            async readFile(input) {
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                throw new Error('No workspace id is available.');
+              }
+              return client.fetchWorkspaceFilePreview(workspaceId, {
+                path: input.path,
+                ...(input.offset !== undefined ? { offset: input.offset } : {}),
+                ...(input.limit !== undefined ? { limit: input.limit } : {}),
+              });
+            },
+            getRawFileUrl(input) {
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                return '';
+              }
+              return client.buildWorkspaceRawFileUrl(workspaceId, {
+                path: input.path,
+              });
+            },
+            async downloadNode(input) {
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                throw new Error('No workspace id is available.');
+              }
+              const downloaded = await client.downloadWorkspaceNode(workspaceId, {
+                path: input.path,
+              });
+              postAndroidMessage({
+                type: 'shareDownloadedFile',
+                filename: downloaded.filename,
+                contentType: downloaded.contentType,
+                base64: downloaded.base64,
+              });
+            },
+            async uploadFile(input) {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                throw new Error('No workspace id is available.');
+              }
+              return client.uploadWorkspaceFile(workspaceId, {
+                path: input.path,
+                file: input.file,
+              });
+            },
+            async pickUploadFile(input) {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
+              if (!hasNativeFilePickerBridge()) {
+                input.defaultPick();
+                return;
+              }
+              postAndroidMessage({
+                type: 'threadWebDebug',
+                message: 'workspace-upload-picker:requested',
+              });
+              const result = await pickNativeFile();
+              if (result.cancelled) {
+                postAndroidMessage({
+                  type: 'threadWebDebug',
+                  message: `workspace-upload-picker:cancelled:${result.requestId}`,
+                });
+                return;
+              }
+              if (!result.file) {
+                return;
+              }
+              await input.upload(fileFromNativePick(result.file));
+              postAndroidMessage({
+                type: 'threadWebDebug',
+                message: `workspace-upload-picker:received:${result.file.filename}`,
+              });
+            },
+          };
 
     return {
       openThread(threadId) {
@@ -771,12 +1045,15 @@ export function AndroidThreadDetailPage({
         return `#thread-${threadId}`;
       },
       sendPrompt(input) {
+        if (!effectiveThreadCanControl) {
+          return false;
+        }
         return submitPromptText(input.prompt);
       },
-      renameThread,
-      deleteThread: setDeletingThread,
+      ...(effectiveThreadIsOwner ? { renameThread } : {}),
+      ...(effectiveThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
       cancelPendingSteer,
-      updateSettings: updateThreadSettings,
+      ...(effectiveThreadIsOwner ? { updateSettings: updateThreadSettings } : {}),
       async loadHistoryItemDetail(itemId) {
         const currentDetail = detailRef.current;
         if (!currentDetail) {
@@ -813,6 +1090,9 @@ export function AndroidThreadDetailPage({
   }, [
     client,
     cancelPendingSteer,
+    effectiveThreadCanControl,
+    effectiveThreadIsOwner,
+    effectiveWorkspaceAccess,
     renameThread,
     resolveWorkspaceId,
     submitPromptText,
@@ -939,56 +1219,69 @@ export function AndroidThreadDetailPage({
         useFloatingMobileComposer
         floatingMobileComposerBottomOffset={0}
         settingsDialogOpen={settingsDialogOpen}
-	        onSettingsDialogOpenChange={setSettingsDialogOpen}
-	        metaContent={metaContent}
-	        settingsContent={settingsContent}
-	        surfaceActions={
-	          <button
-	            type="button"
-	            aria-label="Export transcript"
-	            title="Export transcript"
-	            onClick={() => setExportDialogOpen(true)}
-	            className="thread-mobile-hit-target rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1 text-xs font-semibold text-[var(--theme-fg-soft)] shadow-sm shadow-stone-950/20 transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
-	          >
-	            Export
-	          </button>
-	        }
-	        dialogs={
-	          <>
-	            <ExportTranscriptDialog
-	              open={exportDialogOpen}
-	              busy={exportBusy}
-	              turnsState={exportTurnsState}
-	              onCancel={() => {
-	                if (!exportBusy) {
-	                  setExportDialogOpen(false);
-	                }
-	              }}
-	              onLoadTurns={loadExportTurns}
-	              onExport={exportTranscript}
-	            />
-	            <ConfirmDialog
-	              open={deletingThread !== null}
-	              title="Delete Thread"
-	              description={
-	                deletingThread
-	                  ? `Delete ${deletingThread.title} from supervisor. This cannot be undone.`
-	                  : ''
-	              }
-	              confirmLabel="Delete Thread"
-	              busy={deletingThreadBusy}
-	              onCancel={() => {
-	                if (!deletingThreadBusy) {
-	                  setDeletingThread(null);
-	                }
-	              }}
-	              onConfirm={() => void confirmDeleteThread()}
-	            />
-	          </>
-	        }
-	        currentThreadId={detail?.thread.id ?? bootstrap.threadId ?? undefined}
-	        currentWorkspaceId={detail?.workspace.id ?? null}
-	        currentWorkspaceLabel={detail?.workspace.label ?? null}
+        onSettingsDialogOpenChange={setSettingsDialogOpen}
+        metaContent={metaContent}
+        settingsContent={settingsContent}
+        surfaceActions={relayAccessBadge}
+        mobileHeaderAction={relayAccessBadge}
+        threadActionsButton={
+          <button
+            type="button"
+            aria-label="Thread actions"
+            title="Thread actions"
+            onClick={() => setExportDialogOpen(true)}
+            className="thread-mobile-hit-target inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-base font-semibold text-[var(--theme-fg-soft)] shadow-sm shadow-stone-950/20 transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+          >
+            ...
+          </button>
+        }
+        dialogs={
+          <>
+            <ThreadActionsDialog
+              open={exportDialogOpen}
+              busy={exportBusy || shareBusy}
+              turnsState={exportTurnsState}
+              shareAvailable={effectiveThreadCanShare}
+              {...(relayShareAvailable && relayAccess?.kind === 'shared'
+                ? { shareUnavailableMessage: 'Only the owner can share this session.' }
+                : {})}
+              shareState={threadShareState}
+              onCancel={() => {
+                if (!exportBusy && !shareBusy) {
+                  setExportDialogOpen(false);
+                }
+              }}
+              onLoadTurns={loadExportTurns}
+              onExport={exportTranscript}
+              {...(effectiveThreadCanShare
+                ? {
+                    onCreateShare: createThreadShare,
+                    onRevokeShare: revokeThreadShare,
+                  }
+                : {})}
+            />
+            <ConfirmDialog
+              open={deletingThread !== null}
+              title="Delete Thread"
+              description={
+                deletingThread
+                  ? `Delete ${deletingThread.title} from supervisor. This cannot be undone.`
+                  : ''
+              }
+              confirmLabel="Delete Thread"
+              busy={deletingThreadBusy}
+              onCancel={() => {
+                if (!deletingThreadBusy) {
+                  setDeletingThread(null);
+                }
+              }}
+              onConfirm={() => void confirmDeleteThread()}
+            />
+          </>
+        }
+        currentThreadId={detail?.thread.id ?? bootstrap.threadId ?? undefined}
+        currentWorkspaceId={detail?.workspace.id ?? null}
+        currentWorkspaceLabel={detail?.workspace.label ?? null}
         composerProps={
           detail
             ? {
@@ -1005,20 +1298,29 @@ export function AndroidThreadDetailPage({
                 contextUsage: detail.thread.contextUsage ?? null,
                 capabilities,
                 threadConnected: detail.thread.isLoaded,
-                disabled: detail.workspacePathStatus === 'missing',
+                disabled:
+                  detail.workspacePathStatus === 'missing' ||
+                  !effectiveThreadCanControl,
                 ...(detail.workspacePathStatus === 'missing'
                   ? {
                       disabledPlaceholder:
                         'Restore this workspace path on the current machine before continuing.',
                     }
-                  : {}),
+                  : !effectiveThreadCanControl
+                    ? {
+                        disabledPlaceholder:
+                          'This shared session is view-only.',
+                      }
+                    : {}),
                 shellAvailable: false,
                 followTail,
                 onToggleFollow: () => {
                   setFollowTail(true);
                   setScrollRequestKey((current) => current + 1);
                 },
-                onUpdateSettings: updateThreadSettings,
+                ...(effectiveThreadIsOwner
+                  ? { onUpdateSettings: updateThreadSettings }
+                  : {}),
               }
             : undefined
         }

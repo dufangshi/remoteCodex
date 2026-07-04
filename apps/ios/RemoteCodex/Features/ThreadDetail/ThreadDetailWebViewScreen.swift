@@ -15,6 +15,7 @@ struct ThreadDetailWebViewScreen: View {
     let uiTestAutoExportTranscript: Bool
     let uiTestAutoExportTranscriptFormat: String?
     let uiTestClickVisibleExportControls: Bool
+    let uiTestClickVisibleShareControls: Bool
     let uiTestFocusWorkspacePath: String?
     let uiTestAutoLoadMoreWorkspacePreview: Bool
     let uiTestAutoWorkspaceFileActions: Bool
@@ -65,6 +66,7 @@ struct ThreadDetailWebViewScreen: View {
                         uiTestAutoExportTranscript: uiTestAutoExportTranscript,
                         uiTestAutoExportTranscriptFormat: uiTestAutoExportTranscriptFormat,
                         uiTestClickVisibleExportControls: uiTestClickVisibleExportControls,
+                        uiTestClickVisibleShareControls: uiTestClickVisibleShareControls,
                         uiTestFocusWorkspacePath: uiTestFocusWorkspacePath,
                         uiTestAutoLoadMoreWorkspacePreview: uiTestAutoLoadMoreWorkspacePreview,
                         uiTestAutoWorkspaceFileActions: uiTestAutoWorkspaceFileActions,
@@ -524,6 +526,7 @@ struct ThreadDetailWebBootstrap: Codable, Equatable {
     var uiTestAutoExportTranscript: Bool
     var uiTestAutoExportTranscriptFormat: String?
     var uiTestClickVisibleExportControls: Bool
+    var uiTestClickVisibleShareControls: Bool
     var uiTestFocusWorkspacePath: String?
     var uiTestAutoLoadMoreWorkspacePreview: Bool
     var uiTestAutoWorkspaceFileActions: Bool

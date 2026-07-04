@@ -27,7 +27,28 @@ function device(input: { id: string; name: string; connected?: boolean; token?: 
   };
 }
 
-function renderPage(devices: ReturnType<typeof device>[]) {
+const sharedSession = {
+  id: 'share-1',
+  ownerUserId: 'owner-1',
+  ownerUsername: 'owner',
+  targetUsername: 'user',
+  targetUserId: 'user-1',
+  deviceId: 'device-shared',
+  deviceName: 'Owner Mac',
+  threadId: 'thread-shared',
+  workspaceId: null,
+  label: 'Review session',
+  threadAccess: 'read' as const,
+  workspaceAccess: 'none' as const,
+  createdAt: '2026-06-18T00:00:00.000Z',
+  revokedAt: null,
+  expiresAt: null,
+};
+
+function renderPage(
+  devices: ReturnType<typeof device>[],
+  sharedWithMe: Array<typeof sharedSession> = [],
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
@@ -38,7 +59,7 @@ function renderPage(devices: ReturnType<typeof device>[]) {
           json: async () => ({
             user: baseUser,
             devices,
-            sharedWithMe: [],
+            sharedWithMe,
             sharedByMe: [],
           }),
         });
@@ -60,6 +81,10 @@ function renderPage(devices: ReturnType<typeof device>[]) {
       <Routes>
         <Route path="/relay-devices" element={<RelayDevicesPage />} />
         <Route path="/workspaces" element={<div>Workspaces</div>} />
+        <Route
+          path="/devices/:relayDeviceId/threads/:threadId"
+          element={<div>Shared thread</div>}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -88,6 +113,9 @@ describe('RelayDevicesPage', () => {
         expect.stringContaining('REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_real_device_token'),
       );
     });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679'),
+    );
     expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(
       expect.stringContaining('<device-token>'),
     );
@@ -159,6 +187,9 @@ describe('RelayDevicesPage', () => {
         expect.stringContaining('REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_created_device_token'),
       );
     });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679'),
+    );
   });
 
   it('does not copy a placeholder command when a legacy device has no stored token', async () => {
@@ -171,5 +202,19 @@ describe('RelayDevicesPage', () => {
       screen.getByText('Token not available for this device. Create a new device token to copy a ready-to-run setup command.'),
     ).toBeInTheDocument();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('opens a session shared with the current relay account', async () => {
+    renderPage([], [sharedSession]);
+
+    await screen.findByText('Review session');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Shared thread')).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
+    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
   });
 });

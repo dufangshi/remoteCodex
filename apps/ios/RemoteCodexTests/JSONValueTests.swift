@@ -56,6 +56,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
             uiTestAutoExportTranscript: true,
             uiTestAutoExportTranscriptFormat: "html",
             uiTestClickVisibleExportControls: true,
+            uiTestClickVisibleShareControls: true,
             uiTestFocusWorkspacePath: "Sources/Long.txt",
             uiTestAutoLoadMoreWorkspacePreview: true,
             uiTestAutoWorkspaceFileActions: true,
@@ -88,6 +89,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
         XCTAssertEqual(payload["uiTestAutoExportTranscript"] as? Bool, true)
         XCTAssertEqual(payload["uiTestAutoExportTranscriptFormat"] as? String, "html")
         XCTAssertEqual(payload["uiTestClickVisibleExportControls"] as? Bool, true)
+        XCTAssertEqual(payload["uiTestClickVisibleShareControls"] as? Bool, true)
         XCTAssertEqual(payload["uiTestFocusWorkspacePath"] as? String, "Sources/Long.txt")
         XCTAssertEqual(payload["uiTestAutoLoadMoreWorkspacePreview"] as? Bool, true)
         XCTAssertEqual(payload["uiTestAutoWorkspaceFileActions"] as? Bool, true)
@@ -126,6 +128,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
             uiTestAutoExportTranscript: false,
             uiTestAutoExportTranscriptFormat: nil,
             uiTestClickVisibleExportControls: false,
+            uiTestClickVisibleShareControls: false,
             uiTestFocusWorkspacePath: nil,
             uiTestAutoLoadMoreWorkspacePreview: false,
             uiTestAutoWorkspaceFileActions: false,

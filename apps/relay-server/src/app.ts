@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import type {
   ApiErrorShape,
+  RelayEffectiveAccessDto,
   RelayHealthDto,
   RelaySupervisorEnvelope,
   RelayUserDto,
@@ -20,6 +21,7 @@ import {
   RelayStore,
   RelayStoreError,
 } from './relay-store';
+import type { EffectiveRelayAccess } from './relay-store';
 
 interface SupervisorConnection extends DeviceConnectionStatus {
   deviceId: string;
@@ -28,8 +30,9 @@ interface SupervisorConnection extends DeviceConnectionStatus {
   clientSockets: Map<
     string,
     {
-      socket: { send: (message: string) => void; readyState: number; close: () => void };
+      socket: { send: (message: string) => void; readyState: number; close: (code?: number, reason?: string) => void };
       threadId: string | null;
+      access: EffectiveRelayAccess;
     }
   >;
 }
@@ -45,7 +48,8 @@ interface AuthenticatedRelayRequest extends FastifyRequest {
 const RELAY_REQUEST_TIMEOUT_MS = 30_000;
 const WEBSOCKET_OPEN = 1;
 const RELAY_COOKIE_NAME = 'remote_codex_relay_session';
-const THREAD_SHARED_HTTP_METHODS = new Set(['GET', 'POST', 'PATCH']);
+const threadAccessSchema = z.enum(['read', 'control']);
+const workspaceAccessSchema = z.enum(['none', 'read', 'write']);
 
 const loginSchema = z.object({
   identifier: z.string().trim().min(1),
@@ -60,12 +64,22 @@ const registerSchema = z.object({
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(120),
 });
-const createShareSchema = z.object({
-  targetUsername: z.string().trim().min(3),
-  deviceId: z.string().uuid(),
-  threadId: z.string().trim().min(1),
-  label: z.string().trim().min(1).max(160).optional(),
-});
+const createShareSchema = z
+  .object({
+    targetIdentifier: z.string().trim().min(1).optional(),
+    targetUsername: z.string().trim().min(3).optional(),
+    deviceId: z.string().uuid(),
+    threadId: z.string().trim().min(1),
+    workspaceId: z.string().uuid().nullable().optional(),
+    label: z.string().trim().min(1).max(160).nullable().optional(),
+    threadAccess: threadAccessSchema.default('control'),
+    workspaceAccess: workspaceAccessSchema.default('none'),
+    expiresAt: z.string().datetime().nullable().optional(),
+  })
+  .refine((input) => input.targetIdentifier || input.targetUsername, {
+    message: 'targetIdentifier is required.',
+    path: ['targetIdentifier'],
+  });
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
 });
@@ -75,6 +89,11 @@ const updateAccountSchema = z.object({
 const updatePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8),
+});
+const relayAccessQuerySchema = z.object({
+  deviceId: z.string().uuid(),
+  threadId: z.string().trim().min(1).optional(),
+  workspaceId: z.string().uuid().optional(),
 });
 
 interface RelayServerBuildOptions {
@@ -215,6 +234,26 @@ export function buildRelayServer(
     return store.portalSummary(user.id, connectionStatus(state));
   });
 
+  app.get('/relay/access', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const query = relayAccessQuerySchema.parse(request.query ?? {});
+    const access = store.effectiveAccess(user.id, query.deviceId, {
+      threadId: query.threadId ?? null,
+      workspaceId: query.workspaceId ?? null,
+    });
+    if (!access) {
+      reply.status(403).send({
+        code: 'forbidden',
+        message: 'Device access is not allowed.',
+      } satisfies ApiErrorShape);
+      return;
+    }
+    return relayAccessDto(access);
+  });
+
   app.post('/relay/devices', async (request, reply) => {
     const user = requireRelayUser(request, reply, store);
     if (!user) {
@@ -241,10 +280,14 @@ export function buildRelayServer(
     }
     const body = createShareSchema.parse(request.body ?? {});
     return store.createShare(user.id, {
-      targetUsername: body.targetUsername,
+      targetIdentifier: body.targetIdentifier ?? body.targetUsername!,
       deviceId: body.deviceId,
       threadId: body.threadId,
+      workspaceId: body.workspaceId ?? null,
       label: body.label ?? null,
+      threadAccess: body.threadAccess,
+      workspaceAccess: body.workspaceAccess,
+      expiresAt: body.expiresAt ?? null,
     });
   });
 
@@ -456,7 +499,8 @@ export function buildRelayServer(
           socket.close(1008, 'Relay login is required.');
           return;
         }
-        if (!store.canAccessDevice(session.user.id, deviceId, threadId)) {
+        const access = store.effectiveAccess(session.user.id, deviceId, { threadId });
+        if (!access) {
           socket.close(1008, 'Device access is not allowed.');
           return;
         }
@@ -467,7 +511,7 @@ export function buildRelayServer(
           return;
         }
 
-        connectRelayWebsocket(supervisor, socket, threadId);
+        connectRelayWebsocket(supervisor, socket, threadId, access);
       },
     });
 
@@ -489,11 +533,16 @@ export function buildRelayServer(
         const threadId = queryString(request.query, 'threadId');
         const deviceId = firstAccessibleConnectedDevice(state, store, session.user.id, threadId);
         const supervisor = deviceId ? state.supervisors.get(deviceId) : null;
+        const access = deviceId ? store.effectiveAccess(session.user.id, deviceId, { threadId }) : null;
         if (!deviceId || !supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
           socket.close(1013, 'No accessible supervisor is connected to this relay.');
           return;
         }
-        connectRelayWebsocket(supervisor, socket, threadId);
+        if (!access) {
+          socket.close(1008, 'Device access is not allowed.');
+          return;
+        }
+        connectRelayWebsocket(supervisor, socket, threadId, access);
       },
     });
   });
@@ -558,7 +607,12 @@ async function forwardRelayHttp(input: {
   targetPath: string;
 }) {
   const threadId = threadIdFromPath(input.targetPath);
-  if (!input.store.canAccessDevice(input.user.id, input.deviceId, threadId)) {
+  const workspaceId = workspaceIdFromPath(input.targetPath);
+  const access = input.store.effectiveAccess(input.user.id, input.deviceId, {
+    threadId,
+    workspaceId,
+  });
+  if (!access) {
     input.reply.status(403).send({
       code: 'forbidden',
       message: 'Device access is not allowed.',
@@ -566,7 +620,15 @@ async function forwardRelayHttp(input: {
     return;
   }
 
-  if (!isAllowedForRelayUser(input.store, input.user.id, input.deviceId, input.request.method, input.targetPath)) {
+  if (!isAllowedRelayTarget(input.targetPath)) {
+    input.reply.status(403).send({
+      code: 'forbidden',
+      message: 'This relay path is not allowed.',
+    } satisfies ApiErrorShape);
+    return;
+  }
+
+  if (!isAllowedForRelayAccess(access, input.request.method, input.targetPath)) {
     input.reply.status(403).send({
       code: 'forbidden',
       message: 'This shared session does not allow that operation.',
@@ -579,14 +641,6 @@ async function forwardRelayHttp(input: {
     input.reply.status(503).send({
       code: 'service_unavailable',
       message: 'No supervisor is connected for this device.',
-    } satisfies ApiErrorShape);
-    return;
-  }
-
-  if (!isAllowedRelayTarget(input.targetPath)) {
-    input.reply.status(403).send({
-      code: 'forbidden',
-      message: 'This relay path is not allowed.',
     } satisfies ApiErrorShape);
     return;
   }
@@ -632,11 +686,17 @@ function relayResponseBody(response: { body: string; bodyEncoding?: 'utf8' | 'ba
 
 function connectRelayWebsocket(
   supervisor: SupervisorConnection,
-  socket: { send: (message: string) => void; readyState: number; close: () => void; on: any },
+  socket: {
+    send: (message: string) => void;
+    readyState: number;
+    close: (code?: number, reason?: string) => void;
+    on: any;
+  },
   threadId: string | null,
+  access: EffectiveRelayAccess,
 ) {
   const clientId = randomUUID();
-  supervisor.clientSockets.set(clientId, { socket, threadId });
+  supervisor.clientSockets.set(clientId, { socket, threadId, access });
   sendToSupervisor(supervisor, {
     type: 'relay.client.connected',
     timestamp: new Date().toISOString(),
@@ -651,12 +711,17 @@ function connectRelayWebsocket(
       return;
     }
 
+    if (access.kind === 'shared' && access.threadAccess !== 'control') {
+      socket.close(1008, 'Shared read-only session cannot control supervisor.');
+      return;
+    }
+
     sendToSupervisor(supervisor, {
       type: 'relay.client.message',
       timestamp: new Date().toISOString(),
-        clientId,
-        payload: payload as any,
-      });
+      clientId,
+      payload: payload as any,
+    });
   });
 
   socket.on('close', () => {
@@ -823,6 +888,16 @@ function connectionStatus(state: RelayState) {
   return statuses;
 }
 
+function relayAccessDto(access: EffectiveRelayAccess): RelayEffectiveAccessDto {
+  return {
+    kind: access.kind,
+    shareId: access.share?.id ?? null,
+    threadAccess: access.threadAccess,
+    workspaceAccess: access.workspaceAccess,
+    workspaceId: access.workspaceId,
+  };
+}
+
 function firstAccessibleConnectedDevice(
   state: RelayState,
   store: RelayStore,
@@ -848,40 +923,115 @@ function threadIdFromPath(pathValue: string) {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
-function isAllowedForRelayUser(
-  store: RelayStore,
-  userId: string,
-  deviceId: string,
+function workspaceIdFromPath(pathValue: string) {
+  const pathname = new URL(pathValue, 'http://relay.local').pathname;
+  const match = /^\/api\/workspaces\/([^/?#]+)/.exec(pathname);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
+function isAllowedForRelayAccess(
+  access: EffectiveRelayAccess,
   method: string,
   pathValue: string,
 ) {
-  if (store.canAccessDevice(userId, deviceId, null)) {
+  if (access.kind === 'owner') {
     return true;
   }
 
   const pathname = new URL(pathValue, 'http://relay.local').pathname;
+  const methodName = method.toUpperCase();
   const threadId = threadIdFromPath(pathValue);
-  if (!threadId || !store.canAccessDevice(userId, deviceId, threadId)) {
-    return false;
+  if (threadId) {
+    return isAllowedSharedThreadPath(access, methodName, pathname, threadId);
   }
-  if (!THREAD_SHARED_HTTP_METHODS.has(method.toUpperCase())) {
+
+  const workspaceId = workspaceIdFromPath(pathValue);
+  if (workspaceId) {
+    return isAllowedSharedWorkspacePath(access, methodName, pathname, workspaceId);
+  }
+  return false;
+}
+
+function isAllowedSharedThreadPath(
+  access: EffectiveRelayAccess,
+  methodName: string,
+  pathname: string,
+  threadId: string,
+) {
+  if (access.kind !== 'shared' || access.share.threadId !== threadId) {
     return false;
   }
   const escapedThreadId = escapeRegExp(encodeURIComponent(threadId));
-  const allowed = [
+  const readPatterns = [
     new RegExp(`^/api/threads/${escapedThreadId}$`),
     new RegExp(`^/api/threads/${escapedThreadId}/items/[^/]+/detail$`),
     new RegExp(`^/api/threads/${escapedThreadId}/export-turns$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/exports/pdf$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/assets/image$`),
     new RegExp(`^/api/threads/${escapedThreadId}/goal$`),
     new RegExp(`^/api/threads/${escapedThreadId}/skills$`),
     new RegExp(`^/api/threads/${escapedThreadId}/mcp-servers$`),
     new RegExp(`^/api/threads/${escapedThreadId}/hooks$`),
+  ];
+  if (methodName === 'GET' && readPatterns.some((pattern) => pattern.test(pathname))) {
+    return true;
+  }
+  if (access.threadAccess !== 'control') {
+    return false;
+  }
+  const controlPatterns = [
+    new RegExp(`^/api/threads/${escapedThreadId}/goal$`),
     new RegExp(`^/api/threads/${escapedThreadId}/resume$`),
     new RegExp(`^/api/threads/${escapedThreadId}/prompt$`),
     new RegExp(`^/api/threads/${escapedThreadId}/interrupt$`),
     new RegExp(`^/api/threads/${escapedThreadId}/requests/[^/]+/respond$`),
   ];
-  return allowed.some((pattern) => pattern.test(pathname));
+  if (methodName === 'PATCH') {
+    return new RegExp(`^/api/threads/${escapedThreadId}/goal$`).test(pathname);
+  }
+  if (methodName === 'POST') {
+    return controlPatterns.some((pattern) => pattern.test(pathname));
+  }
+  return false;
+}
+
+function isAllowedSharedWorkspacePath(
+  access: EffectiveRelayAccess,
+  methodName: string,
+  pathname: string,
+  workspaceId: string,
+) {
+  if (
+    access.kind !== 'shared' ||
+    access.workspaceAccess === 'none' ||
+    access.workspaceId !== workspaceId
+  ) {
+    return false;
+  }
+  const escapedWorkspaceId = escapeRegExp(encodeURIComponent(workspaceId));
+  const readPatterns = [
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/tree$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/preview$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/raw$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/download$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/artifacts$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/artifacts/[^/]+$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/artifacts/[^/]+/download$`),
+  ];
+  if (methodName === 'GET' && readPatterns.some((pattern) => pattern.test(pathname))) {
+    return true;
+  }
+  if (access.workspaceAccess !== 'write') {
+    return false;
+  }
+  const writePatterns = [
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/upload$`),
+    new RegExp(`^/api/workspaces/${escapedWorkspaceId}/files/move$`),
+  ];
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(methodName) &&
+    writePatterns.some((pattern) => pattern.test(pathname));
 }
 
 function shouldForwardSocketEvent(

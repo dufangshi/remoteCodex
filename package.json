@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.11.22",
+  "version": "0.11.23",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
@@ -54,6 +54,7 @@
     "test": "NODE_ENV=test pnpm -r --if-present test",
     "test:e2e": "playwright test",
     "db:migrate": "pnpm --filter @remote-codex/db db:migrate",
+    "release:mobile": "node scripts/publish-mobile-release-assets.mjs",
     "impeccable": "impeccable",
     "impeccable:detect": "impeccable detect apps/supervisor-web/src",
     "impeccable:detect:fast": "impeccable detect --fast apps/supervisor-web/src",

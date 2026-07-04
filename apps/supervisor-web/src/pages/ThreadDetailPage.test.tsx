@@ -94,7 +94,6 @@ vi.mock('@remote-codex/thread-ui', async () => {
     timelineRenderMock.render();
     return <actual.ThreadTimeline {...props} />;
   });
-
   return {
     ...actual,
     ThreadShellPanel,
@@ -191,9 +190,10 @@ class FakeWebSocket {
   listeners = new Map<string, ((event: Event | MessageEvent) => void)[]>();
   sentMessages: string[] = [];
   readyState = 0;
+  url: string;
 
   constructor(url: string) {
-    void url;
+    this.url = url;
     FakeWebSocket.instances.push(this);
   }
 
@@ -275,6 +275,19 @@ function setPromptValue(element: HTMLElement, value: string) {
 
   element.textContent = value;
   fireEvent.input(element);
+}
+
+async function openThreadActionsDialog() {
+  const actionsButtons = Array.from(
+    document.body.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Thread actions"]',
+    ),
+  );
+  expect(actionsButtons.length).toBeGreaterThan(0);
+  actionsButtons.forEach((button) => {
+    fireEvent.click(button);
+  });
+  await screen.findByRole('dialog', { name: 'Thread actions', hidden: true });
 }
 
 function stubMobileViewport() {
@@ -450,6 +463,11 @@ const claudeModelOptionsResponse = [
 
 describe('ThreadDetailPage', () => {
   afterEach(() => {
+    window.localStorage.removeItem('remote-codex-relay-mode');
+    window.localStorage.removeItem('remote-codex-relay-token');
+    window.localStorage.removeItem('remote-codex-relay-device-id');
+    window.localStorage.removeItem('remote-codex-relay-thread-id');
+    window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1153,23 +1171,27 @@ describe('ThreadDetailPage', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getAllByRole('button', {
-          name: 'Export transcript',
-          hidden: true,
-        }).length,
-      ).toBeGreaterThan(0);
+    const actionsButton = await waitFor(() => {
+      const actionsButtons = screen.getAllByRole('button', {
+        name: 'Thread actions',
+        hidden: true,
+      });
+      const enabledButton = actionsButtons.find(
+        (button): button is HTMLButtonElement =>
+          button instanceof HTMLButtonElement && !button.disabled,
+      );
+      expect(enabledButton).toBeTruthy();
+      return enabledButton!;
     });
 
-    fireEvent.click(
-      screen.getAllByRole('button', {
-        name: 'Export transcript',
-        hidden: true,
-      })[0]!,
-    );
-    await screen.findByRole('dialog', { name: 'Export transcript' });
-    fireEvent.click(screen.getByRole('button', { name: 'Custom selection' }));
+    await act(async () => {
+      actionsButton.click();
+      await Promise.resolve();
+    });
+    await screen.findByRole('dialog', { name: 'Thread actions', hidden: true });
+    fireEvent.change(screen.getByLabelText('Turns'), {
+      target: { value: 'custom' },
+    });
     await screen.findByText('Second prompt preview');
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     fireEvent.click(screen.getByText('Second prompt preview'));
@@ -1305,22 +1327,24 @@ describe('ThreadDetailPage', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getAllByRole('button', {
-          name: 'Export transcript',
-          hidden: true,
-        }).length,
-      ).toBeGreaterThan(0);
+    const actionsButton = await waitFor(() => {
+      const actionsButtons = screen.getAllByRole('button', {
+        name: 'Thread actions',
+        hidden: true,
+      });
+      const enabledButton = actionsButtons.find(
+        (button): button is HTMLButtonElement =>
+          button instanceof HTMLButtonElement && !button.disabled,
+      );
+      expect(enabledButton).toBeTruthy();
+      return enabledButton!;
     });
 
-    fireEvent.click(
-      screen.getAllByRole('button', {
-        name: 'Export transcript',
-        hidden: true,
-      })[0]!,
-    );
-    await screen.findByRole('dialog', { name: 'Export transcript' });
+    await act(async () => {
+      actionsButton.click();
+      await Promise.resolve();
+    });
+    await screen.findByRole('dialog', { name: 'Thread actions', hidden: true });
     fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
     fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }));
 
@@ -5129,14 +5153,17 @@ describe('ThreadDetailPage', () => {
 
   it('polls active thread detail so completed replies appear even without websocket events', async () => {
     let detailCallCount = 0;
-    const intervalCallbacks = new Map<number, () => void>();
+    const intervalCallbacks = new Map<number, { callback: () => void; timeout: number | undefined }>();
     let nextIntervalId = 1;
 
     vi.spyOn(window, 'setInterval').mockImplementation(
-      ((callback: TimerHandler) => {
+      ((callback: TimerHandler, timeout?: number) => {
         const id = nextIntervalId;
         nextIntervalId += 1;
-        intervalCallbacks.set(id, callback as () => void);
+        intervalCallbacks.set(id, {
+          callback: callback as () => void,
+          timeout,
+        });
         return id as unknown as number;
       }) as typeof window.setInterval,
     );
@@ -5295,7 +5322,9 @@ describe('ThreadDetailPage', () => {
     expect(intervalCallbacks.size).toBeGreaterThan(0);
 
     await act(async () => {
-      const callback = Array.from(intervalCallbacks.values()).at(-1);
+      const callback = Array.from(intervalCallbacks.values()).find(
+        (entry) => entry.timeout === 3_000,
+      )?.callback;
       expect(callback).toBeTypeOf('function');
       if (typeof callback === 'function') {
         callback();
@@ -5309,6 +5338,172 @@ describe('ThreadDetailPage', () => {
           'The build failed because the API never restarted after the socket dropped.',
         ),
       ).toBeInTheDocument();
+    });
+  });
+
+  it('loads owner updates for a shared relay thread through the device-scoped websocket', async () => {
+    let detailCallCount = 0;
+    const requestedUrls: string[] = [];
+    window.localStorage.setItem('remote-codex-relay-mode', 'true');
+    window.localStorage.setItem('remote-codex-relay-token', 'friend-token');
+    window.history.replaceState(
+      null,
+      '',
+      '/devices/device-shared/threads/thread-shared',
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+
+        if (url.startsWith('/relay/access?')) {
+          return okJsonResponse({
+            kind: 'shared',
+            shareId: 'share-1',
+            threadAccess: 'read',
+            workspaceAccess: 'read',
+            workspaceId: 'workspace-shared',
+          });
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-shared',
+              workspaceId: 'workspace-shared',
+              providerSessionId: 'codex-shared',
+              source: 'supervisor',
+              title: 'Shared Relay Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Shared prompt',
+              lastError: null,
+              activeTurnId: 'turn-shared',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (
+          url.startsWith('/relay/devices/device-shared/api/threads/thread-shared?') ||
+          url.endsWith('/relay/devices/device-shared/api/threads/thread-shared')
+        ) {
+          detailCallCount += 1;
+          const completed = detailCallCount > 1;
+          return okJsonResponse({
+            thread: {
+              id: 'thread-shared',
+              workspaceId: 'workspace-shared',
+              providerSessionId: 'codex-shared',
+              source: 'supervisor',
+              title: 'Shared Relay Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: completed ? 'idle' : 'running',
+              summaryText: 'Shared prompt',
+              lastError: null,
+              activeTurnId: completed ? null : 'turn-shared',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: completed ? new Date().toISOString() : null,
+            },
+            workspace: {
+              id: 'workspace-shared',
+              hostId: 'device-shared',
+              label: 'Shared Workspace',
+              absPath: '/tmp/shared',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            totalTurnCount: 1,
+            turns: [
+              {
+                id: 'turn-shared',
+                startedAt: new Date().toISOString(),
+                status: completed ? 'completed' : 'inProgress',
+                error: null,
+                items: [
+                  {
+                    id: 'user-shared',
+                    kind: 'userMessage',
+                    text: 'Shared prompt',
+                  },
+                  ...(completed
+                    ? [
+                        {
+                          id: 'agent-shared',
+                          kind: 'agentMessage',
+                          text: 'OWNER_FOLLOWUP_VISIBLE',
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            ],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/devices/device-shared/threads/thread-shared']}>
+        <Routes>
+          <Route path="/devices/:deviceId/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Shared Relay Thread').length).toBeGreaterThan(0);
+    });
+    await screen.findByTitle('View only / Workspace read');
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    const socketUrl = new URL(FakeWebSocket.instances[0]!.url);
+    expect(socketUrl.pathname).toBe('/relay/devices/device-shared/ws');
+    expect(socketUrl.searchParams.get('relaySession')).toBe('friend-token');
+    expect(socketUrl.searchParams.get('threadId')).toBe('thread-shared');
+    expect(requestedUrls.some((url) => url.startsWith('/relay/access?'))).toBe(true);
+
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.turn.completed',
+      threadId: 'thread-shared',
+      timestamp: new Date().toISOString(),
+      payload: {
+        turnId: 'turn-shared',
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('OWNER_FOLLOWUP_VISIBLE')).toBeInTheDocument();
     });
   });
 

@@ -16,12 +16,14 @@ import type {
   ProviderHostConfigArchiveDto,
   ProviderHostFileDto,
   CreateProviderHostConfigArchiveInput,
+  CreateRelaySessionShareInput,
   CreateThreadInput,
   CreateThreadHookInput,
   TrustThreadHookInput,
   ExportThreadPdfInput,
   ThreadExportFormatDto,
   ForkThreadInput,
+  RelayEffectiveAccessDto,
   CreateWorkspaceInput,
   HealthDto,
   ImportThreadInput,
@@ -525,6 +527,23 @@ export function fetchRelayPortal() {
   return request<RelayPortalSummaryDto>('/relay/portal');
 }
 
+export function fetchRelayAccess(input: {
+  deviceId: string;
+  threadId?: string | null;
+  workspaceId?: string | null;
+}) {
+  const params = new URLSearchParams({
+    deviceId: input.deviceId,
+  });
+  if (input.threadId) {
+    params.set('threadId', input.threadId);
+  }
+  if (input.workspaceId) {
+    params.set('workspaceId', input.workspaceId);
+  }
+  return request<RelayEffectiveAccessDto>(`/relay/access?${params.toString()}`);
+}
+
 export function createRelayDevice(input: { name: string }) {
   return request<RelayCreateDeviceResultDto>('/relay/devices', {
     method: 'POST',
@@ -555,12 +574,7 @@ export function updateRelayPassword(input: {
   });
 }
 
-export function createRelayShare(input: {
-  targetUsername: string;
-  deviceId: string;
-  threadId: string;
-  label?: string;
-}) {
+export function createRelayShare(input: CreateRelaySessionShareInput) {
   return request<RelaySessionShareDto>('/relay/shares', {
     method: 'POST',
     body: JSON.stringify(input),

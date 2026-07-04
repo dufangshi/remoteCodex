@@ -35,6 +35,21 @@ describe('iOS supervisor connection paths', () => {
     ).toBe('/relay/devices/device%2Fwith%20spaces/api/threads');
   });
 
+  it('keeps relay control-plane paths out of the selected device route', () => {
+    expect(
+      supervisorRestPath(
+        bootstrap({ mode: 'relay', relayDeviceId: 'device-a' }),
+        '/relay/portal',
+      ),
+    ).toBe('/relay/portal');
+    expect(
+      supervisorRestPath(
+        bootstrap({ mode: 'relay', relayDeviceId: 'device-a' }),
+        '/relay/access?deviceId=device-a',
+      ),
+    ).toBe('/relay/access?deviceId=device-a');
+  });
+
   it('falls back to relay session REST paths without a selected device', () => {
     expect(supervisorRestPath(bootstrap({ mode: 'relay' }), '/api/threads')).toBe('/relay/api/threads');
   });
@@ -58,7 +73,22 @@ describe('iOS supervisor connection paths', () => {
         }),
       ),
     ).toBe(
-      'wss://remote-codex.example.test/relay/devices/device-a/ws?relaySession=relay%20token',
+      'wss://remote-codex.example.test/relay/ws?relaySession=relay%20token',
+    );
+  });
+
+  it('adds thread ids to relay websocket URLs', () => {
+    expect(
+      supervisorWebSocketUrl(
+        bootstrap({
+          mode: 'relay',
+          relayDeviceId: 'device-a',
+          authToken: 'relay token',
+        }),
+        { threadId: 'thread-a' },
+      ),
+    ).toBe(
+      'wss://remote-codex.example.test/relay/ws?relaySession=relay%20token&threadId=thread-a',
     );
   });
 

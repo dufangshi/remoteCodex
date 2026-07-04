@@ -22,6 +22,7 @@ export interface IOSBootstrap {
   uiTestAutoExportTranscript?: boolean;
   uiTestAutoExportTranscriptFormat?: ThreadExportFormatDto;
   uiTestClickVisibleExportControls?: boolean;
+  uiTestClickVisibleShareControls?: boolean;
   uiTestFocusWorkspacePath?: string | null;
   uiTestAutoLoadMoreWorkspacePreview?: boolean;
   uiTestAutoWorkspaceFileActions?: boolean;
@@ -80,6 +81,8 @@ export function readIOSBootstrap(): IOSBootstrap {
       value.uiTestAutoExportTranscriptFormat === 'html' ? 'html' : 'pdf',
     uiTestClickVisibleExportControls:
       value.uiTestClickVisibleExportControls ?? false,
+    uiTestClickVisibleShareControls:
+      value.uiTestClickVisibleShareControls ?? false,
     uiTestFocusWorkspacePath: value.uiTestFocusWorkspacePath ?? null,
     uiTestAutoLoadMoreWorkspacePreview:
       value.uiTestAutoLoadMoreWorkspacePreview ?? false,

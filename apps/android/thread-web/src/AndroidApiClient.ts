@@ -1,8 +1,12 @@
 import type {
   AgentBackendDto,
   ApiErrorShape,
+  CreateRelaySessionShareInput,
   ExportThreadPdfInput,
   ModelOptionDto,
+  RelayEffectiveAccessDto,
+  RelayPortalSummaryDto,
+  RelaySessionShareDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadExportFormatDto,
@@ -330,6 +334,48 @@ export class AndroidApiClient {
     return this.requestJson<ThreadExportTurnOptionsDto>(
       `/api/threads/${encodeURIComponent(threadId)}/export-turns`,
       { cache: 'no-store' },
+    );
+  }
+
+  fetchRelayPortal() {
+    return this.requestJson<RelayPortalSummaryDto>('/relay/portal', {
+      cache: 'no-store',
+    });
+  }
+
+  fetchRelayAccess(input: {
+    deviceId: string;
+    threadId?: string | null;
+    workspaceId?: string | null;
+  }) {
+    const params = new URLSearchParams({
+      deviceId: input.deviceId,
+    });
+    if (input.threadId) {
+      params.set('threadId', input.threadId);
+    }
+    if (input.workspaceId) {
+      params.set('workspaceId', input.workspaceId);
+    }
+    return this.requestJson<RelayEffectiveAccessDto>(
+      `/relay/access?${params.toString()}`,
+      { cache: 'no-store' },
+    );
+  }
+
+  createRelayShare(input: CreateRelaySessionShareInput) {
+    return this.requestJson<RelaySessionShareDto>('/relay/shares', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  revokeRelayShare(shareId: string) {
+    return this.requestJson<RelaySessionShareDto>(
+      `/relay/shares/${encodeURIComponent(shareId)}`,
+      {
+        method: 'DELETE',
+      },
     );
   }
 

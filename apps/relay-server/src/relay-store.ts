@@ -5,14 +5,17 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import type {
+  CreateRelaySessionShareInput,
   RelayAdminSummaryDto,
   RelayCreateDeviceResultDto,
   RelayDeviceDto,
   RelayPortalSummaryDto,
   RelaySessionDto,
   RelaySessionShareDto,
+  RelayThreadAccessDto,
   RelayUserDto,
   RelayUserRoleDto,
+  RelayWorkspaceAccessDto,
 } from '../../../packages/shared/src/index';
 
 interface StoredUser extends RelayUserDto {
@@ -44,6 +47,22 @@ interface SessionPayload {
 }
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+
+export type EffectiveRelayAccess =
+  | {
+      kind: 'owner';
+      share: null;
+      threadAccess: 'control';
+      workspaceAccess: 'write';
+      workspaceId: null;
+    }
+  | {
+      kind: 'shared';
+      share: RelaySessionShareDto;
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      workspaceId: string | null;
+    };
 
 export class RelayStore {
   private readonly sqlite: Database.Database;
@@ -174,18 +193,13 @@ export class RelayStore {
     );
   }
 
-  createShare(ownerUserId: string, input: {
-    targetUsername: string;
-    deviceId: string;
-    threadId: string;
-    label?: string | null;
-  }) {
+  createShare(ownerUserId: string, input: CreateRelaySessionShareInput) {
     const owner = this.requireUser(ownerUserId);
     const device = this.getDevice(input.deviceId);
     if (!device || device.ownerUserId !== ownerUserId) {
       throw new RelayStoreError(404, 'not_found', 'Device was not found.');
     }
-    const target = this.getUserByUsername(input.targetUsername);
+    const target = this.getUserByIdentifier(input.targetIdentifier);
     if (!target || !target.enabled) {
       throw new RelayStoreError(404, 'not_found', 'Target user was not found.');
     }
@@ -208,7 +222,13 @@ export class RelayStore {
         .get(ownerUserId, target.id, input.deviceId, input.threadId) as ShareRow | undefined,
     );
     if (existing) {
-      return existing;
+      return this.updateShare(existing.id, {
+        label: input.label?.trim() || null,
+        workspaceId: input.workspaceId?.trim() || null,
+        threadAccess: normalizeThreadAccess(input.threadAccess),
+        workspaceAccess: normalizeWorkspaceAccess(input.workspaceAccess),
+        expiresAt: normalizeExpiresAt(input.expiresAt),
+      });
     }
 
     const share: RelaySessionShareDto = {
@@ -220,9 +240,13 @@ export class RelayStore {
       deviceId: input.deviceId,
       deviceName: device.name,
       threadId: input.threadId,
+      workspaceId: input.workspaceId?.trim() || null,
       label: input.label?.trim() || null,
+      threadAccess: normalizeThreadAccess(input.threadAccess),
+      workspaceAccess: normalizeWorkspaceAccess(input.workspaceAccess),
       createdAt: new Date().toISOString(),
       revokedAt: null,
+      expiresAt: normalizeExpiresAt(input.expiresAt),
     };
     this.insertShare(share);
     return share;
@@ -244,28 +268,99 @@ export class RelayStore {
     return { ...share, revokedAt };
   }
 
-  canAccessDevice(userId: string, deviceId: string, threadId?: string | null) {
+  effectiveAccess(userId: string, deviceId: string, scope: {
+    threadId?: string | null;
+    workspaceId?: string | null;
+  } = {}): EffectiveRelayAccess | null {
     const owned = this.sqlite
       .prepare('SELECT 1 FROM relay_devices WHERE id = ? AND owner_user_id = ?')
       .get(deviceId, userId);
     if (owned) {
-      return true;
+      return {
+        kind: 'owner',
+        share: null,
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+        workspaceId: null,
+      };
     }
-    if (!threadId) {
-      return false;
+
+    const now = new Date().toISOString();
+    if (scope.threadId) {
+      const share = this.rowToShare(
+        this.sqlite
+          .prepare(
+            `
+              SELECT * FROM relay_shares
+              WHERE target_user_id = ?
+                AND device_id = ?
+                AND thread_id = ?
+                AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at > ?)
+              ORDER BY created_at DESC
+              LIMIT 1
+            `,
+          )
+          .get(userId, deviceId, scope.threadId, now) as ShareRow | undefined,
+      );
+      if (!share) {
+        return null;
+      }
+      if (
+        scope.workspaceId &&
+        (!share.workspaceId || share.workspaceId !== scope.workspaceId || share.workspaceAccess === 'none')
+      ) {
+        return null;
+      }
+      return {
+        kind: 'shared',
+        share,
+        threadAccess: share.threadAccess,
+        workspaceAccess: share.workspaceAccess,
+        workspaceId: share.workspaceId,
+      };
     }
+
+    if (scope.workspaceId) {
+      const share = this.rowToShare(
+        this.sqlite
+          .prepare(
+            `
+              SELECT * FROM relay_shares
+              WHERE target_user_id = ?
+                AND device_id = ?
+                AND workspace_id = ?
+                AND workspace_access <> 'none'
+                AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at > ?)
+              ORDER BY
+                CASE workspace_access WHEN 'write' THEN 2 WHEN 'read' THEN 1 ELSE 0 END DESC,
+                created_at DESC
+              LIMIT 1
+            `,
+          )
+          .get(userId, deviceId, scope.workspaceId, now) as ShareRow | undefined,
+      );
+      if (!share) {
+        return null;
+      }
+      return {
+        kind: 'shared',
+        share,
+        threadAccess: share.threadAccess,
+        workspaceAccess: share.workspaceAccess,
+        workspaceId: share.workspaceId,
+      };
+    }
+
+    return null;
+  }
+
+  canAccessDevice(userId: string, deviceId: string, threadId?: string | null) {
     return Boolean(
-      this.sqlite
-        .prepare(
-          `
-            SELECT 1 FROM relay_shares
-            WHERE target_user_id = ?
-              AND device_id = ?
-              AND thread_id = ?
-              AND revoked_at IS NULL
-          `,
-        )
-        .get(userId, deviceId, threadId),
+      this.effectiveAccess(userId, deviceId, {
+        threadId: threadId ?? null,
+      }),
     );
   }
 
@@ -419,9 +514,13 @@ export class RelayStore {
         device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
         device_name TEXT,
         thread_id TEXT NOT NULL,
+        workspace_id TEXT,
         label TEXT,
+        thread_access TEXT NOT NULL DEFAULT 'control',
+        workspace_access TEXT NOT NULL DEFAULT 'none',
         created_at TEXT NOT NULL,
-        revoked_at TEXT
+        revoked_at TEXT,
+        expires_at TEXT
       );
 
       CREATE INDEX IF NOT EXISTS relay_shares_owner_idx ON relay_shares(owner_user_id);
@@ -429,6 +528,10 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_shares_device_thread_idx ON relay_shares(device_id, thread_id);
     `);
     this.ensureColumn('relay_devices', 'token', 'TEXT');
+    this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
+    this.ensureColumn('relay_shares', 'thread_access', "TEXT NOT NULL DEFAULT 'control'");
+    this.ensureColumn('relay_shares', 'workspace_access', "TEXT NOT NULL DEFAULT 'none'");
+    this.ensureColumn('relay_shares', 'expires_at', 'TEXT');
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
@@ -648,8 +751,9 @@ export class RelayStore {
         `
           INSERT INTO relay_shares (
             id, owner_user_id, owner_username, target_user_id, target_username,
-            device_id, device_name, thread_id, label, created_at, revoked_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            device_id, device_name, thread_id, workspace_id, label,
+            thread_access, workspace_access, created_at, revoked_at, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -661,10 +765,49 @@ export class RelayStore {
         share.deviceId,
         share.deviceName,
         share.threadId,
+        share.workspaceId,
         share.label,
+        share.threadAccess,
+        share.workspaceAccess,
         share.createdAt,
         share.revokedAt,
+        share.expiresAt,
       );
+  }
+
+  private updateShare(
+    shareId: string,
+    input: {
+      label: string | null;
+      workspaceId: string | null;
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      expiresAt: string | null;
+    },
+  ) {
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_shares
+          SET label = ?,
+              workspace_id = ?,
+              thread_access = ?,
+              workspace_access = ?,
+              expires_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(
+        input.label,
+        input.workspaceId,
+        input.threadAccess,
+        input.workspaceAccess,
+        input.expiresAt,
+        shareId,
+      );
+    return this.rowToShare(
+      this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+    )!;
   }
 
   private getUser(id: string) {
@@ -710,13 +853,13 @@ export class RelayStore {
   }
 
   private getSharesByOwner(ownerUserId: string) {
-    return (this.sqlite.prepare('SELECT * FROM relay_shares WHERE owner_user_id = ? AND revoked_at IS NULL ORDER BY created_at ASC').all(ownerUserId) as ShareRow[])
+    return (this.sqlite.prepare("SELECT * FROM relay_shares WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(ownerUserId, new Date().toISOString()) as ShareRow[])
       .map((row) => this.rowToShare(row))
       .filter((share): share is RelaySessionShareDto => Boolean(share));
   }
 
   private getSharesByTarget(targetUserId: string) {
-    return (this.sqlite.prepare('SELECT * FROM relay_shares WHERE target_user_id = ? AND revoked_at IS NULL ORDER BY created_at ASC').all(targetUserId) as ShareRow[])
+    return (this.sqlite.prepare("SELECT * FROM relay_shares WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(targetUserId, new Date().toISOString()) as ShareRow[])
       .map((row) => this.rowToShare(row))
       .filter((share): share is RelaySessionShareDto => Boolean(share));
   }
@@ -759,9 +902,13 @@ export class RelayStore {
       deviceId: row.device_id,
       deviceName: row.device_name ?? 'Remote Codex device',
       threadId: row.thread_id,
+      workspaceId: row.workspace_id ?? null,
       label: row.label,
+      threadAccess: normalizeThreadAccess(row.thread_access),
+      workspaceAccess: normalizeWorkspaceAccess(row.workspace_access),
       createdAt: row.created_at,
       revokedAt: row.revoked_at,
+      expiresAt: row.expires_at ?? null,
     };
   }
 }
@@ -796,9 +943,13 @@ interface ShareRow {
   device_id: string;
   device_name: string | null;
   thread_id: string;
+  workspace_id: string | null;
   label: string | null;
+  thread_access: string | null;
+  workspace_access: string | null;
   created_at: string;
   revoked_at: string | null;
+  expires_at: string | null;
 }
 
 export interface DeviceConnectionStatus {
@@ -819,6 +970,25 @@ export class RelayStoreError extends Error {
 
 function normalizeUsername(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+}
+
+function normalizeThreadAccess(value: string | null | undefined): RelayThreadAccessDto {
+  return value === 'read' ? 'read' : 'control';
+}
+
+function normalizeWorkspaceAccess(value: string | null | undefined): RelayWorkspaceAccessDto {
+  if (value === 'read' || value === 'write') {
+    return value;
+  }
+  return 'none';
+}
+
+function normalizeExpiresAt(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
 }
 
 function hashSecret(secret: string, salt: string) {

@@ -82,6 +82,7 @@ struct RootView: View {
                         uiTestAutoExportTranscript: threadWebViewUITestAutoExportTranscript,
                         uiTestAutoExportTranscriptFormat: threadWebViewUITestAutoExportTranscriptFormat,
                         uiTestClickVisibleExportControls: threadWebViewUITestClickVisibleExportControls,
+                        uiTestClickVisibleShareControls: threadWebViewUITestClickVisibleShareControls,
                         uiTestFocusWorkspacePath: threadWebViewUITestFocusWorkspacePath,
                         uiTestAutoLoadMoreWorkspacePreview: threadWebViewUITestAutoLoadMoreWorkspacePreview,
                         uiTestAutoWorkspaceFileActions: threadWebViewUITestAutoWorkspaceFileActions,
@@ -208,6 +209,11 @@ struct RootView: View {
     private var threadWebViewUITestClickVisibleExportControls: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-click-visible-export")
             || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_CLICK_VISIBLE_EXPORT"] == "1"
+    }
+
+    private var threadWebViewUITestClickVisibleShareControls: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-click-visible-share")
+            || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_CLICK_VISIBLE_SHARE"] == "1"
     }
 
     private var threadWebViewUITestFocusWorkspacePath: String? {

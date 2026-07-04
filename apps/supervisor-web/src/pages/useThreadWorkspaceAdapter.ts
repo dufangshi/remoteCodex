@@ -14,14 +14,16 @@ import {
 interface UseThreadWorkspaceAdapterInput {
   setError: Dispatch<SetStateAction<string | null>>;
   workspaceId: string | null;
+  access?: 'none' | 'read' | 'write';
 }
 
 export function useThreadWorkspaceAdapter({
   setError,
   workspaceId,
+  access = 'write',
 }: UseThreadWorkspaceAdapterInput): ThreadWorkspaceAdapter | null {
   return useMemo<ThreadWorkspaceAdapter | null>(() => {
-    if (!workspaceId) {
+    if (!workspaceId || access === 'none') {
       return null;
     }
 
@@ -36,14 +38,18 @@ export function useThreadWorkspaceAdapter({
         }),
       getRawFileUrl: (input) =>
         buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
-      uploadFile: (input) =>
-        uploadWorkspaceFile(workspaceId, { file: input.file }),
-      writeFile: async (input) => {
-        await writeWorkspaceFile(workspaceId, {
-          path: input.path,
-          content: input.content,
-        });
-      },
+      ...(access === 'write'
+        ? {
+            uploadFile: (input) =>
+              uploadWorkspaceFile(workspaceId, { file: input.file }),
+            writeFile: async (input) => {
+              await writeWorkspaceFile(workspaceId, {
+                path: input.path,
+                content: input.content,
+              });
+            },
+          }
+        : {}),
       downloadNode: async (input) => {
         setError(null);
         try {
@@ -69,5 +75,5 @@ export function useThreadWorkspaceAdapter({
         }
       },
     };
-  }, [setError, workspaceId]);
+  }, [access, setError, workspaceId]);
 }

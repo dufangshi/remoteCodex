@@ -98,6 +98,96 @@ describe('IOSApiClient', () => {
     );
   });
 
+  it('loads relay access through the relay control plane in relay mode', async () => {
+    const payload = {
+      kind: 'shared',
+      shareId: 'share-1',
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+      workspaceId: 'workspace-1',
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(payload));
+    const client = new IOSApiClient(
+      bootstrap({
+        mode: 'relay',
+        relayDeviceId: 'device-1',
+      }),
+    );
+
+    await expect(
+      client.fetchRelayAccess({
+        deviceId: 'device-1',
+        threadId: 'thread-1',
+        workspaceId: 'workspace-1',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://remote-codex.example.test/relay/access?deviceId=device-1&threadId=thread-1&workspaceId=workspace-1',
+    );
+  });
+
+  it('creates and revokes relay shares through the relay control plane', async () => {
+    const payload = {
+      id: 'share-1',
+      ownerUserId: 'owner',
+      targetUserId: 'target',
+      targetUsername: 'friend',
+      deviceId: 'device-1',
+      deviceName: 'Mac',
+      threadId: 'thread-1',
+      workspaceId: 'workspace-1',
+      label: 'handoff',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      createdAt: '2026-07-03T00:00:00.000Z',
+      revokedAt: null,
+      expiresAt: null,
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse(payload))
+      .mockResolvedValueOnce(jsonResponse(payload));
+    const client = new IOSApiClient(
+      bootstrap({
+        mode: 'relay',
+        relayDeviceId: 'device-1',
+      }),
+    );
+
+    await expect(
+      client.createRelayShare({
+        targetIdentifier: 'friend',
+        deviceId: 'device-1',
+        threadId: 'thread-1',
+        workspaceId: 'workspace-1',
+        label: 'handoff',
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+      }),
+    ).resolves.toEqual(payload);
+    await expect(client.revokeRelayShare('share-1')).resolves.toEqual(payload);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://remote-codex.example.test/relay/shares',
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://remote-codex.example.test/relay/shares/share-1',
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'DELETE',
+      }),
+    );
+  });
+
   it('cancels pending queued prompts through the supervisor API', async () => {
     const payload = {
       thread: {

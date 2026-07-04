@@ -112,6 +112,20 @@ export interface RelayDeviceDto {
   createdAt: string;
 }
 
+export type RelayThreadAccessDto = 'read' | 'control';
+export type RelayWorkspaceAccessDto = 'none' | 'read' | 'write';
+
+export interface CreateRelaySessionShareInput {
+  targetIdentifier: string;
+  deviceId: string;
+  threadId: string;
+  workspaceId?: string | null;
+  label?: string | null;
+  threadAccess: RelayThreadAccessDto;
+  workspaceAccess: RelayWorkspaceAccessDto;
+  expiresAt?: string | null;
+}
+
 export interface RelaySessionShareDto {
   id: string;
   ownerUserId: string;
@@ -121,9 +135,21 @@ export interface RelaySessionShareDto {
   deviceId: string;
   deviceName: string;
   threadId: string;
+  workspaceId: string | null;
   label: string | null;
+  threadAccess: RelayThreadAccessDto;
+  workspaceAccess: RelayWorkspaceAccessDto;
   createdAt: string;
   revokedAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface RelayEffectiveAccessDto {
+  kind: 'owner' | 'shared';
+  shareId: string | null;
+  threadAccess: RelayThreadAccessDto;
+  workspaceAccess: RelayWorkspaceAccessDto;
+  workspaceId: string | null;
 }
 
 export interface RelaySessionDto {

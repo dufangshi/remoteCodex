@@ -8,7 +8,11 @@ import { defineConfig } from 'vite';
 
 const require = createRequire(import.meta.url);
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  if (process.env.VITEST || mode === 'test') {
+    process.env.NODE_ENV = 'test';
+  }
+
   const threadUiRoot = path.resolve(__dirname, '../../../../remote-codex-thread-ui');
   const xyzViewerRoot = path.join(threadUiRoot, 'packages/plugin-xyz-viewer');
   const xyzViewerEntry = path.join(xyzViewerRoot, 'src/index.ts');
@@ -52,6 +56,12 @@ export default defineConfig(() => {
     server: {
       fs: {
         allow: [path.resolve(__dirname, '../../..'), threadUiRoot],
+      },
+    },
+    test: {
+      environment: 'jsdom',
+      env: {
+        NODE_ENV: 'test',
       },
     },
     build: {

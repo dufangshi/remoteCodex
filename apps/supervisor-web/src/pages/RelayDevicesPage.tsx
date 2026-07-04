@@ -6,6 +6,7 @@ import type {
   RelayCreateDeviceResultDto,
   RelayDeviceDto,
   RelayPortalSummaryDto,
+  RelaySessionShareDto,
 } from '@remote-codex/shared';
 import {
   ApiError,
@@ -16,7 +17,7 @@ import {
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
 } from '../lib/api';
-import { workspacesHref } from '../lib/relayRoutes';
+import { threadHref, workspacesHref } from '../lib/relayRoutes';
 
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof ApiError
@@ -92,6 +93,12 @@ export function RelayDevicesPage() {
     setSelectedRelayDeviceId(device.id);
     setSelectedRelayThreadId(null);
     navigate(workspacesHref(device.id));
+  }
+
+  function openSharedSession(share: RelaySessionShareDto) {
+    setSelectedRelayDeviceId(share.deviceId);
+    setSelectedRelayThreadId(share.threadId);
+    navigate(threadHref(share.threadId, share.deviceId));
   }
 
   async function copySupervisorSetup(device: RelayDeviceDto) {
@@ -212,8 +219,79 @@ export function RelayDevicesPage() {
             )}
           </section>
         </section>
+
+        <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared with me</h2>
+              <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+                Sessions another relay user has shared with this account.
+              </p>
+            </div>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+              {portal?.sharedWithMe.length ?? 0}
+            </span>
+          </div>
+          {loading ? (
+            <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
+              Loading shared sessions...
+            </p>
+          ) : portal?.sharedWithMe.length ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {portal.sharedWithMe.map((share) => (
+                <SharedSessionRow
+                  key={share.id}
+                  share={share}
+                  onOpen={() => openSharedSession(share)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
+              No sessions have been shared with this account yet.
+            </div>
+          )}
+        </section>
       </div>
     </main>
+  );
+}
+
+function SharedSessionRow({
+  share,
+  onOpen,
+}: {
+  share: RelaySessionShareDto;
+  onOpen: () => void;
+}) {
+  return (
+    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+            {share.label || share.threadId}
+          </p>
+          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+            {share.ownerUsername} / {share.deviceName}
+          </p>
+          <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {share.threadAccess === 'read' ? 'View only' : 'Collaborator'}
+            </span>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {workspaceAccessLabel(share.workspaceAccess)}
+            </span>
+          </p>
+        </div>
+        <button
+          className="relay-button-primary inline-flex items-center gap-2"
+          onClick={onOpen}
+          type="button"
+        >
+          Open
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -365,6 +443,7 @@ function relaySupervisorCommand(token: string) {
   return [
     `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
     `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\`,
+    'REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\',
     'remote-codex relay-supervisor',
   ].join('\n');
 }
@@ -389,4 +468,16 @@ function relayWebsocketBaseUrl() {
 
 function formatRelayTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
+}
+
+function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {
+  switch (access) {
+    case 'write':
+      return 'Workspace write';
+    case 'read':
+      return 'Workspace read';
+    case 'none':
+    default:
+      return 'No workspace';
+  }
 }

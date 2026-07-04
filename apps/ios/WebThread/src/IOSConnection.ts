@@ -8,11 +8,16 @@ export function supervisorRestPath(
   if (bootstrap.mode !== 'relay') {
     return normalizedPath;
   }
+  if (normalizedPath.startsWith('/relay/')) {
+    return normalizedPath;
+  }
   const deviceId = bootstrap.relayDeviceId?.trim();
   if (deviceId) {
     return `/relay/devices/${encodeURIComponent(deviceId)}${normalizedPath}`;
   }
-  return `/relay${normalizedPath}`;
+  return normalizedPath.startsWith('/relay/')
+    ? normalizedPath
+    : `/relay${normalizedPath}`;
 }
 
 export function supervisorWebSocketUrl(
@@ -22,12 +27,7 @@ export function supervisorWebSocketUrl(
   const base = bootstrap.baseUrl
     .replace(/^https:\/\//, 'wss://')
     .replace(/^http:\/\//, 'ws://');
-  const path =
-    bootstrap.mode === 'relay'
-      ? bootstrap.relayDeviceId
-        ? `/relay/devices/${encodeURIComponent(bootstrap.relayDeviceId)}/ws`
-        : '/relay/ws'
-      : '/ws';
+  const path = bootstrap.mode === 'relay' ? '/relay/ws' : '/ws';
 
   const params: string[] = [];
   if (bootstrap.authToken) {

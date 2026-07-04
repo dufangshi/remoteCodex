@@ -6,6 +6,7 @@ import {
   AgentBackendManagementSchemaDto,
   AgentRuntimeStatusDto,
   ModelOptionDto,
+  RelayEffectiveAccessDto,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadHistoryItemDto,
@@ -21,13 +22,15 @@ import {
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ConfirmDialog,
-  ExportTranscriptDialog,
+  ThreadActionsDialog,
   ThreadDetailSurface,
   ThreadShellPanel,
   ThreadTimeline,
   type ThreadShellControlState,
   type ThreadShellPanelHandle,
   type ThreadComposerProps,
+  type CreateThreadShareInput,
+  type ThreadShareSummary,
   type ThreadTimelineProps,
   type ThreadGraphWorkspaceFeatures,
 } from '@remote-codex/thread-ui';
@@ -42,11 +45,14 @@ import {
   connectSupervisorEvents,
   connectShellSocket,
   createThreadShell,
+  createRelayShare,
   disconnectThread,
   deleteThread,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
   fetchProviderHostFile,
+  fetchRelayAccess,
+  fetchRelayPortal,
   fetchThreadHistoryItemDetail,
   fetchThreadShellState,
   fetchSupervisorHealth,
@@ -54,7 +60,9 @@ import {
   fetchThreadDetail,
   interruptThread,
   respondToThreadRequest,
+  revokeRelayShare,
   resumeThread,
+  relayModeActive,
   sendThreadPrompt,
   type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
@@ -92,6 +100,7 @@ import {
 } from './threadDetailModel';
 import {
   currentNewThreadHref,
+  currentRelayDeviceIdFromPath,
   currentThreadHref,
   currentThreadsHref,
   currentWorkspacesHref,
@@ -124,6 +133,30 @@ const SUPERVISOR_WORKSPACE_FEATURES: ThreadGraphWorkspaceFeatures = {
   extensions: false,
   defaultTab: 'workspace',
 };
+
+function actionErrorMessage(caught: unknown, fallback: string) {
+  return caught instanceof ApiError
+    ? caught.payload.message
+    : caught instanceof Error
+      ? caught.message
+      : fallback;
+}
+
+function relayThreadAccessLabel(access: RelayEffectiveAccessDto['threadAccess']) {
+  return access === 'read' ? 'View only' : 'Collaborator';
+}
+
+function relayWorkspaceAccessLabel(access: RelayEffectiveAccessDto['workspaceAccess']) {
+  switch (access) {
+    case 'write':
+      return 'Workspace write';
+    case 'read':
+      return 'Workspace read';
+    case 'none':
+    default:
+      return 'No workspace';
+  }
+}
 
 type RealtimeConnectionStatus =
   | 'checking'
@@ -491,6 +524,224 @@ export function ThreadDetailPage() {
     setError,
     setThreads,
   });
+  const [shareBusy, setShareBusy] = useState(false);
+  const [threadShareState, setThreadShareState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    shares: ThreadShareSummary[];
+    error: string | null;
+  }>({
+    status: 'idle',
+    shares: [],
+    error: null,
+  });
+  const [relayAccessState, setRelayAccessState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    access: RelayEffectiveAccessDto | null;
+    error: string | null;
+  }>({
+    status: 'idle',
+    access: null,
+    error: null,
+  });
+  const relayDeviceRouteActive =
+    relayModeActive() && Boolean(currentRelayDeviceIdFromPath());
+  const relayAccess = relayAccessState.access;
+  const relayThreadIsOwner =
+    !relayDeviceRouteActive || relayAccess?.kind === 'owner';
+  const relayThreadCanControl =
+    relayThreadIsOwner ||
+    (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'control');
+  const relayThreadCanShare =
+    relayDeviceRouteActive && relayAccess?.kind === 'owner';
+  const currentWorkspaceId =
+    detail?.workspace.id ?? detail?.thread.workspaceId ?? null;
+  const effectiveWorkspaceAccess: 'none' | 'read' | 'write' =
+    !relayDeviceRouteActive
+      ? 'write'
+      : relayAccess?.kind === 'owner'
+        ? 'write'
+        : relayAccess?.kind === 'shared' &&
+            relayAccess.workspaceId &&
+            relayAccess.workspaceId === currentWorkspaceId
+          ? relayAccess.workspaceAccess
+          : 'none';
+  const loadThreadShares = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    const deviceId = currentRelayDeviceIdFromPath();
+    if (!relayModeActive() || !currentDetail || !deviceId) {
+      setThreadShareState({
+        status: 'ready',
+        shares: [],
+        error: null,
+      });
+      return;
+    }
+
+    setThreadShareState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    try {
+      const portal = await fetchRelayPortal();
+      const shares = portal.sharedByMe
+        .filter(
+          (share) =>
+            share.deviceId === deviceId &&
+            share.threadId === currentDetail.thread.id,
+        )
+        .map((share) => ({
+          id: share.id,
+          targetUsername: share.targetUsername,
+          label: share.label,
+          threadAccess: share.threadAccess,
+          workspaceAccess: share.workspaceAccess,
+          createdAt: share.createdAt,
+        }));
+      setThreadShareState({
+        status: 'ready',
+        shares,
+        error: null,
+      });
+    } catch (caught) {
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: actionErrorMessage(caught, 'Unable to load active shares.'),
+      }));
+    }
+  }, [detailRef]);
+  const handleCreateThreadShare = useCallback(
+    async (input: CreateThreadShareInput) => {
+      const currentDetail = detailRef.current;
+      const deviceId = currentRelayDeviceIdFromPath();
+      if (!relayModeActive() || !currentDetail || !deviceId) {
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: 'Relay sharing is only available from a relay device route.',
+        }));
+        return;
+      }
+
+      const workspaceId =
+        input.workspaceAccess === 'none'
+          ? null
+          : currentDetail.workspace.id ??
+            currentDetail.thread.workspaceId ??
+            null;
+      if (input.workspaceAccess !== 'none' && !workspaceId) {
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: 'This thread is not attached to a workspace.',
+        }));
+        return;
+      }
+
+      setShareBusy(true);
+      setThreadShareState((current) => ({
+        ...current,
+        error: null,
+      }));
+      try {
+        await createRelayShare({
+          targetIdentifier: input.targetIdentifier,
+          deviceId,
+          threadId: currentDetail.thread.id,
+          workspaceId,
+          label: input.label ?? null,
+          threadAccess: input.threadAccess,
+          workspaceAccess: input.workspaceAccess,
+        });
+        await loadThreadShares();
+      } catch (caught) {
+        const message = actionErrorMessage(caught, 'Unable to create share.');
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: message,
+        }));
+        setError(message);
+      } finally {
+        setShareBusy(false);
+      }
+    },
+    [detailRef, loadThreadShares],
+  );
+  const handleRevokeThreadShare = useCallback(async (shareId: string) => {
+    setShareBusy(true);
+    setThreadShareState((current) => ({
+      ...current,
+      error: null,
+    }));
+    try {
+      await revokeRelayShare(shareId);
+      await loadThreadShares();
+    } catch (caught) {
+      const message = actionErrorMessage(caught, 'Unable to revoke share.');
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error: message,
+      }));
+      setError(message);
+    } finally {
+      setShareBusy(false);
+    }
+  }, [loadThreadShares]);
+  useEffect(() => {
+    if (exportDialogOpen) {
+      void loadThreadShares();
+    }
+  }, [exportDialogOpen, loadThreadShares]);
+  useEffect(() => {
+    const currentDetail = detailRef.current;
+    const deviceId = currentRelayDeviceIdFromPath();
+    if (!relayModeActive() || !currentDetail || !deviceId) {
+      setRelayAccessState({
+        status: 'idle',
+        access: null,
+        error: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setRelayAccessState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    fetchRelayAccess({
+      deviceId,
+      threadId: currentDetail.thread.id,
+    })
+      .then((access) => {
+        if (cancelled) {
+          return;
+        }
+        setRelayAccessState({
+          status: 'ready',
+          access,
+          error: null,
+        });
+      })
+      .catch((caught) => {
+        if (cancelled) {
+          return;
+        }
+        setRelayAccessState({
+          status: 'failed',
+          access: null,
+          error: actionErrorMessage(caught, 'Unable to verify relay permissions.'),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.thread.id, detail?.workspace.id, detailRef]);
   useThreadListPolling({
     enabled: Boolean(id),
     setThreads,
@@ -969,7 +1220,7 @@ export function ThreadDetailPage() {
       socketOpen: false,
       lastHealthyAt: null,
     });
-  }, [id]);
+  }, [id, relayAccess?.kind, relayAccess?.threadAccess]);
 
   useEffect(() => {
     if (metaSessionCopyState === 'idle') {
@@ -1667,6 +1918,11 @@ export function ThreadDetailPage() {
       return true;
     }
 
+    if (promptDisabledReason) {
+      setError(promptDisabledReason);
+      return false;
+    }
+
     setBusy(true);
     setError(null);
     setScrollRequestKey((current) => current + 1);
@@ -2105,6 +2361,10 @@ export function ThreadDetailPage() {
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
   ) => {
+    if (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read') {
+      setError('This shared session is view only.');
+      return;
+    }
     setRespondingRequestId(requestId);
     setError(null);
 
@@ -2136,35 +2396,35 @@ export function ThreadDetailPage() {
     [id],
   );
 
-  async function handleCancelPendingSteer(
-    threadId: string,
-    pendingSteerId: string,
-  ) {
-    setError(null);
-    try {
-      const updated = await cancelPendingSteer(threadId, pendingSteerId);
-      setDetail((current) =>
-        current
-          ? {
-              ...updated,
-              turns: appendLatestTurns(current.turns, updated.turns),
-            }
-          : updated,
-      );
-      setThreads((current) =>
-        current.map((entry) =>
-          entry.id === updated.thread.id ? updated.thread : entry,
-        ),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : 'Unable to cancel queued prompt.',
-      );
-      throw caught;
-    }
-  }
+  const handleCancelPendingSteer = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      setError(null);
+      try {
+        const updated = await cancelPendingSteer(threadId, pendingSteerId);
+        setDetail((current) =>
+          current
+            ? {
+                ...updated,
+                turns: appendLatestTurns(current.turns, updated.turns),
+              }
+            : updated,
+        );
+        setThreads((current) =>
+          current.map((entry) =>
+            entry.id === updated.thread.id ? updated.thread : entry,
+          ),
+        );
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to cancel queued prompt.',
+        );
+        throw caught;
+      }
+    },
+    [],
+  );
 
   async function handleCompactThread() {
     if (!detail) {
@@ -2337,6 +2597,12 @@ export function ThreadDetailPage() {
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
       ? 'Restore this workspace path on the current machine before continuing.'
+      : relayDeviceRouteActive && relayAccessState.status === 'loading'
+        ? 'Checking relay permissions...'
+      : relayDeviceRouteActive && relayAccessState.status === 'failed'
+        ? relayAccessState.error ?? 'Unable to verify relay permissions.'
+      : relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read'
+        ? 'This shared session is view only.'
       : null
     : null;
   const {
@@ -2694,31 +2960,56 @@ export function ThreadDetailPage() {
       {goalIndicatorIcon}
     </button>
   ) : null;
-  const exportTranscriptButton = (
-    <button
-      type="button"
-      aria-label="Export transcript"
-      title="Export transcript"
-      onClick={() => setExportDialogOpen(true)}
-      disabled={!detail}
-      className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-black/10 transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
-    >
-      <ExportIcon />
-    </button>
+  const relayAccessBadge = useMemo(
+    () =>
+      relayAccess?.kind === 'shared' ? (
+        <div
+          className="host-secondary-button inline-flex max-w-[10rem] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium sm:max-w-[16rem]"
+          title={`${relayThreadAccessLabel(relayAccess.threadAccess)} / ${relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}`}
+        >
+          <span>{relayThreadAccessLabel(relayAccess.threadAccess)}</span>
+          <span className="host-muted">/</span>
+          <span className="truncate">
+            {relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}
+          </span>
+        </div>
+      ) : null,
+    [relayAccess],
   );
-  const mobileSessionConnectionButton = (
-    <div className="relative flex items-center justify-end gap-1.5">
-      {exportTranscriptButton}
-      {goalMonitorButton}
-      {mobileSessionConnectionControl}
-    </div>
+  const threadActionsButton = useMemo(
+    () => (
+      <button
+        type="button"
+        aria-label="Thread actions"
+        title="Thread actions"
+        onClick={() => setExportDialogOpen(true)}
+        disabled={!detail}
+        className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-black/10 transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
+      >
+        <ExportIcon />
+      </button>
+    ),
+    [detail],
   );
-  const surfaceActions = (
-    <div className="flex items-center justify-end gap-2">
-      {exportTranscriptButton}
-      {goalMonitorButton}
-      {desktopSessionConnectionIndicator}
-    </div>
+  const mobileSessionConnectionButton = useMemo(
+    () => (
+      <div className="relative flex items-center justify-end gap-1.5">
+        {goalMonitorButton}
+        {relayAccessBadge}
+        {mobileSessionConnectionControl}
+      </div>
+    ),
+    [goalMonitorButton, mobileSessionConnectionControl, relayAccessBadge],
+  );
+  const surfaceActions = useMemo(
+    () => (
+      <div className="flex items-center justify-end gap-2">
+        {relayAccessBadge}
+        {goalMonitorButton}
+        {desktopSessionConnectionIndicator}
+      </div>
+    ),
+    [desktopSessionConnectionIndicator, goalMonitorButton, relayAccessBadge],
   );
   const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
     () => ({
@@ -2785,42 +3076,58 @@ export function ThreadDetailPage() {
         draftPrompt: chatDraft.prompt,
         draftAttachments: chatDraft.attachments,
         onDraftChange: setChatDraft,
-        canInterrupt: Boolean(detail.thread.activeTurnId),
-        onInterrupt: handleInterrupt,
-        onCompact: handleCompactThread,
-        onOpenForkTurns: handleOpenForkTurns,
-        onForkLatest: handleForkLatest,
-        onForkTurn: handleForkTurn,
-        onOpenSkills: handleOpenSkills,
-        onOpenMcp: handleOpenMcp,
-        onOpenHooks: handleOpenHooks,
-        onCreateHook: handleCreateHook,
-        onUpdateHook: handleUpdateHook,
-        onTrustHook: handleTrustHook,
-        onUntrustHook: handleUntrustHook,
+        canInterrupt: Boolean(
+          detail.thread.activeTurnId && relayThreadCanControl,
+        ),
+        ...(relayThreadCanControl ? { onInterrupt: handleInterrupt } : {}),
+        ...(relayThreadIsOwner
+          ? {
+              onCompact: handleCompactThread,
+              onOpenForkTurns: handleOpenForkTurns,
+              onForkLatest: handleForkLatest,
+              onForkTurn: handleForkTurn,
+              onOpenSkills: handleOpenSkills,
+              onOpenMcp: handleOpenMcp,
+              onOpenHooks: handleOpenHooks,
+              onCreateHook: handleCreateHook,
+              onUpdateHook: handleUpdateHook,
+              onTrustHook: handleTrustHook,
+              onUntrustHook: handleUntrustHook,
+            }
+          : {}),
         goalState,
-        onOpenGoal: handleOpenGoal,
-        onUpdateGoal: handleUpdateGoal,
+        ...(relayThreadIsOwner
+          ? {
+              onOpenGoal: handleOpenGoal,
+              onUpdateGoal: handleUpdateGoal,
+            }
+          : {}),
         ...(mcpProviderConfigFileName
           ? {
-              onReadProviderConfig: () =>
-                fetchProviderHostFile(
-                  detail.thread.provider,
-                  mcpProviderConfigFileName,
-                ),
-              onWriteProviderConfig: (content: string) =>
-                updateProviderHostFile(
-                  detail.thread.provider,
-                  mcpProviderConfigFileName,
-                  { content },
-                ),
+              ...(relayThreadIsOwner
+                ? {
+                    onReadProviderConfig: () =>
+                      fetchProviderHostFile(
+                        detail.thread.provider,
+                        mcpProviderConfigFileName,
+                      ),
+                    onWriteProviderConfig: (content: string) =>
+                      updateProviderHostFile(
+                        detail.thread.provider,
+                        mcpProviderConfigFileName,
+                        { content },
+                      ),
+                  }
+                : {}),
             }
           : {}),
         onToggleFollow: () => setScrollRequestKey((current) => current + 1),
-        onUpdateSettings: handleUpdateThreadSettings,
+        ...(relayThreadIsOwner
+          ? { onUpdateSettings: handleUpdateThreadSettings }
+          : {}),
         onToggleView: handleToggleView,
         onShellCopy: handleShellCopy,
-        onShellControl: handleShellControl,
+        ...(relayThreadCanControl ? { onShellControl: handleShellControl } : {}),
         compactBusy,
         skillsState,
         mcpState,
@@ -2843,12 +3150,14 @@ export function ThreadDetailPage() {
         shellAvailable: terminalPluginEnabled,
         shellControlState,
         canInterrupt: Boolean(
-          detail.thread.isLoaded && shellControlState?.isCommandRunning,
+          detail.thread.isLoaded &&
+            shellControlState?.isCommandRunning &&
+            relayThreadCanControl,
         ),
-        onInterrupt: handleInterrupt,
+        ...(relayThreadCanControl ? { onInterrupt: handleInterrupt } : {}),
         onToggleView: handleToggleView,
         onShellCopy: handleShellCopy,
-        onShellControl: handleShellControl,
+        ...(relayThreadCanControl ? { onShellControl: handleShellControl } : {}),
       } satisfies Omit<ThreadComposerProps, 'activeView' | 'onSubmit'>)
     : null;
   const getCurrentThreadImageAssetUrl = useCallback(
@@ -2861,6 +3170,7 @@ export function ThreadDetailPage() {
   const workspaceAdapter = useThreadWorkspaceAdapter({
     setError,
     workspaceId: detail?.workspace.id ?? null,
+    access: effectiveWorkspaceAccess,
   });
   const handleOpenWorkspaceFile = useCallback(
     (input: { path: string; line?: number }) => {
@@ -2892,13 +3202,15 @@ export function ThreadDetailPage() {
       openThread,
       getThreadHref,
       getNewThreadHref,
-      renameThread: handleRenameThread,
-      deleteThread: setDeletingThread,
+      ...(relayThreadIsOwner ? { renameThread: handleRenameThread } : {}),
+      ...(relayThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
       cancelPendingSteer: handleCancelPendingSteer,
       sendPrompt: handlePrompt,
-      interrupt: handleInterrupt,
-      compact: handleCompactThread,
-      updateSettings: handleUpdateThreadSettings,
+      ...(relayThreadCanControl ? { interrupt: handleInterrupt } : {}),
+      ...(relayThreadIsOwner ? { compact: handleCompactThread } : {}),
+      ...(relayThreadIsOwner
+        ? { updateSettings: handleUpdateThreadSettings }
+        : {}),
       loadHistoryItemDetail: handleLoadHistoryItemDetail,
       getImageAssetUrl: getCurrentThreadImageAssetUrl,
       openWorkspaceFile: handleOpenWorkspaceFile,
@@ -2919,44 +3231,74 @@ export function ThreadDetailPage() {
       handleUpdateThreadSettings,
       localShellAdapter,
       openThread,
+      relayThreadCanControl,
+      relayThreadIsOwner,
       workspaceAdapter,
     ],
   );
   const workspaceReturnHref = detail?.thread.workspaceId
     ? currentThreadsHref(detail.thread.workspaceId)
     : currentWorkspacesHref();
-  const dialogs = (
-    <>
-      <ExportTranscriptDialog
-        open={exportDialogOpen}
-        busy={exportBusy}
-        turnsState={exportTurnsState}
-        onCancel={() => {
-          if (!exportBusy) {
-            setExportDialogOpen(false);
+  const dialogs = useMemo(
+    () => (
+      <>
+        <ThreadActionsDialog
+          open={exportDialogOpen}
+          busy={exportBusy || shareBusy}
+          turnsState={exportTurnsState}
+          shareAvailable={relayThreadCanShare}
+          {...(relayDeviceRouteActive && relayAccess?.kind === 'shared'
+            ? { shareUnavailableMessage: 'Only the owner can share this session.' }
+            : {})}
+          shareState={threadShareState}
+          onCancel={() => {
+            if (!exportBusy && !shareBusy) {
+              setExportDialogOpen(false);
+            }
+          }}
+          onLoadTurns={loadExportTurns}
+          onExport={handleExportTranscript}
+          {...(relayThreadCanShare
+            ? {
+                onCreateShare: handleCreateThreadShare,
+                onRevokeShare: handleRevokeThreadShare,
+              }
+            : {})}
+        />
+        <ConfirmDialog
+          open={deletingThread !== null}
+          title="Delete Thread"
+          description={
+            deletingThread
+              ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
+              : ''
           }
-        }}
-        onLoadTurns={loadExportTurns}
-        onExport={handleExportTranscript}
-      />
-      <ConfirmDialog
-        open={deletingThread !== null}
-        title="Delete Thread"
-        description={
-          deletingThread
-            ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
-            : ''
-        }
-        confirmLabel="Delete Thread"
-        busy={deletingThreadBusy}
-        onCancel={() => {
-          if (!deletingThreadBusy) {
-            setDeletingThread(null);
-          }
-        }}
-        onConfirm={() => void handleDeleteThread()}
-      />
-    </>
+          confirmLabel="Delete Thread"
+          busy={deletingThreadBusy}
+          onCancel={() => {
+            if (!deletingThreadBusy) {
+              setDeletingThread(null);
+            }
+          }}
+          onConfirm={() => void handleDeleteThread()}
+        />
+      </>
+    ),
+    [
+      deletingThread,
+      deletingThreadBusy,
+      exportBusy,
+      exportDialogOpen,
+      exportTurnsState,
+      handleCreateThreadShare,
+      handleDeleteThread,
+      handleExportTranscript,
+      handleRevokeThreadShare,
+      loadExportTurns,
+      relayDeviceRouteActive,
+      shareBusy,
+      threadShareState,
+    ],
   );
 
   return (
@@ -2974,6 +3316,7 @@ export function ThreadDetailPage() {
       mobileHeaderAction={mobileSessionConnectionButton}
       workspaceReturnHref={workspaceReturnHref}
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
+      threadActionsButton={threadActionsButton}
       surfaceActions={surfaceActions}
       floatingPanel={goalMonitorPanel}
       workspaceFeatures={SUPERVISOR_WORKSPACE_FEATURES}

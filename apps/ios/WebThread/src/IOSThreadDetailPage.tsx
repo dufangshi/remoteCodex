@@ -5,6 +5,7 @@ import type {
   ExportThreadPdfInput,
   ModelOptionDto,
   PromptAttachmentKindDto,
+  RelayEffectiveAccessDto,
   RespondThreadActionRequestInput,
   ThreadDetailDto,
   ThreadDto,
@@ -14,13 +15,15 @@ import type {
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
+  CreateThreadShareInput,
   ThreadDetailUiAdapter,
+  ThreadShareSummary,
   ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import {
-  ExportTranscriptDialog,
   formatLongTimestamp,
   PluginProvider,
+  ThreadActionsDialog,
   ThreadDetailSurface,
   threadStatusLabel,
 } from '@remote-codex/thread-ui';
@@ -73,6 +76,22 @@ const idleForkTurnOptionsState: PanelState<ThreadForkTurnOptionDto[]> = {
 
 function errorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : 'Thread failed to load.';
+}
+
+function relayThreadAccessLabel(access: RelayEffectiveAccessDto['threadAccess']) {
+  return access === 'read' ? 'View only' : 'Collaborator';
+}
+
+function relayWorkspaceAccessLabel(access: RelayEffectiveAccessDto['workspaceAccess']) {
+  switch (access) {
+    case 'write':
+      return 'Workspace write';
+    case 'read':
+      return 'Workspace read';
+    case 'none':
+    default:
+      return 'No workspace';
+  }
 }
 
 function threadListRevision(threads: ThreadDto[]) {
@@ -221,6 +240,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   );
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(
     IOS_THREAD_HISTORY_INITIAL_LIMIT,
   );
@@ -230,6 +250,24 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [exportTurnsState, setExportTurnsState] =
     useState<PanelState<ThreadExportTurnOptionsDto>>(idleExportTurnsState);
+  const [threadShareState, setThreadShareState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    shares: ThreadShareSummary[];
+    error: string | null;
+  }>({
+    status: 'idle',
+    shares: [],
+    error: null,
+  });
+  const [relayAccessState, setRelayAccessState] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'failed';
+    access: RelayEffectiveAccessDto | null;
+    error: string | null;
+  }>({
+    status: 'idle',
+    access: null,
+    error: null,
+  });
   const [forkTurnOptionsState, setForkTurnOptionsState] =
     useState<PanelState<ThreadForkTurnOptionDto[]>>(
       idleForkTurnOptionsState,
@@ -257,6 +295,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const uiTestForkControlsClickedRef = useRef(false);
   const uiTestExportStartedRef = useRef(false);
   const uiTestVisibleExportControlsClickedRef = useRef(false);
+  const uiTestVisibleShareControlsClickedRef = useRef(false);
   const uiTestWorkspaceEventsRef = useRef<string[]>([]);
   const uiTestWorkspaceLoadMoreClickedRef = useRef(false);
   const uiTestWorkspaceFileActionsStartedRef = useRef(false);
@@ -275,6 +314,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     new Map<string, (result: NativeAttachmentPickerResult) => void | Promise<void>>(),
   );
   const client = useMemo(() => new IOSApiClient(bootstrap), [bootstrap]);
+  const relayDeviceId =
+    bootstrap.mode === 'relay' ? bootstrap.relayDeviceId : null;
+  const relayShareAvailable = Boolean(relayDeviceId);
   const initialThemeMode = bootstrap.theme ?? 'system';
   const [themeMode, setThemeMode] = useState<IOSThemeMode>(initialThemeMode);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -1399,6 +1441,203 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     [bootstrap.fixture, client, detail],
   );
 
+  const loadThreadShares = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+      setThreadShareState({
+        status: 'ready',
+        shares: [],
+        error: null,
+      });
+      return;
+    }
+
+    setThreadShareState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    try {
+      const portal = await client.fetchRelayPortal();
+      const shares = portal.sharedByMe
+        .filter(
+          (share) =>
+            share.deviceId === relayDeviceId &&
+            share.threadId === currentDetail.thread.id,
+        )
+        .map((share) => ({
+          id: share.id,
+          targetUsername: share.targetUsername,
+          label: share.label,
+          threadAccess: share.threadAccess,
+          workspaceAccess: share.workspaceAccess,
+          createdAt: share.createdAt,
+        }));
+      setThreadShareState({
+        status: 'ready',
+        shares,
+        error: null,
+      });
+    } catch (caught) {
+      setThreadShareState((current) => ({
+        ...current,
+        status: 'failed',
+        error:
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load active shares.',
+      }));
+    }
+  }, [client, relayDeviceId, relayShareAvailable]);
+
+  const createThreadShare = useCallback(
+    async (input: CreateThreadShareInput) => {
+      const currentDetail = detailRef.current;
+      if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: 'Relay sharing is only available from a relay device route.',
+        }));
+        return;
+      }
+
+      const workspaceId =
+        input.workspaceAccess === 'none'
+          ? null
+          : currentDetail.workspace.id ??
+            currentDetail.thread.workspaceId ??
+            null;
+      if (input.workspaceAccess !== 'none' && !workspaceId) {
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: 'This thread is not attached to a workspace.',
+        }));
+        return;
+      }
+
+      setShareBusy(true);
+      setThreadShareState((current) => ({
+        ...current,
+        error: null,
+      }));
+      try {
+        await client.createRelayShare({
+          targetIdentifier: input.targetIdentifier,
+          deviceId: relayDeviceId,
+          threadId: currentDetail.thread.id,
+          workspaceId,
+          label: input.label ?? null,
+          threadAccess: input.threadAccess,
+          workspaceAccess: input.workspaceAccess,
+        });
+        await loadThreadShares();
+      } catch (caught) {
+        const message =
+          caught instanceof Error ? caught.message : 'Unable to create share.';
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: message,
+        }));
+        setError(message);
+      } finally {
+        setShareBusy(false);
+      }
+    },
+    [client, loadThreadShares, relayDeviceId, relayShareAvailable],
+  );
+
+  const revokeThreadShare = useCallback(
+    async (shareId: string) => {
+      setShareBusy(true);
+      setThreadShareState((current) => ({
+        ...current,
+        error: null,
+      }));
+      try {
+        await client.revokeRelayShare(shareId);
+        await loadThreadShares();
+      } catch (caught) {
+        const message =
+          caught instanceof Error ? caught.message : 'Unable to revoke share.';
+        setThreadShareState((current) => ({
+          ...current,
+          status: 'failed',
+          error: message,
+        }));
+        setError(message);
+      } finally {
+        setShareBusy(false);
+      }
+    },
+    [client, loadThreadShares],
+  );
+
+  useEffect(() => {
+    if (exportDialogOpen) {
+      void loadThreadShares();
+    }
+  }, [exportDialogOpen, loadThreadShares]);
+
+  useEffect(() => {
+    const currentDetail = detailRef.current;
+    if (!relayShareAvailable || !relayDeviceId || !currentDetail) {
+      setRelayAccessState({
+        status: 'idle',
+        access: null,
+        error: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setRelayAccessState((current) => ({
+      ...current,
+      status: 'loading',
+      error: null,
+    }));
+    client
+      .fetchRelayAccess({
+        deviceId: relayDeviceId,
+        threadId: currentDetail.thread.id,
+        workspaceId:
+          currentDetail.workspace.id ?? currentDetail.thread.workspaceId ?? null,
+      })
+      .then((access) => {
+        if (!cancelled) {
+          setRelayAccessState({
+            status: 'ready',
+            access,
+            error: null,
+          });
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setRelayAccessState({
+            status: 'failed',
+            access: null,
+            error:
+              caught instanceof Error
+                ? caught.message
+                : 'Unable to load relay permissions.',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    client,
+    detail?.thread.id,
+    detail?.thread.workspaceId,
+    detail?.workspace.id,
+    relayDeviceId,
+    relayShareAvailable,
+  ]);
+
   const loadForkTurnOptions = useCallback(async () => {
     if (bootstrap.fixture || !detail) {
       return;
@@ -1729,7 +1968,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       try {
         if (
           !(await clickWhenReady(
-            () => buttonWithLabel('Export transcript'),
+            () => buttonWithLabel('Thread actions'),
             'export-button',
           ))
         ) {
@@ -1795,6 +2034,129 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       }
     };
   }, [bootstrap.uiTestClickVisibleExportControls, detail]);
+
+  useEffect(() => {
+    if (
+      !bootstrap.uiTestClickVisibleShareControls ||
+      !detail ||
+      uiTestVisibleShareControlsClickedRef.current
+    ) {
+      return;
+    }
+
+    uiTestVisibleShareControlsClickedRef.current = true;
+    let cancelled = false;
+    let timer: number | null = null;
+    const delay = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, ms);
+      });
+    const buttons = () => Array.from(document.querySelectorAll('button'));
+    const buttonWithLabel = (label: string) =>
+      buttons().find(
+        (button) =>
+          button.getAttribute('aria-label') === label ||
+          button.getAttribute('title') === label ||
+          button.textContent?.trim() === label,
+      ) ?? null;
+    const dialog = () =>
+      document.querySelector<HTMLElement>('.thread-export-dialog-root');
+    const dialogButton = (label: string) =>
+      Array.from(dialog()?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent?.trim() === label,
+      ) ?? null;
+    const clickWhenReady = async (
+      findButton: () => HTMLButtonElement | null,
+      label: string,
+    ) => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (cancelled) {
+          return false;
+        }
+        const button = findButton();
+        if (button && !button.disabled) {
+          button.click();
+          await delay(160);
+          return true;
+        }
+        await delay(160);
+      }
+      postNativeMessage({
+        type: 'threadWebDebug',
+        message: `visible-share:missing:${label}`,
+      });
+      return false;
+    };
+    const waitFor = async (check: () => boolean, label: string) => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (cancelled) {
+          return false;
+        }
+        if (check()) {
+          return true;
+        }
+        await delay(160);
+      }
+      postNativeMessage({
+        type: 'threadWebDebug',
+        message: `visible-share:missing:${label}`,
+      });
+      return false;
+    };
+
+    void (async () => {
+      try {
+        if (
+          !(await clickWhenReady(
+            () => buttonWithLabel('Thread actions'),
+            'thread-actions-button',
+          ))
+        ) {
+          return;
+        }
+        if (!(await waitFor(() => dialog() !== null, 'dialog'))) {
+          return;
+        }
+        if (!(await clickWhenReady(() => dialogButton('Share'), 'share-tab'))) {
+          return;
+        }
+        const shareReady = await waitFor(() => {
+          const text = dialog()?.textContent ?? '';
+          return (
+            text.includes('Relay identifier') ||
+            text.includes('Share permissions are not wired yet.') ||
+            text.includes('Share access is enforced by the relay server.')
+          );
+        }, 'share-content');
+        if (!shareReady) {
+          return;
+        }
+        postNativeMessage({
+          type: 'threadWebDebug',
+          message: `visible-share:tab-open:available=${relayShareAvailable}`,
+        });
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postNativeMessage({
+          type: 'threadWebDebug',
+          message: `visible-share:error:${message}`,
+        });
+        postNativeMessage({ type: 'reportFatalError', message });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [
+    bootstrap.uiTestClickVisibleShareControls,
+    detail,
+    relayShareAvailable,
+  ]);
 
   const recordWorkspaceDebug = useCallback(
     (message: string) => {
@@ -2102,9 +2464,47 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     detail?.thread.title,
   ]);
 
+  const currentWorkspaceId =
+    detail?.workspace.id ?? detail?.thread.workspaceId ?? null;
+  const relayAccess = relayAccessState.access;
+  const effectiveThreadIsOwner =
+    !relayShareAvailable || relayAccess?.kind === 'owner';
+  const effectiveThreadCanControl =
+    effectiveThreadIsOwner ||
+    (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'control');
+  const effectiveThreadCanShare =
+    relayShareAvailable && relayAccess?.kind === 'owner';
+  const effectiveWorkspaceAccess: 'none' | 'read' | 'write' =
+    !relayShareAvailable
+      ? 'write'
+      : relayAccess?.kind === 'owner'
+        ? 'write'
+        : relayAccess?.kind === 'shared' &&
+            relayAccess.workspaceId &&
+            relayAccess.workspaceId === currentWorkspaceId
+          ? relayAccess.workspaceAccess
+          : 'none';
+  const relayAccessBadge = useMemo(
+    () =>
+      relayAccess?.kind === 'shared' ? (
+        <div
+          className="inline-flex max-w-[10rem] items-center gap-1.5 rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-2.5 py-1 text-[11px] font-medium text-[var(--theme-fg-soft)]"
+          title={`${relayThreadAccessLabel(relayAccess.threadAccess)} / ${relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}`}
+        >
+          <span>{relayThreadAccessLabel(relayAccess.threadAccess)}</span>
+          <span className="text-[var(--theme-fg-muted)]">/</span>
+          <span className="truncate">
+            {relayWorkspaceAccessLabel(relayAccess.workspaceAccess)}
+          </span>
+        </div>
+      ) : null,
+    [relayAccess],
+  );
+
   const adapter = useMemo<ThreadDetailUiAdapter>(
     () => {
-      const workspaceAdapter: ThreadWorkspaceAdapter | null = bootstrap.fixture || bootstrap.threadId
+      const workspaceAdapter: ThreadWorkspaceAdapter | null =
+        effectiveWorkspaceAccess !== 'none'
         ? {
             listTree: async (input) => {
               const workspaceId = resolveWorkspaceId(input.workspaceId);
@@ -2189,6 +2589,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
               return url;
             },
             uploadFile: async (input) => {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
               const workspaceId = resolveWorkspaceId(input.workspaceId);
               if (!workspaceId) {
                 throw new Error('No workspace id is available.');
@@ -2208,6 +2611,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
               return result;
             },
             pickUploadFile: (input) => {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
               recordWorkspaceDebug(
                 `native-upload-picker:bridge=${hasNativeBridge()}`,
               );
@@ -2227,6 +2633,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
               });
             },
             writeFile: async (input) => {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
               const workspaceId = resolveWorkspaceId(input.workspaceId);
               if (!workspaceId) {
                 throw new Error('No workspace id is available.');
@@ -2269,10 +2678,13 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         getThreadHref(threadId) {
           return `#thread-${threadId}`;
         },
-        renameThread,
-        deleteThread,
+        ...(effectiveThreadIsOwner ? { renameThread } : {}),
+        ...(effectiveThreadIsOwner ? { deleteThread } : {}),
         cancelPendingSteer,
         sendPrompt: async (input) => {
+          if (!effectiveThreadCanControl) {
+            return false;
+          }
           if (bootstrap.fixture || !detailRef.current) {
             return;
           }
@@ -2329,6 +2741,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       client,
       cancelPendingSteer,
       deleteThread,
+      effectiveThreadCanControl,
+      effectiveThreadIsOwner,
+      effectiveWorkspaceAccess,
       pickNativeFiles,
       recordWorkspaceDebug,
       renameThread,
@@ -3121,29 +3536,42 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         onSettingsDialogOpenChange={setSettingsDialogOpen}
         metaContent={metaContent}
         settingsContent={settingsContent}
-        surfaceActions={
+        surfaceActions={relayAccessBadge}
+        mobileHeaderAction={relayAccessBadge}
+        threadActionsButton={
           <button
             type="button"
-            aria-label="Export transcript"
-            title="Export transcript"
+            aria-label="Thread actions"
+            title="Thread actions"
             onClick={() => setExportDialogOpen(true)}
             className="ios-thread-export-button"
           >
-            Export
+            ...
           </button>
         }
         dialogs={
-          <ExportTranscriptDialog
+          <ThreadActionsDialog
             open={exportDialogOpen}
-            busy={exportBusy}
+            busy={exportBusy || shareBusy}
             turnsState={exportTurnsState}
+            shareAvailable={effectiveThreadCanShare}
+            {...(relayShareAvailable && relayAccess?.kind === 'shared'
+              ? { shareUnavailableMessage: 'Only the owner can share this session.' }
+              : {})}
+            shareState={threadShareState}
             onCancel={() => {
-              if (!exportBusy) {
+              if (!exportBusy && !shareBusy) {
                 setExportDialogOpen(false);
               }
             }}
             onLoadTurns={loadExportTurns}
             onExport={exportTranscript}
+            {...(effectiveThreadCanShare
+              ? {
+                  onCreateShare: createThreadShare,
+                  onRevokeShare: revokeThreadShare,
+                }
+              : {})}
           />
         }
         {...(detail
@@ -3164,16 +3592,28 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                 contextUsage: detail.thread.contextUsage ?? null,
                 capabilities,
                 threadConnected: detail.thread.isLoaded,
-                disabled: !detail.thread.isLoaded,
+                disabled: !detail.thread.isLoaded || !effectiveThreadCanControl,
+                ...(!effectiveThreadCanControl
+                  ? {
+                      disabledPlaceholder:
+                        'This shared session is view-only.',
+                    }
+                  : {}),
                 shellAvailable: false,
                 onPickAttachment: pickNativeAttachments,
-                onUpdateSettings: updateThreadSettings,
+                ...(effectiveThreadIsOwner
+                  ? { onUpdateSettings: updateThreadSettings }
+                  : {}),
                 onToggleFollow: () => {
                   setScrollRequestKey((current) => current + 1);
                 },
-                onOpenForkTurns: loadForkTurnOptions,
-                onForkLatest: forkLatest,
-                onForkTurn: forkTurn,
+                ...(effectiveThreadIsOwner
+                  ? {
+                      onOpenForkTurns: loadForkTurnOptions,
+                      onForkLatest: forkLatest,
+                      onForkTurn: forkTurn,
+                    }
+                  : {}),
               },
             }
           : {})}

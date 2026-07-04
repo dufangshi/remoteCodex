@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type {
+  CreateRelaySessionShareInput,
   RelayCreateDeviceResultDto,
   RelayPortalSummaryDto,
   RelaySessionDto,
@@ -87,12 +88,7 @@ export function RelayPortalPage() {
     await load();
   }
 
-  async function handleShare(input: {
-    targetUsername: string;
-    deviceId: string;
-    threadId: string;
-    label?: string;
-  }) {
+  async function handleShare(input: CreateRelaySessionShareInput) {
     await createRelayShare(input);
     await load();
   }
@@ -442,17 +438,15 @@ function ShareForm({
   onShare,
 }: {
   devices: RelayPortalSummaryDto['devices'];
-  onShare: (input: {
-    targetUsername: string;
-    deviceId: string;
-    threadId: string;
-    label?: string;
-  }) => Promise<void>;
+  onShare: (input: CreateRelaySessionShareInput) => Promise<void>;
 }) {
   const firstDeviceId = useMemo(() => devices[0]?.id ?? '', [devices]);
   const [deviceId, setDeviceId] = useState(firstDeviceId);
-  const [targetUsername, setTargetUsername] = useState('');
+  const [targetIdentifier, setTargetIdentifier] = useState('');
   const [threadId, setThreadId] = useState('');
+  const [workspaceId, setWorkspaceId] = useState('');
+  const [threadAccess, setThreadAccess] = useState<CreateRelaySessionShareInput['threadAccess']>('control');
+  const [workspaceAccess, setWorkspaceAccess] = useState<CreateRelaySessionShareInput['workspaceAccess']>('none');
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -469,13 +463,19 @@ function ShareForm({
     setMessage(null);
     try {
       await onShare({
-        targetUsername,
+        targetIdentifier,
         deviceId,
         threadId,
+        workspaceId: workspaceId.trim() || null,
+        threadAccess,
+        workspaceAccess,
         ...(label.trim() ? { label } : {}),
       });
-      setTargetUsername('');
+      setTargetIdentifier('');
       setThreadId('');
+      setWorkspaceId('');
+      setThreadAccess('control');
+      setWorkspaceAccess('none');
       setLabel('');
       setMessage('Invitation created.');
     } catch (caught) {
@@ -501,13 +501,39 @@ function ShareForm({
           ))}
         </select>
       </label>
-      <RelayInput label="Username" onChange={setTargetUsername} value={targetUsername} />
+      <RelayInput label="Relay identifier" onChange={setTargetIdentifier} value={targetIdentifier} />
       <RelayInput label="Thread ID" onChange={setThreadId} value={threadId} />
+      <label className="block text-sm text-[var(--theme-fg-soft)]">
+        Thread access
+        <select
+          className="relay-input mt-2 w-full"
+          onChange={(event) => setThreadAccess(event.target.value as CreateRelaySessionShareInput['threadAccess'])}
+          value={threadAccess}
+        >
+          <option value="control">Full control</option>
+          <option value="read">Read only</option>
+        </select>
+      </label>
+      <label className="block text-sm text-[var(--theme-fg-soft)]">
+        Workspace
+        <select
+          className="relay-input mt-2 w-full"
+          onChange={(event) => setWorkspaceAccess(event.target.value as CreateRelaySessionShareInput['workspaceAccess'])}
+          value={workspaceAccess}
+        >
+          <option value="none">No access</option>
+          <option value="read">Read files</option>
+          <option value="write">Read and write files</option>
+        </select>
+      </label>
+      {workspaceAccess !== 'none' ? (
+        <RelayInput label="Workspace ID" onChange={setWorkspaceId} value={workspaceId} />
+      ) : null}
       <RelayInput label="Label" onChange={setLabel} value={label} />
       {message ? <p className="text-sm text-[var(--theme-fg-muted)]">{message}</p> : null}
       <button
         className="relay-button-primary"
-        disabled={busy || !deviceId || !targetUsername.trim() || !threadId.trim()}
+        disabled={busy || !deviceId || !targetIdentifier.trim() || !threadId.trim()}
         type="submit"
       >
         Invite

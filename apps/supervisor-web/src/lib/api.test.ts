@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   applyProviderHostConfigArchive,
+  createRelayShare,
   createThreadShell,
   createProviderHostConfigArchive,
   createWorkspace,
@@ -14,6 +15,7 @@ import {
   fetchAuthSession,
   fetchProviderHostConfigArchives,
   fetchProviderHostFile,
+  fetchRelayAccess,
   importThread,
   installOrUpdateAgentBackend,
   buildAndRestartService,
@@ -21,6 +23,7 @@ import {
   enableRelayMode,
   renameProviderHostConfigArchive,
   restartAgentBackend,
+  revokeRelayShare,
   resumeThread,
   sendThreadPrompt,
   setSelectedRelayDeviceId,
@@ -185,6 +188,51 @@ describe('api request helper', () => {
     ).toBe(
       '/relay/devices/device-a/api/threads/thread-1/assets/image?path=.%2F.temp%2Fthreads%2Fthread-1%2Fimage.png',
     );
+  });
+
+  it('fetches relay effective access from the relay API surface', async () => {
+    await fetchRelayAccess({
+      deviceId: 'device-1',
+      threadId: 'thread-1',
+      workspaceId: 'workspace-1',
+    });
+
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe(
+      '/relay/access?deviceId=device-1&threadId=thread-1&workspaceId=workspace-1',
+    );
+  });
+
+  it('keeps relay share management on the relay control plane', async () => {
+    enableRelayMode();
+    setSelectedRelayDeviceId('device-1');
+    window.history.pushState(null, '', '/devices/device-1/threads/thread-1');
+
+    await createRelayShare({
+      targetIdentifier: 'friend@example.test',
+      deviceId: 'device-1',
+      threadId: 'thread-1',
+      workspaceId: 'workspace-1',
+      label: 'Pairing',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+    });
+    await revokeRelayShare('share-1');
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('/relay/shares');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
+      targetIdentifier: 'friend@example.test',
+      deviceId: 'device-1',
+      threadId: 'thread-1',
+      workspaceId: 'workspace-1',
+      label: 'Pairing',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+    });
+    expect(calls[1]?.[0]).toBe('/relay/shares/share-1');
+    expect(calls[1]?.[1]?.method).toBe('DELETE');
   });
 
   it('preserves non-JSON upstream error status and body text', async () => {

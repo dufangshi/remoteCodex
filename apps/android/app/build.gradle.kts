@@ -7,6 +7,7 @@ val repoRoot = rootProject.projectDir.parentFile.parentFile
 val androidThreadWebDir = rootProject.layout.projectDirectory.dir("thread-web")
 val androidThreadWebDistDir = androidThreadWebDir.dir("dist")
 val androidThreadWebAssetsDir = layout.projectDirectory.dir("src/main/assets/thread-ui")
+val remoteThreadUiPackageDir = repoRoot.parentFile.resolve("remote-codex-thread-ui/packages/thread-ui")
 
 val buildAndroidThreadWeb by tasks.registering(Exec::class) {
     workingDir = repoRoot
@@ -25,14 +26,13 @@ val buildAndroidThreadWeb by tasks.registering(Exec::class) {
         androidThreadWebDir.file("index.html"),
     )
     inputs.dir(androidThreadWebDir.dir("src"))
+    inputs.file(remoteThreadUiPackageDir.resolve("package.json"))
+    inputs.dir(remoteThreadUiPackageDir.resolve("dist"))
     outputs.dir(androidThreadWebDistDir)
 }
 
-val copyAndroidThreadWebAssets by tasks.registering(Copy::class) {
+val copyAndroidThreadWebAssets by tasks.registering(Sync::class) {
     dependsOn(buildAndroidThreadWeb)
-    doFirst {
-        delete(androidThreadWebAssetsDir)
-    }
     from(androidThreadWebDistDir)
     into(androidThreadWebAssetsDir)
 }
