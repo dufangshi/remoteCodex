@@ -20,6 +20,7 @@ import type {
   ThreadShareSummary,
   ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
+import { Share2 } from 'lucide-react';
 import {
   formatLongTimestamp,
   PluginProvider,
@@ -3541,12 +3542,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         threadActionsButton={
           <button
             type="button"
-            aria-label="Thread actions"
-            title="Thread actions"
+            aria-label="Export or share thread"
+            title="Export or share thread"
             onClick={() => setExportDialogOpen(true)}
             className="ios-thread-export-button"
           >
-            ...
+            <Share2 className="h-4 w-4" aria-hidden="true" />
           </button>
         }
         dialogs={

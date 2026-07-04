@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import WebKit
 
@@ -148,13 +149,11 @@ struct ThreadDetailWebViewScreen: View {
                     .accessibilityIdentifier("thread-webview-swift-settings")
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if let sharedFile = bridge.sharedFile {
-                ShareLink(item: sharedFile.url) {
-                    Label("Share \(sharedFile.filename)", systemImage: "square.and.arrow.up")
-                }
-                .padding(12)
-                .accessibilityIdentifier("thread-webview-share-export")
+        .sheet(item: sharedFileBinding, onDismiss: {
+            bridge.sharedFile = nil
+        }) { sharedFile in
+            ThreadDetailShareSheet(file: sharedFile) {
+                bridge.sharedFile = nil
             }
         }
         .fileImporter(
@@ -199,6 +198,13 @@ struct ThreadDetailWebViewScreen: View {
         Binding(
             get: { bridge.attachmentPickerRequest != nil && !uiTestAutoAttachmentPickerResult },
             set: { _ in }
+        )
+    }
+
+    private var sharedFileBinding: Binding<ThreadDetailWebSharedFile?> {
+        Binding(
+            get: { bridge.sharedFile },
+            set: { bridge.sharedFile = $0 }
         )
     }
 
@@ -276,6 +282,23 @@ struct ThreadDetailWebViewScreen: View {
             base64: data.base64EncodedString()
         )
     }
+}
+
+private struct ThreadDetailShareSheet: UIViewControllerRepresentable {
+    let file: ThreadDetailWebSharedFile
+    let onComplete: () -> Void
+
+    func makeUIViewController(context _: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async {
+                onComplete()
+            }
+        }
+        return controller
+    }
+
+    func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
 
 private struct ThreadDetailWebView: UIViewRepresentable {

@@ -24,7 +24,7 @@ import {
   ThreadDetailSurface,
   threadStatusLabel,
 } from '@remote-codex/thread-ui';
-import { Copy } from 'lucide-react';
+import { Copy, Share2 } from 'lucide-react';
 
 import { AndroidApiClient } from './AndroidApiClient';
 import {
@@ -1227,12 +1227,12 @@ export function AndroidThreadDetailPage({
         threadActionsButton={
           <button
             type="button"
-            aria-label="Thread actions"
-            title="Thread actions"
+            aria-label="Export or share thread"
+            title="Export or share thread"
             onClick={() => setExportDialogOpen(true)}
             className="thread-mobile-hit-target inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-base font-semibold text-[var(--theme-fg-soft)] shadow-sm shadow-stone-950/20 transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
           >
-            ...
+            <Share2 className="h-4 w-4" aria-hidden="true" />
           </button>
         }
         dialogs={
