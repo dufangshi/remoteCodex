@@ -1633,8 +1633,13 @@ describe('ThreadDetailPage', () => {
     FakeIntersectionObserver.triggerAll();
     expect(detailUrls).toHaveLength(1);
 
-    fireEvent.scroll(screen.getByTestId('thread-scroll-container'));
-    FakeIntersectionObserver.triggerAll();
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    scrollContainer.scrollTop = 80;
+    fireEvent.scroll(scrollContainer);
+    scrollContainer.scrollTop = 0;
+    fireEvent.scroll(scrollContainer);
+
+    fireEvent.wheel(scrollContainer, { deltaY: -24 });
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-13'))).toBe(true);
     await waitFor(() => {
       expect(screen.getByText('Prompt 10')).toBeInTheDocument();
@@ -1643,6 +1648,13 @@ describe('ThreadDetailPage', () => {
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-10'))).toBe(false);
 
     FakeIntersectionObserver.triggerAll();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-10'))).toBe(false);
+
+    scrollContainer.scrollTop = 80;
+    fireEvent.scroll(scrollContainer);
+    scrollContainer.scrollTop = 0;
+    fireEvent.scroll(scrollContainer);
+    fireEvent.wheel(scrollContainer, { deltaY: -24 });
     await waitFor(() => {
       expect(screen.getByText('Prompt 7')).toBeInTheDocument();
     });
