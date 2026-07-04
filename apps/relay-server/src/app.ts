@@ -767,11 +767,29 @@ async function forwardRelayHttp(input: {
 }) {
   const threadId = threadIdFromPath(input.targetPath);
   const workspaceId = workspaceIdFromPath(input.targetPath);
+  const targetUrl = new URL(input.targetPath, 'http://relay.local');
+  const sharedThreadListRequest =
+    input.request.method.toUpperCase() === 'GET' &&
+    targetUrl.pathname === '/api/threads';
   const access = input.store.effectiveAccess(input.user.id, input.deviceId, {
     threadId,
     workspaceId,
   });
   if (!access) {
+    if (sharedThreadListRequest) {
+      const shares = input.store.sharedThreadsForDevice(input.user.id, input.deviceId);
+      if (shares.length > 0) {
+        await forwardSharedThreadList({
+          reply: input.reply,
+          state: input.state,
+          store: input.store,
+          user: input.user,
+          deviceId: input.deviceId,
+          shares,
+        });
+        return;
+      }
+    }
     input.reply.status(403).send({
       code: 'forbidden',
       message: 'Device access is not allowed.',
@@ -851,6 +869,40 @@ async function forwardRelayHttp(input: {
       message,
     } satisfies ApiErrorShape);
   }
+}
+
+async function forwardSharedThreadList(input: {
+  reply: FastifyReply;
+  state: RelayState;
+  store: RelayStore;
+  user: RelayUserDto;
+  deviceId: string;
+  shares: RelaySessionShareDto[];
+}) {
+  const supervisor = input.state.supervisors.get(input.deviceId);
+  if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
+    input.reply.status(503).send({
+      code: 'service_unavailable',
+      message: 'No supervisor is connected for this device.',
+    } satisfies ApiErrorShape);
+    return;
+  }
+
+  const threads = await Promise.all(
+    input.shares.map(async (share) => {
+      input.store.recordShareAccess(share, input.user);
+      const payload = await forwardSupervisorJson(
+        supervisor,
+        input.deviceId,
+        `/api/threads/${encodeURIComponent(share.threadId)}?limit=1`,
+        { timeoutMs: RELAY_REQUEST_TIMEOUT_MS },
+      );
+      const thread = isObject(payload) && isObject(payload.thread) ? payload.thread : payload;
+      return isObject(thread) ? thread : null;
+    }),
+  );
+
+  input.reply.send(threads.filter((thread): thread is Record<string, unknown> => Boolean(thread)));
 }
 
 function relayResponseBody(response: { body: string; bodyEncoding?: 'utf8' | 'base64' }) {
@@ -1257,6 +1309,7 @@ async function forwardSupervisorJson(
   supervisor: SupervisorConnection,
   deviceId: string,
   targetPath: string,
+  options: { timeoutMs?: number } = {},
 ) {
   try {
     const response = await supervisor.requestBroker.forward(
@@ -1273,7 +1326,7 @@ async function forwardSupervisorJson(
           body: null,
         },
       },
-      { timeoutMs: RELAY_PORTAL_METADATA_TIMEOUT_MS },
+      { timeoutMs: options.timeoutMs ?? RELAY_PORTAL_METADATA_TIMEOUT_MS },
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;

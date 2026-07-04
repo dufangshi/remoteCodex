@@ -12,6 +12,7 @@ import {
   currentThreadHref,
   currentWorkspacesHref,
 } from '../lib/relayRoutes';
+import { ThreadCreateForm } from '../pages/thread-create/ThreadCreateForm';
 
 type ThreadWorkspaceLayoutProps = ComponentProps<
   typeof SharedThreadWorkspaceLayout
@@ -53,6 +54,21 @@ export function ThreadWorkspaceLayout({
         onOpenThread ?? ((threadId) => navigate(currentThreadHref(threadId)))
       }
       getNewThreadHref={getNewThreadHref ?? buildNewThreadHref}
+      renderNewThreadDialogContent={
+        props.renderNewThreadDialogContent ??
+        (({ close, closeNavigation, currentWorkspaceId }) => (
+          <ThreadCreateForm
+            variant="dialog"
+            initialWorkspaceId={currentWorkspaceId}
+            onCancel={close}
+            onCreated={(thread) => {
+              close();
+              closeNavigation();
+              navigate(currentThreadHref(thread.id));
+            }}
+          />
+        ))
+      }
       renderThreadLink={
         renderThreadLink ??
         (({ thread, children, className, onClick }) => (

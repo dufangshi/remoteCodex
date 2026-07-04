@@ -110,6 +110,7 @@ import { useMobileComposerLayout } from './useMobileComposerLayout';
 import { useThreadAuxiliaryActions } from './useThreadAuxiliaryActions';
 import { useThreadListPolling } from './useThreadListPolling';
 import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
+import { ThreadCreateForm } from './thread-create/ThreadCreateForm';
 
 const INITIAL_DETAIL_TURN_PAGE_SIZE = 3;
 const DETAIL_TURN_PAGE_SIZE = 3;
@@ -440,6 +441,29 @@ export function ThreadDetailPage() {
   const getNewThreadHref = useCallback(
     (workspaceId?: string | null) => currentNewThreadHref(workspaceId),
     [],
+  );
+  const renderNewThreadDialogContent = useCallback(
+    ({
+      close,
+      closeNavigation,
+      currentWorkspaceId,
+    }: {
+      close: () => void;
+      closeNavigation: () => void;
+      currentWorkspaceId?: string | null;
+    }) => (
+      <ThreadCreateForm
+        variant="dialog"
+        initialWorkspaceId={currentWorkspaceId}
+        onCancel={close}
+        onCreated={(thread) => {
+          close();
+          closeNavigation();
+          navigate(currentThreadHref(thread.id));
+        }}
+      />
+    ),
+    [navigate],
   );
   const getThreadImageAssetUrl = useCallback(
     ({ threadId, path }: { threadId: string; path: string }) =>
@@ -3207,6 +3231,7 @@ export function ThreadDetailPage() {
       openThread,
       getThreadHref,
       getNewThreadHref,
+      renderNewThreadDialogContent,
       ...(relayThreadIsOwner ? { renameThread: handleRenameThread } : {}),
       ...(relayThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
       cancelPendingSteer: handleCancelPendingSteer,
@@ -3226,6 +3251,7 @@ export function ThreadDetailPage() {
       getCurrentThreadImageAssetUrl,
       getNewThreadHref,
       getThreadHref,
+      renderNewThreadDialogContent,
       handleCompactThread,
       handleCancelPendingSteer,
       handleInterrupt,

@@ -480,6 +480,12 @@ export class RelayStore {
     };
   }
 
+  sharedThreadsForDevice(userId: string, deviceId: string) {
+    return this.getSharesByTarget(userId)
+      .filter((share) => share.deviceId === deviceId)
+      .map((share) => this.publicShare(share));
+  }
+
   adminSummary(
     connectedDevices: Map<string, DeviceConnectionStatus>,
     options: { conversationWindowDays?: number; metadata?: RelayAdminMetadata } = {},

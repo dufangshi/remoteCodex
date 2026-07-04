@@ -1250,6 +1250,70 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('returns only shared thread records for shared room list refreshes', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'none',
+      workspaceId: null,
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const listResponsePromise = app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+
+      await expect(
+        answerNextRelayRequest(
+          supervisorSocket,
+          (message) =>
+            message.payload.method === 'GET' &&
+            message.payload.path === `/api/threads/${SHARED_THREAD_ID}?limit=1`,
+          {
+            thread: {
+              id: SHARED_THREAD_ID,
+              workspaceId: SHARED_WORKSPACE_ID,
+              title: 'Shared running thread',
+              status: 'running',
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+            },
+          },
+        ),
+      ).resolves.toMatchObject({
+        payload: {
+          method: 'GET',
+          path: `/api/threads/${SHARED_THREAD_ID}?limit=1`,
+        },
+      });
+
+      const listResponse = await listResponsePromise;
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json()).toEqual([
+        {
+          id: SHARED_THREAD_ID,
+          workspaceId: SHARED_WORKSPACE_ID,
+          title: 'Shared running thread',
+          status: 'running',
+          activeTurnId: 'turn-1',
+          isLoaded: true,
+        },
+      ]);
+    } finally {
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
   it('allows documented read-only workspace routes for shared workspace readers', async () => {
     const { app, friendToken, deviceId } = await setupSharedRelaySession({
       threadAccess: 'read',
