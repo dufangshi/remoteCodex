@@ -119,6 +119,58 @@ const WEBVIEW_CORS_ALLOW_METHODS = [
   'DELETE',
   'OPTIONS',
 ].join(', ');
+const RELAY_REQUEST_HEADER_BLOCKLIST = new Set([
+  'authorization',
+  'connection',
+  'content-length',
+  'cookie',
+  'expect',
+  'forwarded',
+  'host',
+  'keep-alive',
+  'origin',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'referer',
+  'referrer',
+  'set-cookie',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'via',
+  'x-client-ip',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-port',
+  'x-forwarded-proto',
+  'x-forwarded-protocol',
+  'x-forwarded-scheme',
+  'x-real-ip',
+  'x-remote-codex-relay-forwarded',
+]);
+const RELAY_RESPONSE_HEADER_BLOCKLIST = new Set([
+  'access-control-allow-credentials',
+  'access-control-allow-headers',
+  'access-control-allow-methods',
+  'access-control-allow-origin',
+  'access-control-expose-headers',
+  'access-control-max-age',
+  'access-control-request-headers',
+  'access-control-request-method',
+  'connection',
+  'content-length',
+  'keep-alive',
+  'location',
+  'proxy-authenticate',
+  'refresh',
+  'set-cookie',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
 
 export function buildRelayServer(
   config: RelayServerConfig,
@@ -1073,11 +1125,7 @@ export function relayRequestHeaders(headers: Record<string, string | string[] | 
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
-    if (
-      lower === 'authorization' ||
-      lower === 'content-length' ||
-      lower === 'transfer-encoding'
-    ) {
+    if (RELAY_REQUEST_HEADER_BLOCKLIST.has(lower) || lower.startsWith('x-forwarded-')) {
       continue;
     }
     if (Array.isArray(value)) {
@@ -1091,7 +1139,7 @@ export function relayRequestHeaders(headers: Record<string, string | string[] | 
 
 function canForwardResponseHeader(name: string) {
   const lower = name.toLowerCase();
-  return lower !== 'content-length' && lower !== 'transfer-encoding';
+  return !RELAY_RESPONSE_HEADER_BLOCKLIST.has(lower);
 }
 
 function bearerToken(value: string | undefined) {

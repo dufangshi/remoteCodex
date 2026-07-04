@@ -312,14 +312,24 @@ describe('relay server', () => {
     expect(
       relayRequestHeaders({
         authorization: 'Bearer client-token',
+        cookie: 'remote_codex_relay_session=session-token',
         'content-length': '999',
         'transfer-encoding': 'chunked',
+        host: 'relay.example.test',
+        origin: 'https://relay.example.test',
+        referer: 'https://relay.example.test/relay-portal',
+        'x-forwarded-for': '203.0.113.10',
+        'x-forwarded-host': 'relay.example.test',
+        'x-real-ip': '203.0.113.10',
+        'x-remote-codex-relay-forwarded': '1',
         'content-type': 'application/json',
         accept: ['application/json', 'text/plain'],
+        range: 'bytes=0-99',
       }),
     ).toEqual({
       'content-type': 'application/json',
       accept: 'application/json, text/plain',
+      range: 'bytes=0-99',
     });
 
     expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toEqual({
@@ -1328,6 +1338,65 @@ describe('relay server', () => {
       const workspaceResponse = await workspaceResponsePromise;
       expect(workspaceResponse.statusCode).toBe(200);
       expect(workspaceResponse.json()).toEqual({ workspaceId: SHARED_WORKSPACE_ID });
+    } finally {
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('blocks sensitive relayed response headers from the supervisor', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+
+      const responsePromise = app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      const requestMessage = await waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.request',
+      );
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.response',
+        timestamp: '2026-07-01T00:00:04.000Z',
+        requestId: requestMessage.requestId,
+        payload: {
+          statusCode: 200,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+            'set-cookie': 'remote_codex_relay_session=attacker',
+            location: 'https://evil.example.test',
+            refresh: '0; url=https://evil.example.test',
+            'access-control-allow-origin': '*',
+            'transfer-encoding': 'chunked',
+          },
+          body: JSON.stringify({ ok: true }),
+        },
+      }));
+
+      const response = await responsePromise;
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(response.headers.location).toBeUndefined();
+      expect(response.headers.refresh).toBeUndefined();
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+      expect(response.headers['transfer-encoding']).toBeUndefined();
     } finally {
       supervisorSocket.close();
       await app.close();
