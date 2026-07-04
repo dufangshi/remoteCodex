@@ -10,6 +10,7 @@ import type {
   RelayLoginResultDto,
   RelayPortalSummaryDto,
   RelayRegisterResultDto,
+  RelayRegistrationSettingsDto,
   RelaySessionDto,
   RelaySessionShareDto,
   UpdateRelaySessionShareInput,
@@ -510,7 +511,7 @@ export async function relayRegister(input: {
     method: 'POST',
     body: JSON.stringify(input),
   });
-  setStoredRelayToken(result.token);
+  setStoredRelayToken(result.token ?? null);
   return result;
 }
 
@@ -595,14 +596,19 @@ export function revokeRelayShare(shareId: string) {
   });
 }
 
-export function fetchRelayAdmin() {
-  return request<RelayAdminSummaryDto>('/relay/admin');
+export function fetchRelayAdmin(days?: number) {
+  const query = days ? `?days=${encodeURIComponent(String(days))}` : '';
+  return request<RelayAdminSummaryDto>(`/relay/admin${query}`);
 }
 
 export function setRelayRegistrationEnabled(enabled: boolean) {
-  return request<{ registrationEnabled: boolean }>('/relay/admin/settings/registration', {
+  return updateRelayRegistrationSettings({ enabled });
+}
+
+export function updateRelayRegistrationSettings(input: Partial<RelayRegistrationSettingsDto>) {
+  return request<{ registrationEnabled: boolean; settings: RelayRegistrationSettingsDto }>('/relay/admin/settings/registration', {
     method: 'PATCH',
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(input),
   });
 }
 
@@ -610,6 +616,18 @@ export function setRelayUserEnabled(userId: string, enabled: boolean) {
   return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export function approveRelayRegistration(requestId: string) {
+  return request<RelayUserDto>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/approve`, {
+    method: 'POST',
+  });
+}
+
+export function rejectRelayRegistration(requestId: string) {
+  return request<{ id: string }>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/reject`, {
+    method: 'POST',
   });
 }
 

@@ -112,6 +112,48 @@ export interface RelayDeviceDto {
   createdAt: string;
 }
 
+export interface RelayAdminUserDto extends RelayUserDto {
+  lastSeenAt: string | null;
+  deviceCount: number;
+  conversationCount: number;
+}
+
+export interface RelayAdminWorkspaceDto {
+  id: string;
+  label: string;
+  absPath?: string | null;
+}
+
+export interface RelayAdminThreadDto {
+  id: string;
+  title: string;
+  workspaceId: string | null;
+  workspaceLabel: string | null;
+  status: string | null;
+  updatedAt: string | null;
+}
+
+export interface RelayAdminDeviceDto extends RelayDeviceDto {
+  ownerUsername: string;
+  ownerEmail: string;
+  ipAddress: string | null;
+  workspaces: RelayAdminWorkspaceDto[];
+  threads: RelayAdminThreadDto[];
+}
+
+export interface RelayRegistrationSettingsDto {
+  enabled: boolean;
+  registrationPassword: string | null;
+  approvalRequired: boolean;
+}
+
+export interface RelayPendingRegistrationDto {
+  id: string;
+  email: string;
+  username: string;
+  createdAt: string;
+}
+
 export type RelayThreadAccessDto = 'read' | 'control';
 export type RelayWorkspaceAccessDto = 'none' | 'read' | 'write';
 
@@ -143,7 +185,9 @@ export interface RelaySessionShareDto {
   deviceId: string;
   deviceName: string;
   threadId: string;
+  threadTitle: string | null;
   workspaceId: string | null;
+  workspaceLabel: string | null;
   label: string | null;
   threadAccess: RelayThreadAccessDto;
   workspaceAccess: RelayWorkspaceAccessDto;
@@ -183,8 +227,10 @@ export interface RelayLoginResultDto {
 }
 
 export interface RelayRegisterResultDto {
-  token: string;
-  session: RelaySessionDto;
+  token?: string;
+  session?: RelaySessionDto;
+  pendingApproval?: boolean;
+  request?: RelayPendingRegistrationDto;
 }
 
 export interface RelayCreateDeviceResultDto {
@@ -200,8 +246,12 @@ export interface RelayPortalSummaryDto {
 }
 
 export interface RelayAdminSummaryDto {
-  users: RelayUserDto[];
-  devices: RelayDeviceDto[];
+  users: RelayAdminUserDto[];
+  devices: RelayAdminDeviceDto[];
+  shares: RelaySessionShareDto[];
+  pendingRegistrations: RelayPendingRegistrationDto[];
+  settings: RelayRegistrationSettingsDto;
+  conversationWindowDays: number;
   registrationEnabled: boolean;
 }
 

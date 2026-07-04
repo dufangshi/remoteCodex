@@ -37,7 +37,9 @@ const sharedSession: RelaySessionShareDto = {
   deviceId: 'device-shared',
   deviceName: 'Owner Mac',
   threadId: 'thread-shared',
+  threadTitle: 'Investigate relay setup',
   workspaceId: null,
+  workspaceLabel: null,
   label: 'Review session',
   threadAccess: 'read' as const,
   workspaceAccess: 'none' as const,
@@ -229,7 +231,7 @@ describe('RelayDevicesPage', () => {
   it('opens a session shared with the current relay account', async () => {
     renderPage([], [sharedSession]);
 
-    await screen.findByText('Review session');
+    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
@@ -250,13 +252,15 @@ describe('RelayDevicesPage', () => {
         targetUserId: 'friend-1',
         targetUsername: 'friend',
         workspaceId: 'workspace-1',
+        workspaceLabel: 'remoteCodex',
         workspaceAccess: 'read',
       },
     ]);
 
-    await screen.findByText('Review session');
+    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
+    expect(screen.getByText('Workspace:')).toBeInTheDocument();
+    expect(screen.getByText('remoteCodex')).toBeInTheDocument();
     expect(screen.getByText('Thread:')).toBeInTheDocument();
-    expect(screen.getByText('thread-shared')).toBeInTheDocument();
     expect(screen.getByText('To friend')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Permissions' }));
@@ -283,5 +287,48 @@ describe('RelayDevicesPage', () => {
         }),
       );
     });
+  });
+
+  it('does not expose raw thread ids when shared thread metadata is unavailable', async () => {
+    renderPage([], [], [
+      {
+        ...sharedSession,
+        ownerUserId: 'user-1',
+        ownerUsername: 'user',
+        targetUserId: 'friend-1',
+        targetUsername: 'friend',
+        threadId: 'thread-raw-id-only',
+        threadTitle: null,
+        workspaceId: 'workspace-1',
+        workspaceLabel: null,
+        label: null,
+      },
+    ]);
+
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(screen.getByText('Workspace unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('thread-raw-id-only')).not.toBeInTheDocument();
+  });
+
+  it('opens a session shared by the current relay account', async () => {
+    renderPage([], [], [
+      {
+        ...sharedSession,
+        ownerUserId: 'user-1',
+        ownerUsername: 'user',
+        targetUserId: 'friend-1',
+        targetUsername: 'friend',
+        workspaceId: 'workspace-1',
+        workspaceLabel: 'remoteCodex',
+        workspaceAccess: 'read',
+      },
+    ]);
+
+    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    await screen.findByText('Shared thread');
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
+    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
   });
 });

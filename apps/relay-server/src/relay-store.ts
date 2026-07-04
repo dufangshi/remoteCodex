@@ -6,10 +6,16 @@ import Database from 'better-sqlite3';
 
 import type {
   CreateRelaySessionShareInput,
+  RelayAdminDeviceDto,
   RelayAdminSummaryDto,
+  RelayAdminThreadDto,
+  RelayAdminUserDto,
+  RelayAdminWorkspaceDto,
   RelayCreateDeviceResultDto,
   RelayDeviceDto,
+  RelayPendingRegistrationDto,
   RelayPortalSummaryDto,
+  RelayRegistrationSettingsDto,
   RelaySessionDto,
   RelaySessionShareAccessDto,
   RelaySessionShareDto,
@@ -23,6 +29,7 @@ import type {
 interface StoredUser extends RelayUserDto {
   passwordHash: string;
   passwordSalt: string;
+  lastSeenAt: string | null;
 }
 
 interface StoredDevice {
@@ -46,6 +53,23 @@ interface SessionPayload {
   userId: string;
   expiresAt: number;
   nonce: string;
+}
+
+interface PendingRegistrationRecord {
+  id: string;
+  email: string;
+  username: string;
+  passwordSalt: string;
+  passwordHash: string;
+  createdAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+}
+
+export interface RelayAdminMetadata {
+  workspacesByDeviceId?: Map<string, RelayAdminWorkspaceDto[]>;
+  threadsByDeviceId?: Map<string, RelayAdminThreadDto[]>;
 }
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -123,6 +147,56 @@ export class RelayStore {
     });
     this.insertUser(user);
     return this.createLoginResult(user);
+  }
+
+  requestRegistrationApproval(input: { email: string; username: string; password: string }) {
+    if (!this.registrationEnabled()) {
+      throw new RelayStoreError(403, 'forbidden', 'Registration is currently disabled.');
+    }
+    const email = input.email.trim().toLowerCase();
+    const username = normalizeUsername(input.username);
+    if (!email.includes('@')) {
+      throw new RelayStoreError(400, 'bad_request', 'A valid email address is required.');
+    }
+    if (username.length < 3) {
+      throw new RelayStoreError(400, 'bad_request', 'Username must be at least 3 characters.');
+    }
+    if (input.password.length < 8) {
+      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+    }
+    if (this.getUserByIdentifier(email) || this.getUserByUsername(username)) {
+      throw new RelayStoreError(409, 'conflict', 'A user with that email or username already exists.');
+    }
+    const existing = this.rowToPendingRegistration(
+      this.sqlite
+        .prepare(
+          `
+            SELECT * FROM relay_pending_registrations
+            WHERE status = 'pending'
+              AND (email = ? OR username = ?)
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+        )
+        .get(email, username) as PendingRegistrationRow | undefined,
+    );
+    if (existing) {
+      return this.publicPendingRegistration(existing);
+    }
+    const passwordSalt = crypto.randomBytes(16).toString('base64url');
+    const record: PendingRegistrationRecord = {
+      id: crypto.randomUUID(),
+      email,
+      username,
+      passwordSalt,
+      passwordHash: hashSecret(input.password, passwordSalt),
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+      reviewedAt: null,
+      reviewedByUserId: null,
+    };
+    this.insertPendingRegistration(record);
+    return this.publicPendingRegistration(record);
   }
 
   login(input: { identifier: string; password: string }) {
@@ -242,7 +316,9 @@ export class RelayStore {
       deviceId: input.deviceId,
       deviceName: device.name,
       threadId: input.threadId,
+      threadTitle: null,
       workspaceId: input.workspaceId?.trim() || null,
+      workspaceLabel: null,
       label: input.label?.trim() || null,
       threadAccess: normalizeThreadAccess(input.threadAccess),
       workspaceAccess: normalizeWorkspaceAccess(input.workspaceAccess),
@@ -404,12 +480,35 @@ export class RelayStore {
     };
   }
 
-  adminSummary(connectedDevices: Map<string, DeviceConnectionStatus>): RelayAdminSummaryDto {
+  adminSummary(
+    connectedDevices: Map<string, DeviceConnectionStatus>,
+    options: { conversationWindowDays?: number; metadata?: RelayAdminMetadata } = {},
+  ): RelayAdminSummaryDto {
+    const conversationWindowDays = normalizeConversationWindowDays(options.conversationWindowDays);
+    const users = this.getUsers();
+    const devices = this.getDevices();
+    const deviceCounts = new Map<string, number>();
+    for (const device of devices) {
+      deviceCounts.set(device.ownerUserId, (deviceCounts.get(device.ownerUserId) ?? 0) + 1);
+    }
+    const conversationCounts = this.conversationCountsByUser(conversationWindowDays);
     return {
-      users: this.getUsers().map((user) => this.publicUser(user)),
-      devices: this.getDevices().map((device) =>
-        this.publicDevice(device, connectedDevices.get(device.id) ?? null),
+      users: users.map((user) =>
+        this.publicAdminUser(user, deviceCounts.get(user.id) ?? 0, conversationCounts.get(user.id) ?? 0),
       ),
+      devices: devices.map((device) => {
+        const owner = users.find((user) => user.id === device.ownerUserId);
+        return this.publicAdminDevice(
+          device,
+          connectedDevices.get(device.id) ?? null,
+          owner,
+          options.metadata,
+        );
+      }),
+      shares: this.getShares({ includeRevoked: true }).map((share) => this.publicShare(share)),
+      pendingRegistrations: this.pendingRegistrations(),
+      settings: this.registrationSettings(),
+      conversationWindowDays,
       registrationEnabled: this.registrationEnabled(),
     };
   }
@@ -417,6 +516,113 @@ export class RelayStore {
   setRegistrationEnabled(enabled: boolean) {
     this.setSetting('registrationEnabled', enabled ? 'true' : 'false');
     return enabled;
+  }
+
+  registrationSettings(): RelayRegistrationSettingsDto {
+    return {
+      enabled: this.registrationEnabled(),
+      registrationPassword: this.getSetting('registrationPassword'),
+      approvalRequired: this.getSetting('registrationApprovalRequired') === 'true',
+    };
+  }
+
+  updateRegistrationSettings(input: Partial<RelayRegistrationSettingsDto>) {
+    if (input.enabled !== undefined) {
+      this.setRegistrationEnabled(input.enabled);
+    }
+    if (input.registrationPassword !== undefined) {
+      const password = input.registrationPassword?.trim() || null;
+      if (password !== null && password.length < 8) {
+        throw new RelayStoreError(400, 'bad_request', 'Registration password must be at least 8 characters.');
+      }
+      if (password === null) {
+        this.deleteSetting('registrationPassword');
+      } else {
+        this.setSetting('registrationPassword', password);
+      }
+    }
+    if (input.approvalRequired !== undefined) {
+      this.setSetting('registrationApprovalRequired', input.approvalRequired ? 'true' : 'false');
+    }
+    return this.registrationSettings();
+  }
+
+  ensureRegistrationPassword(password: string | null) {
+    if (!password || this.getSetting('registrationPassword') !== null) {
+      return;
+    }
+    this.setSetting('registrationPassword', password);
+  }
+
+  approvePendingRegistration(adminUserId: string, requestId: string) {
+    const record = this.requirePendingRegistration(requestId);
+    const user: StoredUser = {
+      id: crypto.randomUUID(),
+      email: record.email,
+      username: record.username,
+      role: 'user',
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastSeenAt: null,
+      passwordSalt: record.passwordSalt,
+      passwordHash: record.passwordHash,
+    };
+    const approve = this.sqlite.transaction(() => {
+      this.insertUser(user);
+      this.sqlite
+        .prepare(
+          `
+            UPDATE relay_pending_registrations
+            SET status = 'approved', reviewed_at = ?, reviewed_by_user_id = ?
+            WHERE id = ?
+          `,
+        )
+        .run(new Date().toISOString(), adminUserId, requestId);
+    });
+    approve();
+    return this.publicUser(user);
+  }
+
+  rejectPendingRegistration(adminUserId: string, requestId: string) {
+    this.requirePendingRegistration(requestId);
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_pending_registrations
+          SET status = 'rejected', reviewed_at = ?, reviewed_by_user_id = ?
+          WHERE id = ?
+        `,
+      )
+      .run(new Date().toISOString(), adminUserId, requestId);
+    return { id: requestId };
+  }
+
+  recordUserSeen(userId: string, at = new Date().toISOString()) {
+    this.sqlite.prepare('UPDATE relay_users SET last_seen_at = ? WHERE id = ?').run(at, userId);
+  }
+
+  recordConversationEvent(input: {
+    userId: string;
+    deviceId: string;
+    threadId: string | null;
+    workspaceId: string | null;
+  }) {
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_conversation_events (
+            id, user_id, device_id, thread_id, workspace_id, occurred_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        crypto.randomUUID(),
+        input.userId,
+        input.deviceId,
+        input.threadId,
+        input.workspaceId,
+        new Date().toISOString(),
+      );
   }
 
   setUserEnabled(userId: string, enabled: boolean) {
@@ -490,6 +696,35 @@ export class RelayStore {
     };
   }
 
+  private publicAdminUser(
+    user: StoredUser,
+    deviceCount: number,
+    conversationCount: number,
+  ): RelayAdminUserDto {
+    return {
+      ...this.publicUser(user),
+      lastSeenAt: user.lastSeenAt,
+      deviceCount,
+      conversationCount,
+    };
+  }
+
+  private publicAdminDevice(
+    device: StoredDevice,
+    status: DeviceConnectionStatus | null,
+    owner: StoredUser | undefined,
+    metadata: RelayAdminMetadata | undefined,
+  ): RelayAdminDeviceDto {
+    return {
+      ...this.publicDevice(device, status),
+      ownerUsername: owner?.username ?? 'unknown',
+      ownerEmail: owner?.email ?? 'unknown',
+      ipAddress: status?.ipAddress ?? null,
+      workspaces: metadata?.workspacesByDeviceId?.get(device.id) ?? [],
+      threads: metadata?.threadsByDeviceId?.get(device.id) ?? [],
+    };
+  }
+
   recordShareAccess(share: RelaySessionShareDto, user: RelayUserDto) {
     if (share.revokedAt || (share.expiresAt && share.expiresAt <= new Date().toISOString())) {
       return;
@@ -536,6 +771,7 @@ export class RelayStore {
         username TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
         enabled INTEGER NOT NULL DEFAULT 1,
+        last_seen_at TEXT,
         created_at TEXT NOT NULL,
         password_salt TEXT NOT NULL,
         password_hash TEXT NOT NULL
@@ -584,7 +820,33 @@ export class RelayStore {
       );
 
       CREATE INDEX IF NOT EXISTS relay_share_access_events_share_idx ON relay_share_access_events(share_id, accessed_at DESC);
+
+      CREATE TABLE IF NOT EXISTS relay_conversation_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+        thread_id TEXT,
+        workspace_id TEXT,
+        occurred_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_conversation_events_user_time_idx ON relay_conversation_events(user_id, occurred_at DESC);
+
+      CREATE TABLE IF NOT EXISTS relay_pending_registrations (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        username TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        reviewed_at TEXT,
+        reviewed_by_user_id TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_pending_registrations_status_idx ON relay_pending_registrations(status, created_at DESC);
     `);
+    this.ensureColumn('relay_users', 'last_seen_at', 'TEXT');
     this.ensureColumn('relay_devices', 'token', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
     this.ensureColumn('relay_shares', 'thread_access', "TEXT NOT NULL DEFAULT 'control'");
@@ -656,6 +918,10 @@ export class RelayStore {
       .run(key, value);
   }
 
+  private deleteSetting(key: string) {
+    this.sqlite.prepare('DELETE FROM relay_settings WHERE key = ?').run(key);
+  }
+
   private createStoredUser(input: {
     email: string;
     username: string;
@@ -684,6 +950,7 @@ export class RelayStore {
       role: input.role,
       enabled: true,
       createdAt: new Date().toISOString(),
+      lastSeenAt: null,
       passwordSalt,
       passwordHash: hashSecret(input.password, passwordSalt),
     };
@@ -767,8 +1034,8 @@ export class RelayStore {
       .prepare(
         `
           INSERT INTO relay_users (
-            id, email, username, role, enabled, created_at, password_salt, password_hash
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            id, email, username, role, enabled, last_seen_at, created_at, password_salt, password_hash
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -777,6 +1044,7 @@ export class RelayStore {
         user.username,
         user.role,
         user.enabled ? 1 : 0,
+        user.lastSeenAt,
         user.createdAt,
         user.passwordSalt,
         user.passwordHash,
@@ -943,6 +1211,95 @@ export class RelayStore {
       .filter((share): share is RelaySessionShareDto => Boolean(share));
   }
 
+  private getShares(options: { includeRevoked?: boolean } = {}) {
+    const sql = options.includeRevoked
+      ? 'SELECT * FROM relay_shares ORDER BY created_at DESC'
+      : "SELECT * FROM relay_shares WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC";
+    const rows = options.includeRevoked
+      ? (this.sqlite.prepare(sql).all() as ShareRow[])
+      : (this.sqlite.prepare(sql).all(new Date().toISOString()) as ShareRow[]);
+    return rows
+      .map((row) => this.rowToShare(row))
+      .filter((share): share is RelaySessionShareDto => Boolean(share));
+  }
+
+  private conversationCountsByUser(days: number) {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const rows = this.sqlite
+      .prepare(
+        `
+          SELECT user_id, COUNT(*) AS count
+          FROM relay_conversation_events
+          WHERE occurred_at >= ?
+          GROUP BY user_id
+        `,
+      )
+      .all(since) as Array<{ user_id: string; count: number }>;
+    return new Map(rows.map((row) => [row.user_id, row.count]));
+  }
+
+  private pendingRegistrations() {
+    return (this.sqlite
+      .prepare(
+        `
+          SELECT * FROM relay_pending_registrations
+          WHERE status = 'pending'
+          ORDER BY created_at ASC
+        `,
+      )
+      .all() as PendingRegistrationRow[])
+      .map((row) => this.rowToPendingRegistration(row))
+      .filter((record): record is PendingRegistrationRecord => Boolean(record))
+      .map((record) => this.publicPendingRegistration(record));
+  }
+
+  private requirePendingRegistration(id: string) {
+    const record = this.rowToPendingRegistration(
+      this.sqlite
+        .prepare("SELECT * FROM relay_pending_registrations WHERE id = ? AND status = 'pending'")
+        .get(id) as PendingRegistrationRow | undefined,
+    );
+    if (!record) {
+      throw new RelayStoreError(404, 'not_found', 'Pending registration was not found.');
+    }
+    if (this.getUserByIdentifier(record.email) || this.getUserByUsername(record.username)) {
+      throw new RelayStoreError(409, 'conflict', 'A user with that email or username already exists.');
+    }
+    return record;
+  }
+
+  private publicPendingRegistration(record: PendingRegistrationRecord): RelayPendingRegistrationDto {
+    return {
+      id: record.id,
+      email: record.email,
+      username: record.username,
+      createdAt: record.createdAt,
+    };
+  }
+
+  private insertPendingRegistration(record: PendingRegistrationRecord) {
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_pending_registrations (
+            id, email, username, password_salt, password_hash,
+            created_at, status, reviewed_at, reviewed_by_user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        record.id,
+        record.email,
+        record.username,
+        record.passwordSalt,
+        record.passwordHash,
+        record.createdAt,
+        record.status,
+        record.reviewedAt,
+        record.reviewedByUserId,
+      );
+  }
+
   private rowToUser(row?: UserRow): StoredUser | null {
     if (!row) return null;
     return {
@@ -952,6 +1309,7 @@ export class RelayStore {
       role: row.role,
       enabled: Boolean(row.enabled),
       createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at ?? null,
       passwordSalt: row.password_salt,
       passwordHash: row.password_hash,
     };
@@ -981,7 +1339,9 @@ export class RelayStore {
       deviceId: row.device_id,
       deviceName: row.device_name ?? 'Remote Codex device',
       threadId: row.thread_id,
+      threadTitle: null,
       workspaceId: row.workspace_id ?? null,
+      workspaceLabel: null,
       label: row.label,
       threadAccess: normalizeThreadAccess(row.thread_access),
       workspaceAccess: normalizeWorkspaceAccess(row.workspace_access),
@@ -993,6 +1353,21 @@ export class RelayStore {
       accessEvents: [],
     };
   }
+
+  private rowToPendingRegistration(row?: PendingRegistrationRow): PendingRegistrationRecord | null {
+    if (!row) return null;
+    return {
+      id: row.id,
+      email: row.email,
+      username: row.username,
+      passwordSalt: row.password_salt,
+      passwordHash: row.password_hash,
+      createdAt: row.created_at,
+      status: row.status,
+      reviewedAt: row.reviewed_at ?? null,
+      reviewedByUserId: row.reviewed_by_user_id ?? null,
+    };
+  }
 }
 
 interface UserRow {
@@ -1001,6 +1376,7 @@ interface UserRow {
   username: string;
   role: RelayUserRoleDto;
   enabled: number;
+  last_seen_at: string | null;
   created_at: string;
   password_salt: string;
   password_hash: string;
@@ -1046,6 +1422,19 @@ export interface DeviceConnectionStatus {
   connected: boolean;
   connectedAt: string | null;
   lastHeartbeatAt: string | null;
+  ipAddress?: string | null;
+}
+
+interface PendingRegistrationRow {
+  id: string;
+  email: string;
+  username: string;
+  password_salt: string;
+  password_hash: string;
+  created_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewed_at: string | null;
+  reviewed_by_user_id: string | null;
 }
 
 export class RelayStoreError extends Error {
@@ -1079,6 +1468,13 @@ function normalizeExpiresAt(value: string | null | undefined) {
   }
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
+}
+
+function normalizeConversationWindowDays(value: number | undefined) {
+  if (!Number.isFinite(value ?? NaN)) {
+    return 7;
+  }
+  return Math.min(365, Math.max(1, Math.floor(value!)));
 }
 
 function hashSecret(secret: string, salt: string) {

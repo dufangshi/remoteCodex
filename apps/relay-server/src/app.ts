@@ -8,8 +8,14 @@ import { z } from 'zod';
 
 import type {
   ApiErrorShape,
+  RelayAdminSummaryDto,
+  RelayAdminThreadDto,
+  RelayAdminWorkspaceDto,
   RelayEffectiveAccessDto,
   RelayHealthDto,
+  RelayHttpResponsePayload,
+  RelayPortalSummaryDto,
+  RelaySessionShareDto,
   RelaySupervisorEnvelope,
   RelayUserDto,
   SupervisorSocketServerEnvelope,
@@ -46,6 +52,7 @@ interface AuthenticatedRelayRequest extends FastifyRequest {
 }
 
 const RELAY_REQUEST_TIMEOUT_MS = 30_000;
+const RELAY_PORTAL_METADATA_TIMEOUT_MS = 900;
 const WEBSOCKET_OPEN = 1;
 const RELAY_COOKIE_NAME = 'remote_codex_relay_session';
 const threadAccessSchema = z.enum(['read', 'control']);
@@ -89,6 +96,14 @@ const updateShareSchema = z.object({
 });
 const setEnabledSchema = z.object({
   enabled: z.boolean(),
+});
+const adminQuerySchema = z.object({
+  days: z.coerce.number().int().positive().max(365).optional(),
+});
+const updateRegistrationSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  registrationPassword: z.string().nullable().optional(),
+  approvalRequired: z.boolean().optional(),
 });
 const updateAccountSchema = z.object({
   username: z.string().trim().min(3).optional(),
@@ -195,6 +210,7 @@ export function buildRelayServer(
   if (config.registrationEnabledConfigured) {
     store.setRegistrationEnabled(config.registrationEnabled);
   }
+  store.ensureRegistrationPassword(config.registrationPassword);
   store.seedAdmin({
     username: config.adminUsername,
     email: config.adminEmail,
@@ -237,9 +253,10 @@ export function buildRelayServer(
 
   app.post('/relay/auth/register', async (request, reply) => {
     const body = registerSchema.parse(request.body ?? {});
+    const settings = store.registrationSettings();
     if (
-      config.registrationPassword &&
-      body.registrationPassword !== config.registrationPassword
+      settings.registrationPassword &&
+      body.registrationPassword !== settings.registrationPassword
     ) {
       reply.status(403).send({
         code: 'forbidden',
@@ -248,7 +265,15 @@ export function buildRelayServer(
       return;
     }
     const { registrationPassword: _registrationPassword, ...registerInput } = body;
+    if (settings.approvalRequired) {
+      reply.status(202);
+      return {
+        pendingApproval: true,
+        request: store.requestRegistrationApproval(registerInput),
+      };
+    }
     const result = store.register(registerInput);
+    store.recordUserSeen(result.session.user!.id);
     attachRelayCookie(reply, result.token);
     return result;
   });
@@ -256,6 +281,7 @@ export function buildRelayServer(
   app.post('/relay/auth/login', async (request, reply) => {
     const body = loginSchema.parse(request.body ?? {});
     const result = store.login(body);
+    store.recordUserSeen(result.session.user!.id);
     attachRelayCookie(reply, result.token);
     return result;
   });
@@ -290,7 +316,7 @@ export function buildRelayServer(
     if (!user) {
       return;
     }
-    return store.portalSummary(user.id, connectionStatus(state));
+    return enrichPortalSummary(store.portalSummary(user.id, connectionStatus(state)), state);
   });
 
   app.get('/relay/access', async (request, reply) => {
@@ -374,7 +400,11 @@ export function buildRelayServer(
     if (!user) {
       return;
     }
-    return store.adminSummary(connectionStatus(state));
+    const query = adminQuerySchema.parse(request.query ?? {});
+    const baseSummary = store.adminSummary(connectionStatus(state), {
+      ...(query.days !== undefined ? { conversationWindowDays: query.days } : {}),
+    });
+    return enrichAdminSummary(baseSummary, state, store, query.days);
   });
 
   app.patch('/relay/admin/settings/registration', async (request, reply) => {
@@ -382,8 +412,16 @@ export function buildRelayServer(
     if (!user) {
       return;
     }
-    const body = setEnabledSchema.parse(request.body ?? {});
-    return { registrationEnabled: store.setRegistrationEnabled(body.enabled) };
+    const body = updateRegistrationSettingsSchema.parse(request.body ?? {});
+    const settings = store.updateRegistrationSettings({
+      ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+      ...(body.registrationPassword !== undefined ? { registrationPassword: body.registrationPassword } : {}),
+      ...(body.approvalRequired !== undefined ? { approvalRequired: body.approvalRequired } : {}),
+    });
+    return {
+      registrationEnabled: settings.enabled,
+      settings,
+    };
   });
 
   app.patch('/relay/admin/users/:userId', async (request, reply) => {
@@ -394,6 +432,24 @@ export function buildRelayServer(
     const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
     const body = setEnabledSchema.parse(request.body ?? {});
     return store.setUserEnabled(userId, body.enabled);
+  });
+
+  app.post('/relay/admin/registrations/:requestId/approve', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    const { requestId } = z.object({ requestId: z.string().uuid() }).parse(request.params);
+    return store.approvePendingRegistration(user.id, requestId);
+  });
+
+  app.post('/relay/admin/registrations/:requestId/reject', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    const { requestId } = z.object({ requestId: z.string().uuid() }).parse(request.params);
+    return store.rejectPendingRegistration(user.id, requestId);
   });
 
   app.all('/relay/devices/:deviceId/api/*', async (request, reply) => {
@@ -499,6 +555,7 @@ export function buildRelayServer(
           connected: true,
           connectedAt,
           lastHeartbeatAt: connectedAt,
+          ipAddress: relayClientIp(request),
         };
         state.supervisors.set(deviceId, connection);
 
@@ -714,6 +771,19 @@ async function forwardRelayHttp(input: {
   if (access.kind === 'shared') {
     input.store.recordShareAccess(access.share, input.user);
   }
+  const conversationEvent = conversationEventFromRequest(
+    input.request.method,
+    input.targetPath,
+    input.request.body,
+  );
+  if (conversationEvent) {
+    input.store.recordConversationEvent({
+      userId: input.user.id,
+      deviceId: input.deviceId,
+      threadId: conversationEvent.threadId,
+      workspaceId: conversationEvent.workspaceId,
+    });
+  }
 
   const supervisor = input.state.supervisors.get(input.deviceId);
   if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
@@ -928,6 +998,7 @@ function requireRelayUser(
     } satisfies ApiErrorShape);
     return null;
   }
+  store.recordUserSeen(session.user.id);
   (request as AuthenticatedRelayRequest).relayUser = session.user;
   return session.user;
 }
@@ -962,9 +1033,243 @@ function connectionStatus(state: RelayState) {
       connected: true,
       connectedAt: supervisor.connectedAt,
       lastHeartbeatAt: supervisor.lastHeartbeatAt,
+      ipAddress: supervisor.ipAddress ?? null,
     });
   }
   return statuses;
+}
+
+async function enrichAdminSummary(
+  summary: RelayAdminSummaryDto,
+  state: RelayState,
+  store: RelayStore,
+  conversationWindowDays?: number,
+): Promise<RelayAdminSummaryDto> {
+  const workspacesByDeviceId = new Map<string, RelayAdminWorkspaceDto[]>();
+  const threadsByDeviceId = new Map<string, RelayAdminThreadDto[]>();
+  await Promise.all(
+    summary.devices.map(async (device) => {
+      const supervisor = state.supervisors.get(device.id);
+      if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
+        return;
+      }
+      const [workspaces, threads] = await Promise.all([
+        fetchRelayWorkspaces(supervisor, device.id),
+        fetchRelayThreads(supervisor, device.id),
+      ]);
+      workspacesByDeviceId.set(device.id, workspaces);
+      const workspaceLabelById = new Map(workspaces.map((workspace) => [workspace.id, workspace.label]));
+      threadsByDeviceId.set(
+        device.id,
+        threads.map((thread) => ({
+          ...thread,
+          workspaceLabel: thread.workspaceId ? workspaceLabelById.get(thread.workspaceId) ?? thread.workspaceLabel : null,
+        })),
+      );
+    }),
+  );
+  const enriched = store.adminSummary(connectionStatus(state), {
+    metadata: {
+      workspacesByDeviceId,
+      threadsByDeviceId,
+    },
+    ...(conversationWindowDays !== undefined ? { conversationWindowDays } : {}),
+  });
+  return {
+    ...enriched,
+    shares: enriched.shares.map((share) => {
+      const thread = threadsByDeviceId.get(share.deviceId)?.find((item) => item.id === share.threadId);
+      const workspace = share.workspaceId
+        ? workspacesByDeviceId.get(share.deviceId)?.find((item) => item.id === share.workspaceId)
+        : null;
+      return {
+        ...share,
+        threadTitle: thread?.title ?? share.threadTitle,
+        workspaceLabel: workspace?.label ?? thread?.workspaceLabel ?? share.workspaceLabel,
+      };
+    }),
+  };
+}
+
+async function fetchRelayWorkspaces(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+): Promise<RelayAdminWorkspaceDto[]> {
+  const payload = await forwardSupervisorJson(supervisor, deviceId, '/api/workspaces');
+  const rows = Array.isArray(payload) ? payload : [];
+  const workspaces: RelayAdminWorkspaceDto[] = [];
+  for (const workspace of rows.filter(isObject)) {
+      const id = stringField(workspace, 'id');
+      const label = stringField(workspace, 'label');
+      if (!id || !label) {
+        continue;
+      }
+      workspaces.push({
+        id,
+        label,
+        absPath: stringField(workspace, 'absPath'),
+      });
+  }
+  return workspaces.slice(0, 50);
+}
+
+async function fetchRelayThreads(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+): Promise<RelayAdminThreadDto[]> {
+  const payload = await forwardSupervisorJson(supervisor, deviceId, '/api/threads');
+  const rows = Array.isArray(payload) ? payload : [];
+  const threads: RelayAdminThreadDto[] = [];
+  for (const thread of rows.filter(isObject)) {
+      const id = stringField(thread, 'id');
+      if (!id) {
+        continue;
+      }
+      threads.push({
+        id,
+        title: stringField(thread, 'title') ?? 'Untitled thread',
+        workspaceId: stringField(thread, 'workspaceId'),
+        workspaceLabel: null,
+        status: stringField(thread, 'status'),
+        updatedAt: stringField(thread, 'updatedAt') ?? stringField(thread, 'createdAt'),
+      });
+  }
+  return threads.slice(0, 80);
+}
+
+async function enrichPortalSummary(
+  portal: RelayPortalSummaryDto,
+  state: RelayState,
+): Promise<RelayPortalSummaryDto> {
+  const threadCache = new Map<string, Promise<string | null>>();
+  const workspaceCache = new Map<string, Promise<string | null>>();
+
+  const enrichShare = async (share: RelaySessionShareDto): Promise<RelaySessionShareDto> => {
+    const supervisor = state.supervisors.get(share.deviceId);
+    if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
+      return share;
+    }
+
+    const threadCacheKey = `${share.deviceId}:${share.threadId}`;
+    let threadTitlePromise = threadCache.get(threadCacheKey);
+    if (!threadTitlePromise) {
+      threadTitlePromise = fetchRelayThreadTitle(supervisor, share.deviceId, share.threadId);
+      threadCache.set(threadCacheKey, threadTitlePromise);
+    }
+
+    let workspaceLabelPromise: Promise<string | null> = Promise.resolve(null);
+    if (share.workspaceId) {
+      const workspaceCacheKey = `${share.deviceId}:${share.workspaceId}`;
+      const cached = workspaceCache.get(workspaceCacheKey);
+      if (cached) {
+        workspaceLabelPromise = cached;
+      } else {
+        workspaceLabelPromise = fetchRelayWorkspaceLabel(
+          supervisor,
+          share.deviceId,
+          share.workspaceId,
+        );
+        workspaceCache.set(workspaceCacheKey, workspaceLabelPromise);
+      }
+    }
+
+    const [threadTitle, workspaceLabel] = await Promise.all([
+      threadTitlePromise,
+      workspaceLabelPromise,
+    ]);
+    return {
+      ...share,
+      threadTitle,
+      workspaceLabel,
+    };
+  };
+
+  const [sharedWithMe, sharedByMe] = await Promise.all([
+    Promise.all(portal.sharedWithMe.map(enrichShare)),
+    Promise.all(portal.sharedByMe.map(enrichShare)),
+  ]);
+
+  return {
+    ...portal,
+    sharedWithMe,
+    sharedByMe,
+  };
+}
+
+async function fetchRelayThreadTitle(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+  threadId: string,
+) {
+  const payload = await forwardSupervisorJson(
+    supervisor,
+    deviceId,
+    `/api/threads/${encodeURIComponent(threadId)}?limit=1`,
+  );
+  const thread = isObject(payload) && isObject(payload.thread) ? payload.thread : payload;
+  return stringField(thread, 'title');
+}
+
+async function fetchRelayWorkspaceLabel(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+  workspaceId: string,
+) {
+  const payload = await forwardSupervisorJson(supervisor, deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}`);
+  return stringField(payload, 'label');
+}
+
+async function forwardSupervisorJson(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+  targetPath: string,
+) {
+  try {
+    const response = await supervisor.requestBroker.forward(
+      supervisor.socket,
+      {
+        type: 'relay.request',
+        timestamp: new Date().toISOString(),
+        requestId: randomUUID(),
+        deviceId,
+        payload: {
+          method: 'GET',
+          path: targetPath,
+          headers: {},
+          body: null,
+        },
+      },
+      { timeoutMs: RELAY_PORTAL_METADATA_TIMEOUT_MS },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return null;
+    }
+    const body = relayJsonBody(response);
+    return JSON.parse(body) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function relayJsonBody(response: RelayHttpResponsePayload) {
+  if (response.bodyEncoding === 'base64') {
+    return Buffer.from(response.body, 'base64').toString('utf8');
+  }
+  return response.body;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function stringField(value: unknown, field: string) {
+  if (!isObject(value)) {
+    return null;
+  }
+  const fieldValue = value[field];
+  return typeof fieldValue === 'string' && fieldValue.trim().length > 0
+    ? fieldValue
+    : null;
 }
 
 function relayAccessDto(access: EffectiveRelayAccess): RelayEffectiveAccessDto {
@@ -1006,6 +1311,44 @@ function workspaceIdFromPath(pathValue: string) {
   const pathname = new URL(pathValue, 'http://relay.local').pathname;
   const match = /^\/api\/workspaces\/([^/?#]+)/.exec(pathname);
   return match ? decodeURIComponent(match[1]!) : null;
+}
+
+function conversationEventFromRequest(method: string, pathValue: string, body: unknown) {
+  if (method.toUpperCase() !== 'POST') {
+    return null;
+  }
+  const pathname = new URL(pathValue, 'http://relay.local').pathname;
+  if (pathname === '/api/threads/start') {
+    return {
+      threadId: null,
+      workspaceId: isObject(body) && typeof body.workspaceId === 'string' ? body.workspaceId : null,
+    };
+  }
+  const promptMatch = /^\/api\/threads\/([^/?#]+)\/prompt$/.exec(pathname);
+  if (promptMatch) {
+    return {
+      threadId: decodeURIComponent(promptMatch[1]!),
+      workspaceId: null,
+    };
+  }
+  return null;
+}
+
+function relayClientIp(request: FastifyRequest) {
+  const forwarded = firstHeaderValue(request.headers['cf-connecting-ip']) ??
+    firstHeaderValue(request.headers['x-real-ip']) ??
+    firstHeaderValue(request.headers['x-forwarded-for']);
+  if (forwarded) {
+    return forwarded.split(',')[0]?.trim() || forwarded;
+  }
+  return request.ip || null;
+}
+
+function firstHeaderValue(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
 }
 
 function isAllowedForRelayAccess(

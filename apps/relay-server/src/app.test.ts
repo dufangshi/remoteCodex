@@ -581,8 +581,13 @@ describe('relay server', () => {
     });
 
     expect(disableResponse.statusCode).toBe(200);
-    expect(disableResponse.json()).toEqual({
+    expect(disableResponse.json()).toMatchObject({
       registrationEnabled: false,
+      settings: {
+        enabled: false,
+        registrationPassword: null,
+        approvalRequired: false,
+      },
     });
 
     const registerResponse = await app.inject({
@@ -596,6 +601,111 @@ describe('relay server', () => {
     });
 
     expect(registerResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('lets admin configure registration password and approve pending registrations', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'admin',
+        password: 'password123',
+      },
+    });
+    const token = loginResponse.json().token as string;
+
+    const settingsResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/admin/settings/registration',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        enabled: true,
+        registrationPassword: 'invite-password-123',
+        approvalRequired: true,
+      },
+    });
+
+    expect(settingsResponse.statusCode).toBe(200);
+    expect(settingsResponse.json()).toMatchObject({
+      settings: {
+        enabled: true,
+        registrationPassword: 'invite-password-123',
+        approvalRequired: true,
+      },
+    });
+
+    const pendingResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'pending@example.test',
+        username: 'pending',
+        password: 'password123',
+        registrationPassword: 'invite-password-123',
+      },
+    });
+
+    expect(pendingResponse.statusCode).toBe(202);
+    expect(pendingResponse.json()).toMatchObject({
+      pendingApproval: true,
+      request: {
+        email: 'pending@example.test',
+        username: 'pending',
+      },
+    });
+    const requestId = pendingResponse.json().request.id as string;
+
+    const adminSummaryResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/admin?days=30',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(adminSummaryResponse.statusCode).toBe(200);
+    expect(adminSummaryResponse.json()).toMatchObject({
+      conversationWindowDays: 30,
+      settings: {
+        registrationPassword: 'invite-password-123',
+        approvalRequired: true,
+      },
+      pendingRegistrations: [
+        expect.objectContaining({
+          id: requestId,
+          username: 'pending',
+        }),
+      ],
+    });
+
+    const approveResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/admin/registrations/${requestId}/approve`,
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(approveResponse.statusCode).toBe(200);
+    expect(approveResponse.json()).toMatchObject({
+      username: 'pending',
+      email: 'pending@example.test',
+    });
+
+    const userLoginResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/login',
+      payload: {
+        identifier: 'pending',
+        password: 'password123',
+      },
+    });
+    expect(userLoginResponse.statusCode).toBe(200);
 
     await app.close();
   });

@@ -521,7 +521,7 @@ struct ConnectionScreen: View {
                 }
             }
         } message: {
-            Text("Remove access to \(revokeShare?.label?.trimmedNonEmpty ?? revokeShare?.threadId ?? "this thread").")
+            Text("Remove access to \(revokeShare.map(shareTitle) ?? "this thread").")
         }
     }
 
@@ -749,7 +749,7 @@ struct ConnectionScreen: View {
                         share: share,
                         mode: .outgoing,
                         expanded: expandedShareId == share.id,
-                        onOpen: {},
+                        onOpen: { model.openSharedSession(share) },
                         onEdit: { editingShare = share },
                         onRevoke: { revokeShare = share },
                         onToggleAccess: {
@@ -930,19 +930,23 @@ private struct RelaySharedSessionRow: View {
                     Button("Open", action: onOpen)
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Menu {
-                        Button("Permissions", action: onEdit)
-                        Button("Access history", action: onToggleAccess)
-                        Button("Revoke", role: .destructive, action: onRevoke)
-                    } label: {
-                        Text("Manage")
+                    HStack(spacing: 8) {
+                        Button("Open", action: onOpen)
+                            .buttonStyle(.borderedProminent)
+                        Menu {
+                            Button("Permissions", action: onEdit)
+                            Button("Access history", action: onToggleAccess)
+                            Button("Revoke", role: .destructive, action: onRevoke)
+                        } label: {
+                            Text("Manage")
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
                 }
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text("Thread: \(share.threadId)")
-                    .fontDesign(.monospaced)
+                Text("Workspace: \(share.workspaceLabel?.trimmedNonEmpty ?? "Workspace unavailable")")
+                Text("Thread: \(shareTitle(share))")
                 Text(mode == .incoming ? "From \(share.ownerUsername)" : "To \(share.targetUsername)")
                 Text("Device: \(share.deviceName)")
             }
@@ -998,8 +1002,7 @@ private struct RelaySharePermissionsSheet: View {
             Form {
                 Section {
                     Text("To \(share.targetUsername)")
-                    Text("Thread: \(share.threadId)")
-                        .fontDesign(.monospaced)
+                    Text("Thread: \(shareTitle(share))")
                     Text("Device: \(share.deviceName)")
                 }
                 Section("Label") {
@@ -1049,7 +1052,7 @@ private enum RelayShareRowMode {
 }
 
 private func shareTitle(_ share: RelaySessionShareSummary) -> String {
-    share.label?.trimmedNonEmpty ?? share.threadId
+    share.threadTitle?.trimmedNonEmpty ?? share.label?.trimmedNonEmpty ?? "Thread unavailable"
 }
 
 private struct ShareAccessHistory: View {

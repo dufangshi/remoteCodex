@@ -156,7 +156,7 @@ export function RelayDevicesPage() {
   }
 
   async function revokeSharedSession(share: RelaySessionShareDto) {
-    if (!window.confirm(`Remove sharing access for "${share.label || share.threadId}"?`)) {
+    if (!window.confirm(`Remove sharing access for "${shareTitleText(share)}"?`)) {
       return;
     }
     setBusy(`share:${share.id}`);
@@ -316,6 +316,7 @@ export function RelayDevicesPage() {
               key={share.id}
               mode="outgoing"
               share={share}
+              onOpen={() => openSharedSession(share)}
               onEdit={() => setEditingShare(share)}
               onRevoke={() => void revokeSharedSession(share)}
               onToggleAccess={() => {
@@ -403,7 +404,9 @@ function SharedSessionRow({
   share: RelaySessionShareDto;
   onOpen?: () => void;
 }) {
-  const shareTitle = share.label || share.threadId;
+  const shareTitle = shareTitleText(share);
+  const threadLabel = shareTitle;
+  const workspaceLabel = share.workspaceLabel?.trim() || 'Workspace unavailable';
   const lastAccessLabel = share.lastAccessedAt
     ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
     : 'Not accessed yet';
@@ -417,7 +420,10 @@ function SharedSessionRow({
           </p>
           <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
             <p className="truncate">
-              Thread: <span className="font-mono">{share.threadId}</span>
+              Workspace: <span className="text-[var(--theme-fg-soft)]">{workspaceLabel}</span>
+            </p>
+            <p className="truncate">
+              Thread: <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
             </p>
             <p className="truncate">
               {mode === 'incoming' ? `From ${share.ownerUsername}` : `To ${share.targetUsername}`}
@@ -448,6 +454,13 @@ function SharedSessionRow({
           </button>
         ) : (
           <div className="flex flex-wrap gap-2">
+            <button
+              className="relay-button-primary inline-flex items-center gap-2"
+              onClick={onOpen}
+              type="button"
+            >
+              Open
+            </button>
             <button
               className="relay-button-secondary inline-flex items-center gap-2"
               disabled={busy}
@@ -535,7 +548,7 @@ function SharePermissionsDialog({
         <div>
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared thread permissions</h2>
           <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-            {share.targetUsername} can access thread <span className="font-mono">{share.threadId}</span>.
+            {share.targetUsername} can access {shareTitleText(share)}.
           </p>
         </div>
         <div className="mt-5 space-y-4">
@@ -544,7 +557,7 @@ function SharePermissionsDialog({
             <input
               className="relay-input mt-2 w-full"
               onChange={(event) => setLabel(event.target.value)}
-              placeholder={share.threadId}
+              placeholder="Optional shared thread label"
               value={label}
             />
           </label>
@@ -764,6 +777,10 @@ function relayWebsocketBaseUrl() {
 
 function formatRelayTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
+}
+
+function shareTitleText(share: RelaySessionShareDto) {
+  return share.threadTitle?.trim() || share.label?.trim() || 'Thread unavailable';
 }
 
 function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {

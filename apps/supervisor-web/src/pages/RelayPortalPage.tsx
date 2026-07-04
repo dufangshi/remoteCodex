@@ -321,17 +321,24 @@ function RelayAuthPanel({
   const [password, setPassword] = useState('');
   const [registrationPassword, setRegistrationPassword] = useState('');
   const [error, setError] = useState(initialError);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
       if (mode === 'login') {
         await relayLogin({ identifier, password });
       } else {
-        await relayRegister({ email, username, password, registrationPassword });
+        const result = await relayRegister({ email, username, password, registrationPassword });
+        if (result.pendingApproval) {
+          setNotice('Registration request sent. An admin must approve it before you can sign in.');
+          setMode('login');
+          return;
+        }
       }
       await onAuthenticated();
     } catch (caught) {
@@ -378,6 +385,7 @@ function RelayAuthPanel({
           value={password}
         />
         {error ? <RelayNotice tone="danger">{error}</RelayNotice> : null}
+        {notice ? <RelayNotice tone="accent">{notice}</RelayNotice> : null}
         <button className="relay-button-primary h-11 w-full" disabled={submitting} type="submit">
           {submitting ? 'Working...' : mode === 'login' ? 'Sign in' : 'Register'}
         </button>

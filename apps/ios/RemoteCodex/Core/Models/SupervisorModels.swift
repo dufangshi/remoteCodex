@@ -648,7 +648,9 @@ struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
     var deviceId: String
     var deviceName: String
     var threadId: String
+    var threadTitle: String?
     var workspaceId: String?
+    var workspaceLabel: String?
     var label: String?
     var threadAccess: String
     var workspaceAccess: String
@@ -668,7 +670,9 @@ struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
         case deviceId
         case deviceName
         case threadId
+        case threadTitle
         case workspaceId
+        case workspaceLabel
         case label
         case threadAccess
         case workspaceAccess
@@ -690,7 +694,9 @@ struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
         deviceId = try container.decode(String.self, forKey: .deviceId)
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? "Remote Codex device"
         threadId = try container.decode(String.self, forKey: .threadId)
+        threadTitle = try container.decodeIfPresent(String.self, forKey: .threadTitle)
         workspaceId = try container.decodeIfPresent(String.self, forKey: .workspaceId)
+        workspaceLabel = try container.decodeIfPresent(String.self, forKey: .workspaceLabel)
         label = try container.decodeIfPresent(String.self, forKey: .label)
         threadAccess = try container.decodeIfPresent(String.self, forKey: .threadAccess) ?? "read"
         workspaceAccess = try container.decodeIfPresent(String.self, forKey: .workspaceAccess) ?? "none"

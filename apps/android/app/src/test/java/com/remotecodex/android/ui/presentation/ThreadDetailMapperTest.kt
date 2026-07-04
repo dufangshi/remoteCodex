@@ -395,7 +395,7 @@ class ThreadDetailMapperTest {
         assertEquals("high", preview.composer.reasoningEffort)
         assertTrue(preview.composer.fastMode)
         assertTrue(preview.composer.planModeActive)
-        assertEquals("danger-full-access", preview.composer.workspaceModeLabel)
+        assertEquals("full access", preview.composer.workspaceModeLabel)
         assertEquals("turn-1", preview.composer.forkTurnOptions.turns.single().turnId)
         assertEquals(1, preview.composer.forkTurnOptions.turns.single().turnIndex)
         assertEquals("completed", preview.composer.forkTurnOptions.turns.single().status)

@@ -18,17 +18,18 @@ export class RelayRequestBroker {
 
   constructor(private readonly timeoutMs: number) {}
 
-  forward(socket: RelaySocketWriter, message: RelaySupervisorEnvelope) {
+  forward(socket: RelaySocketWriter, message: RelaySupervisorEnvelope, options?: { timeoutMs?: number }) {
     return new Promise<RelayHttpResponsePayload>((resolve, reject) => {
       if (message.type !== 'relay.request') {
         reject(new Error('Only relay.request messages can be forwarded.'));
         return;
       }
 
+      const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(message.requestId);
         reject(new Error('Supervisor relay request timed out.'));
-      }, this.timeoutMs);
+      }, timeoutMs);
 
       this.pendingRequests.set(message.requestId, {
         resolve,

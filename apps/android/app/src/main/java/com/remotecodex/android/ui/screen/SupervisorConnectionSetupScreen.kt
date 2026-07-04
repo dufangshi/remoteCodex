@@ -1541,7 +1541,7 @@ private fun RelayDevicesPanel(
                     busy = busy,
                     expanded = expandedShareId == share.id,
                     mode = RelayShareRowMode.Outgoing,
-                    onOpen = {},
+                    onOpen = { onOpenSharedSession(share) },
                     onToggleAccess = { onToggleShareAccess(share) },
                     onEdit = { onEditShare(share) },
                     onRevoke = { onRevokeShare(share) },
@@ -1638,7 +1638,8 @@ private fun RelaySharedSessionRow(
     onEdit: () -> Unit = {},
     onRevoke: () -> Unit = {},
 ) {
-    val shareTitle = share.label?.takeIf { it.isNotBlank() } ?: share.threadId
+    val shareTitle = shareTitle(share)
+    val workspaceLabel = share.workspaceLabel?.takeIf { it.isNotBlank() } ?: "Workspace unavailable"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1677,10 +1678,16 @@ private fun RelaySharedSessionRow(
                 }
             }
             Text(
-                text = "Thread: ${share.threadId}",
+                text = "Workspace: $workspaceLabel",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Thread: $shareTitle",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1720,6 +1727,15 @@ private fun RelaySharedSessionRow(
             if (mode == RelayShareRowMode.Outgoing) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     GraphButton(
+                        label = "Open",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Default,
+                        size = GraphButtonSize.Small,
+                        icon = GraphActionIcon.Open,
+                        contentDescription = "Open shared thread $shareTitle",
+                        onClick = onOpen,
+                    )
+                    GraphButton(
                         label = "Permissions",
                         enabled = !busy,
                         variant = GraphButtonVariant.Outline,
@@ -1755,6 +1771,12 @@ private fun RelaySharedSessionRow(
 private enum class RelayShareRowMode {
     Incoming,
     Outgoing,
+}
+
+private fun shareTitle(share: RelaySessionShareSummary): String {
+    return share.threadTitle?.takeIf { it.isNotBlank() }
+        ?: share.label?.takeIf { it.isNotBlank() }
+        ?: "Thread unavailable"
 }
 
 @Composable
@@ -1881,9 +1903,9 @@ private fun RelaySharePermissionsDialog(
                 value = label,
                 onValueChange = { label = it },
                 contentDescription = "Shared thread label",
-                placeholder = share.threadId,
+                placeholder = "Optional shared thread label",
             )
-            ConnectionSettingText(label = "Thread", value = share.threadId)
+            ConnectionSettingText(label = "Thread", value = shareTitle(share))
             ConnectionSettingText(label = "Device", value = share.deviceName)
             Text(
                 text = "Thread access",
@@ -1984,7 +2006,7 @@ private fun RevokeRelayShareDialog(
     onClose: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val title = share.label?.takeIf { it.isNotBlank() } ?: share.threadId
+    val title = shareTitle(share)
     GraphDialogOverlay(onDismiss = onClose) {
         GraphDialogFrame(
             title = "Revoke shared thread",
@@ -2008,7 +2030,7 @@ private fun RevokeRelayShareDialog(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            ConnectionSettingText(label = "Thread", value = share.threadId)
+            ConnectionSettingText(label = "Thread", value = shareTitle(share))
             ConnectionSettingText(label = "Device", value = share.deviceName)
             Text(
                 text = "The recipient will lose transcript and workspace access granted by this share.",
