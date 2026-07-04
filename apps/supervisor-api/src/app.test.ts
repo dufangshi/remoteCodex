@@ -11275,6 +11275,98 @@ describe('supervisor api', () => {
     });
   });
 
+  it('pauses and continues a goal without resuming an unloaded thread', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Pause Goal Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Pause without restarting the agent.',
+        status: 'active',
+      }
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Start a turn that will be stopped.',
+      }
+    });
+    const runningRecord = fakeCodexManager.threads.get(createdThread.providerSessionId);
+    const activeTurnId = runningRecord?.turns.at(-1)?.id;
+    if (!activeTurnId) {
+      throw new Error('Expected fake Codex manager to start a turn.');
+    }
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/interrupt`,
+    });
+    fakeCodexManager.completeTurn(
+      createdThread.providerSessionId,
+      activeTurnId,
+      'interrupted',
+    );
+    fakeCodexManager.loadedThreadIds.delete(createdThread.providerSessionId);
+    const baselineResumeCalls = fakeCodexManager.resumeThreadCalls.length;
+    const baselineStartTurnCalls = fakeCodexManager.startTurnCalls.length;
+
+    const pauseResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        status: 'paused',
+      }
+    });
+    expect(pauseResponse.statusCode).toBe(200);
+    expect(pauseResponse.json().goal).toMatchObject({
+      objective: 'Pause without restarting the agent.',
+      status: 'paused',
+    });
+
+    const continueResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        status: 'active',
+      }
+    });
+    expect(continueResponse.statusCode).toBe(200);
+    expect(continueResponse.json().goal).toMatchObject({
+      objective: 'Pause without restarting the agent.',
+      status: 'active',
+    });
+    expect(fakeCodexManager.resumeThreadCalls).toHaveLength(baselineResumeCalls);
+    expect(fakeCodexManager.startTurnCalls).toHaveLength(baselineStartTurnCalls);
+    expect(fakeCodexManager.goalSetCalls.at(-2)).toMatchObject({
+      threadId: createdThread.providerSessionId,
+      status: 'paused',
+    });
+    expect(fakeCodexManager.goalSetCalls.at(-1)).toMatchObject({
+      threadId: createdThread.providerSessionId,
+      status: 'active',
+    });
+  });
+
   it('prices token updates for autonomous goal turns started by app-server events', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

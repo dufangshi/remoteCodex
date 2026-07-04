@@ -287,8 +287,6 @@ export class ThreadService {
     this.goalCoordinator = new ThreadGoalCoordinator(db, providerFeatures, {
       emitThreadEvent: (type, threadId, payload) =>
         this.emitThreadEvent(type, threadId, payload),
-      ensureThreadLoaded: (record) =>
-        this.ensureThreadLoadedForProviderOperation(record),
       requireProviderSessionId: (record) => this.requireProviderSessionId(record),
       runtimeForProvider: (provider) => this.runtimeForProvider(provider),
     });

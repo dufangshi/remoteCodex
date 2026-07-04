@@ -1,5 +1,5 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import {
   AgentProviderCapabilitiesDto,
@@ -104,6 +104,7 @@ import {
   currentThreadHref,
   currentThreadsHref,
   currentWorkspacesHref,
+  relayDeviceIdFromPath,
 } from '../lib/relayRoutes';
 import { useMobileComposerLayout } from './useMobileComposerLayout';
 import { useThreadAuxiliaryActions } from './useThreadAuxiliaryActions';
@@ -357,6 +358,7 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
 
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
@@ -543,8 +545,9 @@ export function ThreadDetailPage() {
     access: null,
     error: null,
   });
+  const relayRouteDeviceId = relayDeviceIdFromPath(location.pathname);
   const relayDeviceRouteActive =
-    relayModeActive() && Boolean(currentRelayDeviceIdFromPath());
+    relayModeActive() && Boolean(relayRouteDeviceId);
   const relayAccess = relayAccessState.access;
   const relayThreadIsOwner =
     !relayDeviceRouteActive || relayAccess?.kind === 'owner';
@@ -1196,6 +1199,8 @@ export function ThreadDetailPage() {
     loadRequestIdRef.current += 1;
     pageContextRequestIdRef.current += 1;
     setDetail(null);
+    setError(null);
+    setLoading(true);
     setChatDraft({
       prompt: '',
       attachments: [],
@@ -1220,7 +1225,7 @@ export function ThreadDetailPage() {
       socketOpen: false,
       lastHealthyAt: null,
     });
-  }, [id, relayAccess?.kind, relayAccess?.threadAccess]);
+  }, [id, relayRouteDeviceId]);
 
   useEffect(() => {
     if (metaSessionCopyState === 'idle') {
@@ -3080,7 +3085,7 @@ export function ThreadDetailPage() {
           detail.thread.activeTurnId && relayThreadCanControl,
         ),
         ...(relayThreadCanControl ? { onInterrupt: handleInterrupt } : {}),
-        ...(relayThreadIsOwner
+        ...(relayThreadCanControl
           ? {
               onCompact: handleCompactThread,
               onOpenForkTurns: handleOpenForkTurns,
@@ -3096,7 +3101,7 @@ export function ThreadDetailPage() {
             }
           : {}),
         goalState,
-        ...(relayThreadIsOwner
+        ...(relayThreadCanControl
           ? {
               onOpenGoal: handleOpenGoal,
               onUpdateGoal: handleUpdateGoal,
@@ -3122,7 +3127,7 @@ export function ThreadDetailPage() {
             }
           : {}),
         onToggleFollow: () => setScrollRequestKey((current) => current + 1),
-        ...(relayThreadIsOwner
+        ...(relayThreadCanControl
           ? { onUpdateSettings: handleUpdateThreadSettings }
           : {}),
         onToggleView: handleToggleView,
@@ -3207,8 +3212,8 @@ export function ThreadDetailPage() {
       cancelPendingSteer: handleCancelPendingSteer,
       sendPrompt: handlePrompt,
       ...(relayThreadCanControl ? { interrupt: handleInterrupt } : {}),
-      ...(relayThreadIsOwner ? { compact: handleCompactThread } : {}),
-      ...(relayThreadIsOwner
+      ...(relayThreadCanControl ? { compact: handleCompactThread } : {}),
+      ...(relayThreadCanControl
         ? { updateSettings: handleUpdateThreadSettings }
         : {}),
       loadHistoryItemDetail: handleLoadHistoryItemDetail,

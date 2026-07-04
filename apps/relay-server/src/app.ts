@@ -267,7 +267,11 @@ export function buildRelayServer(
       } satisfies ApiErrorShape);
       return;
     }
-    const { registrationPassword: _registrationPassword, ...registerInput } = body;
+    const registerInput = {
+      email: body.email,
+      username: body.username,
+      password: body.password,
+    };
     if (settings.approvalRequired) {
       reply.status(202);
       return {
@@ -1431,15 +1435,35 @@ function isAllowedSharedThreadPath(
   if (access.threadAccess !== 'control') {
     return false;
   }
+  const controlReadPatterns = [
+    new RegExp(`^/api/threads/${escapedThreadId}/fork-turns$`),
+  ];
+  if (methodName === 'GET') {
+    return controlReadPatterns.some((pattern) => pattern.test(pathname));
+  }
   const controlPatterns = [
     new RegExp(`^/api/threads/${escapedThreadId}/goal$`),
     new RegExp(`^/api/threads/${escapedThreadId}/resume$`),
     new RegExp(`^/api/threads/${escapedThreadId}/prompt$`),
     new RegExp(`^/api/threads/${escapedThreadId}/interrupt$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/compact$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/fork$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/hooks$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/hooks/trust$`),
+    new RegExp(`^/api/threads/${escapedThreadId}/hooks/untrust$`),
     new RegExp(`^/api/threads/${escapedThreadId}/requests/[^/]+/respond$`),
   ];
   if (methodName === 'PATCH') {
+    return [
+      new RegExp(`^/api/threads/${escapedThreadId}/goal$`),
+      new RegExp(`^/api/threads/${escapedThreadId}/settings$`),
+    ].some((pattern) => pattern.test(pathname));
+  }
+  if (methodName === 'DELETE') {
     return new RegExp(`^/api/threads/${escapedThreadId}/goal$`).test(pathname);
+  }
+  if (methodName === 'PUT') {
+    return new RegExp(`^/api/threads/${escapedThreadId}/hooks$`).test(pathname);
   }
   if (methodName === 'POST') {
     return controlPatterns.some((pattern) => pattern.test(pathname));

@@ -36,7 +36,6 @@ interface ThreadGoalCoordinatorCallbacks {
     threadId: string,
     payload: ThreadEventPayloadMap[Type],
   ): void;
-  ensureThreadLoaded(record: ThreadGoalRecordContext): Promise<void>;
   requireProviderSessionId(record: { providerSessionId?: string | null }): string;
   runtimeForProvider(provider: string | null | undefined): AgentRuntime;
 }
@@ -86,7 +85,6 @@ export class ThreadGoalCoordinator {
 
     try {
       await this.ensureGoalsFeatureEnabled(record.provider);
-      await this.callbacks.ensureThreadLoaded(record);
       const activeGoal = this.listThreadGoalHistory(record.id).find((goal) =>
         ['active', 'paused', 'budgetLimited'].includes(goal.status),
       ) ?? null;
@@ -152,7 +150,6 @@ export class ThreadGoalCoordinator {
 
     try {
       await this.ensureGoalsFeatureEnabled(record.provider);
-      await this.callbacks.ensureThreadLoaded(record);
       const cleared = await runtime.clearGoal(providerSessionId);
       markActiveThreadGoalRecordTerminated(this.db, record.id);
       const goalHistory = this.listThreadGoalHistory(record.id);
@@ -174,7 +171,6 @@ export class ThreadGoalCoordinator {
     try {
       if (options.allowEnableFeature) {
         await this.ensureGoalsFeatureEnabled(record.provider);
-        await this.callbacks.ensureThreadLoaded(record);
       }
       const runtime = this.callbacks.runtimeForProvider(record.provider);
       if (!runtime.getGoal || !runtime.capabilities.controls.goals) {

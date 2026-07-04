@@ -27,3 +27,9 @@ apps/android/local.properties
 apps/android/thread-web/dist/
 apps/android/app/src/main/assets/thread-ui/
 apps/ios/RemoteCodex/Resources/WebThreadDist/
+apps/ios/build/
+apps/ios/.temp/
+apps/ios/**/xcuserdata/
+apps/ios/**/*.xcuserstate
+apps/ios/DerivedData/
+apps/.local-does-not-exist

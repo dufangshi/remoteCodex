@@ -1107,6 +1107,27 @@ describe('relay server', () => {
     });
     expect(readonlyPromptResponse.statusCode).toBe(403);
 
+    const readonlyGoalUpdateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/relay/devices/${deviceId}/api/threads/11111111-1111-4111-8111-111111111111/goal`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        status: 'blocked',
+      },
+    });
+    expect(readonlyGoalUpdateResponse.statusCode).toBe(403);
+
+    const readonlyForkTurnsResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/api/threads/11111111-1111-4111-8111-111111111111/fork-turns`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(readonlyForkTurnsResponse.statusCode).toBe(403);
+
     const otherThreadResponse = await app.inject({
       method: 'GET',
       url: `/relay/devices/${deviceId}/api/threads/22222222-2222-4222-8222-222222222222`,
@@ -1282,11 +1303,6 @@ describe('relay server', () => {
         url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}`,
         payload: { title: 'Renamed thread' },
       },
-      {
-        method: 'PATCH',
-        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/settings`,
-        payload: { model: 'gpt-5.5' },
-      },
     ] as const;
 
     for (const request of ownerOnlyRequests) {
@@ -1331,6 +1347,80 @@ describe('relay server', () => {
         url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/goal`,
         payload: { status: 'blocked' },
       },
+      {
+        method: 'PATCH',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/settings`,
+        payload: { fastMode: true },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/compact`,
+        payload: {},
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/fork`,
+        payload: { mode: 'latest' },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/hooks`,
+        payload: {
+          scope: 'global',
+          event: 'stop',
+          matcher: '',
+          command: 'echo ok',
+          timeoutSec: 30,
+        },
+      },
+      {
+        method: 'PUT',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/hooks`,
+        payload: {
+          target: {
+            scope: 'global',
+            event: 'stop',
+            matcher: '',
+            command: 'echo ok',
+          },
+          scope: 'global',
+          event: 'stop',
+          matcher: '',
+          command: 'echo next',
+          timeoutSec: 30,
+        },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/hooks/trust`,
+        payload: {
+          scope: 'global',
+          event: 'stop',
+          matcher: '',
+          command: 'echo ok',
+          hash: 'sha256:abc',
+        },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/hooks/untrust`,
+        payload: {
+          scope: 'global',
+          event: 'stop',
+          matcher: '',
+          command: 'echo ok',
+        },
+      },
+    ] as const;
+    const collaboratorRequestsWithoutPayload = [
+      {
+        method: 'DELETE',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/goal`,
+      },
+      {
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/fork-turns`,
+      },
     ] as const;
 
     for (const request of collaboratorRequests) {
@@ -1341,6 +1431,16 @@ describe('relay server', () => {
           authorization: `Bearer ${friendToken}`,
         },
         payload: request.payload,
+      });
+      expect(response.statusCode, `${request.method} ${request.url}`).toBe(503);
+    }
+    for (const request of collaboratorRequestsWithoutPayload) {
+      const response = await app.inject({
+        method: request.method,
+        url: request.url,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
       });
       expect(response.statusCode, `${request.method} ${request.url}`).toBe(503);
     }

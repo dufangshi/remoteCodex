@@ -277,19 +277,6 @@ function setPromptValue(element: HTMLElement, value: string) {
   fireEvent.input(element);
 }
 
-async function openThreadActionsDialog() {
-  const actionsButtons = Array.from(
-    document.body.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="Thread actions"]',
-    ),
-  );
-  expect(actionsButtons.length).toBeGreaterThan(0);
-  actionsButtons.forEach((button) => {
-    fireEvent.click(button);
-  });
-  await screen.findByRole('dialog', { name: 'Thread actions', hidden: true });
-}
-
 function stubMobileViewport() {
   const addEventListener = vi.fn();
   const removeEventListener = vi.fn();
@@ -835,6 +822,164 @@ describe('ThreadDetailPage', () => {
         requestedUrls.some((url) => url.includes('/api/agent-runtimes/codex/models')),
       ).toBe(true);
     });
+  });
+
+  it('keeps a controlled relay thread visible and enables slash control tools', async () => {
+    const codexBackendWithToolbox = {
+      ...codexBackendResponse,
+      managementSchema: {
+        hostConfigFiles: [],
+        toolboxItems: [
+          { action: 'goal', command: '/goal', label: 'Goal' },
+          { action: 'compact', command: '/compact', label: 'Compact' },
+          { action: 'fork', command: '/fork', label: 'Fork' },
+        ],
+        hookCommandTemplates: [],
+        providerConfigFormat: 'none',
+        mcpConfigFormat: 'none',
+        configArchives: false,
+        buildRestart: false,
+      },
+    };
+    const detailResponse = {
+      thread: {
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        provider: 'codex',
+        providerSessionId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'idle',
+        summaryText: 'Preview',
+        lastError: null,
+        activeTurnId: null,
+        isLoaded: true,
+        isPinned: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastTurnStartedAt: null,
+        lastTurnCompletedAt: null,
+      },
+      workspace: {
+        id: 'workspace-1',
+        hostId: 'host-1',
+        label: 'Demo Workspace',
+        absPath: '/tmp/demo',
+        isFavorite: false,
+        createdAt: new Date().toISOString(),
+        lastOpenedAt: null,
+      },
+      workspacePathStatus: 'present',
+      pendingRequests: [],
+      totalTurnCount: 1,
+      turns: [
+        {
+          id: 'turn-1',
+          startedAt: new Date().toISOString(),
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'item-1',
+              kind: 'userMessage',
+              text: 'hello',
+            },
+          ],
+        },
+      ],
+    };
+    const accessDeferred =
+      createDeferred<ReturnType<typeof okJsonResponse>>();
+    const requestedUrls: string[] = [];
+    window.localStorage.setItem('remote-codex-relay-mode', 'true');
+    window.localStorage.setItem('remote-codex-relay-token', 'relay-token');
+    window.localStorage.setItem('remote-codex-relay-device-id', 'device-1');
+    window.history.replaceState(null, '', '/devices/device-1/threads/thread-1');
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+
+        if (url.startsWith('/relay/access?')) {
+          return accessDeferred.promise;
+        }
+
+        if (url.startsWith('/relay/devices/device-1/api/threads/thread-1?')) {
+          return okJsonResponse(detailResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/goal')) {
+          return okJsonResponse({ goal: null });
+        }
+
+        if (url.endsWith('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendWithToolbox);
+        }
+
+        if (url.endsWith('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([detailResponse.thread]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/devices/device-1/threads/thread-1']}>
+        <Routes>
+          <Route path="/devices/:relayDeviceId/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('hello');
+    expect(
+      requestedUrls.some((url) => url.startsWith('/relay/access?')),
+    ).toBe(true);
+
+    await act(async () => {
+      accessDeferred.resolve(
+        okJsonResponse({
+          kind: 'shared',
+          shareId: 'share-1',
+          threadAccess: 'control',
+          workspaceAccess: 'read',
+          workspaceId: 'workspace-1',
+        }),
+      );
+      await accessDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('hello')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Loading thread detail...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unable to resolve this thread.')).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        requestedUrls.some((url) => url.endsWith('/api/agent-runtimes/codex/status')),
+      ).toBe(true);
+    });
+
+    const slashButtons = screen.getAllByLabelText('Open slash toolbox');
+    const slashButton = slashButtons[0];
+    expect(slashButton).toBeDefined();
+    fireEvent.click(slashButton!);
+    fireEvent.click(await screen.findByText('/goal'));
+
+    expect(await screen.findByLabelText('Goal token budget')).toBeInTheDocument();
+    expect(screen.queryByText('/goal is unavailable in this view.')).not.toBeInTheDocument();
   });
 
   it('does not re-render the timeline when typing in the chat composer', async () => {
