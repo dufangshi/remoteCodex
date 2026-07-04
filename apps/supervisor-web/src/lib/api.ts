@@ -454,6 +454,7 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
 
 function withAuthInit(init: RequestInit = {}, authMode: RequestAuthMode = 'default'): RequestInit {
   const headers = new Headers(init.headers);
+  const relayMode = relayModeEnabled();
   if (authMode !== 'none' && !headers.has('Authorization')) {
     if (authMode === 'relay-admin') {
       const relayAdminToken = readStoredRelayAdminToken();
@@ -463,9 +464,9 @@ function withAuthInit(init: RequestInit = {}, authMode: RequestAuthMode = 'defau
     } else {
       const relayToken = readStoredRelayToken();
       const token = readStoredAuthToken();
-      if (relayModeEnabled() && relayToken) {
+      if (relayMode && relayToken) {
         headers.set('Authorization', `Bearer ${relayToken}`);
-      } else if (token) {
+      } else if (!relayMode && token) {
         headers.set('Authorization', `Bearer ${token}`);
       }
     }
@@ -473,7 +474,7 @@ function withAuthInit(init: RequestInit = {}, authMode: RequestAuthMode = 'defau
 
   return {
     ...init,
-    credentials: init.credentials ?? 'same-origin',
+    credentials: init.credentials ?? (relayMode ? 'omit' : 'same-origin'),
     headers,
   };
 }
@@ -525,7 +526,7 @@ export async function logout() {
 
 export function fetchRelaySession() {
   return request<RelaySessionDto>('/relay/auth/session', {
-    credentials: 'same-origin',
+    cache: 'no-store',
   });
 }
 
@@ -534,9 +535,16 @@ export async function relayLogin(input: { identifier: string; password: string }
   const result = await request<RelayLoginResultDto>('/relay/auth/login', {
     method: 'POST',
     body: JSON.stringify(input),
-  });
+  }, { auth: 'none' });
   setStoredRelayToken(result.token);
   return result;
+}
+
+export function fetchRelayAdminSession() {
+  enableRelayMode();
+  return request<RelaySessionDto>('/relay/auth/session', {
+    cache: 'no-store',
+  }, { auth: 'relay-admin' });
 }
 
 export async function relayAdminLogin(input: { username: string; password: string }) {
@@ -552,6 +560,11 @@ export async function relayAdminLogin(input: { username: string; password: strin
   return result;
 }
 
+export async function relayAdminLogout() {
+  setStoredRelayAdminToken(null);
+  return fetchRelayAdminSession();
+}
+
 export async function relayRegister(input: {
   email: string;
   username: string;
@@ -562,7 +575,7 @@ export async function relayRegister(input: {
   const result = await request<RelayRegisterResultDto>('/relay/auth/register', {
     method: 'POST',
     body: JSON.stringify(input),
-  });
+  }, { auth: 'none' });
   setStoredRelayToken(result.token ?? null);
   return result;
 }

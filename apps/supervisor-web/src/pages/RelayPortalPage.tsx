@@ -1,16 +1,18 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ChevronDown } from 'lucide-react';
 
 import type {
-  CreateRelaySessionShareInput,
   RelayCreateDeviceResultDto,
   RelayPortalSummaryDto,
   RelaySessionDto,
+  RelaySessionShareDto,
+  RelayThreadAccessDto,
+  RelayWorkspaceAccessDto,
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
   createRelayDevice,
-  createRelayShare,
   deleteRelayDevice,
   enableRelayMode,
   fetchRelayPortal,
@@ -21,6 +23,7 @@ import {
   revokeRelayShare,
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
+  updateRelayShare,
 } from '../lib/api';
 import {
   threadHref,
@@ -45,6 +48,8 @@ export function RelayPortalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createdDevice, setCreatedDevice] = useState<RelayCreateDeviceResultDto | null>(null);
+  const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
+  const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(null);
 
   async function load() {
     setLoading(true);
@@ -92,13 +97,18 @@ export function RelayPortalPage() {
     await load();
   }
 
-  async function handleShare(input: CreateRelaySessionShareInput) {
-    await createRelayShare(input);
+  async function handleRevokeShare(shareId: string) {
+    await revokeRelayShare(shareId);
     await load();
   }
 
-  async function handleRevokeShare(shareId: string) {
-    await revokeRelayShare(shareId);
+  async function handleUpdateShare(share: RelaySessionShareDto, input: {
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+  }) {
+    await updateRelayShare(share.id, input);
+    setEditingShare(null);
     await load();
   }
 
@@ -181,7 +191,7 @@ export function RelayPortalPage() {
           </RelayNotice>
         ) : null}
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+        <section className="grid gap-4">
           <Panel title="Devices" description="Owned devices and sessions shared with you.">
             <DeviceCreateForm onCreate={handleCreateDevice} />
             <div className="mt-4 divide-y divide-[var(--theme-border)] rounded-lg border border-[var(--theme-border)]">
@@ -244,10 +254,10 @@ export function RelayPortalPage() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-                            {share.label || share.threadId}
+                            {shareTitleText(share)}
                           </p>
                           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                            {share.ownerUsername} / {share.deviceName}
+                            {share.workspaceLabel ?? 'Workspace unavailable'} / {share.ownerUsername} / {share.deviceName}
                           </p>
                         </div>
                         <button
@@ -268,13 +278,6 @@ export function RelayPortalPage() {
               </div>
             </div>
           </Panel>
-
-          <Panel title="Invite" description="Share a single thread with another relay user.">
-            <ShareForm
-              devices={portal?.devices ?? []}
-              onShare={handleShare}
-            />
-          </Panel>
         </section>
 
         <section>
@@ -282,21 +285,15 @@ export function RelayPortalPage() {
             <div className="space-y-3">
               {portal?.sharedByMe.length ? (
                 portal.sharedByMe.map((share) => (
-                  <article key={share.id} className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
-                    <p className="text-sm font-medium text-[var(--theme-fg)]">
-                      {share.label || share.threadId}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                      Shared with {share.targetUsername} on {share.deviceName}
-                    </p>
-                    <button
-                      className="relay-button-secondary mt-3"
-                      onClick={() => void handleRevokeShare(share.id)}
-                      type="button"
-                    >
-                      Revoke
-                    </button>
-                  </article>
+                  <SharedByMeRow
+                    expanded={expandedShareId === share.id}
+                    key={share.id}
+                    onEdit={() => setEditingShare(share)}
+                    onOpen={() => openSharedSession(share.deviceId, share.threadId)}
+                    onRevoke={() => void handleRevokeShare(share.id)}
+                    onToggleAccess={() => setExpandedShareId((current) => (current === share.id ? null : share.id))}
+                    share={share}
+                  />
                 ))
               ) : (
                 <p className="text-sm text-[var(--theme-fg-muted)]">No active shares.</p>
@@ -304,6 +301,13 @@ export function RelayPortalPage() {
             </div>
           </Panel>
         </section>
+        {editingShare ? (
+          <SharePermissionsDialog
+            onClose={() => setEditingShare(null)}
+            onSave={(input) => void handleUpdateShare(editingShare, input)}
+            share={editingShare}
+          />
+        ) : null}
       </div>
     </RelayFrame>
   );
@@ -445,112 +449,166 @@ function DeviceCreateForm({ onCreate }: { onCreate: (name: string) => Promise<vo
   );
 }
 
-function ShareForm({
-  devices,
-  onShare,
+function SharedByMeRow({
+  expanded,
+  onEdit,
+  onOpen,
+  onRevoke,
+  onToggleAccess,
+  share,
 }: {
-  devices: RelayPortalSummaryDto['devices'];
-  onShare: (input: CreateRelaySessionShareInput) => Promise<void>;
+  expanded: boolean;
+  onEdit: () => void;
+  onOpen: () => void;
+  onRevoke: () => void;
+  onToggleAccess: () => void;
+  share: RelaySessionShareDto;
 }) {
-  const firstDeviceId = useMemo(() => devices[0]?.id ?? '', [devices]);
-  const [deviceId, setDeviceId] = useState(firstDeviceId);
-  const [targetIdentifier, setTargetIdentifier] = useState('');
-  const [threadId, setThreadId] = useState('');
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [threadAccess, setThreadAccess] = useState<CreateRelaySessionShareInput['threadAccess']>('control');
-  const [workspaceAccess, setWorkspaceAccess] = useState<CreateRelaySessionShareInput['workspaceAccess']>('none');
-  const [label, setLabel] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const lastAccessLabel = share.lastAccessedAt
+    ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
+    : 'Not accessed yet';
 
-  useEffect(() => {
-    if (!deviceId && firstDeviceId) {
-      setDeviceId(firstDeviceId);
-    }
-  }, [deviceId, firstDeviceId]);
+  return (
+    <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+            {shareTitleText(share)}
+          </p>
+          <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
+            <p className="truncate">
+              Workspace: <span className="text-[var(--theme-fg-soft)]">{share.workspaceLabel ?? 'Workspace unavailable'}</span>
+            </p>
+            <p className="truncate">
+              Thread: <span className="text-[var(--theme-fg-soft)]">{shareTitleText(share)}</span>
+            </p>
+            <p className="truncate">To {share.targetUsername} on {share.deviceName}</p>
+            <p className="truncate">Last access: {lastAccessLabel}</p>
+          </div>
+          <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {share.threadAccess === 'read' ? 'View only' : 'Collaborator'}
+            </span>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {workspaceAccessLabel(share.workspaceAccess)}
+            </span>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {share.revokedAt ? 'Revoked' : 'Active'}
+            </span>
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="relay-button-primary" onClick={onOpen} type="button">
+            Open
+          </button>
+          <button className="relay-button-secondary" onClick={onEdit} type="button">
+            Permissions
+          </button>
+          <button className="relay-button-secondary inline-flex items-center gap-2" onClick={onToggleAccess} type="button">
+            Access
+            <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+          <button className="relay-button-secondary text-[var(--status-danger-fg)]" onClick={onRevoke} type="button">
+            Revoke
+          </button>
+        </div>
+      </div>
+      {expanded ? (
+        <div className="absolute right-3 top-[calc(100%-0.5rem)] z-20 w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3 shadow-xl">
+          {share.accessEvents.length ? (
+            <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
+              {share.accessEvents.map((event) => (
+                <li className="flex items-center justify-between gap-3" key={event.id}>
+                  <span className="font-medium text-[var(--theme-fg)]">{event.username}</span>
+                  <span>{formatRelayTimestamp(event.accessedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              This shared thread has not been accessed yet.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </article>
+  );
+}
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+function SharePermissionsDialog({
+  onClose,
+  onSave,
+  share,
+}: {
+  onClose: () => void;
+  onSave: (input: {
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+  }) => void;
+  share: RelaySessionShareDto;
+}) {
+  const [label, setLabel] = useState(share.label ?? '');
+  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(share.threadAccess);
+  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(share.workspaceAccess);
+  const workspaceAccessLocked = !share.workspaceId;
+
+  function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
-    setMessage(null);
-    try {
-      await onShare({
-        targetIdentifier,
-        deviceId,
-        threadId,
-        workspaceId: workspaceId.trim() || null,
-        threadAccess,
-        workspaceAccess,
-        ...(label.trim() ? { label } : {}),
-      });
-      setTargetIdentifier('');
-      setThreadId('');
-      setWorkspaceId('');
-      setThreadAccess('control');
-      setWorkspaceAccess('none');
-      setLabel('');
-      setMessage('Invitation created.');
-    } catch (caught) {
-      setMessage(errorMessage(caught, 'Unable to create invitation.'));
-    } finally {
-      setBusy(false);
-    }
+    onSave({
+      label: label.trim() || null,
+      threadAccess,
+      workspaceAccess: workspaceAccessLocked ? 'none' : workspaceAccess,
+    });
   }
 
   return (
-    <form className="space-y-3" onSubmit={submit}>
-      <label className="block text-sm text-[var(--theme-fg-soft)]">
-        Device
-        <select
-          className="relay-input mt-2 w-full"
-          onChange={(event) => setDeviceId(event.target.value)}
-          value={deviceId}
-        >
-          {devices.map((device) => (
-            <option key={device.id} value={device.id}>
-              {device.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <RelayInput label="Relay identifier" onChange={setTargetIdentifier} value={targetIdentifier} />
-      <RelayInput label="Thread ID" onChange={setThreadId} value={threadId} />
-      <label className="block text-sm text-[var(--theme-fg-soft)]">
-        Thread access
-        <select
-          className="relay-input mt-2 w-full"
-          onChange={(event) => setThreadAccess(event.target.value as CreateRelaySessionShareInput['threadAccess'])}
-          value={threadAccess}
-        >
-          <option value="control">Full control</option>
-          <option value="read">Read only</option>
-        </select>
-      </label>
-      <label className="block text-sm text-[var(--theme-fg-soft)]">
-        Workspace
-        <select
-          className="relay-input mt-2 w-full"
-          onChange={(event) => setWorkspaceAccess(event.target.value as CreateRelaySessionShareInput['workspaceAccess'])}
-          value={workspaceAccess}
-        >
-          <option value="none">No access</option>
-          <option value="read">Read files</option>
-          <option value="write">Read and write files</option>
-        </select>
-      </label>
-      {workspaceAccess !== 'none' ? (
-        <RelayInput label="Workspace ID" onChange={setWorkspaceId} value={workspaceId} />
-      ) : null}
-      <RelayInput label="Label" onChange={setLabel} value={label} />
-      {message ? <p className="text-sm text-[var(--theme-fg-muted)]">{message}</p> : null}
-      <button
-        className="relay-button-primary"
-        disabled={busy || !deviceId || !targetIdentifier.trim() || !threadId.trim()}
-        type="submit"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+      <form
+        className="w-full max-w-lg rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        onSubmit={submit}
       >
-        Invite
-      </button>
-    </form>
+        <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared thread permissions</h2>
+        <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+          {share.targetUsername} can access {shareTitleText(share)}.
+        </p>
+        <div className="mt-5 space-y-4">
+          <RelayInput label="Label" onChange={setLabel} value={label} />
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Thread access
+            <select
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+              value={threadAccess}
+            >
+              <option value="read">View only</option>
+              <option value="control">Collaborator</option>
+            </select>
+          </label>
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Workspace access
+            <select
+              className="relay-input mt-2 w-full"
+              disabled={workspaceAccessLocked}
+              onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+              value={workspaceAccessLocked ? 'none' : workspaceAccess}
+            >
+              <option value="none">No workspace</option>
+              <option value="read">Workspace read</option>
+              <option value="write">Workspace write</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="relay-button-secondary" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button className="relay-button-primary" type="submit">
+            Save permissions
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -649,4 +707,20 @@ function relayWebsocketBaseUrl() {
 
 function formatRelayTimestamp(value: string | null | undefined) {
   return value ?? 'never';
+}
+
+function shareTitleText(share: RelaySessionShareDto) {
+  return share.threadTitle?.trim() || share.label?.trim() || 'Thread unavailable';
+}
+
+function workspaceAccessLabel(access: RelayWorkspaceAccessDto) {
+  switch (access) {
+    case 'write':
+      return 'Workspace write';
+    case 'read':
+      return 'Workspace read';
+    case 'none':
+    default:
+      return 'No workspace';
+  }
 }

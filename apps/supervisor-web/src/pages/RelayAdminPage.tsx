@@ -8,6 +8,7 @@ import {
   Clock3,
   Database,
   KeyRound,
+  LogOut,
   RefreshCw,
   Search,
   Settings,
@@ -20,10 +21,10 @@ import type {
   RelayAdminDeviceDto,
   RelayAdminSummaryDto,
   RelayRegistrationSettingsDto,
+  RelaySessionDto,
   RelaySessionShareDto,
   RelayUserDto,
 } from '@remote-codex/shared';
-import { RelayUserMenu } from '../components/RelayUserMenu';
 import { LoginPage } from './LoginPage';
 import {
   ApiError,
@@ -31,7 +32,9 @@ import {
   deleteRelayAdminUser,
   enableRelayMode,
   fetchRelayAdmin,
+  fetchRelayAdminSession,
   rejectRelayRegistration,
+  relayAdminLogout,
   relayAdminLogin,
   resetRelayAdminUserPassword,
   setRelayUserEnabled,
@@ -218,7 +221,10 @@ export function RelayAdminPage() {
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
-      <RelayUserMenu />
+      <RelayAdminUserMenu onLogout={() => {
+        setSummary(null);
+        setLoginRequired(true);
+      }} />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <header className="flex flex-col gap-4 border-b border-[var(--theme-border)] pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -348,6 +354,79 @@ function MetricCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
+  const [session, setSession] = useState<RelaySessionDto | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRelayAdminSession()
+      .then((nextSession) => {
+        if (!cancelled) {
+          setSession(nextSession.authenticated ? nextSession : null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSession(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const user = session?.user ?? null;
+  if (!user) {
+    return null;
+  }
+
+  async function logout() {
+    await relayAdminLogout();
+    setSession(null);
+    setOpen(false);
+    onLogout();
+  }
+
+  return (
+    <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.55rem)] z-50">
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Relay admin menu for ${user.username}`}
+        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] text-sm font-semibold text-[var(--theme-fg)] shadow-lg transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        {initials(user.username)}
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-xl"
+          role="menu"
+        >
+          <div className="border-b border-[var(--theme-border)] px-3 py-2">
+            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{user.username}</p>
+            <p className="truncate text-xs text-[var(--theme-fg-muted)]">{user.email}</p>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+              Admin session
+            </p>
+          </div>
+          <button
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)]"
+            onClick={() => void logout()}
+            role="menuitem"
+            type="button"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout admin
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1134,4 +1213,12 @@ function compareNullableDate(field: 'lastSeenAt') {
 
 function formatTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
+}
+
+function initials(username: string | null | undefined) {
+  const normalized = username?.trim() ?? '';
+  if (!normalized) {
+    return '??';
+  }
+  return Array.from(normalized).slice(0, 2).join('').toUpperCase();
 }

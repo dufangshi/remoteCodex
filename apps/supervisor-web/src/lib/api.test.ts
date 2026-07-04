@@ -22,6 +22,8 @@ import {
   login,
   enableRelayMode,
   fetchRelayAdmin,
+  fetchRelaySession,
+  relayLogin,
   relayAdminLogin,
   renameProviderHostConfigArchive,
   restartAgentBackend,
@@ -96,6 +98,7 @@ describe('api request helper', () => {
     expect(call?.[0]).toBe('/relay/admin');
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer admin-token');
+    expect(call?.[1]?.credentials).toBe('omit');
   });
 
   it('stores admin login separately from the normal relay token', async () => {
@@ -135,6 +138,45 @@ describe('api request helper', () => {
     }));
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.has('Authorization')).toBe(false);
+    expect(call?.[1]?.credentials).toBe('omit');
+  });
+
+  it('keeps relay portal login and session checks cookie-independent', async () => {
+    enableRelayMode();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          token: 'normal-token',
+          session: {
+            authenticated: true,
+            user: {
+              id: 'normal-user',
+              username: 'normal',
+              email: 'normal@example.test',
+              role: 'user',
+              enabled: true,
+              createdAt: '2026-07-04T00:00:00.000Z',
+            },
+            registrationEnabled: true,
+          },
+        }),
+      }),
+    );
+
+    await fetchRelaySession();
+    let call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/relay/auth/session');
+    expect(call?.[1]?.credentials).toBe('omit');
+    expect(new Headers(call?.[1]?.headers).has('Authorization')).toBe(false);
+
+    await relayLogin({ identifier: 'normal', password: 'secret' });
+    call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/relay/auth/login');
+    expect(call?.[1]?.credentials).toBe('omit');
+    expect(new Headers(call?.[1]?.headers).has('Authorization')).toBe(false);
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('normal-token');
   });
 
   it('does not force a JSON content type for body-less post requests', async () => {
