@@ -720,6 +720,58 @@ describe('relay server', () => {
       }),
     ]);
 
+    const ownerPortalBeforeAccessResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+    });
+    expect(ownerPortalBeforeAccessResponse.statusCode).toBe(200);
+    expect(ownerPortalBeforeAccessResponse.json().sharedByMe).toEqual([
+      expect.objectContaining({
+        deviceId,
+        targetUsername: 'friend',
+        threadId: 'thread-1',
+        lastAccessedAt: null,
+        lastAccessedByUsername: null,
+        accessEvents: [],
+      }),
+    ]);
+
+    const sharedThreadResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/api/threads/thread-1`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(sharedThreadResponse.statusCode).toBe(503);
+
+    const ownerPortalAfterAccessResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+    });
+    expect(ownerPortalAfterAccessResponse.statusCode).toBe(200);
+    expect(ownerPortalAfterAccessResponse.json().sharedByMe).toEqual([
+      expect.objectContaining({
+        deviceId,
+        targetUsername: 'friend',
+        threadId: 'thread-1',
+        lastAccessedByUsername: 'friend',
+        accessEvents: [
+          expect.objectContaining({
+            username: 'friend',
+            shareId: shareResponse.json().id,
+          }),
+        ],
+      }),
+    ]);
+    expect(ownerPortalAfterAccessResponse.json().sharedByMe[0].lastAccessedAt).toEqual(expect.any(String));
+
     const accessResponse = await app.inject({
       method: 'GET',
       url: `/relay/access?deviceId=${deviceId}&threadId=thread-1&workspaceId=33333333-3333-4333-8333-333333333333`,

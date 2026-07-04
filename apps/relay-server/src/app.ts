@@ -563,6 +563,9 @@ export function buildRelayServer(
           return;
         }
 
+        if (access.kind === 'shared') {
+          store.recordShareAccess(access.share, session.user);
+        }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
     });
@@ -593,6 +596,9 @@ export function buildRelayServer(
         if (!access) {
           socket.close(1008, 'Device access is not allowed.');
           return;
+        }
+        if (access.kind === 'shared') {
+          store.recordShareAccess(access.share, session.user);
         }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
@@ -686,6 +692,10 @@ async function forwardRelayHttp(input: {
       message: 'This shared session does not allow that operation.',
     } satisfies ApiErrorShape);
     return;
+  }
+
+  if (access.kind === 'shared') {
+    input.store.recordShareAccess(access.share, input.user);
   }
 
   const supervisor = input.state.supervisors.get(input.deviceId);

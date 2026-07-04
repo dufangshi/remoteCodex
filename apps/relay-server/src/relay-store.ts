@@ -11,6 +11,7 @@ import type {
   RelayDeviceDto,
   RelayPortalSummaryDto,
   RelaySessionDto,
+  RelaySessionShareAccessDto,
   RelaySessionShareDto,
   RelayThreadAccessDto,
   RelayUserDto,
@@ -247,6 +248,9 @@ export class RelayStore {
       createdAt: new Date().toISOString(),
       revokedAt: null,
       expiresAt: normalizeExpiresAt(input.expiresAt),
+      lastAccessedAt: null,
+      lastAccessedByUsername: null,
+      accessEvents: [],
     };
     this.insertShare(share);
     return share;
@@ -463,15 +467,36 @@ export class RelayStore {
     };
   }
 
+  recordShareAccess(share: RelaySessionShareDto, user: RelayUserDto) {
+    if (share.revokedAt || (share.expiresAt && share.expiresAt <= new Date().toISOString())) {
+      return;
+    }
+    const accessedAt = new Date().toISOString();
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_share_access_events (
+            id, share_id, user_id, username, accessed_at
+          ) VALUES (?, ?, ?, ?, ?)
+        `,
+      )
+      .run(crypto.randomUUID(), share.id, user.id, user.username, accessedAt);
+  }
+
   private publicShare(share: RelaySessionShareDto): RelaySessionShareDto {
     const owner = this.getUser(share.ownerUserId);
     const target = this.getUser(share.targetUserId);
     const device = this.getDevice(share.deviceId);
+    const accessEvents = this.getShareAccessEvents(share.id);
+    const lastAccess = accessEvents[0] ?? null;
     return {
       ...share,
       ownerUsername: share.ownerUsername ?? owner?.username ?? 'unknown',
       targetUsername: share.targetUsername ?? target?.username ?? 'unknown',
       deviceName: share.deviceName ?? device?.name ?? 'Remote Codex device',
+      lastAccessedAt: lastAccess?.accessedAt ?? null,
+      lastAccessedByUsername: lastAccess?.username ?? null,
+      accessEvents,
     };
   }
 
@@ -526,6 +551,16 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_shares_owner_idx ON relay_shares(owner_user_id);
       CREATE INDEX IF NOT EXISTS relay_shares_target_idx ON relay_shares(target_user_id);
       CREATE INDEX IF NOT EXISTS relay_shares_device_thread_idx ON relay_shares(device_id, thread_id);
+
+      CREATE TABLE IF NOT EXISTS relay_share_access_events (
+        id TEXT PRIMARY KEY,
+        share_id TEXT NOT NULL REFERENCES relay_shares(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        username TEXT NOT NULL,
+        accessed_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_share_access_events_share_idx ON relay_share_access_events(share_id, accessed_at DESC);
     `);
     this.ensureColumn('relay_devices', 'token', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
@@ -775,6 +810,27 @@ export class RelayStore {
       );
   }
 
+  private getShareAccessEvents(shareId: string): RelaySessionShareAccessDto[] {
+    return (
+      this.sqlite
+        .prepare(
+          `
+            SELECT * FROM relay_share_access_events
+            WHERE share_id = ?
+            ORDER BY accessed_at DESC
+            LIMIT 8
+          `,
+        )
+        .all(shareId) as ShareAccessRow[]
+    ).map((row) => ({
+      id: row.id,
+      shareId: row.share_id,
+      userId: row.user_id,
+      username: row.username,
+      accessedAt: row.accessed_at,
+    }));
+  }
+
   private updateShare(
     shareId: string,
     input: {
@@ -909,6 +965,9 @@ export class RelayStore {
       createdAt: row.created_at,
       revokedAt: row.revoked_at,
       expiresAt: row.expires_at ?? null,
+      lastAccessedAt: null,
+      lastAccessedByUsername: null,
+      accessEvents: [],
     };
   }
 }
@@ -950,6 +1009,14 @@ interface ShareRow {
   created_at: string;
   revoked_at: string | null;
   expires_at: string | null;
+}
+
+interface ShareAccessRow {
+  id: string;
+  share_id: string;
+  user_id: string;
+  username: string;
+  accessed_at: string;
 }
 
 export interface DeviceConnectionStatus {

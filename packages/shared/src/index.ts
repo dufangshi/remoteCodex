@@ -142,6 +142,17 @@ export interface RelaySessionShareDto {
   createdAt: string;
   revokedAt: string | null;
   expiresAt: string | null;
+  lastAccessedAt: string | null;
+  lastAccessedByUsername: string | null;
+  accessEvents: RelaySessionShareAccessDto[];
+}
+
+export interface RelaySessionShareAccessDto {
+  id: string;
+  shareId: string;
+  userId: string;
+  username: string;
+  accessedAt: string;
 }
 
 export interface RelayEffectiveAccessDto {

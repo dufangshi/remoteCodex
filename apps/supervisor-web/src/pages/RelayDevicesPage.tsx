@@ -1,5 +1,5 @@
-import { Copy, MonitorSmartphone, Plug, Plus, RefreshCcw, Trash2 } from 'lucide-react';
-import { FormEvent, useEffect, useState } from 'react';
+import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Trash2 } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type {
@@ -19,6 +19,8 @@ import {
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
 
+const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
+
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof ApiError
     ? caught.payload.message
@@ -36,23 +38,48 @@ export function RelayDevicesPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
+  const hasLoadedPortalRef = useRef(false);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (options?: {
+    showLoading?: boolean;
+    clearError?: boolean;
+  }) => {
+    const showLoading = options?.showLoading ?? true;
+    const clearError = options?.clearError ?? true;
+
+    if (showLoading) {
+      setLoading(true);
+    }
+    if (clearError) {
+      setError(null);
+    }
     try {
       enableRelayMode();
-      setPortal(await fetchRelayPortal());
+      const nextPortal = await fetchRelayPortal();
+      hasLoadedPortalRef.current = true;
+      setPortal(nextPortal);
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to load devices.'));
+      if (showLoading || !hasLoadedPortalRef.current) {
+        setError(errorMessage(caught, 'Unable to load devices.'));
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
-  }
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+    const intervalId = window.setInterval(() => {
+      void load({ showLoading: false, clearError: false });
+    }, RELAY_PORTAL_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [load]);
 
   async function addDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,7 +89,7 @@ export function RelayDevicesPage() {
       const result = await createRelayDevice({ name: deviceName });
       setCreatedDevice(result);
       setDeviceName('');
-      await load();
+      await load({ showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to create device.'));
     } finally {
@@ -81,7 +108,7 @@ export function RelayDevicesPage() {
       if (createdDevice?.device.id === device.id) {
         setCreatedDevice(null);
       }
-      await load();
+      await load({ showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to delete device.'));
     } finally {
@@ -122,7 +149,7 @@ export function RelayDevicesPage() {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
       <div className="mx-auto w-full max-w-6xl space-y-5 pr-12 sm:pr-0">
-        <header className="flex flex-col gap-3 border-b border-[var(--theme-border)] pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <header className="border-b border-[var(--theme-border)] pb-5">
           <div>
             <Link className="text-sm text-[var(--theme-accent-strong)]" to="/workspaces">
               Back to workspaces
@@ -134,14 +161,6 @@ export function RelayDevicesPage() {
               Device management
             </h1>
           </div>
-          <button
-            className="relay-button-secondary inline-flex items-center gap-2"
-            onClick={() => void load()}
-            type="button"
-          >
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </button>
         </header>
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
@@ -220,60 +239,130 @@ export function RelayDevicesPage() {
           </section>
         </section>
 
-        <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared with me</h2>
-              <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                Sessions another relay user has shared with this account.
-              </p>
-            </div>
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
-              {portal?.sharedWithMe.length ?? 0}
-            </span>
-          </div>
-          {loading ? (
-            <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
-              Loading shared sessions...
-            </p>
-          ) : portal?.sharedWithMe.length ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              {portal.sharedWithMe.map((share) => (
-                <SharedSessionRow
-                  key={share.id}
-                  share={share}
-                  onOpen={() => openSharedSession(share)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
-              No sessions have been shared with this account yet.
-            </div>
+        <ShareSection
+          count={portal?.sharedWithMe.length ?? 0}
+          emptyText="No sessions have been shared with this account yet."
+          loading={loading}
+          loadingText="Loading shared sessions..."
+          shares={portal?.sharedWithMe ?? []}
+          title="Shared with me"
+          subtitle="Sessions another relay user has shared with this account."
+          renderShare={(share) => (
+            <SharedSessionRow
+              key={share.id}
+              mode="incoming"
+              share={share}
+              onOpen={() => openSharedSession(share)}
+            />
           )}
-        </section>
+        />
+
+        <ShareSection
+          count={portal?.sharedByMe.length ?? 0}
+          emptyText="No sessions have been shared by this account yet."
+          loading={loading}
+          loadingText="Loading shared sessions..."
+          shares={portal?.sharedByMe ?? []}
+          title="Shared by me"
+          subtitle="Threads this relay account has shared with other users."
+          renderShare={(share) => (
+            <SharedSessionRow
+              expanded={expandedShareId === share.id}
+              key={share.id}
+              mode="outgoing"
+              share={share}
+              onToggleAccess={() => {
+                setExpandedShareId((current) => (current === share.id ? null : share.id));
+              }}
+            />
+          )}
+        />
       </div>
     </main>
   );
 }
 
+function ShareSection({
+  count,
+  emptyText,
+  loading,
+  loadingText,
+  renderShare,
+  shares,
+  subtitle,
+  title,
+}: {
+  count: number;
+  emptyText: string;
+  loading: boolean;
+  loadingText: string;
+  renderShare: (share: RelaySessionShareDto) => React.ReactNode;
+  shares: RelaySessionShareDto[];
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{title}</h2>
+          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">{subtitle}</p>
+        </div>
+        <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+          {count}
+        </span>
+      </div>
+      {loading ? (
+        <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
+          {loadingText}
+        </p>
+      ) : shares.length ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          {shares.map((share) => renderShare(share))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
+          {emptyText}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SharedSessionRow({
+  expanded = false,
+  mode,
+  onToggleAccess,
   share,
   onOpen,
 }: {
+  expanded?: boolean;
+  mode: 'incoming' | 'outgoing';
+  onToggleAccess?: () => void;
   share: RelaySessionShareDto;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
+  const lastAccessLabel = share.lastAccessedAt
+    ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
+    : 'Not accessed yet';
+
   return (
-    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+    <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
             {share.label || share.threadId}
           </p>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {share.ownerUsername} / {share.deviceName}
+            {mode === 'incoming'
+              ? `${share.ownerUsername} / ${share.deviceName}`
+              : `To ${share.targetUsername} / ${share.deviceName}`}
           </p>
+          {mode === 'outgoing' ? (
+            <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+              Last access: {lastAccessLabel}
+            </p>
+          ) : null}
           <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
             <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
               {share.threadAccess === 'read' ? 'View only' : 'Collaborator'}
@@ -283,14 +372,43 @@ function SharedSessionRow({
             </span>
           </p>
         </div>
-        <button
-          className="relay-button-primary inline-flex items-center gap-2"
-          onClick={onOpen}
-          type="button"
-        >
-          Open
-        </button>
+        {mode === 'incoming' ? (
+          <button
+            className="relay-button-primary inline-flex items-center gap-2"
+            onClick={onOpen}
+            type="button"
+          >
+            Open
+          </button>
+        ) : (
+          <button
+            className="relay-button-secondary inline-flex items-center gap-2"
+            onClick={onToggleAccess}
+            type="button"
+          >
+            Access history
+            <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        )}
       </div>
+      {mode === 'outgoing' && expanded ? (
+        <div className="absolute right-3 top-[calc(100%-0.5rem)] z-20 w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3 shadow-xl">
+          {share.accessEvents.length ? (
+            <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
+              {share.accessEvents.map((event) => (
+                <li className="flex items-center justify-between gap-3" key={event.id}>
+                  <span className="font-medium text-[var(--theme-fg)]">{event.username}</span>
+                  <span>{formatRelayTimestamp(event.accessedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              This shared thread has not been accessed yet.
+            </p>
+          )}
+        </div>
+      ) : null}
     </article>
   );
 }
