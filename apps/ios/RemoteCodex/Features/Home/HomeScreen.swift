@@ -418,6 +418,7 @@ struct HomeScreen: View {
     let onOpenWorkspace: (String) -> Void
     let onOpenThread: (String) -> Void
     let onChangeConnection: () -> Void
+    let onBack: () -> Void
     let onThemeModeSelected: (ThemeMode) -> Void
     @State private var showingCreateWorkspace = false
     @State private var showingNewThread = false
@@ -432,12 +433,14 @@ struct HomeScreen: View {
         onOpenWorkspace: @escaping (String) -> Void,
         onOpenThread: @escaping (String) -> Void,
         onChangeConnection: @escaping () -> Void,
+        onBack: @escaping () -> Void,
         onThemeModeSelected: @escaping (ThemeMode) -> Void
     ) {
         _model = StateObject(wrappedValue: HomeViewModel(environment: environment, connection: connection))
         self.onOpenWorkspace = onOpenWorkspace
         self.onOpenThread = onOpenThread
         self.onChangeConnection = onChangeConnection
+        self.onBack = onBack
         self.onThemeModeSelected = onThemeModeSelected
     }
 
@@ -447,6 +450,7 @@ struct HomeScreen: View {
         }
         .navigationTitle("Remote Codex")
         .refreshable { await model.refresh() }
+        .edgeSwipeBack(action: onBack)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 homeMenu
@@ -497,9 +501,11 @@ struct HomeScreen: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             Divider()
-            Button(role: .destructive, action: onChangeConnection) {
+            Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
+                    .foregroundStyle(.white)
             }
+            .tint(.white)
         }
     }
 

@@ -4,6 +4,7 @@ struct RootView: View {
     let environment: AppEnvironment
     @State private var route: AppRoute
     @State private var connection: SupervisorConnectionConfig?
+    @State private var connectionSetupReturnRoute: AppRoute?
     @State private var themeMode: ThemeMode
 
     init(environment: AppEnvironment) {
@@ -20,10 +21,16 @@ struct RootView: View {
         NavigationStack {
             switch route {
             case .connection:
-                ConnectionScreen(environment: environment) { config in
-                    connection = config
-                    route = .home
-                }
+                ConnectionScreen(
+                    environment: environment,
+                    onReady: { config in
+                        connection = config
+                        connectionSetupReturnRoute = nil
+                        route = .home
+                    },
+                    onOpenRelaySharedThread: openRelaySharedThread,
+                    onBack: returnFromConnectionSetup
+                )
             case .home:
                 if let connection {
                     HomeScreen(
@@ -38,15 +45,22 @@ struct RootView: View {
                             route = .threadDetail(threadId)
                         },
                         onChangeConnection: returnToConnectionSetup,
+                        onBack: returnToConnectionSetup,
                         onThemeModeSelected: { mode in
                             themeMode = mode
                         }
                     )
                 } else {
-                    ConnectionScreen(environment: environment) { config in
+                    ConnectionScreen(
+                        environment: environment,
+                        onReady: { config in
                         connection = config
+                        connectionSetupReturnRoute = nil
                         route = .home
-                    }
+                    },
+                    onOpenRelaySharedThread: openRelaySharedThread,
+                    onBack: returnFromConnectionSetup
+                )
                 }
             case let .workspaceDetail(workspaceId):
                 if let connection {
@@ -133,15 +147,21 @@ struct RootView: View {
     }
 
     private func returnToConnectionSetup() {
-        guard let connection else {
-            route = .connection
-            return
-        }
-        if connection.mode == .relay {
-            environment.settingsStore.clearRelayDeviceSelection()
-        }
-        self.connection = nil
+        connectionSetupReturnRoute = route == .connection ? nil : route
         route = .connection
+    }
+
+    private func returnFromConnectionSetup() {
+        guard let returnRoute = connectionSetupReturnRoute, connection != nil else { return }
+        connectionSetupReturnRoute = nil
+        route = returnRoute
+    }
+
+    private func openRelaySharedThread(config: SupervisorConnectionConfig, share: RelaySessionShareSummary) {
+        connection = config
+        connectionSetupReturnRoute = nil
+        environment.settingsStore.writeLastRoute(.threadDetail(share.threadId), for: config)
+        route = .threadDetail(share.threadId)
     }
 
     private static func readyConnection(_ connection: SupervisorConnectionConfig?) -> SupervisorConnectionConfig? {

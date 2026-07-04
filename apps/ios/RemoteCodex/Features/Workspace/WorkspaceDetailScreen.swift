@@ -480,9 +480,11 @@ struct WorkspaceDetailScreen: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             Divider()
-            Button(role: .destructive, action: onChangeConnection) {
+            Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
+                    .foregroundStyle(.white)
             }
+            .tint(.white)
         }
     }
 

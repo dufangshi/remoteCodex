@@ -33,10 +33,16 @@ final class ConnectionViewModel: ObservableObject {
 
     private let environment: AppEnvironment
     private let onReady: (SupervisorConnectionConfig) -> Void
+    private let onOpenRelaySharedThread: (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void
 
-    init(environment: AppEnvironment, onReady: @escaping (SupervisorConnectionConfig) -> Void) {
+    init(
+        environment: AppEnvironment,
+        onReady: @escaping (SupervisorConnectionConfig) -> Void,
+        onOpenRelaySharedThread: @escaping (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void
+    ) {
         self.environment = environment
         self.onReady = onReady
+        self.onOpenRelaySharedThread = onOpenRelaySharedThread
         let saved = environment.settingsStore.readSupervisorConnection()
         mode = saved?.mode ?? .local
         baseURL = saved?.normalizedBaseURL ?? "http://127.0.0.1:8787"
@@ -149,14 +155,33 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
-    func loadRelayPortal() async {
+    private func fetchRelayPortalSummary() async throws -> RelayPortalSummary {
+        let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+        return try await environment.apiClientFactory(config).fetchRelayPortal()
+    }
+
+    func loadRelayPortal(silent: Bool = false) async {
         guard !authToken.isEmpty else {
             errorMessage = "Log in to the relay before loading devices."
             return
         }
+        if silent {
+            guard !busy else { return }
+            do {
+                relayPortal = try await fetchRelayPortalSummary()
+                lastRelayRefreshAt = Date()
+                if errorMessage != nil, relayPortal != nil {
+                    errorMessage = nil
+                }
+            } catch {
+                if relayPortal == nil {
+                    errorMessage = error.localizedDescription
+                }
+            }
+            return
+        }
         await runBusy {
-            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
-            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            relayPortal = try await fetchRelayPortalSummary()
             lastRelayRefreshAt = Date()
             statusMessage = relayPortal?.devices.isEmpty == true ? "Create a backend device to connect." : nil
         }
@@ -214,6 +239,21 @@ final class ConnectionViewModel: ObservableObject {
             relayDeviceId = device.id
             statusMessage = "Device saved. Workspaces will load when the backend connects."
             onReady(config)
+        }
+    }
+
+    func openSharedSession(_ share: RelaySessionShareSummary) {
+        let config = SupervisorConnectionConfig(
+            mode: .relay,
+            baseURL: baseURL,
+            authToken: authToken,
+            relayDeviceId: share.deviceId
+        )
+        do {
+            try environment.settingsStore.writeSupervisorConnection(config)
+            onOpenRelaySharedThread(config, share)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -304,11 +344,25 @@ struct ConnectionScreen: View {
     @State private var offlineDevice: RelayDeviceSummary?
     @State private var revokeDevice: RelayDeviceSummary?
     @State private var deleteDevice: SavedSupervisorDevice?
+    @State private var expandedShareId: String?
     @State private var showingAddDevice = false
     @State private var showingCreateRelayDevice = false
+    private let onBack: (() -> Void)?
 
-    init(environment: AppEnvironment, onReady: @escaping (SupervisorConnectionConfig) -> Void) {
-        _model = StateObject(wrappedValue: ConnectionViewModel(environment: environment, onReady: onReady))
+    init(
+        environment: AppEnvironment,
+        onReady: @escaping (SupervisorConnectionConfig) -> Void,
+        onOpenRelaySharedThread: @escaping (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void = { _, _ in },
+        onBack: (() -> Void)? = nil
+    ) {
+        self.onBack = onBack
+        _model = StateObject(
+            wrappedValue: ConnectionViewModel(
+                environment: environment,
+                onReady: onReady,
+                onOpenRelaySharedThread: onOpenRelaySharedThread
+            )
+        )
     }
 
     var body: some View {
@@ -320,20 +374,20 @@ struct ConnectionScreen: View {
                 savedDevicesSection
             }
         }
-        .navigationTitle("Devices")
+        .navigationTitle(navigationTitle)
+        .edgeSwipeBack(action: handleBackGesture)
         .task(id: model.route) {
-            if model.route == .relayDevices, model.relayPortal == nil {
+            guard model.route == .relayDevices else { return }
+            if model.relayPortal == nil {
                 await model.loadRelayPortal()
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled, model.route == .relayDevices else { return }
+                await model.loadRelayPortal(silent: true)
             }
         }
         .toolbar {
-            if model.route != .modeSelect {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Back") {
-                        model.route = .modeSelect
-                    }
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if model.route == .relayDevices {
@@ -407,6 +461,27 @@ struct ConnectionScreen: View {
         }
     }
 
+    private var navigationTitle: String {
+        switch model.route {
+        case .modeSelect:
+            "Connection"
+        case .relayDevices:
+            "Relay Devices"
+        case .relayAuth:
+            "Relay Account"
+        case .serverAuth:
+            "Server Login"
+        }
+    }
+
+    private func handleBackGesture() {
+        if model.route != .modeSelect {
+            model.route = .modeSelect
+        } else {
+            onBack?()
+        }
+    }
+
     private var deleteDeviceAlertPresented: Binding<Bool> {
         Binding(
             get: { deleteDevice != nil },
@@ -455,9 +530,9 @@ struct ConnectionScreen: View {
     }
 
     private var savedDevicesSection: some View {
-        Section("Saved Devices") {
+        Section("Connections") {
             if model.savedDevices.isEmpty {
-                ContentUnavailableView("No Devices", systemImage: "rectangle.stack.badge.plus")
+                ContentUnavailableView("No Connections", systemImage: "rectangle.stack.badge.plus")
             }
             ForEach(model.savedDevices) { device in
                 SavedDeviceRow(
@@ -533,15 +608,13 @@ struct ConnectionScreen: View {
         }
     }
 
+    @ViewBuilder
     private var relayDeviceSection: some View {
         Section("Relay Devices") {
-            HStack {
-                Button("Refresh") {
-                    Task { await model.loadRelayPortal() }
-                }
-                Spacer()
-                if let refreshedAt = model.lastRelayRefreshAt {
-                    Text(refreshedAt.formatted(date: .omitted, time: .standard))
+            if let refreshedAt = model.lastRelayRefreshAt {
+                HStack {
+                    Spacer()
+                    Text("Updated \(refreshedAt.formatted(date: .omitted, time: .standard))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -571,6 +644,42 @@ struct ConnectionScreen: View {
                     },
                     onRevoke: { revokeDevice = device }
                 )
+            }
+        }
+        Section("Shared with me") {
+            let sharedSessions = model.relayPortal?.sharedWithMe ?? []
+            if model.relayPortal == nil {
+                ProgressView("Loading shared sessions...")
+            } else if sharedSessions.isEmpty {
+                ContentUnavailableView("No Shared Threads", systemImage: "person.2.slash")
+            } else {
+                ForEach(sharedSessions) { share in
+                    RelaySharedSessionRow(
+                        share: share,
+                        mode: .incoming,
+                        onOpen: { model.openSharedSession(share) }
+                    )
+                }
+            }
+        }
+        Section("Shared by me") {
+            let sharedSessions = model.relayPortal?.sharedByMe ?? []
+            if model.relayPortal == nil {
+                ProgressView("Loading shared sessions...")
+            } else if sharedSessions.isEmpty {
+                ContentUnavailableView("No Shared Threads", systemImage: "person.2")
+            } else {
+                ForEach(sharedSessions) { share in
+                    RelaySharedSessionRow(
+                        share: share,
+                        mode: .outgoing,
+                        expanded: expandedShareId == share.id,
+                        onOpen: {},
+                        onToggleAccess: {
+                            expandedShareId = expandedShareId == share.id ? nil : share.id
+                        }
+                    )
+                }
             }
         }
     }
@@ -721,6 +830,110 @@ private struct RelayDeviceRow: View {
             }
             .buttonStyle(.borderless)
         }
+    }
+}
+
+private struct RelaySharedSessionRow: View {
+    let share: RelaySessionShareSummary
+    let mode: RelayShareRowMode
+    var expanded = false
+    let onOpen: () -> Void
+    var onToggleAccess: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(share.label?.trimmedNonEmpty ?? share.threadId)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                if mode == .incoming {
+                    Button("Open", action: onOpen)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Access", action: onToggleAccess)
+                        .buttonStyle(.bordered)
+                }
+            }
+            Text(mode == .incoming ? "\(share.ownerUsername) / \(share.deviceName)" : "To \(share.targetUsername) / \(share.deviceName)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if mode == .outgoing {
+                Text(shareAccessSummary(share))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                GraphBadge(
+                    text: share.threadAccess == "read" ? "View only" : "Collaborator",
+                    tone: share.threadAccess == "read" ? .warning : .success
+                )
+                GraphBadge(text: workspaceAccessLabel(share.workspaceAccess), tone: .neutral)
+            }
+            if mode == .outgoing, expanded {
+                ShareAccessHistory(events: share.accessEvents)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private enum RelayShareRowMode {
+    case incoming
+    case outgoing
+}
+
+private struct ShareAccessHistory: View {
+    let events: [RelaySessionShareAccessSummary]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if events.isEmpty {
+                Text("This shared thread has not been accessed yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(events) { event in
+                    HStack {
+                        Text(event.username)
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(shortRelayTimestamp(event.accessedAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private func shareAccessSummary(_ share: RelaySessionShareSummary) -> String {
+    guard let accessedAt = share.lastAccessedAt?.trimmedNonEmpty else {
+        return "Not accessed yet"
+    }
+    return "Last access: \(share.lastAccessedByUsername ?? "unknown") at \(shortRelayTimestamp(accessedAt))"
+}
+
+private func shortRelayTimestamp(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "T", with: " ")
+        .replacingOccurrences(of: #"\.\d{3}Z$"#, with: " UTC", options: .regularExpression)
+        .replacingOccurrences(of: #"Z$"#, with: " UTC", options: .regularExpression)
+}
+
+private func workspaceAccessLabel(_ access: String) -> String {
+    switch access {
+    case "write":
+        "Workspace write"
+    case "read":
+        "Workspace read"
+    default:
+        "No workspace"
     }
 }
 

@@ -212,6 +212,24 @@ class MainActivity : ComponentActivity() {
                                     devicesReturnRoute = null
                                     connectionRoute = ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
                                 },
+                                onOpenRelaySharedThread = { config, share ->
+                                    settingsRepository.writeSupervisorConnection(config)
+                                    supervisorConnection = config
+                                    devicesReturnRoute = null
+                                    settingsRepository.writeLastRoute(
+                                        config,
+                                        SavedAppRoute.ThreadDetail(
+                                            threadId = share.threadId,
+                                            workspaceId = share.workspaceId,
+                                        ),
+                                    )
+                                    connectionRoute = ConnectionRoute.Workspace(
+                                        ConnectedRoute.ThreadDetail(
+                                            threadId = share.threadId,
+                                            workspaceId = share.workspaceId,
+                                        ),
+                                    )
+                                },
                                 onConnectionStateSaved = { config ->
                                     settingsRepository.writeSupervisorConnection(config)
                                     supervisorConnection = config

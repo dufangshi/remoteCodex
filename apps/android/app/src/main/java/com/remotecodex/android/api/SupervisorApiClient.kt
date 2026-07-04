@@ -987,9 +987,17 @@ private fun JSONObject.toShellSession(): SupervisorShellSession {
 
 private fun JSONObject.toRelayPortalSummary(): RelayPortalSummary {
     val devicesArray = optJSONArray("devices") ?: org.json.JSONArray()
+    val sharedWithMeArray = optJSONArray("sharedWithMe") ?: org.json.JSONArray()
+    val sharedByMeArray = optJSONArray("sharedByMe") ?: org.json.JSONArray()
     return RelayPortalSummary(
         devices = List(devicesArray.length()) { index ->
             devicesArray.getJSONObject(index).toRelayDeviceSummary()
+        },
+        sharedWithMe = List(sharedWithMeArray.length()) { index ->
+            sharedWithMeArray.getJSONObject(index).toRelaySessionShareSummary()
+        },
+        sharedByMe = List(sharedByMeArray.length()) { index ->
+            sharedByMeArray.getJSONObject(index).toRelaySessionShareSummary()
         },
     )
 }
@@ -1010,6 +1018,39 @@ private fun JSONObject.toRelayDeviceSummary(): RelayDeviceSummary {
         connectedAt = optNullableString("connectedAt"),
         lastHeartbeatAt = optNullableString("lastHeartbeatAt"),
         createdAt = optString("createdAt"),
+    )
+}
+
+private fun JSONObject.toRelaySessionShareSummary(): RelaySessionShareSummary {
+    val accessEventsArray = optJSONArray("accessEvents") ?: org.json.JSONArray()
+    return RelaySessionShareSummary(
+        id = getString("id"),
+        ownerUserId = optString("ownerUserId"),
+        ownerUsername = optString("ownerUsername"),
+        targetUsername = optString("targetUsername"),
+        targetUserId = optString("targetUserId"),
+        deviceId = getString("deviceId"),
+        deviceName = optString("deviceName", "Remote Codex device"),
+        threadId = getString("threadId"),
+        workspaceId = optNullableString("workspaceId"),
+        label = optNullableString("label"),
+        threadAccess = optString("threadAccess", "read"),
+        workspaceAccess = optString("workspaceAccess", "none"),
+        createdAt = optString("createdAt"),
+        revokedAt = optNullableString("revokedAt"),
+        expiresAt = optNullableString("expiresAt"),
+        lastAccessedAt = optNullableString("lastAccessedAt"),
+        lastAccessedByUsername = optNullableString("lastAccessedByUsername"),
+        accessEvents = List(accessEventsArray.length()) { index ->
+            val item = accessEventsArray.getJSONObject(index)
+            com.remotecodex.android.api.RelaySessionShareAccessSummary(
+                id = item.getString("id"),
+                shareId = item.getString("shareId"),
+                userId = item.getString("userId"),
+                username = item.optString("username", "unknown"),
+                accessedAt = item.getString("accessedAt"),
+            )
+        },
     )
 }
 

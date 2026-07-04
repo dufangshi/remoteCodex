@@ -219,7 +219,9 @@ struct ThreadDetailWebViewScreen: View {
             Divider()
             Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
+                    .foregroundStyle(.white)
             }
+            .tint(.white)
         }
     }
 

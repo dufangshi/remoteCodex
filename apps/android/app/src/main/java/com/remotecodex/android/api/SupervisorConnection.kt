@@ -660,6 +660,37 @@ data class RelayDeviceSummary(
 
 data class RelayPortalSummary(
     val devices: List<RelayDeviceSummary>,
+    val sharedWithMe: List<RelaySessionShareSummary> = emptyList(),
+    val sharedByMe: List<RelaySessionShareSummary> = emptyList(),
+)
+
+data class RelaySessionShareSummary(
+    val id: String,
+    val ownerUserId: String,
+    val ownerUsername: String,
+    val targetUsername: String,
+    val targetUserId: String,
+    val deviceId: String,
+    val deviceName: String,
+    val threadId: String,
+    val workspaceId: String?,
+    val label: String?,
+    val threadAccess: String,
+    val workspaceAccess: String,
+    val createdAt: String,
+    val revokedAt: String?,
+    val expiresAt: String?,
+    val lastAccessedAt: String?,
+    val lastAccessedByUsername: String?,
+    val accessEvents: List<RelaySessionShareAccessSummary> = emptyList(),
+)
+
+data class RelaySessionShareAccessSummary(
+    val id: String,
+    val shareId: String,
+    val userId: String,
+    val username: String,
+    val accessedAt: String,
 )
 
 data class RelayCreateDeviceResult(

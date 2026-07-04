@@ -608,6 +608,107 @@ struct SupervisorReasoningEffortOption: Codable, Equatable {
 struct RelayPortalSummary: Codable, Equatable {
     var session: RelaySession?
     var devices: [RelayDeviceSummary]
+    var sharedWithMe: [RelaySessionShareSummary]
+    var sharedByMe: [RelaySessionShareSummary]
+
+    enum CodingKeys: String, CodingKey {
+        case session
+        case devices
+        case sharedWithMe
+        case sharedByMe
+    }
+
+    init(
+        session: RelaySession? = nil,
+        devices: [RelayDeviceSummary],
+        sharedWithMe: [RelaySessionShareSummary] = [],
+        sharedByMe: [RelaySessionShareSummary] = []
+    ) {
+        self.session = session
+        self.devices = devices
+        self.sharedWithMe = sharedWithMe
+        self.sharedByMe = sharedByMe
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        session = try container.decodeIfPresent(RelaySession.self, forKey: .session)
+        devices = try container.decodeIfPresent([RelayDeviceSummary].self, forKey: .devices) ?? []
+        sharedWithMe = try container.decodeIfPresent([RelaySessionShareSummary].self, forKey: .sharedWithMe) ?? []
+        sharedByMe = try container.decodeIfPresent([RelaySessionShareSummary].self, forKey: .sharedByMe) ?? []
+    }
+}
+
+struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
+    var id: String
+    var ownerUserId: String
+    var ownerUsername: String
+    var targetUsername: String
+    var targetUserId: String
+    var deviceId: String
+    var deviceName: String
+    var threadId: String
+    var workspaceId: String?
+    var label: String?
+    var threadAccess: String
+    var workspaceAccess: String
+    var createdAt: String
+    var revokedAt: String?
+    var expiresAt: String?
+    var lastAccessedAt: String?
+    var lastAccessedByUsername: String?
+    var accessEvents: [RelaySessionShareAccessSummary]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerUserId
+        case ownerUsername
+        case targetUsername
+        case targetUserId
+        case deviceId
+        case deviceName
+        case threadId
+        case workspaceId
+        case label
+        case threadAccess
+        case workspaceAccess
+        case createdAt
+        case revokedAt
+        case expiresAt
+        case lastAccessedAt
+        case lastAccessedByUsername
+        case accessEvents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ownerUserId = try container.decodeIfPresent(String.self, forKey: .ownerUserId) ?? ""
+        ownerUsername = try container.decodeIfPresent(String.self, forKey: .ownerUsername) ?? "unknown"
+        targetUsername = try container.decodeIfPresent(String.self, forKey: .targetUsername) ?? "unknown"
+        targetUserId = try container.decodeIfPresent(String.self, forKey: .targetUserId) ?? ""
+        deviceId = try container.decode(String.self, forKey: .deviceId)
+        deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? "Remote Codex device"
+        threadId = try container.decode(String.self, forKey: .threadId)
+        workspaceId = try container.decodeIfPresent(String.self, forKey: .workspaceId)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        threadAccess = try container.decodeIfPresent(String.self, forKey: .threadAccess) ?? "read"
+        workspaceAccess = try container.decodeIfPresent(String.self, forKey: .workspaceAccess) ?? "none"
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        revokedAt = try container.decodeIfPresent(String.self, forKey: .revokedAt)
+        expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        lastAccessedAt = try container.decodeIfPresent(String.self, forKey: .lastAccessedAt)
+        lastAccessedByUsername = try container.decodeIfPresent(String.self, forKey: .lastAccessedByUsername)
+        accessEvents = try container.decodeIfPresent([RelaySessionShareAccessSummary].self, forKey: .accessEvents) ?? []
+    }
+}
+
+struct RelaySessionShareAccessSummary: Codable, Equatable, Identifiable {
+    var id: String
+    var shareId: String
+    var userId: String
+    var username: String
+    var accessedAt: String
 }
 
 struct RelayDeviceSummary: Codable, Equatable, Identifiable {

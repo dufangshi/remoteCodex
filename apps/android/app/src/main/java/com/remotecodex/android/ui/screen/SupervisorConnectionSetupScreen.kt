@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,8 @@ import com.remotecodex.android.api.AuthLoginResult
 import com.remotecodex.android.api.RelayCreateDeviceResult
 import com.remotecodex.android.api.RelayDeviceSummary
 import com.remotecodex.android.api.RelayPortalSummary
+import com.remotecodex.android.api.RelaySessionShareAccessSummary
+import com.remotecodex.android.api.RelaySessionShareSummary
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorClientError
 import com.remotecodex.android.api.SupervisorConnectionCheck
@@ -68,6 +71,7 @@ import com.remotecodex.android.ui.components.GraphIconButton
 import com.remotecodex.android.ui.components.GraphSelectionGlyph
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -78,6 +82,7 @@ fun SupervisorConnectionSetupScreen(
     activeDeviceId: String? = null,
     initialRoute: ConnectionSetupRoute = ConnectionSetupRoute.ModeSelect,
     onConnectionReady: (SupervisorConnectionConfig, SupervisorConnectionCheck) -> Unit,
+    onOpenRelaySharedThread: (SupervisorConnectionConfig, RelaySessionShareSummary) -> Unit = { _, _ -> },
     onConnectionStateSaved: (SupervisorConnectionConfig) -> Unit = {},
     onSavedDeviceUpsert: (SavedSupervisorDevice) -> Unit = {},
     onSavedDeviceDelete: (String) -> Unit = {},
@@ -108,6 +113,8 @@ fun SupervisorConnectionSetupScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var relayPortalRefreshing by remember { mutableStateOf(false) }
+    var expandedShareId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     fun buildBaseConfig(token: String? = authToken) = SupervisorConnectionConfig(
@@ -117,33 +124,48 @@ fun SupervisorConnectionSetupScreen(
         relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
     )
 
-    fun loadRelayPortal(token: String = authToken) {
+    fun loadRelayPortal(token: String = authToken, silent: Boolean = false) {
         if (token.isBlank()) {
             errorMessage = "Log in to the relay before loading devices."
             statusMessage = null
             return
         }
-        busy = true
-        errorMessage = null
-        statusMessage = null
+        if (silent && (busy || relayPortalRefreshing)) {
+            return
+        }
+        if (silent) {
+            relayPortalRefreshing = true
+        } else {
+            busy = true
+            errorMessage = null
+            statusMessage = null
+        }
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     SupervisorApiClient(buildBaseConfig(token)).fetchRelayPortal()
                 }
             }
-            busy = false
+            if (silent) {
+                relayPortalRefreshing = false
+            } else {
+                busy = false
+            }
             result
                 .onSuccess { portal ->
                     relayPortal = portal
-                    statusMessage = if (portal.devices.isEmpty()) {
-                        "Relay login succeeded. Register a device to connect a backend."
-                    } else {
-                        relayPortalStatusMessage(portal.devices, relayDeviceId)
+                    if (!silent || statusMessage != null) {
+                        statusMessage = if (portal.devices.isEmpty()) {
+                            "Relay login succeeded. Register a device to connect a backend."
+                        } else {
+                            relayPortalStatusMessage(portal.devices, relayDeviceId)
+                        }
                     }
                 }
                 .onFailure { error ->
-                    errorMessage = userFacingConnectionError(error)
+                    if (!silent || relayPortal == null) {
+                        errorMessage = userFacingConnectionError(error)
+                    }
                 }
         }
     }
@@ -173,6 +195,23 @@ fun SupervisorConnectionSetupScreen(
                     errorMessage = userFacingConnectionError(error)
                 }
         }
+    }
+
+    fun openSharedSession(share: RelaySessionShareSummary) {
+        if (authToken.isBlank()) {
+            errorMessage = "Log in to the relay before opening shared sessions."
+            statusMessage = null
+            return
+        }
+        val config = SupervisorConnectionConfig(
+            mode = SupervisorConnectionMode.Relay,
+            baseUrl = baseUrl,
+            authToken = authToken,
+            relayDeviceId = share.deviceId,
+        )
+        relayDeviceId = share.deviceId
+        onConnectionStateSaved(config)
+        onOpenRelaySharedThread(config, share)
     }
 
     fun connectSavedDevice(device: SavedSupervisorDevice) {
@@ -398,9 +437,17 @@ fun SupervisorConnectionSetupScreen(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(route, authToken) {
-        if (route == ConnectionSetupRoute.RelayDevices && authToken.isNotBlank() && relayPortal == null && !busy) {
+    LaunchedEffect(route, authToken) {
+        if (route != ConnectionSetupRoute.RelayDevices || authToken.isBlank()) {
+            return@LaunchedEffect
+        }
+
+        if (relayPortal == null && !busy) {
             loadRelayPortal(authToken)
+        }
+        while (true) {
+            delay(3_000)
+            loadRelayPortal(authToken, silent = true)
         }
     }
 
@@ -468,7 +515,7 @@ fun SupervisorConnectionSetupScreen(
             }
             Text(
                 text = when (route) {
-                    ConnectionSetupRoute.ModeSelect -> "Select a saved supervisor or add a new Local, Server, or Relay device."
+                    ConnectionSetupRoute.ModeSelect -> "Select a saved connection or add a new Local, Server, or Relay endpoint."
                     ConnectionSetupRoute.ServerAuth -> "Sign in to a direct supervisor server."
                     ConnectionSetupRoute.RelayAuth -> "Sign in or create a relay account."
                     ConnectionSetupRoute.RelayDevices -> "Connect, create, or revoke relay backend devices."
@@ -479,7 +526,7 @@ fun SupervisorConnectionSetupScreen(
 
             when (route) {
                 ConnectionSetupRoute.ModeSelect -> {
-                    ConnectionPanel(title = "Saved Devices", detail = "Cards are stored on this Android device and can be connected, edited, or deleted independently.") {
+                    ConnectionPanel(title = "Connections", detail = "Cards are stored on this Android device and can be connected, edited, or deleted independently.") {
                         if (savedDevices.isEmpty()) {
                             Text(
                                 text = "No saved devices yet. Tap + to add Local, Server, or Relay.",
@@ -608,12 +655,18 @@ fun SupervisorConnectionSetupScreen(
                 ConnectionSetupRoute.RelayDevices -> {
                     RelayDevicesPanel(
                         devices = relayPortal?.devices.orEmpty(),
+                        sharedWithMe = relayPortal?.sharedWithMe.orEmpty(),
+                        sharedByMe = relayPortal?.sharedByMe.orEmpty(),
+                        expandedShareId = expandedShareId,
                         selectedDeviceId = relayDeviceId,
                         createdDevice = createdDevice,
                         relayBaseUrl = baseUrl,
                         busy = busy,
                         onConnectDevice = { deviceId -> connectRelayDeviceSelection(deviceId) },
-                        onRefresh = { loadRelayPortal() },
+                        onOpenSharedSession = { share -> openSharedSession(share) },
+                        onToggleShareAccess = { share ->
+                            expandedShareId = if (expandedShareId == share.id) null else share.id
+                        },
                         onRevokeDevice = { revokeDeviceTarget = it },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1307,29 +1360,22 @@ private fun RelayRegisterDialog(
 @Composable
 private fun RelayDevicesPanel(
     devices: List<RelayDeviceSummary>,
+    sharedWithMe: List<RelaySessionShareSummary>,
+    sharedByMe: List<RelaySessionShareSummary>,
+    expandedShareId: String?,
     selectedDeviceId: String,
     createdDevice: RelayCreateDeviceResult?,
     relayBaseUrl: String,
     busy: Boolean,
     onConnectDevice: (String) -> Unit,
-    onRefresh: () -> Unit,
+    onOpenSharedSession: (RelaySessionShareSummary) -> Unit,
+    onToggleShareAccess: (RelaySessionShareSummary) -> Unit,
     onRevokeDevice: (RelayDeviceSummary) -> Unit,
 ) {
     ConnectionPanel(
         title = "Relay Devices",
         detail = "Backend devices under this relay account. Connect directly to any online device.",
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GraphButton(
-                label = if (busy) "Refreshing..." else "Refresh",
-                enabled = !busy,
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Refresh relay devices",
-                onClick = onRefresh,
-            )
-        }
-
         if (devices.isEmpty()) {
             Text(
                 text = "No relay devices loaded for this account.",
@@ -1350,6 +1396,55 @@ private fun RelayDevicesPanel(
 
         createdDevice?.let { result ->
             RelayDeviceTokenNotice(result = result, relayBaseUrl = relayBaseUrl)
+        }
+
+        Text(
+            text = "Shared with me",
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (sharedWithMe.isEmpty()) {
+            Text(
+                text = "No shared threads for this relay account yet.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            sharedWithMe.forEach { share ->
+                RelaySharedSessionRow(
+                    share = share,
+                    busy = busy,
+                    mode = RelayShareRowMode.Incoming,
+                    onOpen = { onOpenSharedSession(share) },
+                    onToggleAccess = {},
+                )
+            }
+        }
+
+        Text(
+            text = "Shared by me",
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (sharedByMe.isEmpty()) {
+            Text(
+                text = "No shared threads from this relay account yet.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            sharedByMe.forEach { share ->
+                RelaySharedSessionRow(
+                    share = share,
+                    busy = busy,
+                    expanded = expandedShareId == share.id,
+                    mode = RelayShareRowMode.Outgoing,
+                    onOpen = {},
+                    onToggleAccess = { onToggleShareAccess(share) },
+                )
+            }
         }
     }
 }
@@ -1426,6 +1521,145 @@ private fun RelayDeviceRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun RelaySharedSessionRow(
+    share: RelaySessionShareSummary,
+    busy: Boolean,
+    mode: RelayShareRowMode,
+    expanded: Boolean = false,
+    onOpen: () -> Unit,
+    onToggleAccess: () -> Unit,
+) {
+    val shareTitle = share.label?.takeIf { it.isNotBlank() } ?: share.threadId
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = shareTitle,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (mode == RelayShareRowMode.Incoming) {
+                    GraphButton(
+                        label = "Open",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Default,
+                        size = GraphButtonSize.Small,
+                        icon = GraphActionIcon.Open,
+                        contentDescription = "Open shared thread $shareTitle",
+                        onClick = onOpen,
+                    )
+                } else {
+                    GraphButton(
+                        label = "Access",
+                        enabled = !busy,
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Show access history for $shareTitle",
+                        onClick = onToggleAccess,
+                    )
+                }
+            }
+            Text(
+                text = if (mode == RelayShareRowMode.Incoming) {
+                    "${share.ownerUsername} / ${share.deviceName}"
+                } else {
+                    "To ${share.targetUsername} / ${share.deviceName}"
+                },
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (mode == RelayShareRowMode.Outgoing) {
+                Text(
+                    text = shareAccessSummary(share),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GraphBadge(
+                    label = if (share.threadAccess == "read") "View only" else "Collaborator",
+                    variant = if (share.threadAccess == "read") GraphBadgeVariant.Secondary else GraphBadgeVariant.Outline,
+                )
+                GraphBadge(
+                    label = workspaceAccessLabel(share.workspaceAccess),
+                    variant = GraphBadgeVariant.Secondary,
+                )
+            }
+            if (mode == RelayShareRowMode.Outgoing && expanded) {
+                ShareAccessHistory(events = share.accessEvents)
+            }
+        }
+    }
+}
+
+private enum class RelayShareRowMode {
+    Incoming,
+    Outgoing,
+}
+
+@Composable
+private fun ShareAccessHistory(events: List<RelaySessionShareAccessSummary>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.Panel)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (events.isEmpty()) {
+            Text(
+                text = "This shared thread has not been accessed yet.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        } else {
+            events.forEach { event ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = event.username,
+                        color = ThreadColors.Foreground,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = shortRelayTimestamp(event.accessedAt),
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
         }
     }
 }
@@ -1724,6 +1958,31 @@ private fun relayPortalStatusMessage(devices: List<RelayDeviceSummary>, selected
         else -> "Last connected backend is offline."
     }
     return "Loaded ${devices.size} device${if (devices.size == 1) "" else "s"}; $onlineCount online. $selectedStatus"
+}
+
+private fun workspaceAccessLabel(access: String): String {
+    return when (access) {
+        "write" -> "Workspace write"
+        "read" -> "Workspace read"
+        else -> "No workspace"
+    }
+}
+
+private fun shareAccessSummary(share: RelaySessionShareSummary): String {
+    val accessedAt = share.lastAccessedAt
+    return if (accessedAt.isNullOrBlank()) {
+        "Not accessed yet"
+    } else {
+        "Last access: ${share.lastAccessedByUsername ?: "unknown"} at ${shortRelayTimestamp(accessedAt)}"
+    }
+}
+
+private fun shortRelayTimestamp(value: String): String {
+    return value
+        .replace("T", " ")
+        .replace(Regex("\\.\\d{3}Z$"), " UTC")
+        .replace(Regex("Z$"), " UTC")
+        .take(22)
 }
 
 private fun relaySupervisorCommand(relayBaseUrl: String, token: String): String {
