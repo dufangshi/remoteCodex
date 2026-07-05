@@ -118,12 +118,14 @@ fun SupervisorConnectionSetupScreen(
     var relayPortalRefreshing by remember { mutableStateOf(false) }
     var expandedShareId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
 
     fun buildBaseConfig(token: String? = authToken) = SupervisorConnectionConfig(
         mode = mode,
         baseUrl = baseUrl,
         authToken = token?.takeIf { it.isNotBlank() },
         relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
+        relayThreadId = null,
     )
 
     fun loadRelayPortal(token: String = authToken, silent: Boolean = false) {
@@ -210,10 +212,23 @@ fun SupervisorConnectionSetupScreen(
             baseUrl = baseUrl,
             authToken = authToken,
             relayDeviceId = share.deviceId,
+            relayThreadId = share.threadId,
         )
         relayDeviceId = share.deviceId
         onConnectionStateSaved(config)
         onOpenRelaySharedThread(config, share)
+    }
+
+    fun copyRelayDeviceSetup(device: RelayDeviceSummary) {
+        val token = device.token?.takeIf { it.isNotBlank() }
+        if (token == null) {
+            errorMessage = "This device token is not available. Create a new device token to copy setup."
+            statusMessage = null
+            return
+        }
+        clipboard.setText(AnnotatedString(relaySupervisorCommand(baseUrl, token)))
+        errorMessage = null
+        statusMessage = "Copied setup command for ${device.name}."
     }
 
     fun connectSavedDevice(device: SavedSupervisorDevice) {
@@ -274,7 +289,11 @@ fun SupervisorConnectionSetupScreen(
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val baseConfig = device.toConnectionConfig().copy(authToken = null, relayDeviceId = null)
+                    val baseConfig = device.toConnectionConfig().copy(
+                        authToken = null,
+                        relayDeviceId = null,
+                        relayThreadId = null,
+                    )
                     val token = SupervisorApiClient(baseConfig).relayLogin(device.username, device.password).token
                     val portal = SupervisorApiClient(baseConfig.copy(authToken = token)).fetchRelayPortal()
                     token to portal
@@ -286,7 +305,13 @@ fun SupervisorConnectionSetupScreen(
                     authToken = token
                     relayPortal = portal
                     relayDeviceId = relayDeviceId.takeIf { current -> portal.devices.any { it.id == current } }.orEmpty()
-                    onSavedDeviceUpsert(device.copy(authToken = token, relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() }))
+                    onSavedDeviceUpsert(
+                        device.copy(
+                            authToken = token,
+                            relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
+                            relayThreadId = null,
+                        ),
+                    )
                     route = ConnectionSetupRoute.RelayDevices
                     statusMessage = relayPortalStatusMessage(portal.devices, relayDeviceId)
                 }
@@ -330,6 +355,7 @@ fun SupervisorConnectionSetupScreen(
                         baseUrl = baseUrl,
                         authToken = token,
                         relayDeviceId = targetDeviceId,
+                        relayThreadId = null,
                     )
                     connectAndCheck(
                         baseConfig = config,
@@ -350,6 +376,7 @@ fun SupervisorConnectionSetupScreen(
                                 password = password.takeIf { it.isNotBlank() } ?: device.password,
                                 authToken = config.authToken,
                                 relayDeviceId = config.relayDeviceId,
+                                relayThreadId = null,
                             ),
                         )
                     }
@@ -394,6 +421,7 @@ fun SupervisorConnectionSetupScreen(
                             baseUrl = baseUrl,
                             authToken = token,
                             relayDeviceId = relayDeviceId.takeIf { it.isNotBlank() },
+                            relayThreadId = null,
                         ),
                     )
                     route = ConnectionSetupRoute.RelayDevices
@@ -665,6 +693,7 @@ fun SupervisorConnectionSetupScreen(
                         relayBaseUrl = baseUrl,
                         busy = busy,
                         onConnectDevice = { deviceId -> connectRelayDeviceSelection(deviceId) },
+                        onCopySetup = { device -> copyRelayDeviceSetup(device) },
                         onOpenSharedSession = { share -> openSharedSession(share) },
                         onToggleShareAccess = { share ->
                             expandedShareId = if (expandedShareId == share.id) null else share.id
@@ -1466,6 +1495,7 @@ private fun RelayDevicesPanel(
     relayBaseUrl: String,
     busy: Boolean,
     onConnectDevice: (String) -> Unit,
+    onCopySetup: (RelayDeviceSummary) -> Unit,
     onOpenSharedSession: (RelaySessionShareSummary) -> Unit,
     onToggleShareAccess: (RelaySessionShareSummary) -> Unit,
     onEditShare: (RelaySessionShareSummary) -> Unit,
@@ -1488,6 +1518,7 @@ private fun RelayDevicesPanel(
                     device = device,
                     selected = device.id == selectedDeviceId,
                     onConnect = { onConnectDevice(device.id) },
+                    onCopySetup = { onCopySetup(device) },
                     onRevoke = { onRevokeDevice(device) },
                     busy = busy,
                 )
@@ -1557,6 +1588,7 @@ private fun RelayDeviceRow(
     selected: Boolean,
     busy: Boolean,
     onConnect: () -> Unit,
+    onCopySetup: () -> Unit,
     onRevoke: () -> Unit,
 ) {
     Row(
@@ -1590,6 +1622,15 @@ private fun RelayDeviceRow(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GraphButton(
+                    label = "Copy setup",
+                    enabled = !busy && !device.token.isNullOrBlank(),
+                    variant = GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    icon = GraphActionIcon.Copy,
+                    contentDescription = "Copy setup command for relay device ${device.name}",
+                    onClick = onCopySetup,
+                )
                 GraphButton(
                     label = if (busy && selected) "Connecting..." else "Connect",
                     enabled = !busy && device.connected,
@@ -2318,7 +2359,19 @@ private fun shortRelayTimestamp(value: String): String {
 
 private fun relaySupervisorCommand(relayBaseUrl: String, token: String): String {
     val relayWsUrl = normalizeRelayWebsocketUrl(relayBaseUrl)
-    return "REMOTE_CODEX_RELAY_SERVER_URL=$relayWsUrl REMOTE_CODEX_RELAY_AGENT_TOKEN=$token remote-codex relay-supervisor"
+    return listOf(
+        "REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayWsUrl)} \\",
+        "REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\",
+        "REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\",
+        "remote-codex relay-supervisor",
+    ).joinToString("\n")
+}
+
+private fun shellQuote(value: String): String {
+    if (value.matches(Regex("^[A-Za-z0-9_./:=@%+-]+$"))) {
+        return value
+    }
+    return "'${value.replace("'", "'\"'\"'")}'"
 }
 
 private fun normalizeRelayWebsocketUrl(relayBaseUrl: String): String {

@@ -36,4 +36,20 @@ class SupervisorConnectionTest {
         )
     }
 
+    @Test
+    fun addsRelayThreadScopeToWebsocketUrl() {
+        val config = SupervisorConnectionConfig(
+            mode = SupervisorConnectionMode.Relay,
+            baseUrl = "https://relay.example.test",
+            authToken = "relay token",
+            relayDeviceId = "device/one",
+            relayThreadId = "thread shared",
+        )
+
+        assertEquals(
+            "wss://relay.example.test/relay/devices/device%2Fone/ws?relaySession=relay+token&threadId=thread+shared",
+            config.websocketUrl(),
+        )
+    }
+
 }

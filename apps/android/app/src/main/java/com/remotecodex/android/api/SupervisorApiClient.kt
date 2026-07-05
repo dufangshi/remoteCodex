@@ -1042,6 +1042,7 @@ private fun JSONObject.toRelayDeviceSummary(): RelayDeviceSummary {
     return RelayDeviceSummary(
         id = getString("id"),
         name = optString("name", "Remote Codex device"),
+        token = optNullableString("token"),
         tokenPreview = optString("tokenPreview"),
         connected = optBoolean("connected", false),
         connectedAt = optNullableString("connectedAt"),

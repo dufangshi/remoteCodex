@@ -277,7 +277,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRelayDeviceSelectionCleared = {
                                     val current = supervisorConnection ?: return@SupervisorConnectionSetupScreen
-                                    val next = current.copy(relayDeviceId = null)
+                                    val next = current.copy(relayDeviceId = null, relayThreadId = null)
                                     settingsRepository.writeSupervisorConnection(next)
                                     supervisorConnection = next
                                 },
@@ -314,8 +314,13 @@ class MainActivity : ComponentActivity() {
                                                     ConnectedRoute.Home
                                                 }
                                             if (nextRoute is ConnectedRoute.ThreadDetail) {
+                                                val scopedConnection = connection.scopedForRelayThread(nextRoute.threadId)
+                                                if (scopedConnection != connection) {
+                                                    settingsRepository.writeSupervisorConnection(scopedConnection)
+                                                    supervisorConnection = scopedConnection
+                                                }
                                                 settingsRepository.writeLastRoute(
-                                                    connection,
+                                                    scopedConnection,
                                                     SavedAppRoute.ThreadDetail(
                                                         threadId = nextRoute.threadId,
                                                         workspaceId = nextRoute.workspaceId,
@@ -372,8 +377,13 @@ class MainActivity : ComponentActivity() {
                                                 ?.firstOrNull { it.id == nextThreadId }
                                                 ?.workspaceId
                                                 ?: route.connectedRoute.workspaceId
+                                            val scopedConnection = connection.scopedForRelayThread(nextThreadId)
+                                            if (scopedConnection != connection) {
+                                                settingsRepository.writeSupervisorConnection(scopedConnection)
+                                                supervisorConnection = scopedConnection
+                                            }
                                             settingsRepository.writeLastRoute(
-                                                connection,
+                                                scopedConnection,
                                                 SavedAppRoute.ThreadDetail(
                                                     threadId = nextThreadId,
                                                     workspaceId = workspaceId,
@@ -467,8 +477,13 @@ class MainActivity : ComponentActivity() {
                                             openDevicesScreen()
                                         },
                                         onOpenThread = { threadId ->
+                                            val scopedConnection = connection.scopedForRelayThread(threadId)
+                                            if (scopedConnection != connection) {
+                                                settingsRepository.writeSupervisorConnection(scopedConnection)
+                                                supervisorConnection = scopedConnection
+                                            }
                                             settingsRepository.writeLastRoute(
-                                                connection,
+                                                scopedConnection,
                                                 SavedAppRoute.ThreadDetail(
                                                     threadId = threadId,
                                                     workspaceId = route.connectedRoute.workspaceId,
@@ -507,7 +522,11 @@ class MainActivity : ComponentActivity() {
                             },
                             onChangeAccount = {
                                 settingsRepository.clearAuthToken()
-                                supervisorConnection = activeConnection.copy(authToken = null, relayDeviceId = null)
+                                supervisorConnection = activeConnection.copy(
+                                    authToken = null,
+                                    relayDeviceId = null,
+                                    relayThreadId = null,
+                                )
                                 connectionRoute = ConnectionRoute.RelayAuth
                             },
                             onReauthenticate = {
@@ -550,6 +569,18 @@ private fun SavedAppRoute.toConnectedRoute(): ConnectedRoute {
         SavedAppRoute.Home -> ConnectedRoute.Home
         is SavedAppRoute.WorkspaceDetail -> ConnectedRoute.WorkspaceDetail(workspaceId)
         is SavedAppRoute.ThreadDetail -> ConnectedRoute.ThreadDetail(threadId, workspaceId)
+    }
+}
+
+private fun SupervisorConnectionConfig.scopedForRelayThread(threadId: String): SupervisorConnectionConfig {
+    return if (
+        mode == SupervisorConnectionMode.Relay &&
+        !relayDeviceId.isNullOrBlank() &&
+        !relayThreadId.isNullOrBlank()
+    ) {
+        copy(relayThreadId = threadId)
+    } else {
+        this
     }
 }
 

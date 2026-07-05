@@ -22,12 +22,14 @@ data class SavedSupervisorDevice(
     val password: String? = null,
     val authToken: String? = null,
     val relayDeviceId: String? = null,
+    val relayThreadId: String? = null,
 ) {
     val normalizedBaseUrl: String = SupervisorConnectionConfig(
         mode = mode,
         baseUrl = baseUrl,
         authToken = authToken,
         relayDeviceId = relayDeviceId,
+        relayThreadId = relayThreadId,
     ).normalizedBaseUrl
 
     fun toConnectionConfig(): SupervisorConnectionConfig {
@@ -36,6 +38,7 @@ data class SavedSupervisorDevice(
             baseUrl = baseUrl,
             authToken = authToken?.takeIf { it.isNotBlank() },
             relayDeviceId = relayDeviceId?.takeIf { it.isNotBlank() },
+            relayThreadId = relayThreadId?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -47,6 +50,7 @@ data class SavedSupervisorDevice(
                 baseUrl = config.normalizedBaseUrl,
                 authToken = config.authToken,
                 relayDeviceId = config.relayDeviceId,
+                relayThreadId = config.relayThreadId,
             )
         }
 
@@ -79,6 +83,7 @@ class AppSettingsRepository(context: Context) {
             baseUrl = baseUrl,
             authToken = preferences.getString(SUPERVISOR_AUTH_TOKEN_KEY, null)?.takeIf { it.isNotBlank() },
             relayDeviceId = preferences.getString(SUPERVISOR_RELAY_DEVICE_ID_KEY, null)?.takeIf { it.isNotBlank() },
+            relayThreadId = preferences.getString(SUPERVISOR_RELAY_THREAD_ID_KEY, null)?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -88,6 +93,7 @@ class AppSettingsRepository(context: Context) {
             .putString(SUPERVISOR_BASE_URL_KEY, config.normalizedBaseUrl)
             .putString(SUPERVISOR_AUTH_TOKEN_KEY, config.authToken)
             .putString(SUPERVISOR_RELAY_DEVICE_ID_KEY, config.relayDeviceId)
+            .putString(SUPERVISOR_RELAY_THREAD_ID_KEY, config.relayThreadId)
             .apply()
     }
 
@@ -97,12 +103,14 @@ class AppSettingsRepository(context: Context) {
             .remove(SUPERVISOR_BASE_URL_KEY)
             .remove(SUPERVISOR_AUTH_TOKEN_KEY)
             .remove(SUPERVISOR_RELAY_DEVICE_ID_KEY)
+            .remove(SUPERVISOR_RELAY_THREAD_ID_KEY)
             .apply()
     }
 
     fun clearRelayDeviceSelection() {
         preferences.edit()
             .remove(SUPERVISOR_RELAY_DEVICE_ID_KEY)
+            .remove(SUPERVISOR_RELAY_THREAD_ID_KEY)
             .apply()
     }
 
@@ -110,6 +118,7 @@ class AppSettingsRepository(context: Context) {
         preferences.edit()
             .remove(SUPERVISOR_AUTH_TOKEN_KEY)
             .remove(SUPERVISOR_RELAY_DEVICE_ID_KEY)
+            .remove(SUPERVISOR_RELAY_THREAD_ID_KEY)
             .apply()
     }
 
@@ -209,6 +218,7 @@ class AppSettingsRepository(context: Context) {
         const val SUPERVISOR_BASE_URL_KEY = "supervisor_base_url"
         const val SUPERVISOR_AUTH_TOKEN_KEY = "supervisor_auth_token"
         const val SUPERVISOR_RELAY_DEVICE_ID_KEY = "supervisor_relay_device_id"
+        const val SUPERVISOR_RELAY_THREAD_ID_KEY = "supervisor_relay_thread_id"
         const val SAVED_SUPERVISOR_DEVICES_KEY = "saved_supervisor_devices"
     }
 }
@@ -223,6 +233,7 @@ private fun SavedSupervisorDevice.toJson(): JSONObject {
         .put("password", password.orEmpty())
         .put("authToken", authToken.orEmpty())
         .put("relayDeviceId", relayDeviceId.orEmpty())
+        .put("relayThreadId", relayThreadId.orEmpty())
 }
 
 private fun JSONObject.toSavedSupervisorDevice(): SavedSupervisorDevice {
@@ -235,5 +246,6 @@ private fun JSONObject.toSavedSupervisorDevice(): SavedSupervisorDevice {
         password = optString("password").takeIf { it.isNotBlank() },
         authToken = optString("authToken").takeIf { it.isNotBlank() },
         relayDeviceId = optString("relayDeviceId").takeIf { it.isNotBlank() },
+        relayThreadId = optString("relayThreadId").takeIf { it.isNotBlank() },
     )
 }

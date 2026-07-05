@@ -33,6 +33,7 @@ data class SupervisorConnectionConfig(
     val baseUrl: String,
     val authToken: String? = null,
     val relayDeviceId: String? = null,
+    val relayThreadId: String? = null,
 ) {
     val normalizedBaseUrl: String = normalizeBaseUrl(baseUrl)
 
@@ -72,7 +73,15 @@ data class SupervisorConnectionConfig(
             .replaceFirst("http://", "ws://")
         val token = authToken?.trim().orEmpty()
         val queryName = if (mode == SupervisorConnectionMode.Relay) "relaySession" else "token"
-        return if (token.isEmpty()) "$wsBase$path" else "$wsBase$path?$queryName=${urlEncodeQueryValue(token)}"
+        val query = mutableListOf<String>()
+        if (token.isNotEmpty()) {
+            query += "$queryName=${urlEncodeQueryValue(token)}"
+        }
+        val threadId = relayThreadId?.trim().orEmpty()
+        if (mode == SupervisorConnectionMode.Relay && threadId.isNotEmpty()) {
+            query += "threadId=${urlEncodeQueryValue(threadId)}"
+        }
+        return if (query.isEmpty()) "$wsBase$path" else "$wsBase$path?${query.joinToString("&")}"
     }
 }
 
@@ -651,6 +660,7 @@ data class RespondThreadRequest(
 data class RelayDeviceSummary(
     val id: String,
     val name: String,
+    val token: String?,
     val tokenPreview: String,
     val connected: Boolean,
     val connectedAt: String?,

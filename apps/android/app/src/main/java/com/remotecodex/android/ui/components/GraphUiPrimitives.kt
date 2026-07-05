@@ -92,6 +92,7 @@ enum class GraphActionIcon {
     Add,
     Cancel,
     Save,
+    Copy,
     Export,
     Delete,
     Open,
@@ -593,6 +594,10 @@ private fun GraphActionGlyph(
                     lineTo(size.width * 0.66f, size.height * 0.66f)
                 }
                 drawPath(path = path, color = color, style = stroke)
+            }
+            GraphActionIcon.Copy -> {
+                rect(0.34f, 0.24f, 0.78f, 0.68f)
+                rect(0.22f, 0.36f, 0.66f, 0.80f)
             }
             GraphActionIcon.Export -> {
                 line(0.50f, 0.18f, 0.50f, 0.58f)

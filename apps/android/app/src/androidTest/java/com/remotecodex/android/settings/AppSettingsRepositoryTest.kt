@@ -90,6 +90,7 @@ class AppSettingsRepositoryTest {
             baseUrl = "https://relay.example.test/",
             authToken = "relay-session",
             relayDeviceId = "mac",
+            relayThreadId = "shared-thread",
         )
         val relayWslConfig = relayMacConfig.copy(relayDeviceId = "wsl")
 
