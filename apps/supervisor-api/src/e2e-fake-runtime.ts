@@ -6,11 +6,13 @@ import type {
   AgentPendingProviderRequest,
   AgentProviderRequest,
   AgentProviderRequestMapping,
+  AgentGoal,
   AgentSessionDetail,
   AgentHistoryItem,
   AgentRuntime,
   AgentRuntimeEvent,
   AgentTurn,
+  SetAgentGoalInput,
 } from '../../../packages/agent-runtime/src/index';
 
 type StoredE2ESession = AgentSessionDetail;
@@ -46,7 +48,7 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
       permissionRequests: false,
       sandboxMode: false,
       performanceMode: false,
-      goals: false,
+      goals: true,
     },
     management: {
       models: true,
@@ -62,6 +64,12 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
   readonly managementSchema: AgentRuntime['managementSchema'] = {
     hostConfigFiles: [],
     toolboxItems: [
+      {
+        action: 'goal',
+        command: '/goal',
+        label: 'Goal',
+        description: 'Manage the current goal.',
+      },
       {
         action: 'fork',
         command: '/fork',
@@ -89,6 +97,7 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
 
   private readonly sessions = new Map<string, StoredE2ESession>();
   private readonly providerRequests = new Map<string | number, StoredProviderRequest>();
+  private readonly goals = new Map<string, AgentGoal>();
   private activeTurnId: string | null = null;
   private startedAt: string | null = null;
 
@@ -208,6 +217,48 @@ export class E2EFakeRuntime extends EventEmitter implements AgentRuntime {
       session,
       rawSession: session,
     };
+  }
+
+  async getGoal(providerSessionId: string) {
+    return this.goals.get(providerSessionId) ?? null;
+  }
+
+  async setGoal(input: SetAgentGoalInput) {
+    const existing = this.goals.get(input.providerSessionId);
+    const now = Date.now();
+    const goal: AgentGoal = {
+      providerSessionId: input.providerSessionId,
+      objective: input.objective ?? existing?.objective ?? 'E2E shared goal',
+      status: input.status ?? existing?.status ?? 'active',
+      tokenBudget:
+        input.tokenBudget !== undefined
+          ? input.tokenBudget
+          : existing?.tokenBudget ?? null,
+      tokensUsed: existing?.tokensUsed ?? 0,
+      timeUsedSeconds: existing?.timeUsedSeconds ?? 0,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      rawGoal: null,
+    };
+    this.goals.set(input.providerSessionId, goal);
+    this.emitRuntimeEvent({
+      type: 'goal.updated',
+      provider,
+      providerSessionId: input.providerSessionId,
+      providerTurnId: null,
+      goal,
+    });
+    return goal;
+  }
+
+  async clearGoal(providerSessionId: string) {
+    const existed = this.goals.delete(providerSessionId);
+    this.emitRuntimeEvent({
+      type: 'goal.cleared',
+      provider,
+      providerSessionId,
+    });
+    return existed;
   }
 
   async startTurn(input: Parameters<AgentRuntime['startTurn']>[0]) {

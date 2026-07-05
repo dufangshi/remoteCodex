@@ -771,13 +771,21 @@ async function forwardRelayHttp(input: {
   const sharedThreadListRequest =
     input.request.method.toUpperCase() === 'GET' &&
     targetUrl.pathname === '/api/threads';
+  const sharedRuntimeMetadataRequest = isAllowedSharedRuntimeMetadataRequest(
+    input.request.method,
+    targetUrl.pathname,
+  );
   const access = input.store.effectiveAccess(input.user.id, input.deviceId, {
     threadId,
     workspaceId,
   });
+  let allowSharedRuntimeMetadata = false;
   if (!access) {
+    const shares =
+      sharedThreadListRequest || sharedRuntimeMetadataRequest
+        ? input.store.sharedThreadsForDevice(input.user.id, input.deviceId)
+        : [];
     if (sharedThreadListRequest) {
-      const shares = input.store.sharedThreadsForDevice(input.user.id, input.deviceId);
       if (shares.length > 0) {
         await forwardSharedThreadList({
           reply: input.reply,
@@ -790,11 +798,14 @@ async function forwardRelayHttp(input: {
         return;
       }
     }
-    input.reply.status(403).send({
-      code: 'forbidden',
-      message: 'Device access is not allowed.',
-    } satisfies ApiErrorShape);
-    return;
+    allowSharedRuntimeMetadata = sharedRuntimeMetadataRequest && shares.length > 0;
+    if (!allowSharedRuntimeMetadata) {
+      input.reply.status(403).send({
+        code: 'forbidden',
+        message: 'Device access is not allowed.',
+      } satisfies ApiErrorShape);
+      return;
+    }
   }
 
   if (!isAllowedRelayTarget(input.targetPath)) {
@@ -805,7 +816,10 @@ async function forwardRelayHttp(input: {
     return;
   }
 
-  if (!isAllowedForRelayAccess(access, input.request.method, input.targetPath)) {
+  if (
+    access &&
+    !isAllowedForRelayAccess(access, input.request.method, input.targetPath)
+  ) {
     input.reply.status(403).send({
       code: 'forbidden',
       message: 'This shared session does not allow that operation.',
@@ -813,7 +827,7 @@ async function forwardRelayHttp(input: {
     return;
   }
 
-  if (access.kind === 'shared') {
+  if (access?.kind === 'shared') {
     input.store.recordShareAccess(access.share, input.user);
   }
   const conversationEvent = conversationEventFromRequest(
@@ -1386,6 +1400,16 @@ function firstAccessibleConnectedDevice(
 function isAllowedRelayTarget(pathValue: string) {
   const pathname = new URL(pathValue, 'http://relay.local').pathname;
   return pathname === '/healthz' || pathname.startsWith('/api/');
+}
+
+function isAllowedSharedRuntimeMetadataRequest(method: string, pathname: string) {
+  if (method.toUpperCase() !== 'GET') {
+    return false;
+  }
+  if (pathname === '/api/agent-runtimes') {
+    return true;
+  }
+  return /^\/api\/agent-runtimes\/[^/]+\/(?:status|models)$/.test(pathname);
 }
 
 function threadIdFromPath(pathValue: string) {

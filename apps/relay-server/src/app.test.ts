@@ -1250,6 +1250,41 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('allows shared viewers to read runtime metadata required by the slash toolbox', async () => {
+    const { app, friendToken, deviceId } = await setupSharedRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'read',
+    });
+
+    const runtimeMetadataUrls = [
+      `/relay/devices/${deviceId}/api/agent-runtimes`,
+      `/relay/devices/${deviceId}/api/agent-runtimes/codex/status`,
+      `/relay/devices/${deviceId}/api/agent-runtimes/codex/models`,
+    ];
+
+    for (const url of runtimeMetadataUrls) {
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(response.statusCode).toBe(503);
+    }
+
+    const restartResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/agent-runtimes/codex/restart`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(restartResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
   it('returns only shared thread records for shared room list refreshes', async () => {
     const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
       threadAccess: 'read',
