@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ClaudeRuntimeAdapter } from './runtimeAdapter';
-import { hiddenInitPrompt } from './historyItems';
+import { assistantMessageToHistoryItems, hiddenInitPrompt } from './historyItems';
 import type { AgentRuntimeEvent } from '../../agent-runtime/src/index';
 
 type SDKMessage = Record<string, any>;
@@ -663,6 +663,225 @@ describe('ClaudeRuntimeAdapter', () => {
       preview: null,
     });
     await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
+  });
+
+  it('keeps active Claude sessions running in list summaries', async () => {
+    const heldQuery = new FakeQuery([systemInit()], { holdOpen: true });
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return heldQuery;
+    });
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: 'turn-1',
+      prompt: 'Keep running',
+    } as any);
+    await wait();
+
+    await expect(adapter.listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        providerSessionId: 'claude-session-1',
+        status: 'running',
+      }),
+    ]);
+
+    heldQuery.close();
+  });
+
+  it('merges adjacent Claude thinking blocks into one reasoning item', () => {
+    const items = assistantMessageToHistoryItems({
+      messageId: 'msg_1',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'First thought.' },
+          { type: 'thinking', thinking: 'Second thought.' },
+          { type: 'text', text: 'Final answer.' },
+        ],
+      },
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        kind: 'reasoning',
+        text: 'First thought.\n\nSecond thought.',
+      }),
+      expect.objectContaining({
+        kind: 'agentMessage',
+        text: 'Final answer.',
+      }),
+    ]);
+  });
+
+  it('merges adjacent Claude reasoning messages while reading history', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: 'reasoning-user',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Inspect the dev branch.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'reasoning-1',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: 'I should inspect dev.' }],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'reasoning-2',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: 'I should inspect dev.' }],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'reasoning-3',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'thinking',
+                thinking: 'I should inspect dev. Then compare the merge.',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage' }),
+      expect.objectContaining({
+        kind: 'reasoning',
+        text: 'I should inspect dev. Then compare the merge.',
+      }),
+    ]);
+  });
+
+  it('keeps late Claude subagent tool results in order before completing the turn', async () => {
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return [
+        systemInit(),
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_agent',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_agent',
+                name: 'Task',
+                input: {
+                  description: 'Inspect dependency graph',
+                  prompt: 'Look for stale imports.',
+                },
+              },
+            ],
+            stop_reason: null,
+            stop_sequence: null,
+            stop_details: null,
+            usage: {} as any,
+            container: null,
+            context_management: null,
+            diagnostics: null,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000031' as any,
+          session_id: 'claude-session-1',
+        },
+        result(),
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_agent',
+                content: 'The subagent found one stale import.',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+          tool_use_result: 'The subagent found one stale import.',
+          uuid: '00000000-0000-4000-8000-000000000032' as any,
+          session_id: 'claude-session-1',
+        },
+      ];
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      displayTurnId: 'turn-subagent',
+      prompt: 'Use a subagent',
+    } as any);
+    await wait();
+
+    const completed = events.at(-1);
+    expect(completed).toMatchObject({
+      type: 'turn.completed',
+      turn: {
+        providerTurnId: 'turn-subagent',
+        status: 'completed',
+      },
+    });
+    expect(completed?.type === 'turn.completed' ? completed.turn.items : []).toEqual([
+      expect.objectContaining({ id: 'turn-subagent:user', kind: 'userMessage' }),
+      expect.objectContaining({
+        id: 'toolu_agent',
+        kind: 'agentToolCall',
+        status: 'completed',
+        detailText: expect.stringContaining('The subagent found one stale import.'),
+      }),
+    ]);
+    expect(
+      events.findIndex(
+        (event) =>
+          event.type === 'item.completed' &&
+          event.item.id === 'toolu_agent' &&
+          event.item.status === 'completed',
+      ),
+    ).toBeLessThan(events.length - 1);
   });
 
   it('filters Claude generated titles derived from the synthetic init prompt', async () => {

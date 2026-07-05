@@ -2924,7 +2924,7 @@ describe('supervisor api', () => {
       },
     });
     const historicalTurn = detailResponse.json().turns.at(-1);
-    expect(historicalTurn.priceEstimate.totalUsd).toBeCloseTo(0.0225948, 10);
+    expect(historicalTurn.priceEstimate.totalUsd).toBeCloseTo(0.0150632, 10);
   });
 
   it('uses local turn metadata time when Claude history lacks a parseable timestamp', async () => {

@@ -54,16 +54,23 @@
       "supportsFastMode": false
     },
     "sonnet": {
-      "inputUsdPerMillion": 3,
-      "cachedInputUsdPerMillion": 0.3,
-      "outputUsdPerMillion": 15,
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
       "supportsFastMode": false,
-      "contextWindowTokens": 200000
+      "contextWindowTokens": 1000000
     },
     "sonnet[1m]": {
-      "inputUsdPerMillion": 6,
-      "cachedInputUsdPerMillion": 0.6,
-      "outputUsdPerMillion": 22.5,
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000
+    },
+    "fable": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
       "supportsFastMode": false,
       "contextWindowTokens": 1000000
     },
@@ -72,7 +79,7 @@
       "cachedInputUsdPerMillion": 0.5,
       "outputUsdPerMillion": 25,
       "supportsFastMode": false,
-      "contextWindowTokens": 200000
+      "contextWindowTokens": 1000000
     },
     "haiku": {
       "inputUsdPerMillion": 1,
@@ -80,6 +87,27 @@
       "outputUsdPerMillion": 5,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
+    },
+    "claude-fable-5": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000
+    },
+    "claude-mythos-5": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000
+    },
+    "claude-sonnet-5": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000
     },
     "claude-sonnet-4-5": {
       "inputUsdPerMillion": 3,
@@ -93,7 +121,15 @@
       "cachedInputUsdPerMillion": 0.3,
       "outputUsdPerMillion": 15,
       "supportsFastMode": false,
-      "contextWindowTokens": 200000
+      "contextWindowTokens": 1000000
+    },
+    "claude-opus-4-8": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": true,
+      "fastMultiplier": 2,
+      "contextWindowTokens": 1000000
     },
     "claude-opus-4-5": {
       "inputUsdPerMillion": 5,
@@ -102,10 +138,32 @@
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     },
+    "claude-opus-4-6": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000
+    },
     "claude-opus-4-7": {
       "inputUsdPerMillion": 5,
       "cachedInputUsdPerMillion": 0.5,
       "outputUsdPerMillion": 25,
+      "supportsFastMode": true,
+      "fastMultiplier": 6,
+      "contextWindowTokens": 1000000
+    },
+    "claude-opus-4-1": {
+      "inputUsdPerMillion": 15,
+      "cachedInputUsdPerMillion": 1.5,
+      "outputUsdPerMillion": 75,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000
+    },
+    "claude-opus-4": {
+      "inputUsdPerMillion": 15,
+      "cachedInputUsdPerMillion": 1.5,
+      "outputUsdPerMillion": 75,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     },
@@ -113,6 +171,13 @@
       "inputUsdPerMillion": 1,
       "cachedInputUsdPerMillion": 0.1,
       "outputUsdPerMillion": 5,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000
+    },
+    "claude-haiku-3-5": {
+      "inputUsdPerMillion": 0.8,
+      "cachedInputUsdPerMillion": 0.08,
+      "outputUsdPerMillion": 4,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     }

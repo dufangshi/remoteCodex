@@ -509,6 +509,7 @@ export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
     item.kind === 'agentToolCall' ||
     item.kind === 'skillToolCall' ||
     item.kind === 'toolCall' ||
+    item.kind === 'reasoning' ||
     item.kind === 'webSearch'
   );
 }

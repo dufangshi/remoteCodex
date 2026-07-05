@@ -94,6 +94,22 @@ function compactJson(value: unknown): string {
   }
 }
 
+function joinReasoningText(left: string, right: string) {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  if (right.startsWith(left)) {
+    return right;
+  }
+  if (left.endsWith(right)) {
+    return left;
+  }
+  return `${left}\n\n${right}`;
+}
+
 function readableToolName(toolName: string) {
   if (CLAUDE_TOOL_LABELS[toolName]) {
     return CLAUDE_TOOL_LABELS[toolName];
@@ -486,11 +502,16 @@ export function assistantMessageToHistoryItems(
     if (type === 'thinking') {
       const thinking = thinkingTextFromBlock(block);
       if (thinking) {
-        items.push({
-          id: `${input.messageId}:content:${index}`,
-          kind: 'reasoning',
-          text: thinking,
-        });
+        const previous = items.at(-1);
+        if (previous?.kind === 'reasoning') {
+          previous.text = joinReasoningText(previous.text, thinking);
+        } else {
+          items.push({
+            id: `${input.messageId}:content:${index}`,
+            kind: 'reasoning',
+            text: thinking,
+          });
+        }
       }
       continue;
     }
@@ -715,12 +736,15 @@ export function buildAgentTurn(input: {
   items: AgentHistoryItem[];
   rawTurn?: unknown;
 }): AgentTurn {
+  const startedAt = input.startedAt ?? null;
   const turn: AgentTurn = {
     providerTurnId: input.providerTurnId,
-    startedAt: input.startedAt ?? null,
+    startedAt,
     status: input.status,
     error: input.error ? { message: input.error } : null,
-    items: input.items,
+    items: input.items.map((item) =>
+      item.createdAt || !startedAt ? item : { ...item, createdAt: startedAt },
+    ),
   };
   if (input.rawTurn !== undefined) {
     turn.rawTurn = input.rawTurn;

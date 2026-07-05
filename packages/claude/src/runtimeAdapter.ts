@@ -863,6 +863,10 @@ function streamMessageId(event: unknown) {
   return messageIdFromPayload(message);
 }
 
+function sessionMessageTimestamp(message: SessionMessage) {
+  return typeof message.uuid === 'string' ? isoFromUuidV7(message.uuid) : null;
+}
+
 function addOrUpdateItem(state: ActiveClaudeTurn, item: AgentHistoryItem) {
   if (!state.items.has(item.id)) {
     state.itemOrder.push(item.id);
@@ -874,6 +878,68 @@ function orderedItems(state: ActiveClaudeTurn) {
   return state.itemOrder
     .map((id) => state.items.get(id))
     .filter((item): item is AgentHistoryItem => Boolean(item));
+}
+
+function withHistoryItemCreatedAt<T extends AgentHistoryItem>(
+  item: T,
+  createdAt: string | null | undefined,
+): T {
+  if (item.createdAt || !createdAt) {
+    return item;
+  }
+  return { ...item, createdAt };
+}
+
+function latestReasoningItem(state: ActiveClaudeTurn) {
+  const lastItemId = state.itemOrder.at(-1);
+  const lastItem = lastItemId ? state.items.get(lastItemId) : null;
+  return lastItem?.kind === 'reasoning' ? lastItem : null;
+}
+
+function joinReasoningText(left: string, right: string) {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  if (right.startsWith(left)) {
+    return right;
+  }
+  if (left.endsWith(right)) {
+    return left;
+  }
+  return `${left}\n\n${right}`;
+}
+
+function isRunningHistoryItemStatus(status: string | null | undefined) {
+  const normalized = status?.trim().toLowerCase();
+  return (
+    normalized === 'running' ||
+    normalized === 'pending' ||
+    normalized === 'in_progress' ||
+    normalized === 'in progress'
+  );
+}
+
+function finalizeTurnItems(
+  state: ActiveClaudeTurn,
+  status: AgentTurn['status'],
+  completedAt: string,
+) {
+  return orderedItems(state).map((item) => {
+    if (item.kind === 'userMessage') {
+      return item;
+    }
+    if (status === 'completed' && isRunningHistoryItemStatus(item.status)) {
+      return {
+        ...item,
+        status: 'completed',
+        createdAt: item.createdAt ?? completedAt,
+      };
+    }
+    return withHistoryItemCreatedAt(item, completedAt);
+  });
 }
 
 function stringFromRecord(value: Record<string, unknown>, key: string) {
@@ -1235,7 +1301,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const sessions = await this.withClaudeConfigEnv(() => this.listSessionsFn({} as ListSessionsOptions));
     return sessions.map((session) => {
       this.knownSessionIds.add(session.sessionId);
-      return sessionSummaryFromInfo(session);
+      const summary = sessionSummaryFromInfo(session);
+      const activeTurn = this.activeTurnForSession(summary.providerSessionId);
+      return activeTurn
+        ? {
+            ...summary,
+            status: 'running' as const,
+            updatedAt: summary.updatedAt ?? activeTurn.startedAt,
+          }
+        : summary;
     });
   }
 
@@ -1418,9 +1492,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         tools: { type: 'preset', preset: 'claude_code' },
       }),
     });
-    const userItem = userMessageToHistoryItem(`${providerTurnId}:user`, {
-      content: input.prompt,
-    });
+    const userItem = withHistoryItemCreatedAt(
+      userMessageToHistoryItem(`${providerTurnId}:user`, {
+        content: input.prompt,
+      }),
+      startedAt,
+    );
     const initialItems = input.hidden ? [] : [userItem];
     const state: ActiveClaudeTurn = {
       providerSessionId: input.providerSessionId,
@@ -1511,6 +1588,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
   }
 
+  private activeTurnForSession(providerSessionId: string) {
+    for (const state of this.activeTurns.values()) {
+      if (state.providerSessionId === providerSessionId && !state.completed) {
+        return state;
+      }
+    }
+    return null;
+  }
+
   private reconcileActiveTranscriptTurn(
     providerSessionId: string,
     turns: AgentTurn[],
@@ -1594,31 +1680,16 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   private async consumeQuery(state: ActiveClaudeTurn) {
     const rawMessages: SDKMessage[] = [];
+    let terminalStatus: AgentTurn['status'] | null = null;
+    let terminalError: string | null = null;
     try {
       for await (const message of state.query) {
         rawMessages.push(message);
-        if (state.completed) {
-          continue;
-        }
         this.consumeMessage(state, message);
         const status = queryResultStatus(message);
         if (status) {
-          state.completed = true;
-          this.deleteActiveTurn(state);
-          this.emitUsage(state);
-          this.emitRuntimeEvent({
-            type: 'turn.completed',
-            provider: 'claude',
-            providerSessionId: state.providerSessionId,
-            turn: buildAgentTurn({
-              providerTurnId: state.providerTurnId,
-              startedAt: state.startedAt,
-              status: state.interrupted ? 'interrupted' : status,
-              error: queryResultError(message),
-              items: orderedItems(state),
-              rawTurn: rawMessages,
-            }),
-          });
+          terminalStatus = status;
+          terminalError = queryResultError(message);
         }
       }
 
@@ -1626,6 +1697,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         state.completed = true;
         this.deleteActiveTurn(state);
         this.emitUsage(state);
+        const completedAt = new Date().toISOString();
+        const status = state.interrupted
+          ? 'interrupted'
+          : terminalStatus ?? 'completed';
         this.emitRuntimeEvent({
           type: 'turn.completed',
           provider: 'claude',
@@ -1633,8 +1708,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           turn: buildAgentTurn({
             providerTurnId: state.providerTurnId,
             startedAt: state.startedAt,
-            status: state.interrupted ? 'interrupted' : 'completed',
-            items: orderedItems(state),
+            status,
+            error: terminalError,
+            items: finalizeTurnItems(state, status, completedAt),
             rawTurn: rawMessages,
           }),
         });
@@ -1656,6 +1732,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   private consumeMessage(state: ActiveClaudeTurn, message: SDKMessage) {
     this.captureUsage(state, message);
+    const messageCreatedAt = new Date().toISOString();
 
     if (message.type === 'system' && message.subtype === 'init') {
       this.updateToolboxItemsFromSystemInit(message);
@@ -1677,8 +1754,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         event: message.event,
       });
       if (toolItem) {
-        addOrUpdateItem(state, toolItem);
-        this.emitItem(state, toolItem, 'item.started');
+        const nextItem = withHistoryItemCreatedAt(toolItem, messageCreatedAt);
+        addOrUpdateItem(state, nextItem);
+        this.emitItem(state, nextItem, 'item.started');
         return;
       }
 
@@ -1688,16 +1766,22 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       });
       if (reasoningItem) {
         const existing = state.items.get(reasoningItem.id);
-        const nextItem: AgentHistoryItem = existing?.kind === 'reasoning'
+        const previousReasoning = existing?.kind === 'reasoning'
+          ? existing
+          : latestReasoningItem(state);
+        const nextItem: AgentHistoryItem = previousReasoning
           ? {
-              ...existing,
-              text: `${existing.text}${reasoningItem.text}`,
-              status: reasoningItem.status ?? existing.status ?? null,
+              ...previousReasoning,
+              text:
+                previousReasoning.id === reasoningItem.id
+                  ? `${previousReasoning.text}${reasoningItem.text}`
+                  : joinReasoningText(previousReasoning.text, reasoningItem.text),
+              status: reasoningItem.status ?? previousReasoning.status ?? null,
             }
-          : reasoningItem;
+          : withHistoryItemCreatedAt(reasoningItem, messageCreatedAt);
         addOrUpdateItem(state, nextItem);
-        this.emitItem(state, nextItem, existing ? 'item.completed' : 'item.started', {
-          force: Boolean(existing),
+        this.emitItem(state, nextItem, previousReasoning ? 'item.completed' : 'item.started', {
+          force: Boolean(previousReasoning),
         });
         return;
       }
@@ -1715,6 +1799,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             })
           : markTransientAgentHistoryItem({
               id: delta.itemId,
+              createdAt: messageCreatedAt,
               kind: 'agentMessage',
               text: delta.delta,
             });
@@ -1743,8 +1828,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             result: message.tool_use_result ?? toolResult.result,
             previous: state.items.get(toolResult.toolUseId) ?? null,
           });
-          addOrUpdateItem(state, item);
-          this.emitItem(state, item, 'item.completed');
+          const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+          addOrUpdateItem(state, nextItem);
+          this.emitItem(state, nextItem, 'item.completed');
         }
         return;
       }
@@ -1776,12 +1862,13 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         messageId: assistantMessageId,
         message: payload,
       })) {
-        const existing = state.items.get(item.id);
-        addOrUpdateItem(state, item);
-        if (item.kind !== 'agentMessage' && !existing) {
-          this.emitItem(state, item, 'item.started');
-        } else if (item.kind !== 'agentMessage' && existing) {
-          this.emitItem(state, item, 'item.started', { force: true });
+        const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+        const existing = state.items.get(nextItem.id);
+        addOrUpdateItem(state, nextItem);
+        if (nextItem.kind !== 'agentMessage' && !existing) {
+          this.emitItem(state, nextItem, 'item.started');
+        } else if (nextItem.kind !== 'agentMessage' && existing) {
+          this.emitItem(state, nextItem, 'item.started', { force: true });
         }
       }
       return;
@@ -1796,8 +1883,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         result: message.tool_use_result ?? message.message,
         previous: state.items.get(message.parent_tool_use_id) ?? null,
       });
-      addOrUpdateItem(state, item);
-      this.emitItem(state, item, 'item.completed');
+      const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+      addOrUpdateItem(state, nextItem);
+      this.emitItem(state, nextItem, 'item.completed');
       return;
     }
 
@@ -1817,8 +1905,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           status: 'running',
         });
         if (item) {
-          addOrUpdateItem(state, item);
-          this.emitItem(state, item, 'item.started');
+          const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+          addOrUpdateItem(state, nextItem);
+          this.emitItem(state, nextItem, 'item.started');
         } else {
           state.suppressedToolUseIds.add(toolUseId);
         }
@@ -1840,13 +1929,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           }
         : {
             id: toolUseId,
+            createdAt: messageCreatedAt,
             kind: 'toolCall',
             text: `${message.tool_name} denied`,
             detailText: typeof message.message === 'string' ? message.message : null,
             status: 'denied',
           };
-      addOrUpdateItem(state, item);
-      this.emitItem(state, item, 'item.completed');
+      const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+      addOrUpdateItem(state, nextItem);
+      this.emitItem(state, nextItem, 'item.completed');
     }
   }
 
@@ -2076,6 +2167,18 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           itemsById: new Map(),
         };
       }
+      const previous = current.items.at(-1);
+      if (item.kind === 'reasoning' && previous?.kind === 'reasoning') {
+        const merged = {
+          ...previous,
+          text: joinReasoningText(previous.text, item.text),
+          status: item.status ?? previous.status ?? null,
+        };
+        current.items[current.items.length - 1] = merged;
+        current.itemsById.set(previous.id, merged);
+        current.itemsById.set(item.id, merged);
+        return;
+      }
       const existingIndex = current.items.findIndex((entry) => entry.id === item.id);
       if (existingIndex >= 0) {
         current.items[existingIndex] = item;
@@ -2094,11 +2197,16 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         if (toolResults.length > 0) {
           for (const toolResult of toolResults) {
             const previous = current?.itemsById.get(toolResult.toolUseId) ?? null;
-            upsertCurrentItem(resultForToolUse({
-              toolUseId: toolResult.toolUseId,
-              result: toolResult.result,
-              previous,
-            }));
+            upsertCurrentItem(
+              withHistoryItemCreatedAt(
+                resultForToolUse({
+                  toolUseId: toolResult.toolUseId,
+                  result: toolResult.result,
+                  previous,
+                }),
+                sessionMessageTimestamp(message) ?? current?.startedAt,
+              ),
+            );
           }
           continue;
         }
@@ -2126,16 +2234,18 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           }));
         }
         const messageUuid = message.uuid ?? randomUUID();
+        const userStartedAt = isoFromUuidV7(messageUuid);
         const userItem = await this.userMessageToHistoryItem(
           messageUuid,
           message.message,
           context,
         );
+        const stampedUserItem = withHistoryItemCreatedAt(userItem, userStartedAt);
         current = {
           providerTurnId: `claude-turn-${messageUuid}`,
-          startedAt: isoFromUuidV7(messageUuid),
-          items: [userItem],
-          itemsById: new Map([[messageUuid, userItem]]),
+          startedAt: userStartedAt,
+          items: [stampedUserItem],
+          itemsById: new Map([[messageUuid, stampedUserItem]]),
         };
         continue;
       }
@@ -2145,6 +2255,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       if (message.type === 'assistant') {
+        const assistantCreatedAt = sessionMessageTimestamp(message) ?? current?.startedAt;
         for (const toolUseId of suppressedClaudeToolUseIds(message.message)) {
           suppressedToolUseIds.add(toolUseId);
           current?.itemsById.delete(toolUseId);
@@ -2153,7 +2264,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           messageId: message.uuid ?? randomUUID(),
           message: message.message,
         })) {
-          upsertCurrentItem(item);
+          upsertCurrentItem(withHistoryItemCreatedAt(item, assistantCreatedAt));
         }
         continue;
       }
@@ -2163,13 +2274,18 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           continue;
         }
         const previous = current?.itemsById.get(message.parent_tool_use_id) ?? null;
-        upsertCurrentItem(resultForToolUse({
-          toolUseId: message.parent_tool_use_id,
-          result: isRecord(message.message) && 'content' in message.message
-            ? message.message.content
-            : message.message,
-          previous,
-        }));
+        upsertCurrentItem(
+          withHistoryItemCreatedAt(
+            resultForToolUse({
+              toolUseId: message.parent_tool_use_id,
+              result: isRecord(message.message) && 'content' in message.message
+                ? message.message.content
+                : message.message,
+              previous,
+            }),
+            sessionMessageTimestamp(message) ?? current?.startedAt,
+          ),
+        );
       }
     }
 

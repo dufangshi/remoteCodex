@@ -71,9 +71,9 @@ describe('modelPricing', () => {
     expect(estimate?.totalUsd).toBeCloseTo(0.125625, 10);
   });
 
-  it('prices Claude Sonnet and its 1M context option from the local pricing config', () => {
+  it('prices current Claude Sonnet aliases from the local pricing config', () => {
     expect(supportsFastMode('sonnet')).toBe(false);
-    expect(contextWindowForModel('sonnet')).toBe(200000);
+    expect(contextWindowForModel('sonnet')).toBe(1000000);
     expect(contextWindowForModel('sonnet[1m]')).toBe(1000000);
 
     const standardEstimate = estimateTurnPrice(sampleUsage, {
@@ -83,9 +83,9 @@ describe('modelPricing', () => {
     expect(standardEstimate).toMatchObject({
       pricingModelKey: 'sonnet',
       pricingTierKey: 'standard',
-      inputUsd: 0.003,
-      cachedInputUsd: 0.00015,
-      outputUsd: 0.0225,
+      inputUsd: 0.002,
+      cachedInputUsd: 0.0001,
+      outputUsd: 0.015,
     });
 
     const oneMillionEstimate = estimateTurnPrice(sampleUsage, {
@@ -95,22 +95,35 @@ describe('modelPricing', () => {
     expect(oneMillionEstimate).toMatchObject({
       pricingModelKey: 'sonnet[1m]',
       pricingTierKey: 'standard',
-      inputUsd: 0.006,
-      cachedInputUsd: 0.0003,
-      outputUsd: 0.03375,
+      inputUsd: 0.002,
+      cachedInputUsd: 0.0001,
+      outputUsd: 0.015,
     });
   });
 
-  it('prices current Claude Opus and Haiku aliases from the local pricing config', () => {
-    expect(contextWindowForModel('claude-opus-4-7')).toBe(200000);
+  it('prices current Claude Fable, Opus, and Haiku aliases from the local pricing config', () => {
+    expect(contextWindowForModel('fable')).toBe(1000000);
+    expect(contextWindowForModel('opus')).toBe(1000000);
     expect(contextWindowForModel('claude-haiku-4-5')).toBe(200000);
 
+    const fableEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'fable',
+      pricingTierKey: 'standard',
+    });
+    expect(fableEstimate).toMatchObject({
+      pricingModelKey: 'fable',
+      pricingTierKey: 'standard',
+      inputUsd: 0.01,
+      cachedInputUsd: 0.0005,
+      outputUsd: 0.075,
+    });
+
     const opusEstimate = estimateTurnPrice(sampleUsage, {
-      pricingModelKey: 'claude-opus-4-7',
+      pricingModelKey: 'opus',
       pricingTierKey: 'standard',
     });
     expect(opusEstimate).toMatchObject({
-      pricingModelKey: 'claude-opus-4-7',
+      pricingModelKey: 'opus',
       pricingTierKey: 'standard',
       inputUsd: 0.005,
       cachedInputUsd: 0.00025,
@@ -127,6 +140,51 @@ describe('modelPricing', () => {
       inputUsd: 0.001,
       cachedInputUsd: 0.00005,
       outputUsd: 0.0075,
+    });
+  });
+
+  it('prices explicit Claude API model ids, including fast Opus and legacy Opus', () => {
+    expect(contextWindowForModel('claude-sonnet-5')).toBe(1000000);
+    expect(contextWindowForModel('claude-sonnet-4-6')).toBe(1000000);
+    expect(contextWindowForModel('claude-opus-4-8')).toBe(1000000);
+    expect(supportsFastMode('claude-opus-4-8')).toBe(true);
+    expect(supportsFastMode('claude-opus-4-7')).toBe(true);
+    expect(contextWindowForModel('claude-opus-4-1')).toBe(200000);
+
+    const sonnet5Estimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-sonnet-5',
+      pricingTierKey: 'standard',
+    });
+    expect(sonnet5Estimate).toMatchObject({
+      pricingModelKey: 'claude-sonnet-5',
+      pricingTierKey: 'standard',
+      inputUsd: 0.002,
+      cachedInputUsd: 0.0001,
+      outputUsd: 0.015,
+    });
+
+    const opusFastEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-opus-4-8',
+      pricingTierKey: 'fast',
+    });
+    expect(opusFastEstimate).toMatchObject({
+      pricingModelKey: 'claude-opus-4-8',
+      pricingTierKey: 'fast',
+      inputUsd: 0.01,
+      cachedInputUsd: 0.0005,
+      outputUsd: 0.075,
+    });
+
+    const legacyOpusEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-opus-4-1',
+      pricingTierKey: 'standard',
+    });
+    expect(legacyOpusEstimate).toMatchObject({
+      pricingModelKey: 'claude-opus-4-1',
+      pricingTierKey: 'standard',
+      inputUsd: 0.015,
+      cachedInputUsd: 0.00075,
+      outputUsd: 0.1125,
     });
   });
 
