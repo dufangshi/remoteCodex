@@ -2,6 +2,7 @@ import type {
   ApiErrorShape,
   AgentBackendDto,
   CreateRelaySessionShareInput,
+  CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
   ModelOptionDto,
@@ -21,6 +22,7 @@ import type {
   ThreadWorkspaceUploadResultDto,
   UpdateThreadSettingsInput,
   WorkspaceFileDto,
+  WorkspaceDto,
 } from '@remote-codex/shared';
 import type { IOSBootstrap } from './IOSBootstrap';
 import { supervisorApiUrl } from './IOSConnection';
@@ -213,6 +215,12 @@ export class IOSApiClient {
     return this.requestJson<ThreadDto[]>('/api/threads');
   }
 
+  listWorkspaces() {
+    return this.requestJson<WorkspaceDto[]>('/api/workspaces', {
+      cache: 'no-store',
+    });
+  }
+
   listAgentRuntimes() {
     return this.requestJson<AgentBackendDto[]>('/api/agent-runtimes', {
       cache: 'no-store',
@@ -245,6 +253,13 @@ export class IOSApiClient {
       `/api/agent-runtimes/${encodeURIComponent(provider)}/models`,
       { cache: 'no-store' },
     );
+  }
+
+  createThread(input: CreateThreadInput) {
+    return this.requestJson<ThreadDto>('/api/threads/start', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   }
 
   updateThreadSettings(

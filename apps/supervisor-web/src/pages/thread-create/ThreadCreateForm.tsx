@@ -66,6 +66,15 @@ export function ThreadCreateForm({
   const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
   const selectedBackend = backends.find((backend) => backend.provider === provider);
   const compact = variant === 'dialog';
+  const controlClassName = compact
+    ? 'host-form-control mt-1.5 h-10 w-full rounded-xl border px-3 text-sm outline-none transition'
+    : 'host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition';
+  const secondaryButtonClassName = compact
+    ? 'host-secondary-button rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
+    : 'host-secondary-button rounded-full border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60';
+  const primaryButtonClassName = compact
+    ? 'ui-action-primary rounded-full px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed'
+    : 'ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed';
 
   useEffect(() => {
     setTitle(initialTitle ?? '');
@@ -226,19 +235,22 @@ export function ThreadCreateForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className={compact ? 'space-y-4' : 'space-y-5'}>
+    <form
+      onSubmit={handleSubmit}
+      className={compact ? 'max-h-[min(76vh,36rem)] space-y-3 overflow-y-auto pr-1 text-sm' : 'space-y-5'}
+    >
       {compact ? (
-        <div>
-          <h2 className="text-xl font-semibold text-[var(--theme-fg)]">
+        <div className="pr-8">
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
             Create New Chat
           </h2>
-          <p className="mt-1 text-sm leading-6 text-[var(--theme-fg-muted)]">
+          <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
             Choose the workspace, model, and approval mode for this thread.
           </p>
         </div>
       ) : null}
       <div>
-        <label className="host-form-label text-sm font-medium" htmlFor={`${formId}-thread-backend`}>
+        <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-backend`}>
           Backend
         </label>
         <select
@@ -248,7 +260,7 @@ export function ThreadCreateForm({
             const next = event.target.value as AgentBackendIdDto;
             setProvider(next);
           }}
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className={controlClassName}
         >
           {backends.map((backend) => (
             <option
@@ -261,6 +273,7 @@ export function ThreadCreateForm({
             </option>
           ))}
         </select>
+        {!compact ? (
         <div className="mt-3 space-y-2">
           {backends.map((backend) => {
             const canStart = backendCanStartSession(backend);
@@ -328,21 +341,26 @@ export function ThreadCreateForm({
             );
           })}
         </div>
-        {selectedBackend && !backendCanStartSession(selectedBackend) ? (
+        ) : selectedBackend && !backendCanStartSession(selectedBackend) ? (
+          <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
+            Select an available backend before creating a thread.
+          </p>
+        ) : null}
+        {!compact && selectedBackend && !backendCanStartSession(selectedBackend) ? (
           <p className="mt-2 text-sm opacity-75">
             Select an available backend, or install this runtime before creating a thread.
           </p>
         ) : null}
       </div>
       <div>
-        <label className="host-form-label text-sm font-medium" htmlFor={`${formId}-thread-workspace`}>
+        <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-workspace`}>
           Workspace
         </label>
         <select
           id={`${formId}-thread-workspace`}
           value={workspaceId}
           onChange={(event) => setWorkspaceId(event.target.value)}
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className={controlClassName}
         >
           {workspaces.map((workspace) => (
             <option key={workspace.id} value={workspace.id}>
@@ -352,7 +370,7 @@ export function ThreadCreateForm({
         </select>
       </div>
       <div>
-        <label className="host-form-label text-sm font-medium" htmlFor={`${formId}-thread-model`}>
+        <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-model`}>
           Model
         </label>
         <select
@@ -360,7 +378,7 @@ export function ThreadCreateForm({
           value={model}
           onChange={(event) => setModel(event.target.value)}
           disabled={models.length === 0}
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className={controlClassName}
         >
           {models.length === 0 ? (
             <option value="">No models available</option>
@@ -373,7 +391,7 @@ export function ThreadCreateForm({
         </select>
       </div>
       <div>
-        <label className="host-form-label text-sm font-medium" htmlFor={`${formId}-thread-title`}>
+        <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-title`}>
           Title
         </label>
         <input
@@ -381,18 +399,18 @@ export function ThreadCreateForm({
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="Optional. Falls back to first prompt."
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className={controlClassName}
         />
       </div>
       <div>
-        <label className="host-form-label text-sm font-medium" htmlFor={`${formId}-thread-approval-mode`}>
+        <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-approval-mode`}>
           Approval mode
         </label>
         <select
           id={`${formId}-thread-approval-mode`}
           value={approvalMode}
           onChange={(event) => setApprovalMode(event.target.value as 'yolo' | 'guarded')}
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className={controlClassName}
         >
           <option value="yolo">yolo</option>
           <option value="guarded">guarded</option>
@@ -403,11 +421,11 @@ export function ThreadCreateForm({
           {error}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2 pt-1">
         <button
           type="submit"
           disabled={busy || !workspaceId || !model}
-          className="ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed"
+          className={primaryButtonClassName}
         >
           {busy ? 'Creating...' : 'Create Thread'}
         </button>
@@ -416,7 +434,7 @@ export function ThreadCreateForm({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="host-secondary-button rounded-full border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+            className={secondaryButtonClassName}
           >
             Cancel
           </button>

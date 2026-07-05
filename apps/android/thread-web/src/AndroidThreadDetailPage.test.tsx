@@ -280,7 +280,7 @@ describe('AndroidThreadDetailPage', () => {
     });
 
     const actionsButton = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Thread actions"]',
+      'button[aria-label="Export or share thread"]',
     );
     expect(actionsButton).toBeTruthy();
 
@@ -386,7 +386,7 @@ describe('AndroidThreadDetailPage', () => {
     });
 
     const actionsButton = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Thread actions"]',
+      'button[aria-label="Export or share thread"]',
     );
     expect(actionsButton).toBeTruthy();
 

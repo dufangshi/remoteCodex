@@ -40,6 +40,7 @@ import {
 import { postAndroidMessage } from './AndroidNativeBridge';
 import { buildOptimisticPromptDetail } from './AndroidOptimisticPrompt';
 import { subscribeToThreadEvents } from './AndroidWebSocket';
+import { MobileThreadCreateDialogContent } from './MobileThreadCreateDialogContent';
 
 interface AndroidThreadDetailPageProps {
   bootstrap: AndroidThreadBootstrap;
@@ -945,6 +946,38 @@ export function AndroidThreadDetailPage({
       ) : null,
     [relayAccess],
   );
+  const renderNewThreadDialogContent = useCallback(
+    ({
+      close,
+      closeNavigation,
+      currentWorkspaceId,
+    }: {
+      close: () => void;
+      closeNavigation: () => void;
+      currentWorkspaceId?: string | null;
+    }) => (
+      <MobileThreadCreateDialogContent
+        client={client}
+        initialWorkspaceId={
+          currentWorkspaceId ??
+          detailRef.current?.workspace.id ??
+          detailRef.current?.thread.workspaceId ??
+          null
+        }
+        onCancel={close}
+        onCreated={(thread) => {
+          setThreads((current) => [
+            thread,
+            ...current.filter((entry) => entry.id !== thread.id),
+          ]);
+          close();
+          closeNavigation();
+          postAndroidMessage({ type: 'openThread', threadId: thread.id });
+        }}
+      />
+    ),
+    [client],
+  );
 
   const adapter = useMemo<ThreadDetailUiAdapter>(() => {
     const workspaceAdapter: ThreadWorkspaceAdapter | null =
@@ -1044,6 +1077,7 @@ export function AndroidThreadDetailPage({
       getThreadHref(threadId) {
         return `#thread-${threadId}`;
       },
+      renderNewThreadDialogContent,
       sendPrompt(input) {
         if (!effectiveThreadCanControl) {
           return false;
@@ -1094,6 +1128,7 @@ export function AndroidThreadDetailPage({
     effectiveThreadIsOwner,
     effectiveWorkspaceAccess,
     renameThread,
+    renderNewThreadDialogContent,
     resolveWorkspaceId,
     submitPromptText,
     updateThreadSettings,

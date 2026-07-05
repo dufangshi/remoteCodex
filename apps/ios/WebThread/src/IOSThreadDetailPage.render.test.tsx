@@ -260,7 +260,7 @@ describe('IOSThreadDetailPage relay sharing UI', () => {
     });
 
     const actionsButton = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Thread actions"]',
+      'button[aria-label="Export or share thread"]',
     );
     expect(actionsButton).toBeTruthy();
 

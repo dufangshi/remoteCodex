@@ -50,6 +50,7 @@ import { buildOptimisticPromptDetail } from './IOSOptimisticPrompt';
 import { subscribeToThreadEvents } from './IOSWebSocket';
 import { projectThreadEventIntoDetail } from './IOSWebSocketProjection';
 import { mockDetail, mockStatus, mockThreads } from './mockData';
+import { MobileThreadCreateDialogContent } from './MobileThreadCreateDialogContent';
 
 interface IOSThreadDetailPageProps {
   bootstrap: IOSBootstrap;
@@ -2501,6 +2502,38 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       ) : null,
     [relayAccess],
   );
+  const renderNewThreadDialogContent = useCallback(
+    ({
+      close,
+      closeNavigation,
+      currentWorkspaceId,
+    }: {
+      close: () => void;
+      closeNavigation: () => void;
+      currentWorkspaceId?: string | null;
+    }) => (
+      <MobileThreadCreateDialogContent
+        client={client}
+        initialWorkspaceId={
+          currentWorkspaceId ??
+          detailRef.current?.workspace.id ??
+          detailRef.current?.thread.workspaceId ??
+          null
+        }
+        onCancel={close}
+        onCreated={(thread) => {
+          setThreads((current) => [
+            thread,
+            ...current.filter((entry) => entry.id !== thread.id),
+          ]);
+          close();
+          closeNavigation();
+          postNativeMessage({ type: 'openThread', threadId: thread.id });
+        }}
+      />
+    ),
+    [client],
+  );
 
   const adapter = useMemo<ThreadDetailUiAdapter>(
     () => {
@@ -2679,6 +2712,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         getThreadHref(threadId) {
           return `#thread-${threadId}`;
         },
+        renderNewThreadDialogContent,
         ...(effectiveThreadIsOwner ? { renameThread } : {}),
         ...(effectiveThreadIsOwner ? { deleteThread } : {}),
         cancelPendingSteer,
@@ -2748,6 +2782,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       pickNativeFiles,
       recordWorkspaceDebug,
       renameThread,
+      renderNewThreadDialogContent,
       resolveWorkspaceId,
       submitPromptText,
     ],
