@@ -28,6 +28,15 @@ const HIDDEN_ASK_USER_QUESTION_CONTINUATION_PREFIX =
 const SUPPRESSED_ASSISTANT_TEXTS = new Set([
   'No response requested.',
 ]);
+const CLAUDE_LIMIT_ERROR_PATTERNS = [
+  /\byou(?:'|’)ve hit your session limit\b/i,
+  /\byou have hit your session limit\b/i,
+  /\b(?:hit|reached|exceeded) (?:the )?(?:session|usage|rate) limit\b/i,
+  /\b(?:session|usage|rate) limit (?:hit|reached|exceeded)\b/i,
+  /\bquota exceeded\b/i,
+  /\bcredit balance (?:is )?(?:too low|insufficient|exhausted)\b/i,
+  /\binsufficient credits?\b/i,
+];
 
 function normalizedToolName(toolName: string) {
   return toolName.replace(/[\s_-]+/g, '').toLowerCase();
@@ -265,6 +274,30 @@ function shouldSuppressAssistantText(text: string) {
   return SUPPRESSED_ASSISTANT_TEXTS.has(text.trim());
 }
 
+export function claudeLimitErrorMessage(text: string | null | undefined) {
+  const normalized = text?.trim();
+  if (!normalized) {
+    return null;
+  }
+  return CLAUDE_LIMIT_ERROR_PATTERNS.some((pattern) => pattern.test(normalized))
+    ? normalized
+    : null;
+}
+
+export function limitErrorFromHistoryItems(items: AgentHistoryItem[]) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.kind !== 'agentMessage') {
+      continue;
+    }
+    const error = claudeLimitErrorMessage(item.text);
+    if (error) {
+      return error;
+    }
+  }
+  return null;
+}
+
 export function userMessageToHistoryItem(id: string, message: unknown): AgentHistoryItem {
   return {
     id,
@@ -432,6 +465,44 @@ export function toolResultBlocks(message: unknown): Array<{ toolUseId: string; r
       };
     })
     .filter((block): block is { toolUseId: string; result: unknown } => Boolean(block));
+}
+
+function xmlTagText(input: string, tagName: string) {
+  const match = new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, 'i').exec(input);
+  return match?.[1]?.trim() || null;
+}
+
+function decodeBasicXmlEntities(input: string) {
+  return input
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+export function taskNotificationToolResult(
+  message: unknown,
+): { toolUseId: string; result: string } | null {
+  const text = messageContentText(message).trim();
+  if (!text.startsWith('<task-notification>') || !text.includes('</task-notification>')) {
+    return null;
+  }
+
+  const toolUseId = xmlTagText(text, 'tool-use-id');
+  if (!toolUseId) {
+    return null;
+  }
+
+  const result =
+    xmlTagText(text, 'result') ??
+    xmlTagText(text, 'summary') ??
+    text;
+
+  return {
+    toolUseId,
+    result: decodeBasicXmlEntities(result),
+  };
 }
 
 export function askUserQuestionToolUseIds(message: unknown): Set<string> {

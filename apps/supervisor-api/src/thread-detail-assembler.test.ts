@@ -190,6 +190,32 @@ describe('ThreadDetailAssembler', () => {
     expect(callbacks.readRemoteSession).toHaveBeenCalledTimes(2);
   });
 
+  it('clears stale active turn ids when the remote session is no longer running', async () => {
+    const { assembler, callbacks } = createAssembler(session([turn('turn-1')]));
+    callbacks.buildThreadPatch.mockReturnValue({
+      status: 'idle',
+      providerSessionId: 'provider-session-1',
+    });
+
+    await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: {
+        ...record,
+        providerTurnId: 'stale-active-turn',
+      },
+      turnMetadataById: new Map(),
+      options: { limit: 3 },
+    });
+
+    expect(callbacks.updateThreadRecord).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        status: 'idle',
+        providerTurnId: null,
+      }),
+    );
+  });
+
   it('keeps live agent timestamps after running items materialize in readThread', async () => {
     const turnStartedAt = '2026-06-07T00:00:00.000Z';
     const liveAgentCreatedAt = '2026-06-07T00:00:21.000Z';

@@ -45,10 +45,12 @@ import {
   hiddenInitPrompt,
   isHiddenContinuationMessage,
   isHiddenInitMessage,
+  limitErrorFromHistoryItems,
   partialReasoningDelta,
   partialTextDelta,
   resultForToolUse,
   suppressedClaudeToolUseIds,
+  taskNotificationToolResult,
   toolUseFromPartialStart,
   toolUseToHistoryItem,
   toolResultBlocks,
@@ -746,6 +748,14 @@ function queryResultError(message: SDKMessage): string | null {
     return null;
   }
   return message.errors?.join('\n') || message.stop_reason || 'Claude turn failed.';
+}
+
+function statusForHistoricalItems(items: AgentHistoryItem[]) {
+  const limitError = limitErrorFromHistoryItems(items);
+  return {
+    status: limitError ? ('failed' as const) : ('completed' as const),
+    error: limitError,
+  };
 }
 
 function assistantMessagePayload(message: SDKMessage) {
@@ -1698,8 +1708,11 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         this.deleteActiveTurn(state);
         this.emitUsage(state);
         const completedAt = new Date().toISOString();
+        const limitError = limitErrorFromHistoryItems(orderedItems(state));
         const status = state.interrupted
           ? 'interrupted'
+          : limitError
+            ? 'failed'
           : terminalStatus ?? 'completed';
         this.emitRuntimeEvent({
           type: 'turn.completed',
@@ -1709,7 +1722,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             providerTurnId: state.providerTurnId,
             startedAt: state.startedAt,
             status,
-            error: terminalError,
+            error: limitError ?? terminalError,
             items: finalizeTurnItems(state, status, completedAt),
             rawTurn: rawMessages,
           }),
@@ -1817,6 +1830,19 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (message.type === 'user') {
+      const taskNotification = taskNotificationToolResult(message.message);
+      if (taskNotification && !state.suppressedToolUseIds.has(taskNotification.toolUseId)) {
+        const item = resultForToolUse({
+          toolUseId: taskNotification.toolUseId,
+          result: message.tool_use_result ?? taskNotification.result,
+          previous: state.items.get(taskNotification.toolUseId) ?? null,
+        });
+        const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
+        addOrUpdateItem(state, nextItem);
+        this.emitItem(state, nextItem, 'item.completed');
+        return;
+      }
+
       const rawToolResults = toolResultBlocks(message.message);
       const toolResults = rawToolResults.filter(
         (toolResult) => !state.suppressedToolUseIds.has(toolResult.toolUseId),
@@ -2190,6 +2216,25 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
     for (const message of messages) {
       if (message.type === 'user') {
+        const taskNotification = taskNotificationToolResult(message.message);
+        if (taskNotification) {
+          if (suppressedToolUseIds.has(taskNotification.toolUseId)) {
+            continue;
+          }
+          const previous = current?.itemsById.get(taskNotification.toolUseId) ?? null;
+          upsertCurrentItem(
+            withHistoryItemCreatedAt(
+              resultForToolUse({
+                toolUseId: taskNotification.toolUseId,
+                result: message.tool_use_result ?? taskNotification.result,
+                previous,
+              }),
+              sessionMessageTimestamp(message) ?? current?.startedAt,
+            ),
+          );
+          continue;
+        }
+
         const rawToolResults = toolResultBlocks(message.message);
         const toolResults = rawToolResults.filter(
           (toolResult) => !suppressedToolUseIds.has(toolResult.toolUseId),
@@ -2226,10 +2271,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         }
         skippingHiddenInit = false;
         if (current && current.items.length > 0) {
+          const outcome = statusForHistoricalItems(current.items);
           turns.push(buildAgentTurn({
             providerTurnId: current.providerTurnId,
             startedAt: current.startedAt,
-            status: 'completed',
+            status: outcome.status,
+            error: outcome.error,
             items: current.items,
           }));
         }
@@ -2290,10 +2337,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (current && current.items.length > 0) {
+      const outcome = statusForHistoricalItems(current.items);
       turns.push(buildAgentTurn({
         providerTurnId: current.providerTurnId,
         startedAt: current.startedAt,
-        status: 'completed',
+        status: outcome.status,
+        error: outcome.error,
         items: current.items,
       }));
     }

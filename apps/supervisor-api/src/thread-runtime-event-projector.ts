@@ -516,8 +516,10 @@ export class ThreadRuntimeEventProjector {
           liveState.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
           event.providerTurnId;
         updateThreadRecord(db, record.id, {
+          providerTurnId: null,
           status: 'failed',
           lastError: event.error,
+          lastTurnCompletedAt: new Date().toISOString(),
         });
         liveState.setLivePlan(record.id, null);
         liveState.setLiveItems(record.id, null);

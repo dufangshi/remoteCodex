@@ -884,6 +884,131 @@ describe('ClaudeRuntimeAdapter', () => {
     ).toBeLessThan(events.length - 1);
   });
 
+  it('maps Claude task-notification text to the active subagent tool result', async () => {
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return [
+        systemInit(),
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_agent',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_agent_xml',
+                name: 'Task',
+                input: {
+                  description: 'Audit docs',
+                  prompt: 'Audit docs.',
+                },
+              },
+            ],
+            usage: {} as any,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000041' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content:
+              '<task-notification>\\n<task-id>task-1</task-id>\\n<tool-use-id>toolu_agent_xml</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \"Audit docs\" finished</summary>\\n<result>Found one stale runbook.</result>\\n</task-notification>',
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000042' as any,
+          session_id: 'claude-session-1',
+        },
+        result(),
+      ];
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      displayTurnId: 'turn-subagent-xml',
+      prompt: 'Use a subagent',
+    } as any);
+    await wait();
+
+    const completed = events.at(-1);
+    expect(completed).toMatchObject({
+      type: 'turn.completed',
+      turn: {
+        providerTurnId: 'turn-subagent-xml',
+        status: 'completed',
+      },
+    });
+    expect(completed?.type === 'turn.completed' ? completed.turn.items : []).toEqual([
+      expect.objectContaining({ id: 'turn-subagent-xml:user', kind: 'userMessage' }),
+      expect.objectContaining({
+        id: 'toolu_agent_xml',
+        kind: 'agentToolCall',
+        status: 'completed',
+        detailText: expect.stringContaining('Found one stale runbook.'),
+      }),
+    ]);
+  });
+
+  it('marks Claude session limit assistant messages as failed even when the SDK result succeeds', async () => {
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return [
+        systemInit(),
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_limit',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [
+              {
+                type: 'text',
+                text: "You've hit your session limit · resets 10pm (America/Toronto)",
+              },
+            ],
+            usage: {} as any,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000043' as any,
+          session_id: 'claude-session-1',
+        },
+        result(),
+      ];
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      displayTurnId: 'turn-limit',
+      prompt: 'Continue',
+    } as any);
+    await wait();
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn.completed',
+      turn: {
+        providerTurnId: 'turn-limit',
+        status: 'failed',
+        error: {
+          message: expect.stringContaining("You've hit your session limit"),
+        },
+      },
+    });
+  });
+
   it('filters Claude generated titles derived from the synthetic init prompt', async () => {
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
@@ -1856,6 +1981,140 @@ describe('ClaudeRuntimeAdapter', () => {
       expect.objectContaining({ kind: 'commandExecution', text: 'pwd', status: 'completed' }),
       expect.objectContaining({ kind: 'agentMessage', text: 'Real answer' }),
     ]);
+  });
+
+  it('keeps historical task notifications inside the originating subagent tool call', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Audit both docs.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-task',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_task_a',
+                name: 'Task',
+                input: {
+                  description: 'Audit infra docs',
+                  prompt: 'Audit infra docs.',
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'task-notification-a',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content:
+              '<task-notification>\\n<task-id>task-a</task-id>\\n<tool-use-id>toolu_task_a</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \"Audit infra docs\" finished</summary>\\n<result>Infra docs need one migration checklist.</result>\\n</task-notification>',
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-final',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Infra audit complete.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage', text: 'Audit both docs.' }),
+      expect.objectContaining({
+        id: 'toolu_task_a',
+        kind: 'agentToolCall',
+        status: 'completed',
+        detailText: expect.stringContaining('Infra docs need one migration checklist.'),
+      }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Infra audit complete.' }),
+    ]);
+    expect(session.turns[0]?.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'userMessage',
+          text: expect.stringContaining('<task-notification>'),
+        }),
+      ]),
+    );
+  });
+
+  it('restores historical Claude session limit turns as failed', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Continue anyway.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-limit',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: "You've hit your session limit · resets 10pm (America/Toronto)",
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]).toMatchObject({
+      status: 'failed',
+      error: {
+        message: expect.stringContaining("You've hit your session limit"),
+      },
+    });
   });
 
   it('omits Claude AskUserQuestion tool results from historical turns', async () => {

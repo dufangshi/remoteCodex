@@ -103,6 +103,7 @@ export function toThreadDto(
     getThreadContextUsage(localThreadId: string): ThreadContextUsageDto;
   },
 ): ThreadDto {
+  const status = (record.status ?? 'idle') as ThreadStatusDto;
   return {
     id: record.id,
     workspaceId: record.workspaceId,
@@ -118,10 +119,10 @@ export function toThreadDto(
     sandboxMode:
       normalizeSandboxMode(record.sandboxMode) ??
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode),
-    status: (record.status ?? 'idle') as ThreadStatusDto,
+    status,
     summaryText: record.summaryText ?? null,
     lastError: record.lastError ?? null,
-    activeTurnId: record.providerTurnId ?? null,
+    activeTurnId: status === 'running' ? record.providerTurnId ?? null : null,
     isLoaded:
       record.isConnected !== false &&
       (record.providerSessionId ? loadedIds.has(record.providerSessionId) : false),

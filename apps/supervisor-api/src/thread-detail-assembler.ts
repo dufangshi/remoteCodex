@@ -244,7 +244,11 @@ export class ThreadDetailAssembler {
     ) {
       threadPatch.status = 'running';
     }
-    this.input.callbacks.updateThreadRecord(input.record.id, threadPatch);
+    const nextThreadPatch = {
+      ...threadPatch,
+      ...(threadPatch.status !== 'running' ? { providerTurnId: null } : {}),
+    };
+    this.input.callbacks.updateThreadRecord(input.record.id, nextThreadPatch);
 
     const updated = this.input.callbacks.getUpdatedThreadRecord(input.record.id);
     this.input.callbacks.syncAfterRemoteSession(updated.id, remoteSession);
