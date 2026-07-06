@@ -607,7 +607,7 @@ struct HomeScreen: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(backend.displayName)
-                                            .foregroundStyle(backend.canStartSession ? .primary : .secondary)
+                                            .foregroundStyle(backend.canStartSession ? RemoteCodexTheme.foreground : RemoteCodexTheme.foregroundMuted)
                                         Text(backend.provider)
                                             .font(.caption)
                                             .remoteCodexStatusText()
@@ -637,7 +637,7 @@ struct HomeScreen: View {
                                         }
                                     }
                                     .disabled(model.newThreadRuntimeBusyProvider != nil || backend.busy)
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(RemoteCodexSecondaryButtonStyle())
                                 }
                                 if backend.provider == model.newThreadProvider {
                                     Image(systemName: "checkmark")

@@ -1327,6 +1327,9 @@ private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
     val graphNodeText = ThreadColors.Foreground
     val graphNodeMutedText = ThreadColors.ForegroundMuted
     val graphNodeStatusText = ThreadColors.ForegroundSoft
+    val graphEdgeColor = ThreadColors.ForegroundMuted
+    val graphEdgeCapColor = ThreadColors.Primary
+    val graphNodeFallbackColor = ThreadColors.CodeForeground
     val nodeColors = graphState.nodes.associate { node ->
         node.id to graphNodeColor(node)
     }
@@ -1353,13 +1356,14 @@ private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
                 drawFloatingEdge(
                     start = edgeAnchor(start, end, cardWidth, cardHeight),
                     end = edgeAnchor(end, start, cardWidth, cardHeight),
-                    color = androidx.compose.ui.graphics.Color(0xFF64748B),
+                    color = graphEdgeColor,
+                    capColor = graphEdgeCapColor,
                 )
             }
         }
         graphState.nodes.forEach { node ->
             val point = nodePoints[node.id] ?: return@forEach
-            val fill = nodeColors[node.id] ?: androidx.compose.ui.graphics.Color(0xFFE5E7EB)
+            val fill = nodeColors[node.id] ?: graphNodeFallbackColor
             val topLeft = Offset(
                 x = (point.x - cardWidth / 2f).coerceIn(0f, size.width - cardWidth),
                 y = (point.y - cardHeight / 2f).coerceIn(0f, size.height - cardHeight),
@@ -2062,6 +2066,7 @@ private fun DrawScope.drawFloatingEdge(
     start: Offset,
     end: Offset,
     color: androidx.compose.ui.graphics.Color,
+    capColor: androidx.compose.ui.graphics.Color,
 ) {
     val controlOffset = (end.x - start.x) * 0.42f
     val path = Path().apply {
@@ -2094,7 +2099,7 @@ private fun DrawScope.drawFloatingEdge(
     drawLine(color = color, start = end, end = first, strokeWidth = 3f, cap = StrokeCap.Round)
     drawLine(color = color, start = end, end = second, strokeWidth = 3f, cap = StrokeCap.Round)
     drawCircle(
-        color = androidx.compose.ui.graphics.Color(0xFF111827),
+        color = capColor,
         radius = 4f,
         center = end,
     )

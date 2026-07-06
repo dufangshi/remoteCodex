@@ -77,3 +77,47 @@ extension View {
             }
     }
 }
+
+struct RemoteCodexPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(RemoteCodexTheme.primaryForeground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: 42)
+            .background(
+                configuration.isPressed
+                    ? RemoteCodexTheme.primary.opacity(0.82)
+                    : RemoteCodexTheme.primary,
+                in: RoundedRectangle(cornerRadius: RemoteCodexTheme.controlRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: RemoteCodexTheme.controlRadius)
+                    .stroke(RemoteCodexTheme.borderStrong.opacity(0.35), lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.92 : 1)
+    }
+}
+
+struct RemoteCodexSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(RemoteCodexTheme.foregroundSoft)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minHeight: 40)
+            .background(
+                configuration.isPressed
+                    ? RemoteCodexTheme.surfaceStrong.opacity(0.72)
+                    : RemoteCodexTheme.surface,
+                in: RoundedRectangle(cornerRadius: RemoteCodexTheme.controlRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: RemoteCodexTheme.controlRadius)
+                    .stroke(RemoteCodexTheme.border, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.9 : 1)
+    }
+}

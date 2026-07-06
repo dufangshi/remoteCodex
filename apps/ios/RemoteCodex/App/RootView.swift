@@ -391,7 +391,7 @@ private struct PlaceholderScreen: View {
     var body: some View {
         VStack(spacing: 12) {
             Text(title).font(.title.bold())
-            Text(subtitle).foregroundStyle(.secondary)
+            Text(subtitle).remoteCodexStatusText()
         }
         .padding()
     }

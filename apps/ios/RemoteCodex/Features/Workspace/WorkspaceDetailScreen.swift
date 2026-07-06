@@ -553,7 +553,7 @@ struct WorkspaceDetailScreen: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(backend.displayName)
-                                            .foregroundStyle(backend.canStartSession ? .primary : .secondary)
+                                            .foregroundStyle(backend.canStartSession ? RemoteCodexTheme.foreground : RemoteCodexTheme.foregroundMuted)
                                         Text(backend.provider)
                                             .font(.caption)
                                             .remoteCodexStatusText()
@@ -584,7 +584,7 @@ struct WorkspaceDetailScreen: View {
                                         }
                                     }
                                     .disabled(model.newThreadRuntimeBusyProvider != nil || backend.busy)
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(RemoteCodexSecondaryButtonStyle())
                                     .accessibilityIdentifier("new-thread-provider-action-\(backend.provider)")
                                 }
                                 if backend.provider == model.newThreadProvider {

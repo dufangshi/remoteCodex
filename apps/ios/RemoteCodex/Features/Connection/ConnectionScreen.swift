@@ -940,11 +940,11 @@ private struct RelaySharedSessionRow: View {
                 Spacer()
                 if mode == .incoming {
                     Button("Open", action: onOpen)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(RemoteCodexPrimaryButtonStyle())
                 } else {
                     HStack(spacing: 8) {
                         Button("Open", action: onOpen)
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(RemoteCodexPrimaryButtonStyle())
                         Menu {
                             Button("Permissions", action: onEdit)
                             Button("Access history", action: onToggleAccess)
@@ -952,7 +952,7 @@ private struct RelaySharedSessionRow: View {
                         } label: {
                             Text("Manage")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(RemoteCodexSecondaryButtonStyle())
                     }
                 }
             }

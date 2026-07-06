@@ -299,7 +299,17 @@ private fun MoleculeFallbackPreview(artifact: ArtifactPreview) {
 @Composable
 private fun MoleculeSchematicCanvas(atoms: List<MoleculeAtomPreview>) {
     val bondColor = ThreadColors.Border.copy(alpha = 0.82f)
-    val atomRingColor = Color(0xFFF8FAFC).copy(alpha = 0.32f)
+    val atomRingColor = ThreadColors.PrimaryForeground.copy(alpha = 0.32f)
+    val elementPalette = MoleculeElementPalette(
+        hydrogen = ThreadColors.CodeForeground,
+        carbon = ThreadColors.ForegroundMuted,
+        nitrogen = ThreadColors.Info,
+        oxygen = ThreadColors.Danger,
+        sulfur = ThreadColors.Warning,
+        phosphorus = ThreadColors.Warning,
+        halogen = ThreadColors.Success,
+        fallback = ThreadColors.ForegroundSoft,
+    )
 
     Canvas(
         modifier = Modifier
@@ -345,7 +355,7 @@ private fun MoleculeSchematicCanvas(atoms: List<MoleculeAtomPreview>) {
             .forEach { atom ->
                 val radius = moleculeElementRadius(atom.element)
                 drawCircle(
-                    color = moleculeElementColor(atom.element),
+                    color = moleculeElementColor(atom.element, elementPalette),
                     radius = radius,
                     center = atom.point,
                 )
@@ -358,6 +368,17 @@ private fun MoleculeSchematicCanvas(atoms: List<MoleculeAtomPreview>) {
             }
     }
 }
+
+private data class MoleculeElementPalette(
+    val hydrogen: Color,
+    val carbon: Color,
+    val nitrogen: Color,
+    val oxygen: Color,
+    val sulfur: Color,
+    val phosphorus: Color,
+    val halogen: Color,
+    val fallback: Color,
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -518,16 +539,16 @@ private fun distanceBetween(start: Offset, end: Offset): Float {
     return sqrt(dx * dx + dy * dy)
 }
 
-private fun moleculeElementColor(element: String): Color {
+private fun moleculeElementColor(element: String, palette: MoleculeElementPalette): Color {
     return when (element.uppercase()) {
-        "H" -> Color(0xFFE5E7EB)
-        "C" -> Color(0xFF9CA3AF)
-        "N" -> Color(0xFF60A5FA)
-        "O" -> Color(0xFFF87171)
-        "S" -> Color(0xFFFACC15)
-        "P" -> Color(0xFFF59E0B)
-        "F", "CL", "BR", "I" -> Color(0xFF34D399)
-        else -> Color(0xFFA7B0C0)
+        "H" -> palette.hydrogen
+        "C" -> palette.carbon
+        "N" -> palette.nitrogen
+        "O" -> palette.oxygen
+        "S" -> palette.sulfur
+        "P" -> palette.phosphorus
+        "F", "CL", "BR", "I" -> palette.halogen
+        else -> palette.fallback
     }
 }
 

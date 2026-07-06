@@ -1,7 +1,6 @@
 package com.remotecodex.android.ui.presentation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -80,7 +79,7 @@ private fun GraphSyntaxToken.style(): SpanStyle {
             color = ThreadColors.Info,
             fontWeight = FontWeight.SemiBold,
         )
-        GraphSyntaxToken.String -> SpanStyle(color = Color(0xFF86EFAC))
+        GraphSyntaxToken.String -> SpanStyle(color = ThreadColors.Success)
         GraphSyntaxToken.Comment -> SpanStyle(color = ThreadColors.ForegroundMuted)
         GraphSyntaxToken.Number -> SpanStyle(color = ThreadColors.Warning)
     }
