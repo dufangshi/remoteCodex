@@ -32,6 +32,8 @@ import { LoginPage } from './pages/LoginPage';
 import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
 import { RelayDevicesPage } from './pages/RelayDevicesPage';
+import { RelayGuidePage } from './pages/RelayGuidePage';
+import { RelayHomePage } from './pages/RelayHomePage';
 import { RelayPortalPage } from './pages/RelayPortalPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -392,7 +394,7 @@ function RelayGate({ children }: { children: React.ReactNode }) {
   }
 
   if (state.status === 'loginRequired') {
-    return <RelayPortalPage />;
+    return <Navigate to="/" replace />;
   }
 
   if (state.session.user?.role === 'admin') {
@@ -406,6 +408,10 @@ function SupervisorAccessGate({ children }: { children: React.ReactNode }) {
   return relayModeActive() ? <RelayGate>{children}</RelayGate> : <AuthGate>{children}</AuthGate>;
 }
 
+function RootRoute() {
+  return relayModeActive() ? <RelayHomePage /> : <Navigate to="/workspaces" replace />;
+}
+
 function SupervisorRoutes({
   themeMode,
   setThemeMode,
@@ -417,7 +423,7 @@ function SupervisorRoutes({
 }) {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/workspaces" replace />} />
+      <Route path="/" element={<RootRoute />} />
       <Route
         element={
           <AppShell
@@ -498,7 +504,8 @@ export function App() {
       <BrowserRouter>
         <RoutePluginProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/workspaces" replace />} />
+            <Route path="/" element={<RootRoute />} />
+            <Route path="/relay-guide" element={<RelayGuidePage />} />
             <Route path="/relay-portal" element={<RelayPortalPage />} />
             <Route path="/relay-admin" element={<RelayAdminPage />} />
             <Route

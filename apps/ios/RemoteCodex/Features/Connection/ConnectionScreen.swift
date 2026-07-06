@@ -530,7 +530,7 @@ struct ConnectionScreen: View {
         case .modeSelect:
             "Connection"
         case .relayDevices:
-            "Relay Devices"
+            "Relay Portal"
         case .relayAuth:
             "Relay Account"
         case .serverAuth:
@@ -874,7 +874,7 @@ private struct SavedDeviceRow: View {
                 GraphBadge(text: device.modeLabel, tone: .neutral)
             }
             HStack {
-                Button(device.mode == .relay ? "Open Devices" : "Connect", action: onConnect)
+                Button(device.mode == .relay ? "Relay Portal" : "Connect", action: onConnect)
                 Button(action: onEdit) {
                     Label("Edit", systemImage: "pencil")
                 }

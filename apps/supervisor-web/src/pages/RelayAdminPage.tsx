@@ -252,8 +252,8 @@ export function RelayAdminPage() {
                 <option value={90}>90 days</option>
               </select>
             </label>
-            <Link className="relay-button-secondary" to="/relay-portal">
-              Portal
+            <Link className="relay-button-secondary" to="/">
+              Relay home
             </Link>
             <button className="relay-button-secondary inline-flex items-center gap-2" onClick={() => void load(days)} type="button">
               <RefreshCw className="h-4 w-4" />

@@ -132,4 +132,46 @@ describe('App', () => {
     expect(screen.queryByText(/Bring your local workspaces/i)).not.toBeInTheDocument();
   });
 
+  it('shows the relay home page at root when relay mode is active', async () => {
+    window.localStorage.setItem('remote-codex-relay-mode', 'true');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          authenticated: false,
+          user: null,
+          registrationEnabled: true,
+        }),
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', {
+        name: /Run Codex on your private machine from anywhere/i,
+      })).toBeInTheDocument();
+    });
+    expect(
+      screen.getAllByRole('link', { name: /Sign in/i }).some((link) =>
+        link.getAttribute('href') === '/relay-portal',
+      ),
+    ).toBe(true);
+  });
+
+  it('renders the relay guide outside supervisor auth', async () => {
+    window.history.pushState({}, '', '/relay-guide');
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    expect(screen.getByRole('heading', {
+      name: /Remote Codex connection modes and relay setup/i,
+    })).toBeInTheDocument();
+    expect(screen.getByText('Local mode')).toBeInTheDocument();
+    expect(screen.getByText('Server mode')).toBeInTheDocument();
+    expect(screen.getByText('Relay mode')).toBeInTheDocument();
+  });
+
 });

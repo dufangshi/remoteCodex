@@ -503,8 +503,8 @@ fun SupervisorConnectionSetupScreen(
             ) {
                 Text(
                     text = when (route) {
-                        ConnectionSetupRoute.ModeSelect -> "Devices"
-                        ConnectionSetupRoute.RelayDevices -> "Relay Devices"
+                        ConnectionSetupRoute.ModeSelect -> "Connection"
+                        ConnectionSetupRoute.RelayDevices -> "Relay portal"
                         ConnectionSetupRoute.ServerAuth,
                         ConnectionSetupRoute.RelayAuth,
                         -> "Remote Codex"
@@ -548,7 +548,7 @@ fun SupervisorConnectionSetupScreen(
                     ConnectionSetupRoute.ModeSelect -> "Select a saved connection or add a new Local, Server, or Relay endpoint."
                     ConnectionSetupRoute.ServerAuth -> "Sign in to a direct supervisor server."
                     ConnectionSetupRoute.RelayAuth -> "Sign in or create a relay account."
-                    ConnectionSetupRoute.RelayDevices -> "Connect, create, or revoke relay backend devices."
+                    ConnectionSetupRoute.RelayDevices -> "Connect backend devices and manage shared threads."
                 },
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodyMedium,
@@ -559,7 +559,7 @@ fun SupervisorConnectionSetupScreen(
                     ConnectionPanel(title = "Connections", detail = "Cards are stored on this Android device and can be connected, edited, or deleted independently.") {
                         if (savedDevices.isEmpty()) {
                             Text(
-                                text = "No saved devices yet. Tap + to add Local, Server, or Relay.",
+                                text = "No saved connections yet. Tap + to add Local, Server, or Relay.",
                                 color = ThreadColors.ForegroundMuted,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -570,13 +570,13 @@ fun SupervisorConnectionSetupScreen(
                                     active = device.id == activeDeviceId,
                                     busy = busy,
                                     onConnect = {
-                                        if (device.mode == SupervisorConnectionMode.Relay && device.relayDeviceId.isNullOrBlank()) {
+                                        if (device.mode == SupervisorConnectionMode.Relay) {
                                             openSavedRelayDevices(device)
                                         } else {
                                             connectSavedDevice(device)
                                         }
                                     },
-                                    onOpenRelayDevices = { openSavedRelayDevices(device) },
+                                    onConnectBackend = { connectSavedDevice(device) },
                                     onEdit = {
                                         deviceEditorTarget = device
                                         deviceEditorOpen = true
@@ -997,7 +997,7 @@ private fun SavedDeviceCard(
     active: Boolean,
     busy: Boolean,
     onConnect: () -> Unit,
-    onOpenRelayDevices: () -> Unit,
+    onConnectBackend: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -1046,16 +1046,16 @@ private fun SavedDeviceCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             GraphButton(
-                label = if (device.mode == SupervisorConnectionMode.Relay && device.relayDeviceId.isNullOrBlank()) {
-                    "Open Devices"
+                label = if (device.mode == SupervisorConnectionMode.Relay) {
+                    "Relay portal"
                 } else {
                     "Connect"
                 },
                 enabled = !busy,
                 variant = GraphButtonVariant.Default,
                 size = GraphButtonSize.Small,
-                contentDescription = if (device.mode == SupervisorConnectionMode.Relay && device.relayDeviceId.isNullOrBlank()) {
-                    "Open relay devices ${device.name}"
+                contentDescription = if (device.mode == SupervisorConnectionMode.Relay) {
+                    "Open relay portal ${device.name}"
                 } else {
                     "Connect device ${device.name}"
                 },
@@ -1063,12 +1063,12 @@ private fun SavedDeviceCard(
             )
             if (device.mode == SupervisorConnectionMode.Relay) {
                 GraphButton(
-                    label = "Devices",
-                    enabled = !busy,
+                    label = "Connect",
+                    enabled = !busy && !device.relayDeviceId.isNullOrBlank(),
                     variant = GraphButtonVariant.Secondary,
                     size = GraphButtonSize.Small,
-                    contentDescription = "Manage relay devices ${device.name}",
-                    onClick = onOpenRelayDevices,
+                    contentDescription = "Connect selected relay backend ${device.name}",
+                    onClick = onConnectBackend,
                 )
             }
             GraphIconButton(
@@ -1503,8 +1503,8 @@ private fun RelayDevicesPanel(
     onRevokeDevice: (RelayDeviceSummary) -> Unit,
 ) {
     ConnectionPanel(
-        title = "Relay Devices",
-        detail = "Backend devices under this relay account. Connect directly to any online device.",
+        title = "Relay portal",
+        detail = "Backend devices and shared threads under this relay account.",
     ) {
         if (devices.isEmpty()) {
             Text(

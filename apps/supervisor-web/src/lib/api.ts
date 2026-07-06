@@ -176,6 +176,9 @@ function relayModeEnabled() {
   return window.__REMOTE_CODEX_BOOTSTRAP__?.mode === 'relay' ||
     window.location.pathname.startsWith('/relay-portal') ||
     window.location.pathname.startsWith('/relay-admin') ||
+    window.location.pathname.startsWith('/relay-account') ||
+    window.location.pathname.startsWith('/relay-devices') ||
+    window.location.pathname.startsWith('/relay-guide') ||
     window.location.search.includes('relay=1') ||
     window.localStorage.getItem(RELAY_MODE_STORAGE_KEY) === 'true';
 }

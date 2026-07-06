@@ -195,14 +195,14 @@ export function RelayDevicesPage() {
       <div className="mx-auto w-full max-w-6xl space-y-5 pr-12 sm:pr-0">
         <header className="border-b border-[var(--theme-border)] pb-5">
           <div>
-            <Link className="text-sm text-[var(--theme-accent-strong)]" to="/workspaces">
-              Back to workspaces
+            <Link className="text-sm text-[var(--theme-accent-strong)]" to="/">
+              Relay home
             </Link>
             <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-              Relay Devices
+              Relay portal
             </p>
             <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-              Device management
+              Devices and shared sessions
             </h1>
           </div>
         </header>

@@ -96,8 +96,8 @@ export function RelayAccountPage() {
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
       <div className="mx-auto w-full max-w-4xl space-y-5 pr-12 sm:pr-0">
         <header className="border-b border-[var(--theme-border)] pb-5">
-          <Link className="text-sm text-[var(--theme-accent-strong)]" to="/workspaces">
-            Back to workspaces
+          <Link className="text-sm text-[var(--theme-accent-strong)]" to="/relay-devices">
+            Back to relay portal
           </Link>
           <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
             Relay Account
