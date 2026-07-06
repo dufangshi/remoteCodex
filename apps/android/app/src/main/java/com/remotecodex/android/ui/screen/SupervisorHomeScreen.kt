@@ -387,26 +387,36 @@ fun SupervisorHomeScreen(
                 HomeSectionTitle(
                     title = "Workspaces",
                     detail = "Trusted project roots",
-                    actionLabel = "New",
-                    actionContentDescription = "Create workspace",
-                    onAction = {
-                        workspaceActionError = null
-                        workspaceDialog = WorkspaceActionDialog.Create
-                    },
                 )
             }
             item {
-                GraphButton(
-                    label = "Import Session",
-                    icon = GraphActionIcon.Open,
-                    variant = GraphButtonVariant.Outline,
-                    size = GraphButtonSize.Small,
-                    contentDescription = "Import existing backend session",
-                    onClick = {
-                        workspaceActionError = null
-                        workspaceDialog = WorkspaceActionDialog.ImportThread
-                    },
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    GraphButton(
+                        label = "Add",
+                        modifier = Modifier.weight(1f),
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Create workspace",
+                        onClick = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.Create
+                        },
+                    )
+                    GraphButton(
+                        label = "Import Session",
+                        modifier = Modifier.weight(1f),
+                        variant = GraphButtonVariant.Outline,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Import existing backend session",
+                        onClick = {
+                            workspaceActionError = null
+                            workspaceDialog = WorkspaceActionDialog.ImportThread
+                        },
+                    )
+                }
             }
             val workspaces = homeSnapshot?.workspaces.orEmpty()
                 .sortedWith(
@@ -441,13 +451,6 @@ fun SupervisorHomeScreen(
                         onRenameWorkspace = {
                             workspaceActionError = null
                             workspaceDialog = WorkspaceActionDialog.Rename(workspace)
-                        },
-                        onStartThread = {
-                            workspaceActionError = null
-                            workspaceDialog = WorkspaceActionDialog.StartThread(workspace)
-                            if (agentBackends == null && !backendSettingsLoading) {
-                                refreshBackendSettings()
-                            }
                         },
                         onDeleteWorkspace = {
                             workspaceActionError = null
@@ -907,7 +910,6 @@ private fun WorkspaceSummaryRow(
     onOpenWorkspace: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRenameWorkspace: () -> Unit,
-    onStartThread: () -> Unit,
     onDeleteWorkspace: () -> Unit,
 ) {
     Column(
@@ -926,7 +928,6 @@ private fun WorkspaceSummaryRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
-            DestinationMark(label = workspace.label.ifBlank { workspace.absPath })
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = workspace.label.ifBlank { workspace.absPath },
@@ -944,14 +945,6 @@ private fun WorkspaceSummaryRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = workspace.workspaceMetaLabel(),
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             if (workspace.isFavorite) {
                 GraphIconButton(
                     icon = GraphActionIcon.Pin,
@@ -969,7 +962,6 @@ private fun WorkspaceSummaryRow(
         ) {
             GraphButton(
                 label = if (workspace.isFavorite) "Unpin" else "Pin",
-                icon = GraphActionIcon.Pin,
                 enabled = !busy,
                 variant = GraphButtonVariant.Outline,
                 size = GraphButtonSize.Small,
@@ -985,17 +977,7 @@ private fun WorkspaceSummaryRow(
                 onClick = onRenameWorkspace,
             )
             GraphButton(
-                label = "New Thread",
-                icon = GraphActionIcon.Add,
-                enabled = !busy,
-                variant = GraphButtonVariant.Default,
-                size = GraphButtonSize.Small,
-                contentDescription = "Start thread in workspace ${workspace.label}",
-                onClick = onStartThread,
-            )
-            GraphButton(
                 label = "Delete",
-                icon = GraphActionIcon.Delete,
                 enabled = !busy,
                 variant = GraphButtonVariant.Destructive,
                 size = GraphButtonSize.Small,
@@ -1003,14 +985,6 @@ private fun WorkspaceSummaryRow(
                 onClick = onDeleteWorkspace,
             )
         }
-    }
-}
-
-private fun SupervisorWorkspaceSummary.workspaceMetaLabel(): String {
-    return when {
-        isFavorite -> "pinned"
-        lastOpenedAt != null -> "opened"
-        else -> "workspace"
     }
 }
 
@@ -1361,7 +1335,7 @@ private fun ImportThreadDialog(
     onClose: () -> Unit,
     onImportThread: (String, String) -> Unit,
 ) {
-    val enabledBackends = backends.filter { it.enabled }.ifEmpty { backends }
+    val enabledBackends = backends.filter { it.enabled || it.canStartSession }.ifEmpty { backends }
     var provider by rememberSaveable(backends.map { it.provider }.joinToString(",")) {
         mutableStateOf(enabledBackends.firstOrNull { it.isDefault }?.provider ?: enabledBackends.firstOrNull()?.provider ?: "codex")
     }

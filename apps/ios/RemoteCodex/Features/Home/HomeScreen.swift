@@ -19,6 +19,8 @@ final class HomeViewModel: ObservableObject {
     @Published var newThreadOptionsLoading = false
     @Published var newThreadRuntimeBusyProvider: String?
     @Published var newThreadOptionsError: String?
+    @Published var importThreadProvider = ""
+    @Published var importThreadSessionId = ""
     @Published var settings = HomeSettingsState()
     @Published var themeMode: ThemeMode
 
@@ -91,6 +93,18 @@ final class HomeViewModel: ObservableObject {
             !loading &&
             !newThreadOptionsLoading &&
             newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true
+    }
+
+    var importableBackends: [SupervisorAgentBackend] {
+        let ready = newThreadBackends.filter { $0.enabled || $0.canStartSession }
+        return ready.isEmpty ? newThreadBackends : ready
+    }
+
+    var canImportThread: Bool {
+        !importThreadProvider.isEmpty &&
+            importThreadSessionId.trimmedNonEmpty != nil &&
+            !loading &&
+            !newThreadOptionsLoading
     }
 
     func refresh() async {
@@ -170,6 +184,23 @@ final class HomeViewModel: ObservableObject {
         return createdThreadId
     }
 
+    func importThread() async -> String? {
+        guard canImportThread, let sessionId = importThreadSessionId.trimmedNonEmpty else { return nil }
+        var importedThreadId: String?
+        await runBusy {
+            let detail = try await client.importThread(
+                ImportSupervisorThreadRequest(
+                    sessionId: sessionId,
+                    provider: importThreadProvider.trimmedNonEmpty
+                )
+            )
+            importedThreadId = detail.thread.id
+            importThreadSessionId = ""
+            snapshot = try await client.fetchHomeSnapshot()
+        }
+        return importedThreadId
+    }
+
     func loadNewThreadOptionsIfNeeded() async {
         guard newThreadBackends.isEmpty || visibleNewThreadModels.isEmpty else { return }
         await loadNewThreadOptions()
@@ -195,6 +226,9 @@ final class HomeViewModel: ObservableObject {
                 ?? selectable.first?.provider
                 ?? backends[0].provider
             newThreadProvider = provider
+            if importThreadProvider.isEmpty {
+                importThreadProvider = provider
+            }
             if selectable.contains(where: { $0.provider == provider }) {
                 try await loadNewThreadModels(provider: provider)
             } else {
@@ -422,6 +456,7 @@ struct HomeScreen: View {
     let onThemeModeSelected: (ThemeMode) -> Void
     @State private var showingCreateWorkspace = false
     @State private var showingNewThread = false
+    @State private var showingImportThread = false
     @State private var showingSettings = false
     @State private var renameTarget: SupervisorWorkspaceSummary?
     @State private var renameDraft = ""
@@ -446,6 +481,7 @@ struct HomeScreen: View {
 
     var body: some View {
         List {
+            snapshotSection
             workspaceSection
         }
         .navigationTitle("Remote Codex")
@@ -464,6 +500,9 @@ struct HomeScreen: View {
         }
         .sheet(isPresented: $showingNewThread) {
             newThreadSheet
+        }
+        .sheet(isPresented: $showingImportThread) {
+            importThreadSheet
         }
         .sheet(isPresented: $showingSettings) {
             HomeSettingsView(model: model, onThemeModeSelected: onThemeModeSelected)
@@ -555,6 +594,20 @@ struct HomeScreen: View {
                 Button("Add") {
                     showingCreateWorkspace = true
                 }
+                Button("Import") {
+                    showingImportThread = true
+                }
+            }
+        }
+        .remoteCodexListRow()
+    }
+
+    private var snapshotSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                SnapshotMetric(label: "Workspaces", value: "\(model.snapshot?.workspaces.count ?? 0)")
+                SnapshotMetric(label: "Threads", value: "\(model.snapshot?.threads.count ?? 0)")
+                SnapshotMetric(label: "Running", value: "\(model.snapshot?.activeThreadCount ?? 0)")
             }
         }
         .remoteCodexListRow()
@@ -704,6 +757,68 @@ struct HomeScreen: View {
         }
     }
 
+    private var importThreadSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Provider") {
+                    if model.newThreadBackends.isEmpty, model.newThreadOptionsLoading {
+                        ProgressView()
+                    } else {
+                        Picker("Backend", selection: $model.importThreadProvider) {
+                            ForEach(model.importableBackends) { backend in
+                                Text(backend.displayName).tag(backend.provider)
+                            }
+                            if model.importableBackends.isEmpty {
+                                Text("Codex").tag("codex")
+                            }
+                        }
+                    }
+                }
+                Section("Session") {
+                    TextField("Session ID", text: $model.importThreadSessionId)
+                        .textInputAutocapitalization(.never)
+                        .font(.body.monospaced())
+                    Text("Import supports any configured backend, including Claude, when the supervisor exposes it.")
+                        .font(.caption)
+                        .remoteCodexStatusText()
+                }
+                if let error = model.errorMessage {
+                    Section {
+                        Text(error)
+                            .remoteCodexErrorText()
+                    }
+                    .remoteCodexListRow()
+                }
+            }
+            .navigationTitle("Import Session")
+            .remoteCodexScreenSurface()
+            .task {
+                await model.loadNewThreadOptionsIfNeeded()
+                if model.importThreadProvider.isEmpty {
+                    model.importThreadProvider = model.importableBackends.first { $0.isDefault }?.provider
+                        ?? model.importableBackends.first?.provider
+                        ?? "codex"
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showingImportThread = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") {
+                        Task {
+                            if let threadId = await model.importThread() {
+                                showingImportThread = false
+                                onOpenThread(threadId)
+                            }
+                        }
+                    }
+                    .disabled(!model.canImportThread)
+                }
+            }
+        }
+    }
+
     private func renameWorkspaceSheet(_ workspace: SupervisorWorkspaceSummary) -> some View {
         NavigationStack {
             Form {
@@ -761,6 +876,28 @@ private struct WorkspaceRow: View {
             .font(.caption)
             .buttonStyle(.borderless)
         }
+    }
+}
+
+private struct SnapshotMetric: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.headline)
+                .foregroundStyle(RemoteCodexTheme.foreground)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption)
+                .remoteCodexStatusText()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(RemoteCodexTheme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

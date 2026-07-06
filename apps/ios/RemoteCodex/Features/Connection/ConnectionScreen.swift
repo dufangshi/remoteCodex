@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum ConnectionSetupRoute: Equatable {
     case modeSelect
@@ -237,6 +238,17 @@ final class ConnectionViewModel: ObservableObject {
             relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
             lastRelayRefreshAt = Date()
         }
+    }
+
+    func copyRelayDeviceSetup(_ device: RelayDeviceSummary) {
+        guard let token = device.token?.trimmedNonEmpty else {
+            errorMessage = "This device token is not available. Create a new device token to copy setup."
+            statusMessage = nil
+            return
+        }
+        UIPasteboard.general.string = relaySupervisorCommand(relayBaseURL: baseURL, token: token)
+        errorMessage = nil
+        statusMessage = "Copied setup command for \(device.name)."
     }
 
     func connectRelayDevice(_ device: RelayDeviceSummary) async {
@@ -756,6 +768,9 @@ struct ConnectionScreen: View {
                             offlineDevice = device
                         }
                     },
+                    onCopySetup: {
+                        model.copyRelayDeviceSetup(device)
+                    },
                     onRevoke: { revokeDevice = device }
                 )
             }
@@ -920,9 +935,7 @@ private struct SavedDeviceRow: View {
             }
             HStack {
                 Button(device.mode == .relay ? "Relay Portal" : "Connect", action: onConnect)
-                Button(action: onEdit) {
-                    Label("Edit", systemImage: "pencil")
-                }
+                Button("Edit", action: onEdit)
                 Button("Delete", role: .destructive, action: onDelete)
             }
             .buttonStyle(.borderless)
@@ -935,6 +948,7 @@ private struct RelayDeviceRow: View {
     let device: RelayDeviceSummary
     let selected: Bool
     let onConnect: () -> Void
+    let onCopySetup: () -> Void
     let onRevoke: () -> Void
 
     var body: some View {
@@ -944,8 +958,12 @@ private struct RelayDeviceRow: View {
                 Spacer()
                 GraphBadge(text: device.online ? "Online" : "Offline", tone: device.online ? .success : .warning)
             }
-            Text(device.id).font(.caption.monospaced()).remoteCodexStatusText()
+            Text(relayDeviceStatusLine(device))
+                .font(.caption)
+                .remoteCodexStatusText()
             HStack {
+                Button("Copy Setup", action: onCopySetup)
+                    .disabled(device.token?.trimmedNonEmpty == nil)
                 Button(selected ? "Connected" : "Connect", action: onConnect)
                     .disabled(selected)
                 Button("Revoke", role: .destructive, action: onRevoke)
@@ -1105,6 +1123,59 @@ private func shareTitle(_ share: RelaySessionShareSummary) -> String {
         return "Thread unavailable"
     }
     return threadTitle
+}
+
+private func relayDeviceStatusLine(_ device: RelayDeviceSummary) -> String {
+    let timestamp = device.lastHeartbeatAt ?? device.lastSeenAt ?? device.createdAt
+    if device.online {
+        return "Last heartbeat: \(formatRelayTimestamp(timestamp))"
+    }
+    return "Last online: \(formatRelayTimestamp(timestamp))"
+}
+
+private func formatRelayTimestamp(_ value: String?) -> String {
+    guard let value = value?.trimmedNonEmpty else { return "never" }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    let date = fractional.date(from: value) ?? plain.date(from: value)
+    guard let date else {
+        return value
+            .replacingOccurrences(of: "T", with: " ")
+            .replacingOccurrences(of: "Z", with: " UTC")
+    }
+    return date.formatted(date: .abbreviated, time: .shortened)
+}
+
+private func relaySupervisorCommand(relayBaseURL: String, token: String) -> String {
+    [
+        "REMOTE_CODEX_RELAY_SERVER_URL=\(shellQuote(normalizedRelayWebSocketURL(relayBaseURL))) \\",
+        "REMOTE_CODEX_RELAY_AGENT_TOKEN=\(shellQuote(token)) \\",
+        "REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\",
+        "remote-codex relay-supervisor"
+    ].joined(separator: "\n")
+}
+
+private func normalizedRelayWebSocketURL(_ baseURL: String) -> String {
+    let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("wss://") || trimmed.hasPrefix("ws://") {
+        return trimmed
+    }
+    if trimmed.hasPrefix("https://") {
+        return "wss://" + String(trimmed.dropFirst("https://".count))
+    }
+    if trimmed.hasPrefix("http://") {
+        return "ws://" + String(trimmed.dropFirst("http://".count))
+    }
+    return "wss://\(trimmed)"
+}
+
+private func shellQuote(_ value: String) -> String {
+    if value.range(of: #"^[A-Za-z0-9_./:=@%+-]+$"#, options: .regularExpression) != nil {
+        return value
+    }
+    return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 private struct ShareAccessHistory: View {

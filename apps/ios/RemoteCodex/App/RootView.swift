@@ -367,15 +367,11 @@ struct FloatingActionMenu<Content: View>: View {
         Menu {
             content()
         } label: {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 17, weight: .semibold))
+            Image(systemName: "ellipsis.vertical")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(RemoteCodexTheme.foregroundSoft)
                 .frame(width: 44, height: 44)
                 .background(RemoteCodexTheme.surfaceStrong, in: Circle())
-                .overlay {
-                    Circle().stroke(RemoteCodexTheme.border, lineWidth: 1)
-                }
-                .shadow(color: RemoteCodexTheme.pageBackground.opacity(0.24), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(accessibilityIdentifier)

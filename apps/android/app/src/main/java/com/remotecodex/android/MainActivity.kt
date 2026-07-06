@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
             var homeSnapshotRefreshNonce by remember { mutableIntStateOf(0) }
             var accountPanelOpen by remember { mutableStateOf(false) }
             var devicesReturnRoute by remember { mutableStateOf<ConnectedRoute?>(null) }
+            var workspaceHomeBackRoute by remember { mutableStateOf<ConnectionRoute?>(null) }
             fun openDevicesScreen() {
                 devicesReturnRoute = (connectionRoute as? ConnectionRoute.Workspace)?.connectedRoute
                     ?: settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute()
@@ -103,7 +104,7 @@ class MainActivity : ComponentActivity() {
             RemoteCodexTheme(dark = darkThemeActive) {
                 BackHandler(
                     enabled = !launchThreadWebFixture &&
-                        (accountPanelOpen || shouldHandleBack(connectionRoute) || devicesReturnRoute != null),
+                        (accountPanelOpen || shouldHandleBack(connectionRoute) || devicesReturnRoute != null || workspaceHomeBackRoute != null),
                 ) {
                     if (accountPanelOpen) {
                         accountPanelOpen = false
@@ -127,7 +128,11 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         is ConnectionRoute.Workspace -> when (route.connectedRoute) {
-                            ConnectedRoute.Home -> route
+                            ConnectedRoute.Home -> {
+                                val returnRoute = workspaceHomeBackRoute
+                                workspaceHomeBackRoute = null
+                                returnRoute ?: route
+                            }
                             ConnectedRoute.ThreadPreview,
                             is ConnectedRoute.WorkspaceDetail,
                             -> {
@@ -210,6 +215,8 @@ class MainActivity : ComponentActivity() {
                                     settingsRepository.writeSupervisorConnection(config)
                                     supervisorConnection = config
                                     devicesReturnRoute = null
+                                    workspaceHomeBackRoute =
+                                        if (route == ConnectionRoute.RelayDevices) ConnectionRoute.RelayDevices else null
                                     connectionRoute = ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
                                 },
                                 onOpenRelaySharedThread = { config, share ->

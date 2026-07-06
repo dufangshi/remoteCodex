@@ -721,7 +721,10 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var online: Bool
+    var token: String?
+    var tokenPreview: String?
     var createdAt: String?
+    var connectedAt: String?
     var lastHeartbeatAt: String?
     var lastSeenAt: String?
 
@@ -730,7 +733,10 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         case name
         case online
         case connected
+        case token
+        case tokenPreview
         case createdAt
+        case connectedAt
         case lastHeartbeatAt
         case lastSeenAt
     }
@@ -739,14 +745,20 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         id: String,
         name: String,
         online: Bool,
+        token: String? = nil,
+        tokenPreview: String? = nil,
         createdAt: String? = nil,
+        connectedAt: String? = nil,
         lastHeartbeatAt: String? = nil,
         lastSeenAt: String? = nil
     ) {
         self.id = id
         self.name = name
         self.online = online
+        self.token = token
+        self.tokenPreview = tokenPreview
         self.createdAt = createdAt
+        self.connectedAt = connectedAt
         self.lastHeartbeatAt = lastHeartbeatAt
         self.lastSeenAt = lastSeenAt
     }
@@ -758,7 +770,10 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         online = try container.decodeIfPresent(Bool.self, forKey: .online)
             ?? container.decodeIfPresent(Bool.self, forKey: .connected)
             ?? false
+        token = try container.decodeIfPresent(String.self, forKey: .token)
+        tokenPreview = try container.decodeIfPresent(String.self, forKey: .tokenPreview)
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        connectedAt = try container.decodeIfPresent(String.self, forKey: .connectedAt)
         lastHeartbeatAt = try container.decodeIfPresent(String.self, forKey: .lastHeartbeatAt)
         lastSeenAt = try container.decodeIfPresent(String.self, forKey: .lastSeenAt)
     }
@@ -768,7 +783,10 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(online, forKey: .online)
+        try container.encodeIfPresent(token, forKey: .token)
+        try container.encodeIfPresent(tokenPreview, forKey: .tokenPreview)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(connectedAt, forKey: .connectedAt)
         try container.encodeIfPresent(lastHeartbeatAt, forKey: .lastHeartbeatAt)
         try container.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
     }

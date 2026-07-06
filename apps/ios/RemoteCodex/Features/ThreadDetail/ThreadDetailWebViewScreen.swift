@@ -209,7 +209,7 @@ struct ThreadDetailWebViewScreen: View {
     }
 
     private var threadMenu: some View {
-        FloatingActionMenu(accessibilityIdentifier: "thread-webview-menu") {
+        FloatingActionMenu(accessibilityIdentifier: "thread-webview-menu", appliesFloatingPadding: false) {
             Button(action: returnToWorkspaceLevel) {
                 Label("Workspace", systemImage: "folder")
             }
@@ -223,6 +223,7 @@ struct ThreadDetailWebViewScreen: View {
             }
             .tint(RemoteCodexTheme.foreground)
         }
+        .padding(.trailing, 12)
     }
 
     private func returnToWorkspaceLevel() {

@@ -74,6 +74,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun SupervisorConnectionSetupScreen(
@@ -556,7 +559,7 @@ fun SupervisorConnectionSetupScreen(
 
             when (route) {
                 ConnectionSetupRoute.ModeSelect -> {
-                    ConnectionPanel(title = "Connections", detail = "Cards are stored on this Android device and can be connected, edited, or deleted independently.") {
+                    ConnectionPanel(title = "Connections", detail = "Cards are stored on this Android device and can be opened, edited, or deleted independently.") {
                         if (savedDevices.isEmpty()) {
                             Text(
                                 text = "No saved connections yet. Tap + to add Local, Server, or Relay.",
@@ -576,7 +579,6 @@ fun SupervisorConnectionSetupScreen(
                                             connectSavedDevice(device)
                                         }
                                     },
-                                    onConnectBackend = { connectSavedDevice(device) },
                                     onEdit = {
                                         deviceEditorTarget = device
                                         deviceEditorOpen = true
@@ -997,7 +999,6 @@ private fun SavedDeviceCard(
     active: Boolean,
     busy: Boolean,
     onConnect: () -> Unit,
-    onConnectBackend: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -1041,9 +1042,6 @@ private fun SavedDeviceCard(
                 variant = if (active) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
             )
         }
-        if (device.mode == SupervisorConnectionMode.Relay && !device.relayDeviceId.isNullOrBlank()) {
-            ConnectionSettingText(label = "Relay device", value = device.relayDeviceId)
-        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             GraphButton(
                 label = if (device.mode == SupervisorConnectionMode.Relay) {
@@ -1061,21 +1059,12 @@ private fun SavedDeviceCard(
                 },
                 onClick = onConnect,
             )
-            if (device.mode == SupervisorConnectionMode.Relay) {
-                GraphButton(
-                    label = "Connect",
-                    enabled = !busy && !device.relayDeviceId.isNullOrBlank(),
-                    variant = GraphButtonVariant.Secondary,
-                    size = GraphButtonSize.Small,
-                    contentDescription = "Connect selected relay backend ${device.name}",
-                    onClick = onConnectBackend,
-                )
-            }
-            GraphIconButton(
-                icon = GraphActionIcon.Settings,
-                contentDescription = "Edit device ${device.name}",
+            GraphButton(
+                label = "Edit",
+                enabled = !busy,
                 variant = GraphButtonVariant.Outline,
                 size = GraphButtonSize.Small,
+                contentDescription = "Edit device ${device.name}",
                 onClick = onEdit,
             )
             GraphIconButton(
@@ -1649,14 +1638,6 @@ private fun RelayDeviceRow(
                     onClick = onRevoke,
                 )
             }
-            Text(
-                text = device.tokenPreview.ifBlank { device.id },
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             Text(
                 text = deviceStatusLine(device),
                 color = ThreadColors.ForegroundMuted,
@@ -2314,9 +2295,9 @@ private fun ConnectionStatus(message: String, error: Boolean) {
 }
 
 private fun deviceStatusLine(device: RelayDeviceSummary): String {
-    val lastSeen = device.lastHeartbeatAt ?: device.connectedAt ?: "never"
+    val lastSeen = shortRelayTimestamp(device.lastHeartbeatAt ?: device.connectedAt)
     return if (device.connected) {
-        "Connected. Last heartbeat: $lastSeen"
+        "Last heartbeat: $lastSeen"
     } else {
         "Last online: $lastSeen"
     }
@@ -2350,12 +2331,20 @@ private fun shareAccessSummary(share: RelaySessionShareSummary): String {
     }
 }
 
-private fun shortRelayTimestamp(value: String): String {
-    return value
-        .replace("T", " ")
-        .replace(Regex("\\.\\d{3}Z$"), " UTC")
-        .replace(Regex("Z$"), " UTC")
-        .take(22)
+private fun shortRelayTimestamp(value: String?): String {
+    if (value.isNullOrBlank()) {
+        return "never"
+    }
+    return runCatching {
+        DateTimeFormatter.ofPattern("MMM d, HH:mm")
+            .format(Instant.parse(value).atZone(ZoneId.systemDefault()))
+    }.getOrElse {
+        value
+            .replace("T", " ")
+            .replace(Regex("\\.\\d{3}Z$"), " UTC")
+            .replace(Regex("Z$"), " UTC")
+            .take(17)
+    }
 }
 
 private fun relaySupervisorCommand(relayBaseUrl: String, token: String): String {
