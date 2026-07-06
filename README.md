@@ -103,6 +103,18 @@ remote-codex relay-supervisor
 `45679` is used by default in copied setup commands to avoid common local
 `8787` port conflicts. You can change it if needed.
 
+By default, `remote-codex relay-supervisor` starts itself inside a detached
+`tmux` session so closing the terminal does not take the device offline. Manage
+it with:
+
+```bash
+remote-codex relay-supervisor status
+remote-codex relay-supervisor stop
+```
+
+If `tmux` is not installed it runs in the foreground. Use
+`remote-codex relay-supervisor run` for explicit foreground/debug mode.
+
 ### Local Mode
 
 ```bash
@@ -246,6 +258,17 @@ remote-codex relay-supervisor
 ```
 
 复制命令默认使用 `45679`，用于避开本机常见的 `8787` 端口冲突；需要时可以手动换。
+
+默认情况下，`remote-codex relay-supervisor` 会尝试启动到 detached `tmux`
+session 里，这样关闭终端窗口不会让设备下线。可以用下面命令管理：
+
+```bash
+remote-codex relay-supervisor status
+remote-codex relay-supervisor stop
+```
+
+如果设备没有安装 `tmux`，它会自动退回前台运行。需要显式前台调试时使用
+`remote-codex relay-supervisor run`。
 
 ### 本地模式
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const binDir = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +19,30 @@ const supervisorSourceEntry = path.join(packageRoot, 'apps', 'supervisor-api', '
 const relaySupervisorConfigPath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG
   ? path.resolve(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG)
   : path.join(os.homedir(), '.remote-codex', 'relay-supervisor.json');
+const relaySupervisorTmuxSession = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION?.trim()
+  || 'remote-codex-relay-supervisor';
+const relaySupervisorConfigKeys = [
+  'REMOTE_CODEX_RELAY_SERVER_URL',
+  'REMOTE_CODEX_RELAY_AGENT_TOKEN',
+  'REMOTE_CODEX_ADMIN_USERNAME',
+  'REMOTE_CODEX_ADMIN_PASSWORD',
+  'REMOTE_CODEX_SESSION_SECRET',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_HOST',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_PORT',
+  'DATABASE_URL',
+  'WORKSPACE_ROOT',
+  'CODEX_HOME',
+  'CODEX_COMMAND',
+  'CLAUDE_HOME',
+  'CLAUDE_COMMAND',
+  'OPENCODE_HOME',
+  'OPENCODE_COMMAND',
+  'REMOTE_CODEX_ENABLED_AGENT_PROVIDERS',
+  'LOG_LEVEL',
+  'REMOTE_CODEX_E2E_FAKE_RUNTIME',
+  'REMOTE_CODEX_DISABLE_BUILD_RESTART',
+  'REMOTE_CODEX_PACKAGE_ROOT',
+];
 const sourceCheckout =
   fs.existsSync(path.join(packageRoot, 'pnpm-workspace.yaml')) &&
   fs.existsSync(path.join(packageRoot, 'scripts', 'service-restart.mjs'));
@@ -174,11 +198,33 @@ function runRelayServer() {
 }
 
 async function runRelaySupervisor() {
-  if (process.argv[3] === 'reset') {
+  const action = process.argv[3] ?? 'start';
+  if (action === 'reset') {
     resetRelaySupervisorConfig();
     return;
   }
+  if (action === 'status') {
+    relaySupervisorStatus();
+    return;
+  }
+  if (action === 'stop') {
+    stopRelaySupervisorTmux();
+    return;
+  }
+  if (action !== 'start' && action !== 'run') {
+    console.error(`Unknown relay-supervisor action: ${action}`);
+    console.error('Use one of: start, run, status, stop, reset.');
+    process.exit(1);
+  }
   await ensureRelaySupervisorConfig();
+  if (action === 'start' && shouldStartRelaySupervisorInTmux()) {
+    startRelaySupervisorTmux();
+    return;
+  }
+  runRelaySupervisorForeground();
+}
+
+function runRelaySupervisorForeground() {
   const guidance = {
     commandName: 'remote-codex relay-supervisor',
     description: 'Run the private-machine supervisor backend that connects outward to a public relay.',
@@ -198,6 +244,8 @@ async function runRelaySupervisor() {
     ],
     example: [
       'remote-codex relay-supervisor',
+      '# foreground/debug mode:',
+      'remote-codex relay-supervisor run',
       '# or reset saved interactive configuration:',
       'remote-codex relay-supervisor reset',
     ],
@@ -278,6 +326,125 @@ async function runRelaySupervisor() {
   });
 }
 
+function shouldStartRelaySupervisorInTmux() {
+  const setting = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX?.trim().toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(setting ?? '')) {
+    return false;
+  }
+  if (process.env.TMUX) {
+    return false;
+  }
+  return commandExists('tmux');
+}
+
+function startRelaySupervisorTmux() {
+  persistRelaySupervisorRuntimeConfig();
+  if (tmuxSessionExists(relaySupervisorTmuxSession)) {
+    console.log(`remote-codex relay-supervisor is already running in tmux session: ${relaySupervisorTmuxSession}`);
+    printRelaySupervisorTmuxCommands();
+    return;
+  }
+
+  const command = relaySupervisorTmuxCommand();
+  const result = spawnSync('tmux', ['new-session', '-d', '-s', relaySupervisorTmuxSession, command], {
+    cwd: packageRoot,
+    env: relaySupervisorTmuxLaunchEnv(),
+    encoding: 'utf8',
+  });
+
+  if (result.status !== 0) {
+    console.error('Failed to start relay-supervisor in tmux.');
+    if (result.stderr?.trim()) {
+      console.error(result.stderr.trim());
+    }
+    console.error('Falling back to foreground mode.');
+    runRelaySupervisorForeground();
+    return;
+  }
+
+  console.log(`Started remote-codex relay-supervisor in tmux session: ${relaySupervisorTmuxSession}`);
+  printRelaySupervisorTmuxCommands();
+}
+
+function relaySupervisorTmuxCommand() {
+  const envPrefix = nonEmptyEnv('REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG')
+    ? `REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG=${shellQuote(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG)}`
+    : '';
+  const command = `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} relay-supervisor run`;
+  return envPrefix ? `${envPrefix} ${command}` : command;
+}
+
+function relaySupervisorTmuxLaunchEnv() {
+  const env = {};
+  for (const name of ['PATH', 'HOME', 'SHELL', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM']) {
+    if (nonEmptyEnv(name)) {
+      env[name] = process.env[name];
+    }
+  }
+  if (nonEmptyEnv('REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG')) {
+    env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG;
+  }
+  return env;
+}
+
+function relaySupervisorStatus() {
+  if (!commandExists('tmux')) {
+    console.log('tmux is not installed; no managed relay-supervisor session can be inspected.');
+    process.exit(1);
+  }
+  if (!tmuxSessionExists(relaySupervisorTmuxSession)) {
+    console.log(`remote-codex relay-supervisor is not running in tmux session: ${relaySupervisorTmuxSession}`);
+    process.exit(1);
+  }
+  console.log(`remote-codex relay-supervisor is running in tmux session: ${relaySupervisorTmuxSession}`);
+  printRelaySupervisorTmuxCommands();
+}
+
+function stopRelaySupervisorTmux() {
+  if (!commandExists('tmux')) {
+    console.log('tmux is not installed; no managed relay-supervisor session can be stopped.');
+    return;
+  }
+  if (!tmuxSessionExists(relaySupervisorTmuxSession)) {
+    console.log(`remote-codex relay-supervisor is not running in tmux session: ${relaySupervisorTmuxSession}`);
+    return;
+  }
+  const result = spawnSync('tmux', ['kill-session', '-t', relaySupervisorTmuxSession], {
+    cwd: packageRoot,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    console.error(`Failed to stop tmux session: ${relaySupervisorTmuxSession}`);
+    if (result.stderr?.trim()) {
+      console.error(result.stderr.trim());
+    }
+    process.exit(1);
+  }
+  console.log(`Stopped remote-codex relay-supervisor tmux session: ${relaySupervisorTmuxSession}`);
+}
+
+function printRelaySupervisorTmuxCommands() {
+  console.log(`Attach logs: tmux attach -t ${shellQuote(relaySupervisorTmuxSession)}`);
+  console.log('Status:      remote-codex relay-supervisor status');
+  console.log('Stop:        remote-codex relay-supervisor stop');
+}
+
+function tmuxSessionExists(sessionName) {
+  const result = spawnSync('tmux', ['has-session', '-t', sessionName], {
+    cwd: packageRoot,
+    stdio: 'ignore',
+  });
+  return result.status === 0;
+}
+
+function commandExists(commandName) {
+  const result = spawnSync(commandName, ['-V'], {
+    cwd: packageRoot,
+    stdio: 'ignore',
+  });
+  return result.error?.code !== 'ENOENT';
+}
+
 async function ensureRelaySupervisorConfig() {
   const existing = readRelaySupervisorConfig();
   const generated = {
@@ -296,9 +463,11 @@ async function ensureRelaySupervisorConfig() {
   const needsRelayUrl = !nonEmptyEnv('REMOTE_CODEX_RELAY_SERVER_URL');
   const needsAgentToken = !nonEmptyEnv('REMOTE_CODEX_RELAY_AGENT_TOKEN');
   if (!needsRelayUrl && !needsAgentToken) {
+    persistRelaySupervisorRuntimeConfig(config);
     return;
   }
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    persistRelaySupervisorRuntimeConfig(config);
     return;
   }
 
@@ -326,15 +495,7 @@ async function ensureRelaySupervisorConfig() {
     rl.close();
   }
 
-  writeRelaySupervisorConfig({
-    ...config,
-    REMOTE_CODEX_RELAY_SERVER_URL: process.env.REMOTE_CODEX_RELAY_SERVER_URL,
-    REMOTE_CODEX_RELAY_AGENT_TOKEN: process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN,
-    REMOTE_CODEX_ADMIN_USERNAME: process.env.REMOTE_CODEX_ADMIN_USERNAME,
-    REMOTE_CODEX_ADMIN_PASSWORD: process.env.REMOTE_CODEX_ADMIN_PASSWORD,
-    REMOTE_CODEX_SESSION_SECRET: process.env.REMOTE_CODEX_SESSION_SECRET,
-    DATABASE_URL: process.env.DATABASE_URL,
-  });
+  persistRelaySupervisorRuntimeConfig(config);
 }
 
 async function promptRelaySupervisorValue(rl, prompt, validate, invalidMessage) {
@@ -366,6 +527,16 @@ function writeRelaySupervisorConfig(config) {
   } catch {
     // Best-effort on filesystems that do not support chmod.
   }
+}
+
+function persistRelaySupervisorRuntimeConfig(base = readRelaySupervisorConfig()) {
+  const config = { ...base };
+  for (const name of relaySupervisorConfigKeys) {
+    if (nonEmptyEnv(name)) {
+      config[name] = process.env[name];
+    }
+  }
+  writeRelaySupervisorConfig(config);
 }
 
 function resetRelaySupervisorConfig() {
@@ -525,6 +696,14 @@ function envValue(names, defaultValue) {
     }
   }
   return defaultValue;
+}
+
+function shellQuote(value) {
+  const stringValue = String(value ?? '');
+  if (/^[A-Za-z0-9_./:@%+=,~-]+$/.test(stringValue)) {
+    return stringValue;
+  }
+  return `'${stringValue.replace(/'/g, `'\\''`)}'`;
 }
 
 function relayServerEnv() {
@@ -806,10 +985,23 @@ public internet; it connects outward to a public relay server.
 
 Usage:
   remote-codex relay-supervisor
+  remote-codex relay-supervisor run
+  remote-codex relay-supervisor status
+  remote-codex relay-supervisor stop
   remote-codex relay-supervisor reset
 
 This command automatically sets for the child supervisor:
   REMOTE_CODEX_MODE=relay
+
+Default process management:
+  By default, this command tries to start the supervisor in a detached tmux
+  session named "${relaySupervisorTmuxSession}" so the device stays online
+  after the launching terminal closes. If tmux is not installed, or if
+  REMOTE_CODEX_RELAY_SUPERVISOR_TMUX=0 is set, it runs in the foreground.
+
+  Use "remote-codex relay-supervisor run" for explicit foreground/debug mode.
+  Use "remote-codex relay-supervisor status" to inspect the tmux session.
+  Use "remote-codex relay-supervisor stop" to stop the tmux session.
 
 Interactive setup:
   When REMOTE_CODEX_RELAY_SERVER_URL or REMOTE_CODEX_RELAY_AGENT_TOKEN is
@@ -818,7 +1010,8 @@ Interactive setup:
     ${relaySupervisorConfigPath}
 
   The saved config also includes generated local supervisor auth/session values
-  so the normal first-run path only asks for relay URL and device token.
+  and copied setup values such as REMOTE_CODEX_RELAY_SUPERVISOR_PORT, so the
+  tmux child process can start with the same effective configuration.
 
   Use "remote-codex relay-supervisor reset" to delete the saved config.
 
@@ -851,9 +1044,20 @@ Recommended environment:
     Codex executable. Default codex.
   REMOTE_CODEX_ENABLED_AGENT_PROVIDERS
     Comma-separated provider ids, for example codex,claude.
+  REMOTE_CODEX_RELAY_SUPERVISOR_TMUX
+    Set to 0/false/no/off to disable default tmux management.
+  REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION
+    tmux session name. Default ${relaySupervisorTmuxSession}.
 
 Example:
   remote-codex relay-supervisor
+
+Foreground/debug example:
+  remote-codex relay-supervisor run
+
+Management:
+  remote-codex relay-supervisor status
+  remote-codex relay-supervisor stop
 
 Non-interactive example:
   REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com \\
