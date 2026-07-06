@@ -214,19 +214,19 @@ export function WorkspacesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="host-topbar sticky top-[env(safe-area-inset-top)] z-20 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-[1.4rem] sm:border sm:px-4">
+      <div className="host-topbar sticky top-[env(safe-area-inset-top)] z-20 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-4">
         <div className="relative">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <AppShellMenuButton />
             <Link
               to={currentRelayScopedPath('/threads/import')}
-              className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-full border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+              className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
             >
               Import
             </Link>
             <Link
               to={currentRelayScopedPath('/workspaces/new')}
-              className="ui-action-primary inline-flex h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+              className="ui-action-primary inline-flex h-8 shrink-0 items-center rounded-md px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
             >
               Create
             </Link>
@@ -243,19 +243,19 @@ export function WorkspacesPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <section className="min-w-0 space-y-4">
           {loading && (
-            <div className="host-empty-state rounded-[1.6rem] border px-6 py-12 text-center">
+            <div className="host-empty-state rounded-lg border px-6 py-12 text-center">
               Loading workspace registry...
             </div>
           )}
 
           {error && (
-            <div className="host-error rounded-[1.4rem] border px-4 py-4">
+            <div className="host-error rounded-lg border px-4 py-4">
               {error}
             </div>
           )}
 
           {!loading && !error && workspaces.length === 0 && (
-            <div className="host-empty-state rounded-[1.6rem] border border-dashed px-6 py-12 text-center">
+            <div className="host-empty-state rounded-lg border border-dashed px-6 py-12 text-center">
               <p className="host-page-title text-lg font-medium">No workspaces yet</p>
               <p className="host-muted mt-2 text-sm">
                 Add a local directory inside the configured workspace root to start building the
@@ -273,7 +273,7 @@ export function WorkspacesPage() {
               tabIndex={0}
               onClick={() => openWorkspaceThreads(workspace.id)}
               onKeyDown={(event) => handleWorkspaceKeyDown(event, workspace.id)}
-              className="host-card relative overflow-hidden rounded-[1.35rem] border px-4 py-3 transition"
+              className="host-card relative overflow-hidden rounded-lg border px-4 py-3 transition"
             >
               <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
                 <button
@@ -412,7 +412,7 @@ function WorkspaceRuntimeSidebar({
 }) {
   return (
     <aside className="space-y-3 xl:sticky xl:top-[calc(env(safe-area-inset-top)+4.25rem)] xl:self-start">
-      <section className="rounded-[1.2rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+      <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
           Supervisor
         </p>
@@ -434,7 +434,7 @@ function WorkspaceRuntimeSidebar({
         </dl>
       </section>
       {error ? (
-        <section className="rounded-[1.2rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
+        <section className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
           Runtime metadata is unavailable. Workspace actions may still work if a relay device is connected.
         </section>
       ) : null}

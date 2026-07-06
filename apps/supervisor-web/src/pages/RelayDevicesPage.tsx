@@ -33,6 +33,56 @@ function errorMessage(caught: unknown, fallback: string) {
       : fallback;
 }
 
+export function mergeRelayPortalSummary(
+  previous: RelayPortalSummaryDto | null,
+  next: RelayPortalSummaryDto,
+): RelayPortalSummaryDto {
+  if (!previous) {
+    return sanitizeRelayPortalSummary(next);
+  }
+
+  return {
+    ...next,
+    sharedWithMe: mergeShareMetadata(previous.sharedWithMe, next.sharedWithMe),
+    sharedByMe: mergeShareMetadata(previous.sharedByMe, next.sharedByMe),
+  };
+}
+
+function sanitizeRelayPortalSummary(summary: RelayPortalSummaryDto): RelayPortalSummaryDto {
+  return {
+    ...summary,
+    sharedWithMe: summary.sharedWithMe.map(sanitizeShareMetadata),
+    sharedByMe: summary.sharedByMe.map(sanitizeShareMetadata),
+  };
+}
+
+function mergeShareMetadata(
+  previousShares: RelaySessionShareDto[],
+  nextShares: RelaySessionShareDto[],
+) {
+  const previousById = new Map(previousShares.map((share) => [share.id, share]));
+  return nextShares.map((share) => {
+    const previous = previousById.get(share.id);
+    if (!previous) {
+      return sanitizeShareMetadata(share);
+    }
+    const nextThreadTitle = stableShareThreadTitle(share);
+    const previousThreadTitle = stableShareThreadTitle(previous);
+    return {
+      ...share,
+      threadTitle: nextThreadTitle ?? previousThreadTitle,
+      workspaceLabel: share.workspaceLabel ?? previous.workspaceLabel,
+    };
+  });
+}
+
+function sanitizeShareMetadata(share: RelaySessionShareDto): RelaySessionShareDto {
+  return {
+    ...share,
+    threadTitle: stableShareThreadTitle(share),
+  };
+}
+
 export function RelayDevicesPage() {
   const navigate = useNavigate();
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
@@ -63,7 +113,7 @@ export function RelayDevicesPage() {
       enableRelayMode();
       const nextPortal = await fetchRelayPortal();
       hasLoadedPortalRef.current = true;
-      setPortal(nextPortal);
+      setPortal((current) => mergeRelayPortalSummary(current, nextPortal));
     } catch (caught) {
       if (showLoading || !hasLoadedPortalRef.current) {
         setError(errorMessage(caught, 'Unable to load devices.'));
@@ -406,6 +456,7 @@ function SharedSessionRow({
 }) {
   const shareTitle = shareTitleText(share);
   const threadLabel = shareTitle;
+  const shareLabel = share.label?.trim() || null;
   const workspaceLabel = share.workspaceLabel?.trim() || 'Workspace unavailable';
   const lastAccessLabel = share.lastAccessedAt
     ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
@@ -425,6 +476,11 @@ function SharedSessionRow({
             <p className="truncate">
               Thread: <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
             </p>
+            {shareLabel ? (
+              <p className="truncate">
+                Label: <span className="text-[var(--theme-fg-soft)]">{shareLabel}</span>
+              </p>
+            ) : null}
             <p className="truncate">
               {mode === 'incoming' ? `From ${share.ownerUsername}` : `To ${share.targetUsername}`}
             </p>
@@ -780,7 +836,16 @@ function formatRelayTimestamp(value: string | null | undefined) {
 }
 
 function shareTitleText(share: RelaySessionShareDto) {
-  return share.threadTitle?.trim() || share.label?.trim() || 'Thread unavailable';
+  return stableShareThreadTitle(share) ?? 'Thread unavailable';
+}
+
+function stableShareThreadTitle(share: RelaySessionShareDto) {
+  const threadTitle = share.threadTitle?.trim();
+  if (!threadTitle) {
+    return null;
+  }
+  const label = share.label?.trim();
+  return label && threadTitle === label ? null : threadTitle;
 }
 
 function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {

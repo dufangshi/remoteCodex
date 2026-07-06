@@ -396,4 +396,71 @@ describe('ThreadDetailAssembler', () => {
       }),
     );
   });
+
+  it('does not promote failed items from completed remote turns to thread failure', async () => {
+    const failedAt = '2026-06-07T00:00:30.000Z';
+    const persistedFailureItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'turn-1:user',
+        kind: 'userMessage',
+        text: 'run checks',
+        createdAt: '2026-06-07T00:00:00.000Z',
+        transcriptOrder: 0,
+      },
+      {
+        id: 'turn-1:command',
+        kind: 'commandExecution',
+        text: 'npm test',
+        createdAt: failedAt,
+        transcriptOrder: 1,
+        status: 'failed',
+        sourceTurnId: 'turn-1',
+      },
+    ];
+    const { assembler, callbacks } = createAssembler(
+      session([turn('turn-1')]),
+    );
+    callbacks.buildThreadPatch.mockReturnValue({
+      status: 'idle',
+      lastError: null,
+    });
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['turn-1', persistedFailureItems]]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record,
+      turnMetadataById: new Map([
+        [
+          'turn-1',
+          {
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            reasoningEffortAvailable: true,
+            pricingModelKey: null,
+            pricingTierKey: null,
+            tokenUsageJson: null,
+            displayPrompt: 'run checks',
+            createdAt: '2026-06-07T00:00:00.000Z',
+          },
+        ],
+      ]),
+      options: { limit: 3 },
+    });
+
+    expect(entry.turns).toHaveLength(1);
+    expect(entry.turns[0]).toMatchObject({
+      id: 'turn-1',
+      status: 'completed',
+    });
+    expect(callbacks.updateThreadRecord).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        status: 'idle',
+        lastError: null,
+        providerTurnId: null,
+      }),
+    );
+  });
 });

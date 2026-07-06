@@ -87,7 +87,7 @@ export function WorkspaceForm({
   }
 
   const formClassName = surface
-    ? 'host-panel space-y-5 rounded-3xl border p-6'
+    ? 'host-panel space-y-5 rounded-lg border p-5 sm:p-6'
     : 'space-y-5';
 
   return (
@@ -102,7 +102,7 @@ export function WorkspaceForm({
           value={absPath}
           onChange={(event) => setAbsPath(event.target.value)}
           placeholder="/Users/name/project or https://github.com/owner/repo.git"
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
         />
         <p className="host-muted mt-2 text-xs">
           Absolute paths register local directories. Git URLs clone into the configured dev home.
@@ -118,21 +118,21 @@ export function WorkspaceForm({
           value={label}
           onChange={(event) => setLabel(event.target.value)}
           placeholder="Optional override"
-          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+          className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
         />
         <p className="host-muted mt-2 text-xs">
           Defaults to the last folder name. You can override it.
         </p>
       </div>
       {(localError || error) && (
-        <div className="host-error rounded-2xl border px-4 py-3 text-sm">
+        <div className="host-error rounded-lg border px-4 py-3 text-sm">
           {localError ?? error}
         </div>
       )}
       <button
         type="submit"
         disabled={busy}
-        className="ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed"
+        className="ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed"
       >
         {busy ? 'Saving...' : submitLabel}
       </button>

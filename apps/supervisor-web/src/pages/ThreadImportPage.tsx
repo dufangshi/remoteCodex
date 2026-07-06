@@ -103,7 +103,7 @@ export function ThreadImportPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-3xl border p-6">
+      <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-lg border p-5 sm:p-6">
         <div>
           <label htmlFor="backend-provider" className="host-form-label text-sm font-medium">
             Backend
@@ -113,7 +113,7 @@ export function ThreadImportPage() {
             value={provider}
             onChange={(event) => setProvider(event.target.value as AgentBackendIdDto)}
             disabled={busy || backendsLoading}
-            className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
           >
             {backendOptions.map((backend) => (
               <option key={backend.provider} value={backend.provider}>
@@ -132,12 +132,12 @@ export function ThreadImportPage() {
             value={sessionId}
             onChange={(event) => setSessionId(event.target.value)}
             placeholder="019d6fb7-7033-7a30-a2c7-74d0919e87d4"
-            className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
           />
         </div>
 
         {error && (
-          <div className="host-error rounded-2xl border px-4 py-3 text-sm">
+          <div className="host-error rounded-lg border px-4 py-3 text-sm">
             {error}
           </div>
         )}
@@ -146,7 +146,7 @@ export function ThreadImportPage() {
           <button
             type="submit"
             disabled={busy}
-            className="ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed"
+              className="ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed"
           >
             {busy ? 'Importing...' : 'Import Session'}
           </button>

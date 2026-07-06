@@ -18,7 +18,7 @@ export function FloatingRoutePanel({
   return (
     <div className="flex min-h-[calc(100vh-2rem)] items-start justify-center py-[calc(env(safe-area-inset-top)+3.75rem)] sm:items-center sm:py-[calc(env(safe-area-inset-top)+2rem)]">
       <section
-        className={`host-panel w-full ${maxWidthClassName} overflow-hidden rounded-[1.6rem] border shadow-2xl`}
+        className={`host-panel w-full ${maxWidthClassName} overflow-hidden rounded-lg border shadow-[var(--theme-shadow)]`}
       >
         <header className="border-b border-[var(--theme-border)] px-5 py-4 sm:px-6">
           <p className="host-page-eyebrow text-xs uppercase tracking-[0.22em]">{eyebrow}</p>

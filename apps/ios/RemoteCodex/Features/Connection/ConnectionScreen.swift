@@ -1052,7 +1052,13 @@ private enum RelayShareRowMode {
 }
 
 private func shareTitle(_ share: RelaySessionShareSummary) -> String {
-    share.threadTitle?.trimmedNonEmpty ?? share.label?.trimmedNonEmpty ?? "Thread unavailable"
+    guard let threadTitle = share.threadTitle?.trimmedNonEmpty else {
+        return "Thread unavailable"
+    }
+    if let label = share.label?.trimmedNonEmpty, label == threadTitle {
+        return "Thread unavailable"
+    }
+    return threadTitle
 }
 
 private struct ShareAccessHistory: View {

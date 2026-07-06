@@ -102,7 +102,7 @@ export function AppShellNavigationMenu({
       onTouchStart={(event) => {
         event.stopPropagation();
       }}
-      className={`rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 shadow-2xl shadow-black/15 backdrop-blur ${className}`.trim()}
+      className={`rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 shadow-[var(--theme-shadow)] backdrop-blur ${className}`.trim()}
     >
       <div>
         <p className="text-base font-semibold tracking-wide text-[var(--theme-accent-strong)]">

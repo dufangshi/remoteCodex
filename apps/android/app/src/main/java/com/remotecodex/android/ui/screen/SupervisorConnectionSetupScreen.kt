@@ -1815,8 +1815,9 @@ private enum class RelayShareRowMode {
 }
 
 private fun shareTitle(share: RelaySessionShareSummary): String {
-    return share.threadTitle?.takeIf { it.isNotBlank() }
-        ?: share.label?.takeIf { it.isNotBlank() }
+    val threadTitle = share.threadTitle?.trim()?.takeIf { it.isNotBlank() }
+    val label = share.label?.trim()?.takeIf { it.isNotBlank() }
+    return threadTitle?.takeUnless { label != null && it == label }
         ?: "Thread unavailable"
 }
 

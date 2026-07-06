@@ -2,8 +2,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { RelaySessionShareDto } from '@remote-codex/shared';
-import { RelayDevicesPage } from './RelayDevicesPage';
+import type {
+  RelayPortalSummaryDto,
+  RelaySessionShareDto,
+} from '@remote-codex/shared';
+import {
+  RelayDevicesPage,
+  mergeRelayPortalSummary,
+} from './RelayDevicesPage';
 
 const baseUser = {
   id: 'user-1',
@@ -308,6 +314,76 @@ describe('RelayDevicesPage', () => {
     expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
     expect(screen.getByText('Workspace unavailable')).toBeInTheDocument();
     expect(screen.queryByText('thread-raw-id-only')).not.toBeInTheDocument();
+  });
+
+  it('does not use the custom share label as the thread title', async () => {
+    renderPage([], [], [
+      {
+        ...sharedSession,
+        ownerUserId: 'user-1',
+        ownerUsername: 'user',
+        targetUserId: 'friend-1',
+        targetUsername: 'friend',
+        threadTitle: null,
+        label: 'Pairing note',
+      },
+    ]);
+
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(screen.getByText('Label:')).toBeInTheDocument();
+    expect(screen.getByText('Pairing note')).toBeInTheDocument();
+  });
+
+  it('does not use a stale custom share label stored as the thread title', async () => {
+    renderPage([], [], [
+      {
+        ...sharedSession,
+        ownerUserId: 'user-1',
+        ownerUsername: 'user',
+        targetUserId: 'friend-1',
+        targetUsername: 'friend',
+        threadTitle: 'feiji',
+        label: 'feiji',
+      },
+    ]);
+
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(screen.getByText('Label:')).toBeInTheDocument();
+    expect(screen.getByText('feiji')).toBeInTheDocument();
+  });
+
+  it('keeps resolved shared thread metadata when a refresh omits it', () => {
+    const previousShare: RelaySessionShareDto = {
+      ...sharedSession,
+      threadTitle: 'solido',
+      workspaceLabel: 'el-agente-cloud-infrastructure',
+      label: 'feiji',
+    };
+    const previous: RelayPortalSummaryDto = {
+      user: baseUser,
+      devices: [],
+      sharedWithMe: [],
+      sharedByMe: [previousShare],
+    };
+    const next: RelayPortalSummaryDto = {
+      ...previous,
+      sharedByMe: [
+        {
+          ...previousShare,
+          threadTitle: 'feiji',
+          workspaceLabel: null,
+          label: 'feiji',
+          lastAccessedAt: '2026-07-06T16:00:00.000Z',
+        },
+      ],
+    };
+
+    expect(mergeRelayPortalSummary(previous, next).sharedByMe[0]).toMatchObject({
+      threadTitle: 'solido',
+      workspaceLabel: 'el-agente-cloud-infrastructure',
+      label: 'feiji',
+      lastAccessedAt: '2026-07-06T16:00:00.000Z',
+    });
   });
 
   it('opens a session shared by the current relay account', async () => {

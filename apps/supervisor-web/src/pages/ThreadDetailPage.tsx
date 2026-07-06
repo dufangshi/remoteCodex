@@ -2663,7 +2663,7 @@ export function ThreadDetailPage() {
                   : 'Copy session ID'
             }
             onClick={() => void handleCopyMetaSessionId()}
-            className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
+            className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm backdrop-blur transition ${
               metaSessionCopyState === 'copied'
                 ? 'ui-status-info'
                 : metaSessionCopyState === 'failed'
@@ -2784,14 +2784,14 @@ export function ThreadDetailPage() {
   const threadLoaded = detail?.thread.isLoaded ?? false;
   const realtimeConnectionIndicatorClassName =
     !threadLoaded
-      ? 'host-icon-button border shadow-lg shadow-black/10'
+      ? 'host-icon-button border shadow-[var(--theme-shadow)]'
     : realtimeConnection.status === 'connected'
-      ? 'ui-action-success shadow-lg shadow-stone-950/20'
-      : realtimeConnection.status === 'reconnecting'
-        ? 'thread-live-connection-reconnecting ui-status-success shadow-lg shadow-stone-950/20'
+      ? 'ui-action-success shadow-[var(--theme-shadow)]'
+    : realtimeConnection.status === 'reconnecting'
+        ? 'thread-live-connection-reconnecting ui-status-success shadow-[var(--theme-shadow)]'
         : realtimeConnection.status === 'offline'
-          ? 'ui-status-danger shadow-lg shadow-stone-950/20'
-          : 'ui-status-warning shadow-lg shadow-stone-950/20';
+          ? 'ui-status-danger shadow-[var(--theme-shadow)]'
+          : 'ui-status-warning shadow-[var(--theme-shadow)]';
   const realtimeConnectionLabel = threadConnectionSummary(
     threadLoaded,
     realtimeConnection,
@@ -2867,7 +2867,7 @@ export function ThreadDetailPage() {
     </svg>
   );
   const goalMonitorPanel = goalMonitorOpen && supportsGoals ? (
-    <div className="host-dialog w-96 max-w-[calc(100vw-1.5rem)] rounded-3xl border p-3 text-left shadow-2xl shadow-black/20 backdrop-blur-xl">
+    <div className="host-dialog w-96 max-w-[calc(100vw-1.5rem)] rounded-lg border p-3 text-left shadow-[var(--theme-shadow)] backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="host-page-title text-sm font-semibold">Goal monitor</p>
@@ -2876,19 +2876,19 @@ export function ThreadDetailPage() {
         <button
           type="button"
           onClick={() => setGoalMonitorOpen(false)}
-          className="host-secondary-button rounded-full border px-2.5 py-1 text-xs transition"
+          className="host-secondary-button rounded-md border px-2.5 py-1 text-xs transition"
         >
           Close
         </button>
       </div>
       {goalState.error ? (
-        <p className="host-error mt-3 rounded-2xl border px-3 py-2 text-xs">
+        <p className="host-error mt-3 rounded-lg border px-3 py-2 text-xs">
           {goalState.error}
         </p>
       ) : null}
       <div className="mt-3 max-h-[28rem] space-y-2 overflow-auto pr-1">
         {monitorGoals.length === 0 ? (
-          <p className="host-empty-state rounded-2xl border px-3 py-3 text-sm">
+          <p className="host-empty-state rounded-lg border px-3 py-3 text-sm">
             No goals in this thread yet.
           </p>
         ) : (
@@ -2899,7 +2899,7 @@ export function ThreadDetailPage() {
             return (
               <div
                 key={key}
-                className={`rounded-2xl border px-3 py-3 ${
+                className={`rounded-lg border px-3 py-3 ${
                   active
                     ? 'ui-status-info'
                     : 'host-surface-strong'
@@ -2946,7 +2946,7 @@ export function ThreadDetailPage() {
                       type="button"
                       disabled={goalActionBusy || goal.status === 'active'}
                       onClick={() => void handleGoalStatusAction('active')}
-                      className="ui-status-info rounded-full px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
+                      className="ui-status-info rounded-md px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Continue
                     </button>
@@ -2954,7 +2954,7 @@ export function ThreadDetailPage() {
                       type="button"
                       disabled={goalActionBusy || goal.status === 'paused'}
                       onClick={() => void handleGoalStatusAction('paused')}
-                      className="host-secondary-button rounded-full border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
+                      className="host-secondary-button rounded-md border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Pause
                     </button>
@@ -2962,7 +2962,7 @@ export function ThreadDetailPage() {
                       type="button"
                       disabled={goalActionBusy}
                       onClick={() => void handleTerminateGoal()}
-                      className="rounded-full border border-[var(--status-danger-border)] px-3 py-1.5 text-xs text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-md border border-[var(--status-danger-border)] px-3 py-1.5 text-xs text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Terminate
                     </button>
@@ -2984,7 +2984,7 @@ export function ThreadDetailPage() {
         setGoalMonitorOpen((current) => !current);
         void handleOpenGoal();
       }}
-      className="ui-status-info inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-lg shadow-stone-950/20 transition lg:h-9 lg:w-9"
+      className="ui-status-info inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-[var(--theme-shadow)] transition lg:h-9 lg:w-9"
     >
       {goalIndicatorIcon}
     </button>
@@ -3013,7 +3013,7 @@ export function ThreadDetailPage() {
         title="Thread actions"
         onClick={() => setExportDialogOpen(true)}
         disabled={!detail}
-        className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-black/10 transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
+        className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-[var(--theme-shadow)] transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
       >
         <ExportIcon />
       </button>

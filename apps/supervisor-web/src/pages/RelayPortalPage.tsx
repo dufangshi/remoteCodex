@@ -128,7 +128,7 @@ function RelayAuthPanel({
   }
 
   return (
-    <section className="w-full max-w-sm rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-xl shadow-black/10">
+    <section className="w-full max-w-sm rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-xl shadow-[var(--theme-shadow)]">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
         Relay Access
       </p>

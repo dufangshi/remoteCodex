@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -36,8 +37,10 @@ async function setupSharedRelaySession(options: {
   workspaceAccess?: 'none' | 'read' | 'write';
   workspaceId?: string | null;
   expiresAt?: string | null;
+  label?: string | null;
 } = {}) {
-  const app = buildRelayServer(testConfig());
+  const config = testConfig();
+  const app = buildRelayServer(config);
   await app.ready();
 
   const ownerResponse = await app.inject({
@@ -83,6 +86,7 @@ async function setupSharedRelaySession(options: {
       deviceId,
       threadId: SHARED_THREAD_ID,
       workspaceId: options.workspaceId ?? SHARED_WORKSPACE_ID,
+      label: options.label ?? null,
       threadAccess: options.threadAccess ?? 'read',
       workspaceAccess: options.workspaceAccess ?? 'read',
       expiresAt: options.expiresAt ?? null,
@@ -97,6 +101,7 @@ async function setupSharedRelaySession(options: {
     friendToken,
     deviceId,
     deviceToken,
+    dataDir: config.dataDir,
     shareId: shareResponse.json().id as string,
   };
 }
@@ -201,6 +206,43 @@ async function answerNextRelayRequest(
     },
   }));
   return requestMessage;
+}
+
+async function answerRelayRequestsByPath(
+  supervisorSocket: WebSocket,
+  responsesByPath: Map<string, unknown>,
+) {
+  const seen: any[] = [];
+  const pendingPaths = new Set(responsesByPath.keys());
+  const deadline = Date.now() + 1000;
+  while (pendingPaths.size > 0 && Date.now() < deadline) {
+    const message = await waitForSocketMessageMatching(
+      supervisorSocket,
+      (candidate) => candidate.type === 'relay.request',
+    );
+    const path = message.payload?.path;
+    if (!pendingPaths.has(path)) {
+      continue;
+    }
+    pendingPaths.delete(path);
+    seen.push(message);
+    supervisorSocket.send(JSON.stringify({
+      type: 'relay.response',
+      timestamp: '2026-07-01T00:00:04.000Z',
+      requestId: message.requestId,
+      payload: {
+        statusCode: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(responsesByPath.get(path)),
+      },
+    }));
+  }
+  if (pendingPaths.size > 0) {
+    throw new Error(`Timed out waiting for relay paths: ${[...pendingPaths].join(', ')}`);
+  }
+  return seen;
 }
 
 describe('relay server', () => {
@@ -1349,6 +1391,134 @@ describe('relay server', () => {
     }
   });
 
+  it('persists resolved shared thread metadata so labels do not replace titles between portal refreshes', async () => {
+    const { app, ownerToken, deviceToken } = await setupSharedRelaySession({
+      label: 'feiji',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+
+    try {
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.connected',
+      );
+      await waitForSocketOpen(supervisorSocket);
+      await connectedMessagePromise;
+      const seenRequestsPromise = answerRelayRequestsByPath(
+        supervisorSocket,
+        new Map([
+          [
+            `/api/threads/${SHARED_THREAD_ID}?limit=1`,
+            {
+              thread: {
+                id: SHARED_THREAD_ID,
+                workspaceId: SHARED_WORKSPACE_ID,
+                title: 'solido',
+              },
+            },
+          ],
+          [
+            `/api/workspaces/${SHARED_WORKSPACE_ID}`,
+            {
+              id: SHARED_WORKSPACE_ID,
+              label: 'el-agente-cloud-infrastructure',
+            },
+          ],
+        ]),
+      );
+      const firstPortalResponsePromise = app.inject({
+        method: 'GET',
+        url: '/relay/portal',
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      const seenRequests = await seenRequestsPromise;
+      expect(seenRequests).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              method: 'GET',
+              path: `/api/threads/${SHARED_THREAD_ID}?limit=1`,
+            }),
+          }),
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              method: 'GET',
+              path: `/api/workspaces/${SHARED_WORKSPACE_ID}`,
+            }),
+          }),
+        ]),
+      );
+
+      const firstPortalResponse = await firstPortalResponsePromise;
+      expect(firstPortalResponse.statusCode).toBe(200);
+      expect(firstPortalResponse.json().sharedByMe[0]).toMatchObject({
+        threadTitle: 'solido',
+        workspaceLabel: 'el-agente-cloud-infrastructure',
+        label: 'feiji',
+      });
+
+      supervisorSocket.close();
+      await waitForSocketClose(supervisorSocket);
+
+      const secondPortalResponse = await app.inject({
+        method: 'GET',
+        url: '/relay/portal',
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      expect(secondPortalResponse.statusCode).toBe(200);
+      expect(secondPortalResponse.json().sharedByMe[0]).toMatchObject({
+        threadTitle: 'solido',
+        workspaceLabel: 'el-agente-cloud-infrastructure',
+        label: 'feiji',
+      });
+    } finally {
+      if (supervisorSocket.readyState === WebSocket.OPEN) {
+        supervisorSocket.close();
+      }
+      await app.close();
+    }
+  });
+
+  it('does not return stale label-contaminated shared thread titles', async () => {
+    const { app, ownerToken, dataDir, shareId } = await setupSharedRelaySession({
+      label: 'feiji',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+    });
+    const sqlite = new Database(path.join(dataDir, 'relay-store.sqlite'));
+    sqlite
+      .prepare('UPDATE relay_shares SET thread_title = ? WHERE id = ?')
+      .run('feiji', shareId);
+    sqlite.close();
+
+    try {
+      const portalResponse = await app.inject({
+        method: 'GET',
+        url: '/relay/portal',
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      expect(portalResponse.statusCode).toBe(200);
+      expect(portalResponse.json().sharedByMe[0]).toMatchObject({
+        threadTitle: null,
+        label: 'feiji',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('allows documented read-only workspace routes for shared workspace readers', async () => {
     const { app, friendToken, deviceId } = await setupSharedRelaySession({
       threadAccess: 'read',
@@ -1831,8 +2001,20 @@ describe('relay server', () => {
     );
 
     try {
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.connected',
+      );
       await waitForSocketOpen(supervisorSocket);
+      await connectedMessagePromise;
 
+      const threadRelayRequestPromise = answerNextRelayRequest(
+          supervisorSocket,
+          (message) =>
+            message.payload.method === 'GET' &&
+            message.payload.path === `/api/threads/${SHARED_THREAD_ID}`,
+          { threadId: SHARED_THREAD_ID },
+      );
       const threadResponsePromise = app.inject({
         method: 'GET',
         url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}`,
@@ -1840,15 +2022,7 @@ describe('relay server', () => {
           authorization: `Bearer ${friendToken}`,
         },
       });
-      await expect(
-        answerNextRelayRequest(
-          supervisorSocket,
-          (message) =>
-            message.payload.method === 'GET' &&
-            message.payload.path === `/api/threads/${SHARED_THREAD_ID}`,
-          { threadId: SHARED_THREAD_ID },
-        ),
-      ).resolves.toMatchObject({
+      await expect(threadRelayRequestPromise).resolves.toMatchObject({
         payload: {
           method: 'GET',
           path: `/api/threads/${SHARED_THREAD_ID}`,
@@ -1858,6 +2032,13 @@ describe('relay server', () => {
       expect(threadResponse.statusCode).toBe(200);
       expect(threadResponse.json()).toEqual({ threadId: SHARED_THREAD_ID });
 
+      const workspaceRelayRequestPromise = answerNextRelayRequest(
+          supervisorSocket,
+          (message) =>
+            message.payload.method === 'GET' &&
+            message.payload.path === `/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,
+          { workspaceId: SHARED_WORKSPACE_ID },
+      );
       const workspaceResponsePromise = app.inject({
         method: 'GET',
         url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,
@@ -1865,15 +2046,7 @@ describe('relay server', () => {
           authorization: `Bearer ${friendToken}`,
         },
       });
-      await expect(
-        answerNextRelayRequest(
-          supervisorSocket,
-          (message) =>
-            message.payload.method === 'GET' &&
-            message.payload.path === `/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,
-          { workspaceId: SHARED_WORKSPACE_ID },
-        ),
-      ).resolves.toMatchObject({
+      await expect(workspaceRelayRequestPromise).resolves.toMatchObject({
         payload: {
           method: 'GET',
           path: `/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,

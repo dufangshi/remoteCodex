@@ -141,14 +141,14 @@ export function ThreadsPage() {
   function supervisorDotClassName() {
     switch (status?.state) {
       case 'ready':
-        return 'bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.14)]';
+        return 'bg-teal-300 shadow-[0_0_0_3px_rgba(94,234,212,0.14)]';
       case 'starting':
-        return 'bg-amber-300 shadow-[0_0_0_3px_rgba(252,211,77,0.12)]';
+        return 'bg-[var(--status-warning-fg)] shadow-[0_0_0_3px_var(--status-warning-bg)]';
       case 'degraded':
       case 'failed':
         return 'bg-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.14)]';
       default:
-        return 'bg-stone-500 shadow-[0_0_0_3px_rgba(120,113,108,0.14)]';
+        return 'bg-slate-500 shadow-[0_0_0_3px_rgba(100,116,139,0.14)]';
     }
   }
 
@@ -224,7 +224,7 @@ export function ThreadsPage() {
       onDeleteThread={setDeletingThread}
     >
       <>
-        <div className="host-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border shadow-2xl shadow-black/10">
+        <div className="host-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border shadow-[var(--theme-shadow)]">
           <div className="border-b border-[var(--theme-border)] px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex items-center justify-between gap-3">
               <h2
@@ -235,7 +235,7 @@ export function ThreadsPage() {
               </h2>
               <Link
                 to={newThreadHref}
-                className="ui-action-primary inline-flex h-9 shrink-0 items-center rounded-full px-3.5 text-xs font-medium uppercase tracking-[0.18em] transition"
+                className="ui-action-primary inline-flex h-9 shrink-0 items-center rounded-lg px-3.5 text-xs font-medium uppercase tracking-[0.18em] transition"
               >
                 New Thread
               </Link>
@@ -243,7 +243,7 @@ export function ThreadsPage() {
           </div>
 
           <div className="px-4 py-3 sm:px-6 sm:py-4">
-            <article className="host-surface-strong inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-[1.25rem] border px-3.5 py-2.5">
+            <article className="host-surface-strong inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-lg border px-3.5 py-2.5">
               <span
                 aria-hidden="true"
                 className={`h-2.5 w-2.5 shrink-0 rounded-full ${supervisorDotClassName()}`}

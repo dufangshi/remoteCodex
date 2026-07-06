@@ -317,18 +317,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (state.status === 'unavailable') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-[var(--app-fg)]">
-        <section className="w-full max-w-md rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_14%,transparent)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-muted)]">
+        <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
             Supervisor Access
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
             Unable to reach supervisor
           </h1>
-          <p className="mt-3 text-sm leading-6 text-[var(--theme-muted)]">
+          <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
             {state.error}
           </p>
           <button
-            className="mt-5 h-11 rounded-xl bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)]"
+            className="mt-5 h-11 rounded-lg bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)]"
             onClick={handleRetry}
             type="button"
           >
@@ -343,7 +343,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <>
         {state.error && (
-          <div className="fixed left-1/2 top-4 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 py-2 text-sm text-[var(--status-warning-fg)]">
+          <div className="fixed left-1/2 top-4 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 py-2 text-sm text-[var(--status-warning-fg)]">
             {state.error}
           </div>
         )}

@@ -75,7 +75,7 @@ export function RelayUserMenu() {
       </button>
       {open ? (
         <div
-          className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-xl"
+          className="absolute right-0 mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)]"
           role="menu"
         >
           <div className="border-b border-[var(--theme-border)] px-3 py-2">

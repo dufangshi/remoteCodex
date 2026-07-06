@@ -323,7 +323,7 @@ export function buildRelayServer(
     if (!user) {
       return;
     }
-    return enrichPortalSummary(store.portalSummary(user.id, connectionStatus(state)), state);
+    return enrichPortalSummary(store.portalSummary(user.id, connectionStatus(state)), state, store);
   });
 
   app.get('/relay/access', async (request, reply) => {
@@ -1240,6 +1240,7 @@ async function fetchRelayThreads(
 async function enrichPortalSummary(
   portal: RelayPortalSummaryDto,
   state: RelayState,
+  store: RelayStore,
 ): Promise<RelayPortalSummaryDto> {
   const threadCache = new Map<string, Promise<string | null>>();
   const workspaceCache = new Map<string, Promise<string | null>>();
@@ -1247,7 +1248,10 @@ async function enrichPortalSummary(
   const enrichShare = async (share: RelaySessionShareDto): Promise<RelaySessionShareDto> => {
     const supervisor = state.supervisors.get(share.deviceId);
     if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
-      return share;
+      return {
+        ...share,
+        threadTitle: stableShareThreadTitle(share),
+      };
     }
 
     const threadCacheKey = `${share.deviceId}:${share.threadId}`;
@@ -1277,10 +1281,16 @@ async function enrichPortalSummary(
       threadTitlePromise,
       workspaceLabelPromise,
     ]);
+    if (threadTitle || workspaceLabel) {
+      store.updateShareMetadata(share.id, {
+        threadTitle,
+        workspaceLabel,
+      });
+    }
     return {
       ...share,
-      threadTitle,
-      workspaceLabel,
+      threadTitle: threadTitle ?? stableShareThreadTitle(share),
+      workspaceLabel: workspaceLabel ?? share.workspaceLabel,
     };
   };
 
@@ -1317,6 +1327,15 @@ async function fetchRelayWorkspaceLabel(
 ) {
   const payload = await forwardSupervisorJson(supervisor, deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}`);
   return stringField(payload, 'label');
+}
+
+function stableShareThreadTitle(share: RelaySessionShareDto) {
+  const threadTitle = share.threadTitle?.trim();
+  if (!threadTitle) {
+    return null;
+  }
+  const label = share.label?.trim();
+  return label && threadTitle === label ? null : threadTitle;
 }
 
 async function forwardSupervisorJson(

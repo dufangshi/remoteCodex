@@ -1132,7 +1132,7 @@ export function AppShellSettingsDialog({
                   type="button"
                   onClick={() => void handleBuildAndRestartService()}
                   disabled={restartState.busy || backendState.saving}
-                  className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  className="rounded-full border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 py-1.5 text-xs font-medium text-[var(--status-warning-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
                 >
                   {restartState.busy ? 'Working...' : 'Build and restart'}
                 </button>
@@ -1228,7 +1228,7 @@ export function AppShellSettingsDialog({
               <p
                 className={`mt-2 whitespace-pre-line text-xs ${
                   backendState.message.includes('requires attention')
-                    ? 'text-amber-300'
+                    ? 'text-[var(--status-warning-fg)]'
                     : 'text-emerald-300'
                 }`}
               >
@@ -1477,9 +1477,9 @@ export function AppShellSettingsDialog({
               type="button"
               aria-label="Close plugins panel"
               onClick={() => setPluginsPanelOpen(false)}
-              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
+              className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
             />
-            <section className="relative z-10 flex max-h-[min(82vh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/25">
+            <section className="relative z-10 flex max-h-[min(82vh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">
@@ -1494,7 +1494,7 @@ export function AppShellSettingsDialog({
                     type="button"
                     onClick={() => void plugins.refresh()}
                     disabled={plugins.loading}
-                    className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                    className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
                   >
                     {plugins.loading ? 'Loading...' : 'Refresh'}
                   </button>
@@ -1530,14 +1530,14 @@ export function AppShellSettingsDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/20"
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]"
       >
         {settingsContentNode}
       </section>
 
       {selectedFileName && selectedFile ? (
         <div className="pointer-events-none fixed inset-0 z-[71] flex items-center justify-center p-4">
-          <div className="pointer-events-auto relative z-10 flex max-h-[min(88vh,56rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[1.6rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/25">
+          <div className="pointer-events-auto relative z-10 flex max-h-[min(88vh,56rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
             <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-[var(--theme-fg)]">

@@ -251,6 +251,7 @@ export class ThreadDetailAssembler {
       persistedItemsByTurnIdForPatch,
       input.turnMetadataById,
       newestRemoteTurnStartedAt(remoteSession.turns),
+      new Set(remoteSession.turns.map((turn) => turn.providerTurnId)),
     );
     if (threadPatch.status !== 'running' && latestPersistedFailure) {
       threadPatch.status = 'failed';
@@ -584,9 +585,13 @@ function latestPersistedFailureAfter(
   persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
   metadataById: Map<string, ThreadTurnMetadataRecord>,
   timestamp: string | null,
+  remoteTurnIds: Set<string>,
 ) {
   let latest: { error: string; startedAt: string | null } | null = null;
   for (const [turnId, items] of persistedItemsByTurnId.entries()) {
+    if (persistedItemsBelongToRemoteTurn(turnId, items, remoteTurnIds)) {
+      continue;
+    }
     const error = persistedTurnError(items);
     if (!error) {
       continue;
@@ -605,6 +610,17 @@ function latestPersistedFailureAfter(
     }
   }
   return latest;
+}
+
+function persistedItemsBelongToRemoteTurn(
+  turnId: string,
+  items: ThreadHistoryItemDto[],
+  remoteTurnIds: Set<string>,
+) {
+  return (
+    remoteTurnIds.has(turnId) ||
+    items.some((item) => item.sourceTurnId && remoteTurnIds.has(item.sourceTurnId))
+  );
 }
 
 function sortTurnsByStartedAt(turns: ThreadTurnDto[]) {

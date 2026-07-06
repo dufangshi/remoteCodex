@@ -832,7 +832,9 @@ export class RelayStore {
         device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
         device_name TEXT,
         thread_id TEXT NOT NULL,
+        thread_title TEXT,
         workspace_id TEXT,
+        workspace_label TEXT,
         label TEXT,
         thread_access TEXT NOT NULL DEFAULT 'control',
         workspace_access TEXT NOT NULL DEFAULT 'none',
@@ -882,7 +884,9 @@ export class RelayStore {
     `);
     this.ensureColumn('relay_users', 'last_seen_at', 'TEXT');
     this.ensureColumn('relay_devices', 'token', 'TEXT');
+    this.ensureColumn('relay_shares', 'thread_title', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
+    this.ensureColumn('relay_shares', 'workspace_label', 'TEXT');
     this.ensureColumn('relay_shares', 'thread_access', "TEXT NOT NULL DEFAULT 'control'");
     this.ensureColumn('relay_shares', 'workspace_access', "TEXT NOT NULL DEFAULT 'none'");
     this.ensureColumn('relay_shares', 'expires_at', 'TEXT');
@@ -1111,9 +1115,9 @@ export class RelayStore {
         `
           INSERT INTO relay_shares (
             id, owner_user_id, owner_username, target_user_id, target_username,
-            device_id, device_name, thread_id, workspace_id, label,
+            device_id, device_name, thread_id, thread_title, workspace_id, workspace_label, label,
             thread_access, workspace_access, created_at, revoked_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -1125,7 +1129,9 @@ export class RelayStore {
         share.deviceId,
         share.deviceName,
         share.threadId,
+        share.threadTitle,
         share.workspaceId,
+        share.workspaceLabel,
         share.label,
         share.threadAccess,
         share.workspaceAccess,
@@ -1133,6 +1139,37 @@ export class RelayStore {
         share.revokedAt,
         share.expiresAt,
       );
+  }
+
+  updateShareMetadata(
+    shareId: string,
+    input: {
+      threadTitle?: string | null;
+      workspaceLabel?: string | null;
+    },
+  ) {
+    const threadTitle = normalizeOptionalMetadata(input.threadTitle);
+    const workspaceLabel = normalizeOptionalMetadata(input.workspaceLabel);
+    if (threadTitle === undefined && workspaceLabel === undefined) {
+      return this.rowToShare(
+        this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+      );
+    }
+
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_shares
+          SET thread_title = COALESCE(?, thread_title),
+              workspace_label = COALESCE(?, workspace_label)
+          WHERE id = ?
+        `,
+      )
+      .run(threadTitle ?? null, workspaceLabel ?? null, shareId);
+
+    return this.rowToShare(
+      this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+    );
   }
 
   private getShareAccessEvents(shareId: string): RelaySessionShareAccessDto[] {
@@ -1373,9 +1410,9 @@ export class RelayStore {
       deviceId: row.device_id,
       deviceName: row.device_name ?? 'Remote Codex device',
       threadId: row.thread_id,
-      threadTitle: null,
+      threadTitle: row.thread_title ?? null,
       workspaceId: row.workspace_id ?? null,
-      workspaceLabel: null,
+      workspaceLabel: row.workspace_label ?? null,
       label: row.label,
       threadAccess: normalizeThreadAccess(row.thread_access),
       workspaceAccess: normalizeWorkspaceAccess(row.workspace_access),
@@ -1435,7 +1472,9 @@ interface ShareRow {
   device_id: string;
   device_name: string | null;
   thread_id: string;
+  thread_title: string | null;
   workspace_id: string | null;
+  workspace_label: string | null;
   label: string | null;
   thread_access: string | null;
   workspace_access: string | null;
@@ -1502,6 +1541,13 @@ function normalizeExpiresAt(value: string | null | undefined) {
   }
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
+}
+
+function normalizeOptionalMetadata(value: string | null | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value?.trim() || undefined;
 }
 
 function normalizeConversationWindowDays(value: number | undefined) {

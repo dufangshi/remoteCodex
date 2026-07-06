@@ -38,15 +38,15 @@ export function LoginPage({
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 py-8 text-[var(--app-fg)]">
-      <section className="w-full max-w-sm rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_14%,transparent)] sm:p-6">
+      <section className="w-full max-w-sm rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
         <div className="mb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-muted)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
             {eyebrow}
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
             Sign in
           </h1>
-          <p className="mt-2 text-sm leading-6 text-[var(--theme-muted)]">
+          <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
             {description}
           </p>
         </div>
@@ -59,7 +59,7 @@ export function LoginPage({
             <input
               autoComplete="username"
               autoFocus
-              className="mt-2 h-11 w-full rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
+              className="mt-2 h-11 w-full rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
               disabled={submitting}
               name="username"
               onChange={(event) => setUsername(event.target.value)}
@@ -73,7 +73,7 @@ export function LoginPage({
             </span>
             <input
               autoComplete="current-password"
-              className="mt-2 h-11 w-full rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
+              className="mt-2 h-11 w-full rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
               disabled={submitting}
               name="password"
               onChange={(event) => setPassword(event.target.value)}
@@ -83,13 +83,13 @@ export function LoginPage({
           </label>
 
           {error && (
-            <p className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+            <p className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
               {error}
             </p>
           )}
 
           <button
-            className="h-11 w-full rounded-xl bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-11 w-full rounded-lg bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={submitting || !username.trim() || !password}
             type="submit"
           >

@@ -67,14 +67,14 @@ export function ThreadCreateForm({
   const selectedBackend = backends.find((backend) => backend.provider === provider);
   const compact = variant === 'dialog';
   const controlClassName = compact
-    ? 'host-form-control mt-1.5 h-10 w-full rounded-xl border px-3 text-sm outline-none transition'
-    : 'host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition';
+    ? 'host-form-control mt-1.5 h-10 w-full rounded-lg border px-3 text-sm outline-none transition'
+    : 'host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition';
   const secondaryButtonClassName = compact
-    ? 'host-secondary-button rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
-    : 'host-secondary-button rounded-full border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60';
+    ? 'host-secondary-button rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
+    : 'host-secondary-button rounded-lg border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60';
   const primaryButtonClassName = compact
-    ? 'ui-action-primary rounded-full px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed'
-    : 'ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed';
+    ? 'ui-action-primary rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed'
+    : 'ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed';
 
   useEffect(() => {
     setTitle(initialTitle ?? '');
@@ -228,7 +228,7 @@ export function ThreadCreateForm({
 
   if (loading) {
     return (
-      <div className="host-empty-state rounded-3xl border px-6 py-12 text-center">
+      <div className="host-empty-state rounded-lg border px-6 py-12 text-center">
         Loading creation form...
       </div>
     );
@@ -287,7 +287,7 @@ export function ThreadCreateForm({
             return (
               <div
                 key={backend.provider}
-                className={`rounded-2xl border px-4 py-3 transition ${
+                className={`rounded-lg border px-4 py-3 transition ${
                   isSelected ? 'host-surface-strong' : 'host-surface'
                 } ${canStart ? '' : 'opacity-75'}`}
               >
@@ -325,7 +325,7 @@ export function ThreadCreateForm({
                       type="button"
                       onClick={() => handleRuntimeAction(backend)}
                       disabled={busy || rowBusy || runtimeBusyProvider !== null}
-                      className="host-secondary-button rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+                      className="host-secondary-button rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
                       aria-label={`${actionLabel} ${backend.displayName}`}
                     >
                       {rowBusy ? `${actionLabel}ing...` : actionLabel}
@@ -417,7 +417,7 @@ export function ThreadCreateForm({
         </select>
       </div>
       {error && (
-        <div className="host-error rounded-2xl border px-4 py-3 text-sm">
+        <div className="host-error rounded-lg border px-4 py-3 text-sm">
           {error}
         </div>
       )}

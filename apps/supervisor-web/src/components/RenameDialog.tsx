@@ -62,7 +62,7 @@ export function RenameDialog({
         aria-modal="true"
         aria-label={title}
         onSubmit={handleSubmit}
-        className="host-dialog relative z-[1] w-full max-w-md rounded-[1.6rem] border p-5 shadow-2xl shadow-black/20 sm:p-6"
+        className="host-dialog relative z-[1] w-full max-w-md rounded-lg border p-5 shadow-[var(--theme-shadow)] sm:p-6"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -94,7 +94,7 @@ export function RenameDialog({
             autoFocus
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
+            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
           />
         </div>
 
@@ -103,14 +103,14 @@ export function RenameDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="host-secondary-button rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+            className="host-secondary-button rounded-lg border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy || !value.trim()}
-            className="ui-action-success rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
+            className="ui-action-success rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
           >
             Save
           </button>
