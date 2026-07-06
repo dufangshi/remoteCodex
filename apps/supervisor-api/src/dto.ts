@@ -57,17 +57,25 @@ export function buildThreadPatch(
   model: string | null | undefined,
   reasoningEffort: string | null | undefined,
 ) {
-  const failedTurn = 'turns' in remoteSession
-    ? remoteSession.turns.find((turn) => turn.status === 'failed')
+  const latestTurn = 'turns' in remoteSession
+    ? remoteSession.turns.at(-1) ?? null
     : null;
+  const latestStatus =
+    latestTurn?.status === 'failed'
+      ? 'failed'
+      : latestTurn?.status === 'interrupted'
+        ? 'interrupted'
+        : remoteSession.status;
   return {
     provider: remoteSession.provider,
     providerSessionId: remoteSession.providerSessionId,
-    status: remoteSession.status,
+    status: latestStatus,
     summaryText: remoteSession.preview || null,
     model: model ?? null,
     reasoningEffort: normalizeReasoningEffort(reasoningEffort),
-    lastError: failedTurn?.error?.message ?? null,
+    lastError: latestTurn?.status === 'failed'
+      ? latestTurn.error?.message ?? 'Turn failed.'
+      : null,
     updatedAt: remoteSession.updatedAt ?? new Date().toISOString(),
   };
 }

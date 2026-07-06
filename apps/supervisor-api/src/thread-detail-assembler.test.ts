@@ -4,6 +4,7 @@ import type {
   AgentSessionDetail,
   AgentTurn,
 } from '../../../packages/agent-runtime/src/index';
+import type { ThreadHistoryItemDto } from '../../../packages/shared/src/index';
 import { ThreadLiveStateStore } from './thread-live-state-store';
 import {
   ThreadDetailAssembler,
@@ -323,5 +324,76 @@ describe('ThreadDetailAssembler', () => {
       kind: 'userMessage',
       text: '图中内容是什么 [PHOTO ./.temp/threads/thread-1/image.png]',
     });
+  });
+
+  it('shows a persisted failed turn when the provider never created one', async () => {
+    const failedAt = '2026-06-07T00:00:30.000Z';
+    const persistedFailureItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'local-failed-turn:user',
+        kind: 'userMessage',
+        text: 'hello',
+        createdAt: failedAt,
+        transcriptOrder: 0,
+      },
+      {
+        id: 'local-failed-turn:error',
+        kind: 'agentMessage',
+        text: 'Missing API key',
+        createdAt: failedAt,
+        transcriptOrder: 1,
+        status: 'failed',
+        sourceTurnId: 'local-failed-turn',
+      },
+    ];
+    const { assembler, callbacks } = createAssembler(
+      session([turn('turn-1')]),
+    );
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['local-failed-turn', persistedFailureItems]]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record,
+      turnMetadataById: new Map([
+        [
+          'local-failed-turn',
+          {
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            reasoningEffortAvailable: true,
+            pricingModelKey: null,
+            pricingTierKey: null,
+            tokenUsageJson: null,
+            displayPrompt: 'hello',
+            createdAt: failedAt,
+          },
+        ],
+      ]),
+      options: { limit: 3 },
+    });
+
+    expect(entry.turns.map((item) => item.id)).toEqual([
+      'turn-1',
+      'local-failed-turn',
+    ]);
+    expect(entry.turns[1]).toMatchObject({
+      id: 'local-failed-turn',
+      status: 'failed',
+      error: 'Missing API key',
+    });
+    expect(entry.turns[1]?.items).toMatchObject([
+      { kind: 'userMessage', text: 'hello' },
+      { kind: 'agentMessage', text: 'Missing API key', status: 'failed' },
+    ]);
+    expect(callbacks.updateThreadRecord).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        status: 'failed',
+        lastError: 'Missing API key',
+        providerTurnId: null,
+      }),
+    );
   });
 });

@@ -227,6 +227,9 @@ export class ThreadDetailAssembler {
       input.record.model,
       input.record.reasoningEffort,
     );
+    const persistedItemsByTurnIdForPatch = this.input.callbacks.listPersistedHistoryItemsByTurnId(
+      input.localThreadId,
+    );
     const activeDisplayTurnId =
       this.input.liveState.displayTurnIdForRuntimeTurn(
         input.localThreadId,
@@ -243,6 +246,15 @@ export class ThreadDetailAssembler {
       activeLiveItems.items.length > 0
     ) {
       threadPatch.status = 'running';
+    }
+    const latestPersistedFailure = latestPersistedFailureAfter(
+      persistedItemsByTurnIdForPatch,
+      input.turnMetadataById,
+      newestRemoteTurnStartedAt(remoteSession.turns),
+    );
+    if (threadPatch.status !== 'running' && latestPersistedFailure) {
+      threadPatch.status = 'failed';
+      threadPatch.lastError = latestPersistedFailure.error;
     }
     const nextThreadPatch = {
       ...threadPatch,
@@ -275,8 +287,17 @@ export class ThreadDetailAssembler {
       this.input.liveState,
       input.turnMetadataById,
     );
-    const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
+    const visibleTurnsWithPersistedFailures = appendPersistedFailureTurnsIfMissing(
       visibleTurnsWithActiveLiveTurn,
+      persistedItemsByTurnId,
+      input.turnMetadataById,
+      {
+        includeAllMissing: shouldCacheFullDetail,
+        includeLatestMissing: options.beforeTurnId === undefined,
+      },
+    );
+    const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
+      visibleTurnsWithPersistedFailures,
       input.localThreadId,
       this.input.liveState,
     );
@@ -337,13 +358,16 @@ export class ThreadDetailAssembler {
     );
     const localTurns =
       localSession?.turns ??
-      [...persistedItemsByTurnId.keys()].map((turnId) => ({
-        id: turnId,
-        startedAt: null,
-        status: 'completed' as const,
-        error: null,
-        items: [],
-      }));
+      [...persistedItemsByTurnId.entries()].map(([turnId, items]) => {
+        const error = persistedTurnError(items);
+        return {
+          id: turnId,
+          startedAt: input.turnMetadataById.get(turnId)?.createdAt ?? null,
+          status: error ? ('failed' as const) : ('completed' as const),
+          error,
+          items: [],
+        };
+      });
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
         localTurns,
@@ -473,6 +497,134 @@ function appendActiveLiveTurnIfMissing(
       items: sortHistoryItemsBySequence(liveItems.items),
     },
   ];
+}
+
+function appendPersistedFailureTurnsIfMissing(
+  turns: ThreadTurnDto[],
+  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+  options: { includeAllMissing: boolean; includeLatestMissing: boolean },
+) {
+  if (persistedItemsByTurnId.size === 0) {
+    return turns;
+  }
+
+  const existingTurnIds = new Set(turns.map((turn) => turn.id));
+  const newestVisibleStartedAt = newestStartedAt(turns);
+  const missingFailureTurns: ThreadTurnDto[] = [];
+  for (const [turnId, items] of persistedItemsByTurnId.entries()) {
+    if (existingTurnIds.has(turnId)) {
+      continue;
+    }
+
+    const error = persistedTurnError(items);
+    if (!error) {
+      continue;
+    }
+
+    const startedAt =
+      metadataById.get(turnId)?.createdAt ?? earliestItemCreatedAt(items);
+    const shouldInclude =
+      options.includeAllMissing ||
+      (options.includeLatestMissing &&
+        (!newestVisibleStartedAt ||
+          !startedAt ||
+          startedAt >= newestVisibleStartedAt));
+    if (!shouldInclude) {
+      continue;
+    }
+
+    missingFailureTurns.push({
+      id: turnId,
+      startedAt,
+      status: 'failed',
+      error,
+      items: [],
+    });
+  }
+
+  if (missingFailureTurns.length === 0) {
+    return turns;
+  }
+
+  return sortTurnsByStartedAt([...turns, ...missingFailureTurns]);
+}
+
+function persistedTurnError(items: ThreadHistoryItemDto[]) {
+  const failedItem = [...items].reverse().find((item) =>
+    item.status === 'failed' || item.status === 'error',
+  );
+  return failedItem?.text?.trim() || null;
+}
+
+function earliestItemCreatedAt(items: ThreadHistoryItemDto[]) {
+  return items
+    .map((item) => item.createdAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()[0] ?? null;
+}
+
+function newestStartedAt(turns: ThreadTurnDto[]) {
+  return turns
+    .map((turn) => turn.startedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+}
+
+function newestRemoteTurnStartedAt(turns: AgentTurn[]) {
+  return turns
+    .map((turn) => turn.startedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+}
+
+function latestPersistedFailureAfter(
+  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+  timestamp: string | null,
+) {
+  let latest: { error: string; startedAt: string | null } | null = null;
+  for (const [turnId, items] of persistedItemsByTurnId.entries()) {
+    const error = persistedTurnError(items);
+    if (!error) {
+      continue;
+    }
+    const startedAt =
+      metadataById.get(turnId)?.createdAt ?? earliestItemCreatedAt(items);
+    if (timestamp && startedAt && startedAt < timestamp) {
+      continue;
+    }
+    if (
+      !latest ||
+      (!latest.startedAt && startedAt) ||
+      (latest.startedAt && startedAt && startedAt > latest.startedAt)
+    ) {
+      latest = { error, startedAt };
+    }
+  }
+  return latest;
+}
+
+function sortTurnsByStartedAt(turns: ThreadTurnDto[]) {
+  return turns
+    .map((turn, index) => ({ turn, index }))
+    .sort((left, right) => {
+      const leftStartedAt = left.turn.startedAt;
+      const rightStartedAt = right.turn.startedAt;
+      if (!leftStartedAt && !rightStartedAt) {
+        return left.index - right.index;
+      }
+      if (!leftStartedAt) {
+        return 1;
+      }
+      if (!rightStartedAt) {
+        return -1;
+      }
+      return leftStartedAt.localeCompare(rightStartedAt) || left.index - right.index;
+    })
+    .map(({ turn }) => turn);
 }
 
 export function buildTurnDto(

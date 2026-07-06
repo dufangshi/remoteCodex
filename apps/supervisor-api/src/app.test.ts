@@ -19,6 +19,7 @@ import {
 import type { RelayTunnelClient } from './relay-tunnel-client';
 import {
   AgentRuntime,
+  AgentRuntimeError,
   AgentRuntimeEvent,
   AgentHistoryItem,
   AgentProviderRequestMapping,
@@ -106,6 +107,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   sessions = new Map<string, any>();
   activeTurnId: string | null = null;
   autoStreamDeltas = true;
+  startTurnFailure: Error | null = null;
   startTurnInputs: Array<Parameters<AgentRuntime['startTurn']>[0]> = [];
 
   getStatus(): AgentRuntime['getStatus'] extends () => infer T ? T : never {
@@ -202,6 +204,9 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   }
   async startTurn(input: Parameters<AgentRuntime['startTurn']>[0]) {
     this.startTurnInputs.push(input);
+    if (this.startTurnFailure) {
+      throw this.startTurnFailure;
+    }
     const session = await this.readSession(input.providerSessionId);
     const providerTurnId = `claude-turn-${session.turns.length + 1}`;
     const userItem: AgentHistoryItem = {
@@ -2298,6 +2303,77 @@ describe('supervisor api', () => {
         expect.objectContaining({ kind: 'userMessage', text: 'Say hello.' }),
         expect.objectContaining({ kind: 'userMessage', text: 'Second prompt while running.' }),
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
+      ]),
+    });
+  });
+
+  it('persists and returns a specific provider start failure when a turn never starts', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    fakeClaudeRuntime.startTurnFailure = new AgentRuntimeError(
+      'ANTHROPIC_API_KEY is missing.',
+      'claude',
+      'provider_unavailable',
+    );
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        title: 'Claude Thread',
+      },
+    });
+    const threadId = createResponse.json().id;
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      payload: {
+        prompt: 'Say hello.',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(503);
+    expect(promptResponse.json()).toMatchObject({
+      code: 'service_unavailable',
+      message:
+        'Claude failed to start this turn (provider_unavailable): ANTHROPIC_API_KEY is missing.',
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().thread).toMatchObject({
+      status: 'failed',
+      lastError:
+        'Claude failed to start this turn (provider_unavailable): ANTHROPIC_API_KEY is missing.',
+    });
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      status: 'failed',
+      error:
+        'Claude failed to start this turn (provider_unavailable): ANTHROPIC_API_KEY is missing.',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'agentMessage',
+          text:
+            'Claude failed to start this turn (provider_unavailable): ANTHROPIC_API_KEY is missing.',
+          status: 'failed',
+        }),
       ]),
     });
   });
