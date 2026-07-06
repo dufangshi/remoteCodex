@@ -449,6 +449,7 @@ struct HomeScreen: View {
             workspaceSection
         }
         .navigationTitle("Remote Codex")
+        .navigationBarTitleDisplayMode(.inline)
         .remoteCodexScreenSurface()
         .refreshable { await model.refresh() }
         .edgeSwipeBack(action: onBack)

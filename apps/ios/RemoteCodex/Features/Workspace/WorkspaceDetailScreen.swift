@@ -450,6 +450,7 @@ struct WorkspaceDetailScreen: View {
             threadsSection
         }
         .navigationTitle(model.workspace?.label ?? "Workspace")
+        .navigationBarTitleDisplayMode(.inline)
         .remoteCodexScreenSurface()
         .refreshable { await model.refresh() }
         .edgeSwipeBack(action: onBack)

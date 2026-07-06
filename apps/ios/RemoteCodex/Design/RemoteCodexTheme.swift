@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 enum RemoteCodexTheme {
-    static let pageBackground = dynamicColor(light: 0xEEF2F7, dark: 0x101217)
+    static let pageBackground = dynamicColor(light: 0xF1F5F9, dark: 0x101217)
     static let panelBackground = dynamicColor(light: 0xF8FAFC, dark: 0x171A22)
     static let workspaceBackground = dynamicColor(light: 0xF3F6FB, dark: 0x151820)
     static let surface = dynamicColor(light: 0xEDF2F7, dark: 0x1D222C)
@@ -12,7 +12,7 @@ enum RemoteCodexTheme {
     static let foreground = dynamicColor(light: 0x0F172A, dark: 0xF1F5F9)
     static let foregroundSoft = dynamicColor(light: 0x334155, dark: 0xCBD5E1)
     static let foregroundMuted = dynamicColor(light: 0x64748B, dark: 0x94A3B8)
-    static let primary = dynamicColor(light: 0x1E293B, dark: 0xF1F5F9)
+    static let primary = dynamicColor(light: 0x020617, dark: 0xF1F5F9)
     static let primaryForeground = dynamicColor(light: 0xF8FAFC, dark: 0x11141A)
     static let success = dynamicColor(light: 0x166534, dark: 0x86EFAC)
     static let successSoft = dynamicColor(light: 0xDCFCE7, dark: 0x173322)

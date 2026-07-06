@@ -407,6 +407,7 @@ struct ConnectionScreen: View {
             }
         }
         .navigationTitle(navigationTitle)
+        .navigationBarTitleDisplayMode(.inline)
         .remoteCodexScreenSurface()
         .edgeSwipeBack(action: handleBackGesture)
         .task(id: model.route) {
@@ -433,7 +434,16 @@ struct ConnectionScreen: View {
                     }
                 } label: {
                     Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(RemoteCodexTheme.primaryForeground)
+                        .frame(width: 44, height: 44)
+                        .background(RemoteCodexTheme.primary, in: Circle())
+                        .overlay {
+                            Circle().stroke(RemoteCodexTheme.borderStrong.opacity(0.32), lineWidth: 1)
+                        }
+                        .shadow(color: RemoteCodexTheme.pageBackground.opacity(0.24), radius: 8, x: 0, y: 4)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel(model.route == .relayDevices ? "Create relay device" : "Add device")
             }
         }
@@ -609,7 +619,30 @@ struct ConnectionScreen: View {
     private var savedDevicesSection: some View {
         Section("Connections") {
             if model.savedDevices.isEmpty {
-                ContentUnavailableView("No Connections", systemImage: "rectangle.stack.badge.plus")
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Cards are stored on this iOS device and can be connected, edited, or deleted independently.")
+                        .font(.caption)
+                        .remoteCodexStatusText()
+                    Divider()
+                    VStack(spacing: 10) {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                            .font(.system(size: 38, weight: .semibold))
+                            .foregroundStyle(RemoteCodexTheme.foregroundMuted)
+                        Text("No Connections")
+                            .font(.headline)
+                            .foregroundStyle(RemoteCodexTheme.foreground)
+                        Text("No saved connections yet. Tap + to add Local, Server, or Relay.")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .remoteCodexStatusText()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                }
+            } else {
+                Text("Cards are stored on this iOS device and can be connected, edited, or deleted independently.")
+                    .font(.caption)
+                    .remoteCodexStatusText()
             }
             ForEach(model.savedDevices) { device in
                 SavedDeviceRow(
