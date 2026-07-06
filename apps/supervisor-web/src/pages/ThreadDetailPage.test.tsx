@@ -982,6 +982,269 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('/goal is unavailable in this view.')).not.toBeInTheDocument();
   });
 
+  it('renders a user bubble when setting a goal from the composer', async () => {
+    const now = new Date().toISOString();
+    const codexBackendWithGoalToolbox = {
+      ...codexBackendResponse,
+      managementSchema: {
+        hostConfigFiles: [],
+        toolboxItems: [
+          { action: 'goal', command: '/goal', label: 'Goal' },
+        ],
+        hookCommandTemplates: [],
+        providerConfigFormat: 'none',
+        mcpConfigFormat: 'none',
+        configArchives: false,
+        buildRestart: false,
+      },
+    };
+    const detailResponse = {
+      thread: {
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        provider: 'codex',
+        providerSessionId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'idle',
+        summaryText: 'Preview',
+        lastError: null,
+        activeTurnId: null,
+        isLoaded: true,
+        isPinned: false,
+        createdAt: now,
+        updatedAt: now,
+        lastTurnStartedAt: null,
+        lastTurnCompletedAt: null,
+      },
+      workspace: {
+        id: 'workspace-1',
+        hostId: 'host-1',
+        label: 'Demo Workspace',
+        absPath: '/tmp/demo',
+        isFavorite: false,
+        createdAt: now,
+        lastOpenedAt: null,
+      },
+      workspacePathStatus: 'present',
+      pendingRequests: [],
+      turns: [
+        {
+          id: 'turn-1',
+          startedAt: now,
+          status: 'completed',
+          error: null,
+          items: [{ id: 'item-1', kind: 'userMessage', text: 'hello' }],
+        },
+      ],
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendWithGoalToolbox);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/goal')) {
+          if (init?.method === 'PATCH') {
+            return okJsonResponse({
+              goal: {
+                threadId: 'codex-1',
+                localGoalId: 'goal-1',
+                objective: 'Keep polishing goal mode.',
+                status: 'active',
+                tokenBudget: null,
+                tokensUsed: 0,
+                timeUsedSeconds: 0,
+                createdAt: now,
+                updatedAt: now,
+                completedAt: null,
+              },
+            });
+          }
+          return okJsonResponse({ goal: null });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse(detailResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([detailResponse.thread]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('hello');
+    fireEvent.click(screen.getAllByLabelText('Open slash toolbox')[0]!);
+    fireEvent.click(await screen.findByText('/goal'));
+    setPromptValue(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'Keep polishing goal mode.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Set goal/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Keep polishing goal mode.')).toBeInTheDocument();
+    });
+  });
+
+  it('connects an unloaded thread before setting a composer goal', async () => {
+    const now = new Date().toISOString();
+    const requestOrder: string[] = [];
+    const codexBackendWithGoalToolbox = {
+      ...codexBackendResponse,
+      managementSchema: {
+        hostConfigFiles: [],
+        toolboxItems: [
+          { action: 'goal', command: '/goal', label: 'Goal' },
+        ],
+        hookCommandTemplates: [],
+        providerConfigFormat: 'none',
+        mcpConfigFormat: 'none',
+        configArchives: false,
+        buildRestart: false,
+      },
+    };
+    const unloadedDetail = {
+      thread: {
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        provider: 'codex',
+        providerSessionId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'idle',
+        summaryText: 'Preview',
+        lastError: null,
+        activeTurnId: null,
+        isLoaded: false,
+        isPinned: false,
+        createdAt: now,
+        updatedAt: now,
+        lastTurnStartedAt: null,
+        lastTurnCompletedAt: null,
+      },
+      workspace: {
+        id: 'workspace-1',
+        hostId: 'host-1',
+        label: 'Demo Workspace',
+        absPath: '/tmp/demo',
+        isFavorite: false,
+        createdAt: now,
+        lastOpenedAt: null,
+      },
+      workspacePathStatus: 'present',
+      pendingRequests: [],
+      turns: [],
+    };
+    const resumedDetail = {
+      ...unloadedDetail,
+      thread: {
+        ...unloadedDetail.thread,
+        isLoaded: true,
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendWithGoalToolbox);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/resume') && init?.method === 'POST') {
+          requestOrder.push('resume');
+          return okJsonResponse(resumedDetail);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/goal')) {
+          if (init?.method === 'PATCH') {
+            requestOrder.push('goal');
+            return okJsonResponse({
+              goal: {
+                threadId: 'codex-1',
+                localGoalId: 'goal-1',
+                objective: 'Reconnect before goal.',
+                status: 'active',
+                tokenBudget: null,
+                tokensUsed: 0,
+                timeUsedSeconds: 0,
+                createdAt: now,
+                updatedAt: now,
+                completedAt: null,
+              },
+            });
+          }
+          return okJsonResponse({ goal: null });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse(unloadedDetail);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([unloadedDetail.thread]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Demo Thread');
+    fireEvent.click(screen.getAllByLabelText('Open slash toolbox')[0]!);
+    fireEvent.click(await screen.findByText('/goal'));
+    setPromptValue(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'Reconnect before goal.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Set goal/i }));
+
+    await waitFor(() => {
+      expect(requestOrder).toEqual(['resume', 'goal']);
+    });
+    expect(screen.getByText('Reconnect before goal.')).toBeInTheDocument();
+  });
+
   it('does not re-render the timeline when typing in the chat composer', async () => {
     render(
       <MemoryRouter initialEntries={['/threads/thread-1']}>

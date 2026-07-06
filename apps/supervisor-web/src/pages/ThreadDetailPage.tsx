@@ -180,7 +180,7 @@ interface OptimisticTurnState {
   id: string;
   serverTurnId: string | null;
   startedAt: string;
-  status: 'sending' | 'inProgress' | 'failed';
+  status: 'sending' | 'inProgress' | 'completed' | 'failed';
   error: string | null;
   prompt: string;
   attachmentPreviews: OptimisticAttachmentPreview[];
@@ -2182,6 +2182,123 @@ export function ThreadDetailPage() {
     }
   }
 
+  async function ensureThreadConnectedForGoal() {
+    const currentDetail = detailRef.current;
+    if (!currentDetail) {
+      setError('Thread detail is still loading.');
+      return false;
+    }
+
+    if (currentDetail.thread.isLoaded) {
+      return true;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const resumed = await resumeThread(
+        id,
+        {
+          ...(currentDetail.thread.model ? { model: currentDetail.thread.model } : {}),
+        },
+      );
+      setDetail((current) =>
+        current
+          ? {
+              ...resumed,
+              turns: appendLatestTurns(current.turns, resumed.turns),
+            }
+          : resumed,
+      );
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === resumed.thread.id ? resumed.thread : entry,
+        ),
+      );
+      return true;
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to connect this thread before setting its goal.',
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleComposerGoalSubmit(input: {
+    objective?: string | null;
+    status?: NonNullable<ThreadDetailDto['goal']>['status'] | null;
+    tokenBudget?: number | null;
+  }) {
+    const objective = input.objective?.trim() ?? '';
+    const optimisticTurnId = objective
+      ? `optimistic-goal-${Date.now()}`
+      : null;
+    const startedAt = new Date().toISOString();
+    const currentDetail = detailRef.current;
+    const optimisticThread = currentDetail?.thread ?? null;
+
+    if (optimisticTurnId) {
+      setScrollRequestKey((current) => current + 1);
+      setOptimisticTurn({
+        id: optimisticTurnId,
+        serverTurnId: null,
+        startedAt,
+        status: 'sending',
+        error: null,
+        prompt: objective,
+        attachmentPreviews: [],
+        model: optimisticThread?.model ?? null,
+        reasoningEffort: optimisticThread?.reasoningEffort ?? null,
+        reasoningEffortAvailable: getReasoningEffortAvailability(
+          modelOptions,
+          optimisticThread?.model ?? null,
+        ),
+        tokenUsage: null,
+        priceEstimate: null,
+      });
+    }
+
+    try {
+      await handleUpdateGoal(input);
+      if (optimisticTurnId) {
+        setOptimisticTurn((current) =>
+          current && current.id === optimisticTurnId
+            ? {
+                ...current,
+                status: 'completed',
+                error: null,
+              }
+            : current,
+        );
+      }
+    } catch (caught) {
+      const message =
+        caught instanceof ApiError
+          ? caught.payload.message
+          : caught instanceof Error
+            ? caught.message
+            : 'Unable to set goal.';
+      setError(message);
+      if (optimisticTurnId) {
+        setOptimisticTurn((current) =>
+          current && current.id === optimisticTurnId
+            ? {
+                ...current,
+                status: 'failed',
+                error: message,
+              }
+            : current,
+        );
+      }
+      throw caught;
+    }
+  }
+
   async function handleCopyMetaSessionId() {
     const sessionId = detail?.thread.providerSessionId;
     if (!sessionId) {
@@ -3128,7 +3245,8 @@ export function ThreadDetailPage() {
         ...(relayThreadCanControl
           ? {
               onOpenGoal: handleOpenGoal,
-              onUpdateGoal: handleUpdateGoal,
+              onPrepareGoalSubmit: ensureThreadConnectedForGoal,
+              onUpdateGoal: handleComposerGoalSubmit,
             }
           : {}),
         ...(mcpProviderConfigFileName
