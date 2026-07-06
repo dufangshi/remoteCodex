@@ -108,10 +108,10 @@ struct ThreadDetailWebViewScreen: View {
             if let error = bridge.errorMessage {
                 Text(error)
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(RemoteCodexTheme.danger)
                     .padding(12)
                     .frame(maxWidth: .infinity)
-                    .background(.regularMaterial)
+                    .background(RemoteCodexTheme.dangerSoft)
                     .accessibilityIdentifier("thread-webview-error")
             }
         }
@@ -219,9 +219,9 @@ struct ThreadDetailWebViewScreen: View {
             Divider()
             Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(RemoteCodexTheme.foreground)
             }
-            .tint(.white)
+            .tint(RemoteCodexTheme.foreground)
         }
     }
 

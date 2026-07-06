@@ -39,22 +39,22 @@ fun ThreadStatusBadge(
     val colors = when (status) {
         ThreadStatus.Running -> BadgeColors(
             background = ThreadColors.WarningSoft,
-            border = Color(0xFFFACC15),
+            border = ThreadColors.Warning.copy(alpha = 0.36f),
             foreground = ThreadColors.Warning,
         )
         ThreadStatus.Complete -> BadgeColors(
             background = ThreadColors.SuccessSoft,
-            border = Color(0xFF86EFAC),
+            border = ThreadColors.Success.copy(alpha = 0.36f),
             foreground = ThreadColors.Success,
         )
         ThreadStatus.Failed -> BadgeColors(
             background = ThreadColors.DangerSoft,
-            border = Color(0xFFFDA4AF),
+            border = ThreadColors.Danger.copy(alpha = 0.36f),
             foreground = ThreadColors.Danger,
         )
         ThreadStatus.Waiting -> BadgeColors(
             background = ThreadColors.InfoSoft,
-            border = Color(0xFF7DD3FC),
+            border = ThreadColors.Info.copy(alpha = 0.36f),
             foreground = ThreadColors.Info,
         )
     }
@@ -127,17 +127,17 @@ fun ToolStatusBadge(
     val colors = when (status) {
         ToolStatus.Running -> BadgeColors(
             background = ThreadColors.WarningSoft,
-            border = Color(0xFFFACC15),
+            border = ThreadColors.Warning.copy(alpha = 0.36f),
             foreground = ThreadColors.Warning,
         )
         ToolStatus.Completed -> BadgeColors(
             background = ThreadColors.SuccessSoft,
-            border = Color(0xFF86EFAC),
+            border = ThreadColors.Success.copy(alpha = 0.36f),
             foreground = ThreadColors.Success,
         )
         ToolStatus.Failed -> BadgeColors(
             background = ThreadColors.DangerSoft,
-            border = Color(0xFFFDA4AF),
+            border = ThreadColors.Danger.copy(alpha = 0.36f),
             foreground = ThreadColors.Danger,
         )
     }
@@ -214,17 +214,17 @@ private fun messageStatusBadgeColors(tone: MessageStatusTone): BadgeColors {
     return when (tone) {
         MessageStatusTone.Running -> BadgeColors(
             background = ThreadColors.WarningSoft,
-            border = Color(0xFFFACC15),
+            border = ThreadColors.Warning.copy(alpha = 0.36f),
             foreground = ThreadColors.Warning,
         )
         MessageStatusTone.Success -> BadgeColors(
             background = ThreadColors.SuccessSoft,
-            border = Color(0xFF86EFAC),
+            border = ThreadColors.Success.copy(alpha = 0.36f),
             foreground = ThreadColors.Success,
         )
         MessageStatusTone.Danger -> BadgeColors(
             background = ThreadColors.DangerSoft,
-            border = Color(0xFFFDA4AF),
+            border = ThreadColors.Danger.copy(alpha = 0.36f),
             foreground = ThreadColors.Danger,
         )
         MessageStatusTone.Neutral -> BadgeColors(
@@ -244,11 +244,11 @@ fun MetadataPill(
         label = label,
         colors = BadgeColors(
             background = ThreadColors.InfoSoft,
-            border = Color(0xFFBAE6FD),
+            border = ThreadColors.Info.copy(alpha = 0.28f),
             foreground = ThreadColors.ForegroundMuted,
         ),
         modifier = modifier,
-        leading = { RunningDots(color = Color(0xFF7DD3FC), active = false) },
+        leading = { RunningDots(color = ThreadColors.Info, active = false) },
     )
 }
 

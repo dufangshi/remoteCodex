@@ -9,18 +9,27 @@ enum GraphBadgeTone {
     var foreground: Color {
         switch self {
         case .neutral:
-            .secondary
+            RemoteCodexTheme.foregroundMuted
         case .success:
-            .green
+            RemoteCodexTheme.success
         case .warning:
-            .orange
+            RemoteCodexTheme.warning
         case .destructive:
-            .red
+            RemoteCodexTheme.danger
         }
     }
 
     var background: Color {
-        foreground.opacity(0.12)
+        switch self {
+        case .neutral:
+            RemoteCodexTheme.surfaceStrong
+        case .success:
+            RemoteCodexTheme.successSoft
+        case .warning:
+            RemoteCodexTheme.warningSoft
+        case .destructive:
+            RemoteCodexTheme.dangerSoft
+        }
     }
 }
 
@@ -35,6 +44,9 @@ struct GraphBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(tone.background, in: Capsule())
+            .overlay {
+                Capsule().stroke(tone.foreground.opacity(0.32), lineWidth: 1)
+            }
     }
 }
 

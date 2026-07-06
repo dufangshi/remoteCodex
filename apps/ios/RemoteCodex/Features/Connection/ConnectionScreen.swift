@@ -407,6 +407,7 @@ struct ConnectionScreen: View {
             }
         }
         .navigationTitle(navigationTitle)
+        .remoteCodexScreenSurface()
         .edgeSwipeBack(action: handleBackGesture)
         .task(id: model.route) {
             guard model.route == .relayDevices else { return }
@@ -596,12 +597,13 @@ struct ConnectionScreen: View {
                 ProgressView("Working...")
             }
             if let message = model.statusMessage {
-                Text(message).foregroundStyle(.secondary)
+                Text(message).remoteCodexStatusText()
             }
             if let error = model.errorMessage {
-                Text(error).foregroundStyle(.red)
+                Text(error).remoteCodexErrorText()
             }
         }
+        .remoteCodexListRow()
     }
 
     private var savedDevicesSection: some View {
@@ -624,6 +626,7 @@ struct ConnectionScreen: View {
                 )
             }
         }
+        .remoteCodexListRow()
     }
 
     private var modeSection: some View {
@@ -644,6 +647,7 @@ struct ConnectionScreen: View {
             }
             .disabled(model.busy)
         }
+        .remoteCodexListRow()
     }
 
     private var serverAuthSection: some View {
@@ -657,6 +661,7 @@ struct ConnectionScreen: View {
             }
             .disabled(model.busy || model.username.isEmpty || model.password.isEmpty)
         }
+        .remoteCodexListRow()
     }
 
     private var relayAuthSection: some View {
@@ -681,6 +686,7 @@ struct ConnectionScreen: View {
             }
             .disabled(model.busy || model.username.isEmpty || model.password.isEmpty)
         }
+        .remoteCodexListRow()
     }
 
     @ViewBuilder
@@ -691,17 +697,17 @@ struct ConnectionScreen: View {
                     Spacer()
                     Text("Updated \(refreshedAt.formatted(date: .omitted, time: .standard))")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .remoteCodexStatusText()
                 }
             }
             if model.busy {
                 ProgressView("Working...")
             }
             if let message = model.statusMessage {
-                Text(message).foregroundStyle(.secondary)
+                Text(message).remoteCodexStatusText()
             }
             if let error = model.errorMessage {
-                Text(error).foregroundStyle(.red)
+                Text(error).remoteCodexErrorText()
             }
             if model.relayPortal?.devices.isEmpty == true {
                 ContentUnavailableView("No Devices", systemImage: "antenna.radiowaves.left.and.right")
@@ -721,6 +727,7 @@ struct ConnectionScreen: View {
                 )
             }
         }
+        .remoteCodexListRow()
         Section("Shared with me") {
             let sharedSessions = model.relayPortal?.sharedWithMe ?? []
             if model.relayPortal == nil {
@@ -737,6 +744,7 @@ struct ConnectionScreen: View {
                 }
             }
         }
+        .remoteCodexListRow()
         Section("Shared by me") {
             let sharedSessions = model.relayPortal?.sharedByMe ?? []
             if model.relayPortal == nil {
@@ -759,6 +767,7 @@ struct ConnectionScreen: View {
                 }
             }
         }
+        .remoteCodexListRow()
     }
 
     private var addDeviceSheet: some View {
@@ -777,6 +786,7 @@ struct ConnectionScreen: View {
                 }
             }
             .navigationTitle("Add Device")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -802,7 +812,7 @@ struct ConnectionScreen: View {
                     ProgressView("Working...")
                 }
                 if let error = model.errorMessage {
-                    Text(error).foregroundStyle(.red)
+                    Text(error).remoteCodexErrorText()
                 }
                 if let created = model.createdDevice {
                     Section("Setup") {
@@ -818,6 +828,7 @@ struct ConnectionScreen: View {
                 }
             }
             .navigationTitle("Create Device")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
@@ -837,6 +848,7 @@ struct ConnectionScreen: View {
                     .keyboardType(.URL)
             }
             .navigationTitle("Edit Device")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -868,7 +880,7 @@ private struct SavedDeviceRow: View {
                         .font(.headline)
                     Text(device.normalizedBaseURL)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .remoteCodexStatusText()
                 }
                 Spacer()
                 GraphBadge(text: device.modeLabel, tone: .neutral)
@@ -899,7 +911,7 @@ private struct RelayDeviceRow: View {
                 Spacer()
                 GraphBadge(text: device.online ? "Online" : "Offline", tone: device.online ? .success : .warning)
             }
-            Text(device.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+            Text(device.id).font(.caption.monospaced()).remoteCodexStatusText()
             HStack {
                 Button(selected ? "Connected" : "Connect", action: onConnect)
                     .disabled(selected)
@@ -951,12 +963,12 @@ private struct RelaySharedSessionRow: View {
                 Text("Device: \(share.deviceName)")
             }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .remoteCodexStatusText()
                 .lineLimit(1)
             if mode == .outgoing {
                 Text(shareAccessSummary(share))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .remoteCodexStatusText()
             }
             HStack {
                 GraphBadge(
@@ -1021,15 +1033,16 @@ private struct RelaySharePermissionsSheet: View {
                         Text("Read").tag("read")
                         Text("Write").tag("write")
                     }
-                    .disabled(share.workspaceId == nil)
-                    if share.workspaceId == nil {
-                        Text("This share was created without a workspace scope.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .disabled(share.workspaceId == nil)
+                        if share.workspaceId == nil {
+                            Text("This share was created without a workspace scope.")
+                                .font(.caption)
+                                .remoteCodexStatusText()
+                        }
                     }
-                }
             }
             .navigationTitle("Permissions")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
@@ -1069,7 +1082,7 @@ private struct ShareAccessHistory: View {
             if events.isEmpty {
                 Text("This shared thread has not been accessed yet.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .remoteCodexStatusText()
             } else {
                 ForEach(events) { event in
                     HStack {
@@ -1078,14 +1091,18 @@ private struct ShareAccessHistory: View {
                         Spacer()
                         Text(shortRelayTimestamp(event.accessedAt))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .remoteCodexStatusText()
                     }
                 }
             }
         }
         .padding(8)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(RemoteCodexTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: RemoteCodexTheme.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: RemoteCodexTheme.panelRadius)
+                .stroke(RemoteCodexTheme.border, lineWidth: 1)
+        }
     }
 }
 

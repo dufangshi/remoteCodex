@@ -449,6 +449,7 @@ struct HomeScreen: View {
             workspaceSection
         }
         .navigationTitle("Remote Codex")
+        .remoteCodexScreenSurface()
         .refreshable { await model.refresh() }
         .edgeSwipeBack(action: onBack)
         .toolbar {
@@ -503,9 +504,9 @@ struct HomeScreen: View {
             Divider()
             Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(RemoteCodexTheme.foreground)
             }
-            .tint(.white)
+            .tint(RemoteCodexTheme.foreground)
         }
     }
 
@@ -526,7 +527,7 @@ struct HomeScreen: View {
                 ProgressView("Loading...")
             }
             if let error = model.errorMessage {
-                Text(error).foregroundStyle(.red)
+                Text(error).remoteCodexErrorText()
             }
             if model.snapshot?.workspaces.isEmpty == true {
                 ContentUnavailableView("No Workspaces", systemImage: "folder.badge.plus")
@@ -555,6 +556,7 @@ struct HomeScreen: View {
                 }
             }
         }
+        .remoteCodexListRow()
     }
 
     private var createWorkspaceSheet: some View {
@@ -565,6 +567,7 @@ struct HomeScreen: View {
                 TextField("Label", text: $model.workspaceDraftLabel)
             }
             .navigationTitle("New Workspace")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showingCreateWorkspace = false }
@@ -607,15 +610,15 @@ struct HomeScreen: View {
                                             .foregroundStyle(backend.canStartSession ? .primary : .secondary)
                                         Text(backend.provider)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .remoteCodexStatusText()
                                         if !backend.canStartSession {
                                             Text(backend.lastError ?? "Runtime is not available.")
                                                 .font(.caption2)
-                                                .foregroundStyle(.red)
+                                                .remoteCodexErrorText()
                                         } else if let version = backend.installedVersion {
                                             Text(version)
                                                 .font(.caption2)
-                                                .foregroundStyle(.secondary)
+                                                .remoteCodexStatusText()
                                         }
                                     }
                                 }
@@ -654,10 +657,10 @@ struct HomeScreen: View {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(option.displayName)
-                                            .foregroundStyle(.primary)
+                                            .foregroundStyle(RemoteCodexTheme.foreground)
                                         Text(option.model)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .remoteCodexStatusText()
                                     }
                                     Spacer()
                                     if option.model == model.newThreadModel {
@@ -671,11 +674,13 @@ struct HomeScreen: View {
                 if let error = model.newThreadOptionsError {
                     Section {
                         Text(error)
-                            .foregroundStyle(.red)
+                            .remoteCodexErrorText()
                     }
+                    .remoteCodexListRow()
                 }
             }
             .navigationTitle("New Thread")
+            .remoteCodexScreenSurface()
             .task {
                 await model.loadNewThreadOptionsIfNeeded()
             }
@@ -704,6 +709,7 @@ struct HomeScreen: View {
                 TextField("Label", text: $renameDraft)
             }
             .navigationTitle("Rename Workspace")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { renameTarget = nil }
@@ -738,14 +744,14 @@ private struct WorkspaceRow: View {
                 Spacer()
                 if workspace.isFavorite {
                     Image(systemName: "pin.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(RemoteCodexTheme.foregroundMuted)
                         .accessibilityLabel("Pinned")
                 }
             }
             .buttonStyle(.borderless)
             Text(workspace.absPath)
                 .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+                .remoteCodexStatusText()
             HStack {
                 Button(workspace.isFavorite ? "Unpin" : "Pin", action: onPin)
                 Button("Rename", action: onRename)
@@ -769,7 +775,7 @@ private struct ThreadRow: View {
             }
             Text(thread.summaryText ?? thread.id)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .remoteCodexStatusText()
                 .lineLimit(2)
             HStack {
                 Text(thread.provider)
@@ -779,7 +785,7 @@ private struct ThreadRow: View {
                 Text(thread.updatedAt)
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .remoteCodexStatusText()
         }
     }
 }
@@ -796,7 +802,7 @@ private struct HomeSettingsView: View {
                     ProgressView("Loading settings...")
                 }
                 if let error = model.settings.errorMessage {
-                    Text(error).foregroundStyle(.red)
+                    Text(error).remoteCodexErrorText()
                 }
                 Section("Appearance") {
                     Picker("Theme", selection: $model.themeMode) {
@@ -859,6 +865,7 @@ private struct HomeSettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .remoteCodexScreenSurface()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

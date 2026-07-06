@@ -144,6 +144,8 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(themeMode.colorScheme)
+        .tint(RemoteCodexTheme.accent)
+        .background(RemoteCodexTheme.pageBackground)
     }
 
     private func returnToConnectionSetup() {
@@ -367,9 +369,13 @@ struct FloatingActionMenu<Content: View>: View {
         } label: {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(RemoteCodexTheme.foregroundSoft)
                 .frame(width: 44, height: 44)
-                .background(.regularMaterial, in: Circle())
-                .shadow(color: .black.opacity(0.16), radius: 10, x: 0, y: 6)
+                .background(RemoteCodexTheme.surfaceStrong, in: Circle())
+                .overlay {
+                    Circle().stroke(RemoteCodexTheme.border, lineWidth: 1)
+                }
+                .shadow(color: RemoteCodexTheme.pageBackground.opacity(0.24), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(accessibilityIdentifier)

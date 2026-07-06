@@ -450,6 +450,7 @@ struct WorkspaceDetailScreen: View {
             threadsSection
         }
         .navigationTitle(model.workspace?.label ?? "Workspace")
+        .remoteCodexScreenSurface()
         .refreshable { await model.refresh() }
         .edgeSwipeBack(action: onBack)
         .toolbar {
@@ -482,9 +483,9 @@ struct WorkspaceDetailScreen: View {
             Divider()
             Button(action: onChangeConnection) {
                 Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(RemoteCodexTheme.foreground)
             }
-            .tint(.white)
+            .tint(RemoteCodexTheme.foreground)
         }
     }
 
@@ -497,12 +498,13 @@ struct WorkspaceDetailScreen: View {
                 ProgressView("Loading...")
             }
             if let message = model.message {
-                Text(message).foregroundStyle(.secondary)
+                Text(message).remoteCodexStatusText()
             }
             if let error = model.errorMessage {
-                Text(error).foregroundStyle(.red)
+                Text(error).remoteCodexErrorText()
             }
         }
+        .remoteCodexListRow()
     }
 
     private var threadsSection: some View {
@@ -516,7 +518,7 @@ struct WorkspaceDetailScreen: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(thread.title)
-                        Text(thread.status).font(.caption).foregroundStyle(.secondary)
+                        Text(thread.status).font(.caption).remoteCodexStatusText()
                     }
                 }
                 .accessibilityIdentifier("thread-open-\(thread.id)")
@@ -530,6 +532,7 @@ struct WorkspaceDetailScreen: View {
                 }
             }
         }
+        .remoteCodexListRow()
     }
 
     private var newThreadSheet: some View {
@@ -553,15 +556,15 @@ struct WorkspaceDetailScreen: View {
                                             .foregroundStyle(backend.canStartSession ? .primary : .secondary)
                                         Text(backend.provider)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .remoteCodexStatusText()
                                         if !backend.canStartSession {
                                             Text(backend.lastError ?? "Runtime is not available.")
                                                 .font(.caption2)
-                                                .foregroundStyle(.red)
+                                                .remoteCodexErrorText()
                                         } else if let version = backend.installedVersion {
                                             Text(version)
                                                 .font(.caption2)
-                                                .foregroundStyle(.secondary)
+                                                .remoteCodexStatusText()
                                         }
                                     }
                                 }
@@ -602,10 +605,10 @@ struct WorkspaceDetailScreen: View {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(option.displayName)
-                                            .foregroundStyle(.primary)
+                                            .foregroundStyle(RemoteCodexTheme.foreground)
                                         Text(option.model)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .remoteCodexStatusText()
                                     }
                                     Spacer()
                                     if option.model == model.newThreadModel {
@@ -620,11 +623,13 @@ struct WorkspaceDetailScreen: View {
                 if let error = model.newThreadOptionsError {
                     Section {
                         Text(error)
-                            .foregroundStyle(.red)
+                            .remoteCodexErrorText()
                     }
+                    .remoteCodexListRow()
                 }
             }
             .navigationTitle("New Thread")
+            .remoteCodexScreenSurface()
             .task {
                 await model.loadNewThreadOptionsIfNeeded()
             }
