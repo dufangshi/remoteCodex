@@ -1068,6 +1068,172 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('creates device grants that expose whole-device relay access without exposing owner-only actions', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const ownerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'owner@example.test',
+        username: 'owner',
+        password: 'password123',
+      },
+    });
+    const ownerToken = ownerResponse.json().token as string;
+    const friendResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'friend@example.test',
+        username: 'friend',
+        password: 'password123',
+      },
+    });
+    const friendToken = friendResponse.json().token as string;
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        name: 'Office server',
+      },
+    });
+    const deviceId = deviceResponse.json().device.id;
+
+    const grantResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/grants',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        targetIdentifier: 'friend',
+        deviceId,
+        scope: 'device',
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+        canCreateThreads: true,
+        label: 'Office server access',
+      },
+    });
+
+    expect(grantResponse.statusCode).toBe(200);
+    expect(grantResponse.json()).toMatchObject({
+      deviceId,
+      deviceName: 'Office server',
+      scope: 'device',
+      threadId: null,
+      workspaceId: null,
+      workspaceScope: 'all',
+      threadAccess: 'control',
+      workspaceAccess: 'read',
+      canCreateThreads: true,
+      label: 'Office server access',
+    });
+
+    const friendPortalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(friendPortalResponse.statusCode).toBe(200);
+    expect(friendPortalResponse.json().sharedDevicesWithMe).toEqual([
+      expect.objectContaining({
+        id: grantResponse.json().id,
+        deviceId,
+        scope: 'device',
+        ownerUsername: 'owner',
+        targetUsername: 'friend',
+      }),
+    ]);
+    expect(friendPortalResponse.json().sharedWithMe).toEqual([]);
+
+    const accessResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/access?deviceId=${deviceId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(accessResponse.statusCode).toBe(200);
+    expect(accessResponse.json()).toMatchObject({
+      kind: 'shared',
+      grantId: grantResponse.json().id,
+      shareId: null,
+      scope: 'device',
+      threadAccess: 'control',
+      workspaceAccess: 'read',
+      workspaceId: null,
+      workspaceScope: 'all',
+      canCreateThreads: true,
+    });
+
+    const threadsResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/api/threads`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(threadsResponse.statusCode).toBe(503);
+
+    const startThreadResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/threads/start`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        workspaceId: SHARED_WORKSPACE_ID,
+      },
+    });
+    expect(startThreadResponse.statusCode).toBe(503);
+
+    const blockedRuntimeMutationResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/agent-runtimes/codex/restart`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(blockedRuntimeMutationResponse.statusCode).toBe(403);
+
+    const friendDeleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/relay/devices/${deviceId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(friendDeleteResponse.statusCode).toBe(404);
+
+    const revokeResponse = await app.inject({
+      method: 'DELETE',
+      url: `/relay/grants/${grantResponse.json().id}`,
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+    });
+    expect(revokeResponse.statusCode).toBe(200);
+
+    const accessAfterRevokeResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/access?deviceId=${deviceId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(accessAfterRevokeResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
   it('limits shared users by thread and workspace access levels', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();

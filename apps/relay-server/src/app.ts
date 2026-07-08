@@ -57,6 +57,8 @@ const WEBSOCKET_OPEN = 1;
 const RELAY_COOKIE_NAME = 'remote_codex_relay_session';
 const threadAccessSchema = z.enum(['read', 'control']);
 const workspaceAccessSchema = z.enum(['none', 'read', 'write']);
+const grantScopeSchema = z.enum(['thread', 'workspace', 'device']);
+const workspaceScopeSchema = z.enum(['all', 'selected']);
 
 const loginSchema = z.object({
   identifier: z.string().trim().min(1),
@@ -92,6 +94,44 @@ const updateShareSchema = z.object({
   label: z.string().trim().min(1).max(160).nullable().optional(),
   threadAccess: threadAccessSchema.optional(),
   workspaceAccess: workspaceAccessSchema.optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+const createGrantSchema = z
+  .object({
+    targetIdentifier: z.string().trim().min(1).optional(),
+    targetUsername: z.string().trim().min(3).optional(),
+    deviceId: z.string().uuid(),
+    scope: grantScopeSchema,
+    threadId: z.string().trim().min(1).nullable().optional(),
+    workspaceId: z.string().uuid().nullable().optional(),
+    workspaceScope: workspaceScopeSchema.default('all'),
+    workspaceIds: z.array(z.string().uuid()).default([]),
+    label: z.string().trim().min(1).max(160).nullable().optional(),
+    threadAccess: threadAccessSchema.default('control'),
+    workspaceAccess: workspaceAccessSchema.default('none'),
+    canCreateThreads: z.boolean().optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+  })
+  .refine((input) => input.targetIdentifier || input.targetUsername, {
+    message: 'targetIdentifier is required.',
+    path: ['targetIdentifier'],
+  })
+  .refine((input) => input.scope !== 'thread' || Boolean(input.threadId), {
+    message: 'threadId is required for thread grants.',
+    path: ['threadId'],
+  })
+  .refine((input) => input.scope !== 'workspace' || Boolean(input.workspaceId), {
+    message: 'workspaceId is required for workspace grants.',
+    path: ['workspaceId'],
+  });
+const updateGrantSchema = z.object({
+  workspaceId: z.string().uuid().nullable().optional(),
+  workspaceScope: workspaceScopeSchema.optional(),
+  workspaceIds: z.array(z.string().uuid()).optional(),
+  label: z.string().trim().min(1).max(160).nullable().optional(),
+  threadAccess: threadAccessSchema.optional(),
+  workspaceAccess: workspaceAccessSchema.optional(),
+  canCreateThreads: z.boolean().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
 });
 const setEnabledSchema = z.object({
@@ -402,6 +442,47 @@ export function buildRelayServer(
     return store.revokeShare(user.id, shareId);
   });
 
+  app.post('/relay/grants', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const body = createGrantSchema.parse(request.body ?? {});
+    return store.createGrant(user.id, {
+      targetIdentifier: body.targetIdentifier ?? body.targetUsername!,
+      deviceId: body.deviceId,
+      scope: body.scope,
+      threadId: body.threadId ?? null,
+      workspaceId: body.workspaceId ?? null,
+      workspaceScope: body.workspaceScope,
+      workspaceIds: body.workspaceIds,
+      label: body.label ?? null,
+      threadAccess: body.threadAccess,
+      workspaceAccess: body.workspaceAccess,
+      canCreateThreads: body.canCreateThreads ?? false,
+      expiresAt: body.expiresAt ?? null,
+    });
+  });
+
+  app.patch('/relay/grants/:grantId', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const { grantId } = z.object({ grantId: z.string().uuid() }).parse(request.params);
+    const body = updateGrantSchema.parse(request.body ?? {});
+    return store.updateGrant(user.id, grantId, body);
+  });
+
+  app.delete('/relay/grants/:grantId', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store);
+    if (!user) {
+      return;
+    }
+    const { grantId } = z.object({ grantId: z.string().uuid() }).parse(request.params);
+    return store.revokeGrant(user.id, grantId);
+  });
+
   app.get('/relay/admin', async (request, reply) => {
     const user = requireRelayUser(request, reply, store, { admin: true });
     if (!user) {
@@ -665,7 +746,7 @@ export function buildRelayServer(
         }
 
         if (access.kind === 'shared') {
-          store.recordShareAccess(access.share, session.user);
+          recordRelayAccess(store, access, session.user);
         }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
@@ -699,7 +780,7 @@ export function buildRelayServer(
           return;
         }
         if (access.kind === 'shared') {
-          store.recordShareAccess(access.share, session.user);
+          recordRelayAccess(store, access, session.user);
         }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
@@ -828,7 +909,7 @@ async function forwardRelayHttp(input: {
   }
 
   if (access?.kind === 'shared') {
-    input.store.recordShareAccess(access.share, input.user);
+    recordRelayAccess(input.store, access, input.user);
   }
   const conversationEvent = conversationEventFromRequest(
     input.request.method,
@@ -1395,11 +1476,26 @@ function stringField(value: unknown, field: string) {
 function relayAccessDto(access: EffectiveRelayAccess): RelayEffectiveAccessDto {
   return {
     kind: access.kind,
+    grantId: access.grant?.id ?? null,
     shareId: access.share?.id ?? null,
+    scope: access.scope,
     threadAccess: access.threadAccess,
     workspaceAccess: access.workspaceAccess,
     workspaceId: access.workspaceId,
+    workspaceScope: access.workspaceScope,
+    canCreateThreads: access.canCreateThreads,
   };
+}
+
+function recordRelayAccess(store: RelayStore, access: EffectiveRelayAccess, user: RelayUserDto) {
+  if (access.kind !== 'shared') {
+    return;
+  }
+  if (access.share) {
+    store.recordShareAccess(access.share, user);
+    return;
+  }
+  store.recordGrantAccess(access.grant, user);
 }
 
 function firstAccessibleConnectedDevice(
@@ -1495,6 +1591,12 @@ function isAllowedForRelayAccess(
 
   const pathname = new URL(pathValue, 'http://relay.local').pathname;
   const methodName = method.toUpperCase();
+  if (isAllowedSharedRuntimeMetadataRequest(methodName, pathname)) {
+    return true;
+  }
+  if (access.scope === 'device' && methodName === 'POST' && pathname === '/api/threads/start') {
+    return access.canCreateThreads && access.threadAccess === 'control';
+  }
   const threadId = threadIdFromPath(pathValue);
   if (threadId) {
     return isAllowedSharedThreadPath(access, methodName, pathname, threadId);
@@ -1503,6 +1605,11 @@ function isAllowedForRelayAccess(
   const workspaceId = workspaceIdFromPath(pathValue);
   if (workspaceId) {
     return isAllowedSharedWorkspacePath(access, methodName, pathname, workspaceId);
+  }
+  if (access.scope === 'device') {
+    if (methodName === 'GET' && (pathname === '/api/threads' || pathname === '/api/workspaces')) {
+      return true;
+    }
   }
   return false;
 }
@@ -1513,7 +1620,10 @@ function isAllowedSharedThreadPath(
   pathname: string,
   threadId: string,
 ) {
-  if (access.kind !== 'shared' || access.share.threadId !== threadId) {
+  if (access.kind !== 'shared') {
+    return false;
+  }
+  if (access.scope !== 'device' && access.grant.threadId !== threadId) {
     return false;
   }
   const escapedThreadId = escapeRegExp(encodeURIComponent(threadId));
@@ -1576,9 +1686,11 @@ function isAllowedSharedWorkspacePath(
   pathname: string,
   workspaceId: string,
 ) {
+  if (access.kind !== 'shared' || access.workspaceAccess === 'none') {
+    return false;
+  }
   if (
-    access.kind !== 'shared' ||
-    access.workspaceAccess === 'none' ||
+    access.scope !== 'device' &&
     access.workspaceId !== workspaceId
   ) {
     return false;

@@ -156,6 +156,8 @@ export interface RelayPendingRegistrationDto {
 
 export type RelayThreadAccessDto = 'read' | 'control';
 export type RelayWorkspaceAccessDto = 'none' | 'read' | 'write';
+export type RelayShareScopeDto = 'thread' | 'workspace' | 'device';
+export type RelayWorkspaceScopeDto = 'all' | 'selected';
 
 export interface CreateRelaySessionShareInput {
   targetIdentifier: string;
@@ -207,12 +209,77 @@ export interface RelaySessionShareAccessDto {
   accessedAt: string;
 }
 
+export interface RelayAccessGrantEventDto {
+  id: string;
+  grantId: string;
+  userId: string;
+  username: string;
+  accessedAt: string;
+}
+
+export interface CreateRelayAccessGrantInput {
+  targetIdentifier: string;
+  deviceId: string;
+  scope: RelayShareScopeDto;
+  threadId?: string | null;
+  workspaceId?: string | null;
+  workspaceScope?: RelayWorkspaceScopeDto;
+  workspaceIds?: string[];
+  label?: string | null;
+  threadAccess: RelayThreadAccessDto;
+  workspaceAccess: RelayWorkspaceAccessDto;
+  canCreateThreads?: boolean;
+  expiresAt?: string | null;
+}
+
+export interface UpdateRelayAccessGrantInput {
+  workspaceId?: string | null | undefined;
+  workspaceScope?: RelayWorkspaceScopeDto | undefined;
+  workspaceIds?: string[] | undefined;
+  label?: string | null | undefined;
+  threadAccess?: RelayThreadAccessDto | undefined;
+  workspaceAccess?: RelayWorkspaceAccessDto | undefined;
+  canCreateThreads?: boolean | undefined;
+  expiresAt?: string | null | undefined;
+}
+
+export interface RelayAccessGrantDto {
+  id: string;
+  ownerUserId: string;
+  ownerUsername: string;
+  targetUserId: string;
+  targetUsername: string;
+  deviceId: string;
+  deviceName: string;
+  scope: RelayShareScopeDto;
+  threadId: string | null;
+  threadTitle: string | null;
+  workspaceId: string | null;
+  workspaceLabel: string | null;
+  workspaceScope: RelayWorkspaceScopeDto;
+  workspaceIds: string[];
+  label: string | null;
+  threadAccess: RelayThreadAccessDto;
+  workspaceAccess: RelayWorkspaceAccessDto;
+  canCreateThreads: boolean;
+  createdAt: string;
+  revokedAt: string | null;
+  expiresAt: string | null;
+  lastAccessedAt: string | null;
+  lastAccessedByUsername: string | null;
+  accessEvents: RelayAccessGrantEventDto[];
+}
+
 export interface RelayEffectiveAccessDto {
   kind: 'owner' | 'shared';
+  grantId?: string | null;
   shareId: string | null;
+  scope?: 'owner' | RelayShareScopeDto;
   threadAccess: RelayThreadAccessDto;
   workspaceAccess: RelayWorkspaceAccessDto;
   workspaceId: string | null;
+  workspaceScope?: RelayWorkspaceScopeDto | null;
+  canCreateThreads?: boolean;
 }
 
 export interface RelaySessionDto {
@@ -243,12 +310,16 @@ export interface RelayPortalSummaryDto {
   devices: RelayDeviceDto[];
   sharedWithMe: RelaySessionShareDto[];
   sharedByMe: RelaySessionShareDto[];
+  sharedDevicesWithMe?: RelayAccessGrantDto[];
+  sharedThreadsWithMe?: RelayAccessGrantDto[];
+  grantsByMe?: RelayAccessGrantDto[];
 }
 
 export interface RelayAdminSummaryDto {
   users: RelayAdminUserDto[];
   devices: RelayAdminDeviceDto[];
   shares: RelaySessionShareDto[];
+  grants?: RelayAccessGrantDto[];
   pendingRegistrations: RelayPendingRegistrationDto[];
   settings: RelayRegistrationSettingsDto;
   conversationWindowDays: number;

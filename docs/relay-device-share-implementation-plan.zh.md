@@ -89,9 +89,9 @@ V1.1 再支持：
 
 ### Phase 1: Shared types and store model
 
-- [ ] 在 `packages/shared/src/index.ts` 增加通用 grant DTO。
-- [ ] 保留现有 `RelaySessionShareDto` 兼容旧 UI/API。
-- [ ] 新增 `RelayAccessGrantDto`：
+- [x] 在 `packages/shared/src/index.ts` 增加通用 grant DTO。
+- [x] 保留现有 `RelaySessionShareDto` 兼容旧 UI/API。
+- [x] 新增 `RelayAccessGrantDto`：
 
 ```ts
 export type RelayShareScopeDto = 'thread' | 'workspace' | 'device';
@@ -164,19 +164,24 @@ export interface RelayEffectiveAccessDto {
 
 验收：
 
-- [ ] TypeScript shared package builds.
-- [ ] Existing thread share type consumers still compile.
+- [x] TypeScript shared package builds.
+- [x] Existing thread share type consumers still compile.
 
 ### Phase 2: Database migration
 
 Preferred path: introduce new table instead of overloading `relay_shares`.
 
-- [ ] Add `relay_access_grants`.
+- [x] Add `relay_access_grants`.
 - [ ] Add `relay_access_grant_workspace_ids` if selected workspaces are supported in this phase.
-- [ ] Add `relay_access_grant_events`.
-- [ ] Keep `relay_shares` readable for existing deployments.
+- [x] Add `relay_access_grant_events`.
+- [x] Keep `relay_shares` readable for existing deployments.
 - [ ] Option A: migrate existing `relay_shares` rows into `relay_access_grants(scope='thread')`.
-- [ ] Option B: keep compatibility read path that maps old shares into grant objects.
+- [x] Option B: keep compatibility read path that maps old shares into grant objects.
+
+Current V1 implementation note:
+
+- `relay_access_grants.workspace_ids` is stored as a JSON text column for scaffolding.
+- A normalized `relay_access_grant_workspace_ids` table is still deferred until selected-workspace enforcement is implemented.
 
 Recommended V1 migration:
 
@@ -213,10 +218,10 @@ Unique active grant policy:
 
 验收：
 
-- [ ] Fresh DB starts.
+- [x] Fresh DB starts.
 - [ ] Existing DB with `relay_shares` starts.
-- [ ] Existing thread shares still appear in portal.
-- [ ] Revoked/expired grants are not effective.
+- [x] Existing thread shares still appear in portal.
+- [x] Revoked/expired grants are not effective.
 
 ### Phase 3: Access resolver
 
@@ -231,10 +236,10 @@ Resolution order:
 
 Rules:
 
-- [ ] Owner keeps full access.
-- [ ] Thread grant keeps current behavior.
+- [x] Owner keeps full access.
+- [x] Thread grant keeps current behavior.
 - [ ] Workspace grant allows threads/files under that workspace only. This can be deferred.
-- [ ] Device grant allows full device navigation with bounded operations.
+- [x] Device grant allows full device navigation with bounded operations.
 - [ ] If multiple active grants match, use highest capability:
   - `control > read`
   - `write > read > none`
@@ -242,7 +247,7 @@ Rules:
 
 Implementation targets:
 
-- [ ] `apps/relay-server/src/relay-store.ts`
+- [x] `apps/relay-server/src/relay-store.ts`
   - `createGrant`
   - `updateGrant`
   - `revokeGrant`
@@ -253,7 +258,7 @@ Implementation targets:
 验收:
 
 - [ ] Unit tests for owner, thread grant, device grant, expired, revoked, and self-share rejection.
-- [ ] Existing thread-share tests still pass.
+- [x] Existing thread-share tests still pass.
 
 ## Relay Forwarding Design
 
@@ -268,21 +273,21 @@ Change `forwardRelayHttp(...)` to distinguish:
 
 Allowed for device grant:
 
-- [ ] `GET /api/threads`
+- [x] `GET /api/threads`
 - [ ] `GET /api/threads/:threadId`
 - [ ] `GET /api/threads/:threadId/items/:itemId/detail`
 - [ ] transcript export and image asset paths
-- [ ] `GET /api/workspaces`
+- [x] `GET /api/workspaces`
 - [ ] `GET /api/workspaces/:workspaceId`
 - [ ] workspace file read paths when `workspaceAccess !== none`
 - [ ] workspace file write paths when `workspaceAccess === write`
-- [ ] runtime metadata reads needed for toolbox:
+- [x] runtime metadata reads needed for toolbox:
   - `GET /api/agent-runtimes`
   - `GET /api/plugins`
   - `GET /api/agent-runtimes/:provider/status`
   - `GET /api/agent-runtimes/:provider/models`
-- [ ] `POST /api/threads/start` when `canCreateThreads === true`
-- [ ] thread control paths when `threadAccess === control`:
+- [x] `POST /api/threads/start` when `canCreateThreads === true`
+- [x] thread control paths when `threadAccess === control`:
   - prompt
   - resume
   - interrupt
@@ -292,10 +297,10 @@ Allowed for device grant:
 
 Still forbidden for shared users:
 
-- [ ] device token/setup token reads
-- [ ] delete device
+- [x] device token/setup token reads
+- [x] delete device
 - [ ] relay admin APIs
-- [ ] runtime restart/build/install
+- [x] runtime restart/build/install
 - [ ] provider host config mutation
 - [ ] workspace create/import/delete unless explicitly added later
 
@@ -310,9 +315,9 @@ Special list behavior:
 
 验收：
 
-- [ ] Shared thread recipient still sees only shared threads.
-- [ ] Shared device recipient sees all device threads.
-- [ ] Forbidden admin/runtime mutation paths return 403.
+- [x] Shared thread recipient still sees only shared threads.
+- [x] Shared device recipient sees all device threads.
+- [x] Forbidden admin/runtime mutation paths return 403.
 
 ### Phase 5: WebSocket access
 
@@ -343,9 +348,9 @@ Add general grant endpoints while keeping `/relay/shares` compatible.
 
 New endpoints:
 
-- [ ] `POST /relay/grants`
-- [ ] `PATCH /relay/grants/:grantId`
-- [ ] `DELETE /relay/grants/:grantId`
+- [x] `POST /relay/grants`
+- [x] `PATCH /relay/grants/:grantId`
+- [x] `DELETE /relay/grants/:grantId`
 
 Compatibility:
 

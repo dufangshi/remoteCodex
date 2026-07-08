@@ -5,7 +5,9 @@ import type {
   ApiErrorShape,
   AuthLoginResultDto,
   AuthSessionDto,
+  CreateRelayAccessGrantInput,
   RelayAdminSummaryDto,
+  RelayAccessGrantDto,
   RelayCreateDeviceResultDto,
   RelayLoginResultDto,
   RelayPortalSummaryDto,
@@ -13,6 +15,7 @@ import type {
   RelayRegistrationSettingsDto,
   RelaySessionDto,
   RelaySessionShareDto,
+  UpdateRelayAccessGrantInput,
   UpdateRelaySessionShareInput,
   RelayUserDto,
   ProviderHostConfigArchiveDto,
@@ -660,6 +663,26 @@ export function updateRelayShare(shareId: string, input: UpdateRelaySessionShare
 
 export function revokeRelayShare(shareId: string) {
   return request<RelaySessionShareDto>(`/relay/shares/${encodeURIComponent(shareId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function createRelayGrant(input: CreateRelayAccessGrantInput) {
+  return request<RelayAccessGrantDto>('/relay/grants', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateRelayGrant(grantId: string, input: UpdateRelayAccessGrantInput) {
+  return request<RelayAccessGrantDto>(`/relay/grants/${encodeURIComponent(grantId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function revokeRelayGrant(grantId: string) {
+  return request<RelayAccessGrantDto>(`/relay/grants/${encodeURIComponent(grantId)}`, {
     method: 'DELETE',
   });
 }

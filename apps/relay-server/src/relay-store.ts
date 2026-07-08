@@ -5,7 +5,10 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import type {
+  CreateRelayAccessGrantInput,
   CreateRelaySessionShareInput,
+  RelayAccessGrantDto,
+  RelayAccessGrantEventDto,
   RelayAdminDeviceDto,
   RelayAdminSummaryDto,
   RelayAdminThreadDto,
@@ -19,10 +22,13 @@ import type {
   RelaySessionDto,
   RelaySessionShareAccessDto,
   RelaySessionShareDto,
+  RelayShareScopeDto,
   RelayThreadAccessDto,
   RelayUserDto,
   RelayUserRoleDto,
   RelayWorkspaceAccessDto,
+  RelayWorkspaceScopeDto,
+  UpdateRelayAccessGrantInput,
   UpdateRelaySessionShareInput,
 } from '../../../packages/shared/src/index';
 
@@ -47,6 +53,7 @@ interface RelayStoreData {
   users: StoredUser[];
   devices: StoredDevice[];
   shares: RelaySessionShareDto[];
+  grants?: RelayAccessGrantDto[];
 }
 
 interface SessionPayload {
@@ -78,16 +85,24 @@ export type EffectiveRelayAccess =
   | {
       kind: 'owner';
       share: null;
+      grant: null;
+      scope: 'owner';
       threadAccess: 'control';
       workspaceAccess: 'write';
       workspaceId: null;
+      workspaceScope: null;
+      canCreateThreads: true;
     }
   | {
       kind: 'shared';
-      share: RelaySessionShareDto;
+      share: RelaySessionShareDto | null;
+      grant: RelayAccessGrantDto;
+      scope: RelayShareScopeDto;
       threadAccess: RelayThreadAccessDto;
       workspaceAccess: RelayWorkspaceAccessDto;
       workspaceId: string | null;
+      workspaceScope: RelayWorkspaceScopeDto;
+      canCreateThreads: boolean;
     };
 
 export class RelayStore {
@@ -333,6 +348,88 @@ export class RelayStore {
     return share;
   }
 
+  createGrant(ownerUserId: string, input: CreateRelayAccessGrantInput) {
+    const owner = this.requireUser(ownerUserId);
+    const device = this.getDevice(input.deviceId);
+    if (!device || device.ownerUserId !== ownerUserId) {
+      throw new RelayStoreError(404, 'not_found', 'Device was not found.');
+    }
+    const target = this.getUserByIdentifier(input.targetIdentifier);
+    if (!target || !target.enabled) {
+      throw new RelayStoreError(404, 'not_found', 'Target user was not found.');
+    }
+    if (target.id === ownerUserId) {
+      throw new RelayStoreError(400, 'bad_request', 'You cannot share access with yourself.');
+    }
+
+    const scope = normalizeShareScope(input.scope);
+    const threadId = scope === 'thread' ? input.threadId?.trim() || null : null;
+    const workspaceId = scope === 'workspace' ? input.workspaceId?.trim() || null : null;
+    if (scope === 'thread' && !threadId) {
+      throw new RelayStoreError(400, 'bad_request', 'threadId is required for thread grants.');
+    }
+    if (scope === 'workspace' && !workspaceId) {
+      throw new RelayStoreError(400, 'bad_request', 'workspaceId is required for workspace grants.');
+    }
+
+    const existing = this.rowToGrant(
+      this.sqlite
+        .prepare(
+          `
+            SELECT * FROM relay_access_grants
+            WHERE owner_user_id = ?
+              AND target_user_id = ?
+              AND device_id = ?
+              AND scope = ?
+              AND COALESCE(thread_id, '') = COALESCE(?, '')
+              AND COALESCE(workspace_id, '') = COALESCE(?, '')
+              AND revoked_at IS NULL
+          `,
+        )
+        .get(ownerUserId, target.id, input.deviceId, scope, threadId, workspaceId) as GrantRow | undefined,
+    );
+    if (existing) {
+      return this.updateGrantRecord(existing.id, {
+        label: input.label?.trim() || null,
+        workspaceScope: normalizeWorkspaceScope(input.workspaceScope),
+        workspaceIds: normalizeWorkspaceIds(input.workspaceIds),
+        threadAccess: normalizeThreadAccess(input.threadAccess),
+        workspaceAccess: normalizeWorkspaceAccess(input.workspaceAccess),
+        canCreateThreads: Boolean(input.canCreateThreads),
+        expiresAt: normalizeExpiresAt(input.expiresAt),
+      });
+    }
+
+    const grant: RelayAccessGrantDto = {
+      id: crypto.randomUUID(),
+      ownerUserId,
+      ownerUsername: owner.username,
+      targetUserId: target.id,
+      targetUsername: target.username,
+      deviceId: input.deviceId,
+      deviceName: device.name,
+      scope,
+      threadId,
+      threadTitle: null,
+      workspaceId,
+      workspaceLabel: null,
+      workspaceScope: normalizeWorkspaceScope(input.workspaceScope),
+      workspaceIds: normalizeWorkspaceIds(input.workspaceIds),
+      label: input.label?.trim() || null,
+      threadAccess: normalizeThreadAccess(input.threadAccess),
+      workspaceAccess: normalizeWorkspaceAccess(input.workspaceAccess),
+      canCreateThreads: Boolean(input.canCreateThreads),
+      createdAt: new Date().toISOString(),
+      revokedAt: null,
+      expiresAt: normalizeExpiresAt(input.expiresAt),
+      lastAccessedAt: null,
+      lastAccessedByUsername: null,
+      accessEvents: [],
+    };
+    this.insertGrant(grant);
+    return grant;
+  }
+
   updateShare(userId: string, shareId: string, input: UpdateRelaySessionShareInput) {
     const share = this.rowToShare(
       this.sqlite
@@ -371,6 +468,54 @@ export class RelayStore {
     return { ...share, revokedAt };
   }
 
+  updateGrant(userId: string, grantId: string, input: UpdateRelayAccessGrantInput) {
+    const grant = this.rowToGrant(
+      this.sqlite
+        .prepare('SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL')
+        .get(grantId, userId) as GrantRow | undefined,
+    );
+    if (!grant) {
+      throw new RelayStoreError(404, 'not_found', 'Grant was not found.');
+    }
+    return this.publicGrant(
+      this.updateGrantRecord(grantId, {
+        label: input.label !== undefined ? input.label?.trim() || null : grant.label,
+        workspaceScope: input.workspaceScope !== undefined
+          ? normalizeWorkspaceScope(input.workspaceScope)
+          : grant.workspaceScope,
+        workspaceIds: input.workspaceIds !== undefined
+          ? normalizeWorkspaceIds(input.workspaceIds)
+          : grant.workspaceIds,
+        threadAccess: input.threadAccess !== undefined
+          ? normalizeThreadAccess(input.threadAccess)
+          : grant.threadAccess,
+        workspaceAccess: input.workspaceAccess !== undefined
+          ? normalizeWorkspaceAccess(input.workspaceAccess)
+          : grant.workspaceAccess,
+        canCreateThreads: input.canCreateThreads !== undefined
+          ? Boolean(input.canCreateThreads)
+          : grant.canCreateThreads,
+        expiresAt: input.expiresAt !== undefined ? normalizeExpiresAt(input.expiresAt) : grant.expiresAt,
+      }),
+    );
+  }
+
+  revokeGrant(userId: string, grantId: string) {
+    const grant = this.rowToGrant(
+      this.sqlite
+        .prepare('SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ?')
+        .get(grantId, userId) as GrantRow | undefined,
+    );
+    if (!grant) {
+      throw new RelayStoreError(404, 'not_found', 'Grant was not found.');
+    }
+    const revokedAt = new Date().toISOString();
+    this.sqlite
+      .prepare('UPDATE relay_access_grants SET revoked_at = ? WHERE id = ?')
+      .run(revokedAt, grantId);
+    return { ...grant, revokedAt };
+  }
+
   effectiveAccess(userId: string, deviceId: string, scope: {
     threadId?: string | null;
     workspaceId?: string | null;
@@ -382,9 +527,13 @@ export class RelayStore {
       return {
         kind: 'owner',
         share: null,
+        grant: null,
+        scope: 'owner',
         threadAccess: 'control',
         workspaceAccess: 'write',
         workspaceId: null,
+        workspaceScope: null,
+        canCreateThreads: true,
       };
     }
 
@@ -406,22 +555,28 @@ export class RelayStore {
           )
           .get(userId, deviceId, scope.threadId, now) as ShareRow | undefined,
       );
-      if (!share) {
-        return null;
+      if (share) {
+        if (
+          scope.workspaceId &&
+          (!share.workspaceId || share.workspaceId !== scope.workspaceId || share.workspaceAccess === 'none')
+        ) {
+          const grant = this.findBestGrant(userId, deviceId, scope);
+          return grant ? this.accessFromGrant(grant) : null;
+        }
+        return {
+          kind: 'shared',
+          share,
+          grant: this.grantFromShare(share),
+          scope: 'thread',
+          threadAccess: share.threadAccess,
+          workspaceAccess: share.workspaceAccess,
+          workspaceId: share.workspaceId,
+          workspaceScope: 'selected',
+          canCreateThreads: false,
+        };
       }
-      if (
-        scope.workspaceId &&
-        (!share.workspaceId || share.workspaceId !== scope.workspaceId || share.workspaceAccess === 'none')
-      ) {
-        return null;
-      }
-      return {
-        kind: 'shared',
-        share,
-        threadAccess: share.threadAccess,
-        workspaceAccess: share.workspaceAccess,
-        workspaceId: share.workspaceId,
-      };
+      const grant = this.findBestGrant(userId, deviceId, scope);
+      return grant ? this.accessFromGrant(grant) : null;
     }
 
     if (scope.workspaceId) {
@@ -444,19 +599,25 @@ export class RelayStore {
           )
           .get(userId, deviceId, scope.workspaceId, now) as ShareRow | undefined,
       );
-      if (!share) {
-        return null;
+      if (share) {
+        return {
+          kind: 'shared',
+          share,
+          grant: this.grantFromShare(share),
+          scope: 'thread',
+          threadAccess: share.threadAccess,
+          workspaceAccess: share.workspaceAccess,
+          workspaceId: share.workspaceId,
+          workspaceScope: 'selected',
+          canCreateThreads: false,
+        };
       }
-      return {
-        kind: 'shared',
-        share,
-        threadAccess: share.threadAccess,
-        workspaceAccess: share.workspaceAccess,
-        workspaceId: share.workspaceId,
-      };
+      const grant = this.findBestGrant(userId, deviceId, scope);
+      return grant ? this.accessFromGrant(grant) : null;
     }
 
-    return null;
+    const grant = this.findBestGrant(userId, deviceId, scope);
+    return grant ? this.accessFromGrant(grant) : null;
   }
 
   canAccessDevice(userId: string, deviceId: string, threadId?: string | null) {
@@ -472,11 +633,26 @@ export class RelayStore {
     const devices = this.getDevicesByOwner(userId);
     const sharedWithMe = this.getSharesByTarget(userId);
     const sharedByMe = this.getSharesByOwner(userId);
+    const grantsWithMe = this.getGrantsByTarget(userId);
+    const grantsByMe = this.getGrantsByOwner(userId);
     return {
       user: this.publicUser(user),
       devices: devices.map((device) => this.publicDevice(device, connectedDevices.get(device.id) ?? null)),
       sharedWithMe: sharedWithMe.map((share) => this.publicShare(share)),
       sharedByMe: sharedByMe.map((share) => this.publicShare(share)),
+      sharedDevicesWithMe: grantsWithMe
+        .filter((grant) => grant.scope === 'device')
+        .map((grant) => this.publicGrant(grant)),
+      sharedThreadsWithMe: [
+        ...sharedWithMe.map((share) => this.publicGrant(this.grantFromShare(share))),
+        ...grantsWithMe
+          .filter((grant) => grant.scope !== 'device')
+          .map((grant) => this.publicGrant(grant)),
+      ],
+      grantsByMe: [
+        ...sharedByMe.map((share) => this.publicGrant(this.grantFromShare(share))),
+        ...grantsByMe.map((grant) => this.publicGrant(grant)),
+      ],
     };
   }
 
@@ -775,6 +951,22 @@ export class RelayStore {
       .run(crypto.randomUUID(), share.id, user.id, user.username, accessedAt);
   }
 
+  recordGrantAccess(grant: RelayAccessGrantDto, user: RelayUserDto) {
+    if (grant.revokedAt || (grant.expiresAt && grant.expiresAt <= new Date().toISOString())) {
+      return;
+    }
+    const accessedAt = new Date().toISOString();
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_access_grant_events (
+            id, grant_id, user_id, username, accessed_at
+          ) VALUES (?, ?, ?, ?, ?)
+        `,
+      )
+      .run(crypto.randomUUID(), grant.id, user.id, user.username, accessedAt);
+  }
+
   private publicShare(share: RelaySessionShareDto): RelaySessionShareDto {
     const owner = this.getUser(share.ownerUserId);
     const target = this.getUser(share.targetUserId);
@@ -786,6 +978,23 @@ export class RelayStore {
       ownerUsername: share.ownerUsername ?? owner?.username ?? 'unknown',
       targetUsername: share.targetUsername ?? target?.username ?? 'unknown',
       deviceName: share.deviceName ?? device?.name ?? 'Remote Codex device',
+      lastAccessedAt: lastAccess?.accessedAt ?? null,
+      lastAccessedByUsername: lastAccess?.username ?? null,
+      accessEvents,
+    };
+  }
+
+  private publicGrant(grant: RelayAccessGrantDto): RelayAccessGrantDto {
+    const owner = this.getUser(grant.ownerUserId);
+    const target = this.getUser(grant.targetUserId);
+    const device = this.getDevice(grant.deviceId);
+    const accessEvents = this.getGrantAccessEvents(grant.id);
+    const lastAccess = accessEvents[0] ?? null;
+    return {
+      ...grant,
+      ownerUsername: grant.ownerUsername ?? owner?.username ?? 'unknown',
+      targetUsername: grant.targetUsername ?? target?.username ?? 'unknown',
+      deviceName: grant.deviceName ?? device?.name ?? 'Remote Codex device',
       lastAccessedAt: lastAccess?.accessedAt ?? null,
       lastAccessedByUsername: lastAccess?.username ?? null,
       accessEvents,
@@ -857,6 +1066,44 @@ export class RelayStore {
 
       CREATE INDEX IF NOT EXISTS relay_share_access_events_share_idx ON relay_share_access_events(share_id, accessed_at DESC);
 
+      CREATE TABLE IF NOT EXISTS relay_access_grants (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        owner_username TEXT,
+        target_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        target_username TEXT,
+        device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+        device_name TEXT,
+        scope TEXT NOT NULL CHECK (scope IN ('thread', 'workspace', 'device')),
+        thread_id TEXT,
+        thread_title TEXT,
+        workspace_id TEXT,
+        workspace_label TEXT,
+        workspace_scope TEXT NOT NULL DEFAULT 'all',
+        workspace_ids TEXT NOT NULL DEFAULT '[]',
+        label TEXT,
+        thread_access TEXT NOT NULL DEFAULT 'control',
+        workspace_access TEXT NOT NULL DEFAULT 'none',
+        can_create_threads INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT,
+        expires_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_access_grants_owner_idx ON relay_access_grants(owner_user_id);
+      CREATE INDEX IF NOT EXISTS relay_access_grants_target_idx ON relay_access_grants(target_user_id);
+      CREATE INDEX IF NOT EXISTS relay_access_grants_device_scope_idx ON relay_access_grants(device_id, scope);
+
+      CREATE TABLE IF NOT EXISTS relay_access_grant_events (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL REFERENCES relay_access_grants(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        username TEXT NOT NULL,
+        accessed_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_access_grant_events_grant_idx ON relay_access_grant_events(grant_id, accessed_at DESC);
+
       CREATE TABLE IF NOT EXISTS relay_conversation_events (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
@@ -890,6 +1137,9 @@ export class RelayStore {
     this.ensureColumn('relay_shares', 'thread_access', "TEXT NOT NULL DEFAULT 'control'");
     this.ensureColumn('relay_shares', 'workspace_access', "TEXT NOT NULL DEFAULT 'none'");
     this.ensureColumn('relay_shares', 'expires_at', 'TEXT');
+    this.ensureColumn('relay_access_grants', 'workspace_scope', "TEXT NOT NULL DEFAULT 'all'");
+    this.ensureColumn('relay_access_grants', 'workspace_ids', "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn('relay_access_grants', 'can_create_threads', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
@@ -1141,6 +1391,43 @@ export class RelayStore {
       );
   }
 
+  private insertGrant(grant: RelayAccessGrantDto) {
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_access_grants (
+            id, owner_user_id, owner_username, target_user_id, target_username,
+            device_id, device_name, scope, thread_id, thread_title, workspace_id,
+            workspace_label, workspace_scope, workspace_ids, label, thread_access,
+            workspace_access, can_create_threads, created_at, revoked_at, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        grant.id,
+        grant.ownerUserId,
+        grant.ownerUsername,
+        grant.targetUserId,
+        grant.targetUsername,
+        grant.deviceId,
+        grant.deviceName,
+        grant.scope,
+        grant.threadId,
+        grant.threadTitle,
+        grant.workspaceId,
+        grant.workspaceLabel,
+        grant.workspaceScope,
+        JSON.stringify(grant.workspaceIds),
+        grant.label,
+        grant.threadAccess,
+        grant.workspaceAccess,
+        grant.canCreateThreads ? 1 : 0,
+        grant.createdAt,
+        grant.revokedAt,
+        grant.expiresAt,
+      );
+  }
+
   updateShareMetadata(
     shareId: string,
     input: {
@@ -1193,6 +1480,27 @@ export class RelayStore {
     }));
   }
 
+  private getGrantAccessEvents(grantId: string): RelayAccessGrantEventDto[] {
+    return (
+      this.sqlite
+        .prepare(
+          `
+            SELECT * FROM relay_access_grant_events
+            WHERE grant_id = ?
+            ORDER BY accessed_at DESC
+            LIMIT 8
+          `,
+        )
+        .all(grantId) as GrantAccessRow[]
+    ).map((row) => ({
+      id: row.id,
+      grantId: row.grant_id,
+      userId: row.user_id,
+      username: row.username,
+      accessedAt: row.accessed_at,
+    }));
+  }
+
   private updateShareRecord(
     shareId: string,
     input: {
@@ -1225,6 +1533,47 @@ export class RelayStore {
       );
     return this.rowToShare(
       this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+    )!;
+  }
+
+  private updateGrantRecord(
+    grantId: string,
+    input: {
+      label: string | null;
+      workspaceScope: RelayWorkspaceScopeDto;
+      workspaceIds: string[];
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      canCreateThreads: boolean;
+      expiresAt: string | null;
+    },
+  ) {
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_access_grants
+          SET label = ?,
+              workspace_scope = ?,
+              workspace_ids = ?,
+              thread_access = ?,
+              workspace_access = ?,
+              can_create_threads = ?,
+              expires_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(
+        input.label,
+        input.workspaceScope,
+        JSON.stringify(input.workspaceIds),
+        input.threadAccess,
+        input.workspaceAccess,
+        input.canCreateThreads ? 1 : 0,
+        input.expiresAt,
+        grantId,
+      );
+    return this.rowToGrant(
+      this.sqlite.prepare('SELECT * FROM relay_access_grants WHERE id = ?').get(grantId) as GrantRow | undefined,
     )!;
   }
 
@@ -1292,6 +1641,138 @@ export class RelayStore {
     return rows
       .map((row) => this.rowToShare(row))
       .filter((share): share is RelaySessionShareDto => Boolean(share));
+  }
+
+  private getGrantsByOwner(ownerUserId: string) {
+    return (this.sqlite.prepare("SELECT * FROM relay_access_grants WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(ownerUserId, new Date().toISOString()) as GrantRow[])
+      .map((row) => this.rowToGrant(row))
+      .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
+  }
+
+  private getGrantsByTarget(targetUserId: string) {
+    return (this.sqlite.prepare("SELECT * FROM relay_access_grants WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(targetUserId, new Date().toISOString()) as GrantRow[])
+      .map((row) => this.rowToGrant(row))
+      .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
+  }
+
+  private findBestGrant(
+    userId: string,
+    deviceId: string,
+    scope: {
+      threadId?: string | null;
+      workspaceId?: string | null;
+    },
+  ) {
+    const now = new Date().toISOString();
+    const rows = this.sqlite
+      .prepare(
+        `
+          SELECT * FROM relay_access_grants
+          WHERE target_user_id = ?
+            AND device_id = ?
+            AND revoked_at IS NULL
+            AND (expires_at IS NULL OR expires_at > ?)
+          ORDER BY
+            CASE scope
+              WHEN 'thread' THEN 3
+              WHEN 'workspace' THEN 2
+              WHEN 'device' THEN 1
+              ELSE 0
+            END DESC,
+            CASE thread_access WHEN 'control' THEN 2 WHEN 'read' THEN 1 ELSE 0 END DESC,
+            CASE workspace_access WHEN 'write' THEN 2 WHEN 'read' THEN 1 ELSE 0 END DESC,
+            can_create_threads DESC,
+            created_at DESC
+        `,
+      )
+      .all(userId, deviceId, now) as GrantRow[];
+    const grants = rows
+      .map((row) => this.rowToGrant(row))
+      .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
+    return grants.find((grant) => this.grantMatchesScope(grant, scope)) ?? null;
+  }
+
+  private grantMatchesScope(
+    grant: RelayAccessGrantDto,
+    scope: {
+      threadId?: string | null;
+      workspaceId?: string | null;
+    },
+  ) {
+    if (grant.scope === 'thread') {
+      if (!scope.threadId || grant.threadId !== scope.threadId) {
+        return false;
+      }
+      if (
+        scope.workspaceId &&
+        (!grant.workspaceId || grant.workspaceId !== scope.workspaceId || grant.workspaceAccess === 'none')
+      ) {
+        return false;
+      }
+      return true;
+    }
+    if (grant.scope === 'workspace') {
+      if (!scope.workspaceId || grant.workspaceId !== scope.workspaceId || grant.workspaceAccess === 'none') {
+        return false;
+      }
+      return true;
+    }
+    if (grant.scope === 'device') {
+      if (scope.workspaceId && grant.workspaceAccess === 'none') {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private accessFromGrant(grant: RelayAccessGrantDto): EffectiveRelayAccess {
+    return {
+      kind: 'shared',
+      share: null,
+      grant,
+      scope: grant.scope,
+      threadAccess: grant.threadAccess,
+      workspaceAccess: grant.workspaceAccess,
+      workspaceId: grant.workspaceId,
+      workspaceScope: grant.workspaceScope,
+      canCreateThreads: grant.canCreateThreads,
+    };
+  }
+
+  private grantFromShare(share: RelaySessionShareDto): RelayAccessGrantDto {
+    return {
+      id: share.id,
+      ownerUserId: share.ownerUserId,
+      ownerUsername: share.ownerUsername,
+      targetUserId: share.targetUserId,
+      targetUsername: share.targetUsername,
+      deviceId: share.deviceId,
+      deviceName: share.deviceName,
+      scope: 'thread',
+      threadId: share.threadId,
+      threadTitle: share.threadTitle,
+      workspaceId: share.workspaceId,
+      workspaceLabel: share.workspaceLabel,
+      workspaceScope: 'selected',
+      workspaceIds: share.workspaceId ? [share.workspaceId] : [],
+      label: share.label,
+      threadAccess: share.threadAccess,
+      workspaceAccess: share.workspaceAccess,
+      canCreateThreads: false,
+      createdAt: share.createdAt,
+      revokedAt: share.revokedAt,
+      expiresAt: share.expiresAt,
+      lastAccessedAt: share.lastAccessedAt,
+      lastAccessedByUsername: share.lastAccessedByUsername,
+      accessEvents: share.accessEvents.map((event) => ({
+        id: event.id,
+        grantId: event.shareId,
+        userId: event.userId,
+        username: event.username,
+        accessedAt: event.accessedAt,
+      })),
+    };
   }
 
   private conversationCountsByUser(days: number) {
@@ -1425,6 +1906,36 @@ export class RelayStore {
     };
   }
 
+  private rowToGrant(row?: GrantRow): RelayAccessGrantDto | null {
+    if (!row) return null;
+    return {
+      id: row.id,
+      ownerUserId: row.owner_user_id,
+      ownerUsername: row.owner_username ?? 'unknown',
+      targetUserId: row.target_user_id,
+      targetUsername: row.target_username ?? 'unknown',
+      deviceId: row.device_id,
+      deviceName: row.device_name ?? 'Remote Codex device',
+      scope: normalizeShareScope(row.scope),
+      threadId: row.thread_id ?? null,
+      threadTitle: row.thread_title ?? null,
+      workspaceId: row.workspace_id ?? null,
+      workspaceLabel: row.workspace_label ?? null,
+      workspaceScope: normalizeWorkspaceScope(row.workspace_scope),
+      workspaceIds: parseWorkspaceIds(row.workspace_ids),
+      label: row.label,
+      threadAccess: normalizeThreadAccess(row.thread_access),
+      workspaceAccess: normalizeWorkspaceAccess(row.workspace_access),
+      canCreateThreads: Boolean(row.can_create_threads),
+      createdAt: row.created_at,
+      revokedAt: row.revoked_at,
+      expiresAt: row.expires_at ?? null,
+      lastAccessedAt: null,
+      lastAccessedByUsername: null,
+      accessEvents: [],
+    };
+  }
+
   private rowToPendingRegistration(row?: PendingRegistrationRow): PendingRegistrationRecord | null {
     if (!row) return null;
     return {
@@ -1491,6 +2002,38 @@ interface ShareAccessRow {
   accessed_at: string;
 }
 
+interface GrantRow {
+  id: string;
+  owner_user_id: string;
+  owner_username: string | null;
+  target_user_id: string;
+  target_username: string | null;
+  device_id: string;
+  device_name: string | null;
+  scope: string;
+  thread_id: string | null;
+  thread_title: string | null;
+  workspace_id: string | null;
+  workspace_label: string | null;
+  workspace_scope: string | null;
+  workspace_ids: string | null;
+  label: string | null;
+  thread_access: string | null;
+  workspace_access: string | null;
+  can_create_threads: number;
+  created_at: string;
+  revoked_at: string | null;
+  expires_at: string | null;
+}
+
+interface GrantAccessRow {
+  id: string;
+  grant_id: string;
+  user_id: string;
+  username: string;
+  accessed_at: string;
+}
+
 export interface DeviceConnectionStatus {
   connected: boolean;
   connectedAt: string | null;
@@ -1533,6 +2076,36 @@ function normalizeWorkspaceAccess(value: string | null | undefined): RelayWorksp
     return value;
   }
   return 'none';
+}
+
+function normalizeShareScope(value: string | null | undefined): RelayShareScopeDto {
+  if (value === 'workspace' || value === 'device') {
+    return value;
+  }
+  return 'thread';
+}
+
+function normalizeWorkspaceScope(value: string | null | undefined): RelayWorkspaceScopeDto {
+  return value === 'selected' ? 'selected' : 'all';
+}
+
+function normalizeWorkspaceIds(values: string[] | null | undefined) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+}
+
+function parseWorkspaceIds(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return normalizeWorkspaceIds(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return [];
+  }
 }
 
 function normalizeExpiresAt(value: string | null | undefined) {
