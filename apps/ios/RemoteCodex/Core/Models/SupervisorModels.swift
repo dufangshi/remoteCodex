@@ -715,13 +715,17 @@ struct RelayAccessGrantSummary: Codable, Equatable, Identifiable {
         targetUserId: String,
         deviceId: String,
         deviceName: String,
+        scope: String = "thread",
         threadId: String,
         threadTitle: String?,
         workspaceId: String?,
         workspaceLabel: String?,
+        workspaceScope: String? = nil,
+        workspaceIds: [String] = [],
         label: String?,
         threadAccess: String,
         workspaceAccess: String,
+        canCreateThreads: Bool = false,
         createdAt: String,
         revokedAt: String?,
         expiresAt: String?,
@@ -736,13 +740,17 @@ struct RelayAccessGrantSummary: Codable, Equatable, Identifiable {
         self.targetUserId = targetUserId
         self.deviceId = deviceId
         self.deviceName = deviceName
+        self.scope = scope
         self.threadId = threadId
         self.threadTitle = threadTitle
         self.workspaceId = workspaceId
         self.workspaceLabel = workspaceLabel
+        self.workspaceScope = workspaceScope
+        self.workspaceIds = workspaceIds
         self.label = label
         self.threadAccess = threadAccess
         self.workspaceAccess = workspaceAccess
+        self.canCreateThreads = canCreateThreads
         self.createdAt = createdAt
         self.revokedAt = revokedAt
         self.expiresAt = expiresAt
@@ -860,6 +868,50 @@ struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
         case lastAccessedAt
         case lastAccessedByUsername
         case accessEvents
+    }
+
+    init(
+        id: String,
+        ownerUserId: String,
+        ownerUsername: String,
+        targetUsername: String,
+        targetUserId: String,
+        deviceId: String,
+        deviceName: String,
+        threadId: String,
+        threadTitle: String?,
+        workspaceId: String?,
+        workspaceLabel: String?,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        createdAt: String,
+        revokedAt: String?,
+        expiresAt: String?,
+        lastAccessedAt: String?,
+        lastAccessedByUsername: String?,
+        accessEvents: [RelaySessionShareAccessSummary]
+    ) {
+        self.id = id
+        self.ownerUserId = ownerUserId
+        self.ownerUsername = ownerUsername
+        self.targetUsername = targetUsername
+        self.targetUserId = targetUserId
+        self.deviceId = deviceId
+        self.deviceName = deviceName
+        self.threadId = threadId
+        self.threadTitle = threadTitle
+        self.workspaceId = workspaceId
+        self.workspaceLabel = workspaceLabel
+        self.label = label
+        self.threadAccess = threadAccess
+        self.workspaceAccess = workspaceAccess
+        self.createdAt = createdAt
+        self.revokedAt = revokedAt
+        self.expiresAt = expiresAt
+        self.lastAccessedAt = lastAccessedAt
+        self.lastAccessedByUsername = lastAccessedByUsername
+        self.accessEvents = accessEvents
     }
 
     init(from decoder: Decoder) throws {

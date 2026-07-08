@@ -64,9 +64,9 @@ final class PhaseOneViewModelTests: XCTestCase {
         let transport = MockSupervisorTransport()
         let environment = makeEnvironment(transport: transport)
         var readyConfig: SupervisorConnectionConfig?
-        let model = ConnectionViewModel(environment: environment) { config in
+        let model = ConnectionViewModel(environment: environment) { config, _ in
             readyConfig = config
-        }
+        } onOpenRelaySharedThread: { _, _ in }
         model.mode = .relay
         model.baseURL = "https://relay.example.com"
         model.authToken = "relay-token"
@@ -100,7 +100,8 @@ final class PhaseOneViewModelTests: XCTestCase {
             )
         )
 
-        let model = ConnectionViewModel(environment: environment) { _ in }
+        let model = ConnectionViewModel(environment: environment) { _, _ in
+        } onOpenRelaySharedThread: { _, _ in }
 
         XCTAssertEqual(model.mode, .relay)
         XCTAssertEqual(model.route, .relayDevices)
@@ -131,9 +132,9 @@ final class PhaseOneViewModelTests: XCTestCase {
         }
         let environment = makeEnvironment(transport: transport)
         var readyConfig: SupervisorConnectionConfig?
-        let model = ConnectionViewModel(environment: environment) { config in
+        let model = ConnectionViewModel(environment: environment) { config, _ in
             readyConfig = config
-        }
+        } onOpenRelaySharedThread: { _, _ in }
         model.mode = .local
         model.baseURL = "http://127.0.0.1:8787"
 

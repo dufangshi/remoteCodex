@@ -342,7 +342,7 @@ final class SupervisorAPIClient: @unchecked Sendable {
         threadId: String? = nil,
         workspaceId: String? = nil
     ) async throws -> RelayEffectiveAccessSummary {
-        let queryItems: [(String, String?)] = [
+        let queryItems = [
             ("deviceId", deviceId),
             ("threadId", threadId),
             ("workspaceId", workspaceId)

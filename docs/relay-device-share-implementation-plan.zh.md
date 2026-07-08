@@ -511,6 +511,12 @@ Mobile navigation:
 - [ ] iOS relay smoke with owner and target accounts.
 - [x] No mobile-only route assumes all devices are owned.
 
+当前移动端验证记录:
+
+- Android: `SupervisorApiClientTest` 已通过，覆盖 shared device / effective access DTO 与 relay API 解析。
+- iOS: `SupervisorAPIClientTests` 与 `PhaseOneViewModelTests` 已通过，覆盖 shared device DTO、relay API 路径与连接视图模型签名。
+- 以上不替代真实 owner/target 双账号 relay smoke，因此两个 smoke checkbox 暂不勾选。
+
 ## Security and Audit
 
 ### Phase 10: Boundary hardening
