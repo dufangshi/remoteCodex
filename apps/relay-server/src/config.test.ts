@@ -3,16 +3,15 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadRelayServerConfig } from './config';
 
-const originalCwd = process.cwd();
 const tempDirs: string[] = [];
 
 describe('relay server config', () => {
   afterEach(async () => {
-    process.chdir(originalCwd);
+    vi.restoreAllMocks();
     await Promise.all(
       tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
     );
@@ -24,7 +23,7 @@ describe('relay server config', () => {
     const distDir = path.join(tempDir, 'apps', 'supervisor-web', 'dist');
     await fs.mkdir(distDir, { recursive: true });
     await fs.writeFile(path.join(distDir, 'index.html'), '<html></html>', 'utf8');
-    process.chdir(tempDir);
+    vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
 
     const config = loadRelayServerConfig({
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',
@@ -110,7 +109,7 @@ describe('relay server config', () => {
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
     } as any);
 
-    const repoDistDir = path.resolve(originalCwd, '../supervisor-web/dist');
+    const repoDistDir = path.resolve(process.cwd(), '../supervisor-web/dist');
     const expectedDistDir =
       fsSyncExists(path.join(repoDistDir, 'index.html')) ? repoDistDir : null;
     expect(config.webDistDir).toBe(expectedDistDir);

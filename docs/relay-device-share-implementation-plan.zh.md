@@ -323,12 +323,12 @@ Special list behavior:
 
 Update WebSocket behavior:
 
-- [ ] `/relay/devices/:deviceId/ws?threadId=...` permits device grant.
-- [ ] `/relay/devices/:deviceId/ws` permits device grant without thread filter.
-- [ ] Read-only device viewers receive events but cannot send control messages.
-- [ ] Collaborator/operator can send allowed client messages.
-- [ ] If a specific `threadId` is present, keep filtering events to that thread.
-- [ ] If no `threadId`, device grant can receive device-wide thread status updates.
+- [x] `/relay/devices/:deviceId/ws?threadId=...` permits device grant.
+- [x] `/relay/devices/:deviceId/ws` permits device grant without thread filter.
+- [x] Read-only device viewers receive events but cannot send control messages.
+- [x] Collaborator/operator can send allowed client messages.
+- [x] If a specific `threadId` is present, keep filtering events to that thread.
+- [x] If no `threadId`, device grant can receive device-wide thread status updates.
 
 Open question:
 
@@ -336,9 +336,9 @@ Open question:
 
 验收：
 
-- [ ] A and B can view the same shared thread and both receive streaming updates.
-- [ ] B can see sidebar room status change when another user starts a thread on the shared device.
-- [ ] Viewer socket cannot control supervisor.
+- [x] A and B can view the same shared thread and both receive streaming updates.
+- [x] B can see sidebar room status change when another user starts a thread on the shared device.
+- [x] Viewer socket cannot control supervisor.
 
 ## API Design
 
@@ -377,7 +377,7 @@ Migration compatibility:
 
 验收：
 
-- [ ] API tests cover create/update/revoke device grant.
+- [x] API tests cover create/update/revoke device grant.
 - [ ] API tests cover compatibility thread share endpoint.
 - [ ] API tests cover portal summary grouping.
 
@@ -484,19 +484,19 @@ Mobile navigation:
 
 Required tests:
 
-- [ ] Shared device Viewer cannot prompt.
-- [ ] Shared device Collaborator cannot write files.
-- [ ] Shared device Operator can write files.
+- [x] Shared device Viewer cannot prompt.
+- [x] Shared device Collaborator cannot write files.
+- [x] Shared device Operator can write files.
 - [ ] Shared device user cannot:
-  - delete device
-  - copy device setup token
-  - restart runtime
-  - install/update runtime
-  - access relay admin
-  - mutate registration settings
-- [ ] Revoke cuts access for HTTP requests immediately.
+  - [x] delete device
+  - [ ] copy device setup token
+  - [x] restart runtime
+  - [ ] install/update runtime
+  - [ ] access relay admin
+  - [ ] mutate registration settings
+- [x] Revoke cuts access for HTTP requests immediately.
 - [ ] Revoke closes or invalidates WebSocket on next permission check.
-- [ ] Expired grant is denied.
+- [x] Expired grant is denied.
 
 Audit event plan:
 

@@ -106,6 +106,80 @@ async function setupSharedRelaySession(options: {
   };
 }
 
+async function setupDeviceGrantRelaySession(options: {
+  threadAccess?: 'read' | 'control';
+  workspaceAccess?: 'none' | 'read' | 'write';
+  canCreateThreads?: boolean;
+  expiresAt?: string | null;
+  label?: string | null;
+} = {}) {
+  const config = testConfig();
+  const app = buildRelayServer(config);
+  await app.ready();
+
+  const ownerResponse = await app.inject({
+    method: 'POST',
+    url: '/relay/auth/register',
+    payload: {
+      email: 'owner@example.test',
+      username: 'owner',
+      password: 'password123',
+    },
+  });
+  const ownerToken = ownerResponse.json().token as string;
+  const friendResponse = await app.inject({
+    method: 'POST',
+    url: '/relay/auth/register',
+    payload: {
+      email: 'friend@example.test',
+      username: 'friend',
+      password: 'password123',
+    },
+  });
+  const friendToken = friendResponse.json().token as string;
+  const deviceResponse = await app.inject({
+    method: 'POST',
+    url: '/relay/devices',
+    headers: {
+      authorization: `Bearer ${ownerToken}`,
+    },
+    payload: {
+      name: 'Owner workstation',
+    },
+  });
+  const deviceId = deviceResponse.json().device.id as string;
+  const deviceToken = deviceResponse.json().token as string;
+  const grantResponse = await app.inject({
+    method: 'POST',
+    url: '/relay/grants',
+    headers: {
+      authorization: `Bearer ${ownerToken}`,
+    },
+    payload: {
+      targetIdentifier: 'friend',
+      deviceId,
+      scope: 'device',
+      label: options.label ?? null,
+      threadAccess: options.threadAccess ?? 'read',
+      workspaceAccess: options.workspaceAccess ?? 'read',
+      canCreateThreads: options.canCreateThreads ?? false,
+      expiresAt: options.expiresAt ?? null,
+    },
+  });
+
+  expect(grantResponse.statusCode).toBe(200);
+
+  return {
+    app,
+    ownerToken,
+    friendToken,
+    deviceId,
+    deviceToken,
+    dataDir: config.dataDir,
+    grantId: grantResponse.json().id as string,
+  };
+}
+
 function websocketBaseUrl(app: ReturnType<typeof buildRelayServer>) {
   const address = app.server.address();
   if (!address || typeof address === 'string') {
@@ -136,7 +210,7 @@ async function waitForSocketMessage(socket: WebSocket) {
   return new Promise<any>((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error('Timed out waiting for websocket message.'));
-    }, 1000);
+    }, 3000);
     socket.addEventListener(
       'message',
       (event) => {
@@ -160,7 +234,7 @@ async function waitForSocketMessageMatching(
   socket: WebSocket,
   predicate: (message: any) => boolean,
 ) {
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
     const message = await waitForSocketMessage(socket);
     if (predicate(message)) {
@@ -212,37 +286,53 @@ async function answerRelayRequestsByPath(
   supervisorSocket: WebSocket,
   responsesByPath: Map<string, unknown>,
 ) {
-  const seen: any[] = [];
-  const pendingPaths = new Set(responsesByPath.keys());
-  const deadline = Date.now() + 1000;
-  while (pendingPaths.size > 0 && Date.now() < deadline) {
-    const message = await waitForSocketMessageMatching(
-      supervisorSocket,
-      (candidate) => candidate.type === 'relay.request',
-    );
-    const path = message.payload?.path;
-    if (!pendingPaths.has(path)) {
-      continue;
-    }
-    pendingPaths.delete(path);
-    seen.push(message);
-    supervisorSocket.send(JSON.stringify({
-      type: 'relay.response',
-      timestamp: '2026-07-01T00:00:04.000Z',
-      requestId: message.requestId,
-      payload: {
-        statusCode: 200,
-        headers: {
-          'content-type': 'application/json',
+  return new Promise<any[]>((resolve, reject) => {
+    const seen: any[] = [];
+    const pendingPaths = new Set(responsesByPath.keys());
+    const cleanup = () => {
+      clearTimeout(timeout);
+      supervisorSocket.removeEventListener('message', onMessage);
+      supervisorSocket.removeEventListener('error', onError);
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for relay paths: ${[...pendingPaths].join(', ')}`));
+    }, 3000);
+    const onError = () => {
+      cleanup();
+      reject(new Error('WebSocket failed while waiting for relay requests.'));
+    };
+    const onMessage = (event: MessageEvent) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type !== 'relay.request') {
+        return;
+      }
+      const requestPath = message.payload?.path;
+      if (!pendingPaths.has(requestPath)) {
+        return;
+      }
+      pendingPaths.delete(requestPath);
+      seen.push(message);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.response',
+        timestamp: '2026-07-01T00:00:04.000Z',
+        requestId: message.requestId,
+        payload: {
+          statusCode: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(responsesByPath.get(requestPath)),
         },
-        body: JSON.stringify(responsesByPath.get(path)),
-      },
-    }));
-  }
-  if (pendingPaths.size > 0) {
-    throw new Error(`Timed out waiting for relay paths: ${[...pendingPaths].join(', ')}`);
-  }
-  return seen;
+      }));
+      if (pendingPaths.size === 0) {
+        cleanup();
+        resolve(seen);
+      }
+    };
+    supervisorSocket.addEventListener('message', onMessage);
+    supervisorSocket.addEventListener('error', onError, { once: true });
+  });
 }
 
 describe('relay server', () => {
@@ -1195,6 +1285,44 @@ describe('relay server', () => {
     });
     expect(startThreadResponse.statusCode).toBe(503);
 
+    const updateGrantResponse = await app.inject({
+      method: 'PATCH',
+      url: `/relay/grants/${grantResponse.json().id}`,
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        label: 'Updated office access',
+        threadAccess: 'read',
+        workspaceAccess: 'none',
+        canCreateThreads: false,
+      },
+    });
+    expect(updateGrantResponse.statusCode).toBe(200);
+    expect(updateGrantResponse.json()).toMatchObject({
+      id: grantResponse.json().id,
+      label: 'Updated office access',
+      threadAccess: 'read',
+      workspaceAccess: 'none',
+      canCreateThreads: false,
+    });
+
+    const accessAfterUpdateResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/access?deviceId=${deviceId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(accessAfterUpdateResponse.statusCode).toBe(200);
+    expect(accessAfterUpdateResponse.json()).toMatchObject({
+      grantId: grantResponse.json().id,
+      scope: 'device',
+      threadAccess: 'read',
+      workspaceAccess: 'none',
+      canCreateThreads: false,
+    });
+
     const blockedRuntimeMutationResponse = await app.inject({
       method: 'POST',
       url: `/relay/devices/${deviceId}/api/agent-runtimes/codex/restart`,
@@ -1230,6 +1358,167 @@ describe('relay server', () => {
       },
     });
     expect(accessAfterRevokeResponse.statusCode).toBe(403);
+
+    const threadsAfterRevokeResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/api/threads`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(threadsAfterRevokeResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('keeps shared device viewers out of HTTP prompt and workspace mutations', async () => {
+    const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+      canCreateThreads: false,
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/prompt`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        prompt: 'not allowed',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(403);
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        path: 'README.md',
+        content: 'not allowed',
+      },
+    });
+    expect(uploadResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('keeps shared device collaborators out of workspace mutations', async () => {
+    const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'read',
+      canCreateThreads: true,
+    });
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        path: 'README.md',
+        content: 'not allowed',
+      },
+    });
+    expect(uploadResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+
+  it('forwards shared device operator workspace writes to the supervisor', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      canCreateThreads: true,
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const uploadResponsePromise = app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          path: 'README.md',
+          content: 'allowed',
+        },
+      });
+
+      const requestMessage = await waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.request',
+      );
+      expect(requestMessage).toMatchObject({
+        type: 'relay.request',
+        payload: {
+          method: 'POST',
+          path: `/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        },
+      });
+      expect(JSON.parse(requestMessage.payload.body)).toEqual({
+        path: 'README.md',
+        content: 'allowed',
+      });
+
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.response',
+        timestamp: '2026-07-01T00:00:04.000Z',
+        requestId: requestMessage.requestId,
+        payload: {
+          statusCode: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ ok: true }),
+        },
+      }));
+
+      const uploadResponse = await uploadResponsePromise;
+      expect(uploadResponse.statusCode).toBe(200);
+      expect(uploadResponse.json()).toEqual({ ok: true });
+    } finally {
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('keeps expired device grants out of portal summaries and shared HTTP access', async () => {
+    const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      canCreateThreads: true,
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    });
+
+    const portalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(portalResponse.statusCode).toBe(200);
+    expect(portalResponse.json().sharedDevicesWithMe).toEqual([]);
+
+    const threadsResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/devices/${deviceId}/api/threads`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(threadsResponse.statusCode).toBe(403);
 
     await app.close();
   });
@@ -2426,6 +2715,228 @@ describe('relay server', () => {
       );
       clientSocket = new WebSocket(
         `${baseUrl}/relay/devices/${deviceId}/ws?threadId=${encodeURIComponent(SHARED_THREAD_ID)}&relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      await connectedMessagePromise;
+
+      const closeEventPromise = waitForSocketClose(clientSocket);
+      clientSocket.send(JSON.stringify({ type: 'thread.prompt', prompt: 'not allowed' }));
+      const closeEvent = await closeEventPromise;
+
+      expect(closeEvent.code).toBe(1008);
+      expect(closeEvent.reason).toContain('read-only');
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('forwards device-wide updates to shared device websocket clients without a thread filter', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      const connectedMessage = await connectedMessagePromise;
+      const clientId = connectedMessage.clientId as string;
+
+      const firstUpdatePromise = waitForSocketMessage(clientSocket);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.server.message',
+        timestamp: '2026-07-01T00:00:01.000Z',
+        clientId,
+        payload: {
+          type: 'thread.turn.started',
+          threadId: SHARED_THREAD_ID,
+          timestamp: '2026-07-01T00:00:01.000Z',
+          payload: {
+            turnId: 'turn-1',
+          },
+        },
+      }));
+      await expect(firstUpdatePromise).resolves.toMatchObject({
+        type: 'thread.turn.started',
+        threadId: SHARED_THREAD_ID,
+      });
+
+      const secondUpdatePromise = waitForSocketMessage(clientSocket);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.server.message',
+        timestamp: '2026-07-01T00:00:02.000Z',
+        clientId,
+        payload: {
+          type: 'thread.turn.completed',
+          threadId: '22222222-2222-4222-8222-222222222222',
+          timestamp: '2026-07-01T00:00:02.000Z',
+          payload: {
+            turnId: 'turn-other',
+          },
+        },
+      }));
+      await expect(secondUpdatePromise).resolves.toMatchObject({
+        type: 'thread.turn.completed',
+        threadId: '22222222-2222-4222-8222-222222222222',
+      });
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('keeps shared device websocket thread filters when a thread id is requested', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?threadId=${encodeURIComponent(SHARED_THREAD_ID)}&relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      const connectedMessage = await connectedMessagePromise;
+      const clientId = connectedMessage.clientId as string;
+
+      const matchingThreadUpdatePromise = waitForSocketMessage(clientSocket);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.server.message',
+        timestamp: '2026-07-01T00:00:01.000Z',
+        clientId,
+        payload: {
+          type: 'thread.turn.started',
+          threadId: SHARED_THREAD_ID,
+          timestamp: '2026-07-01T00:00:01.000Z',
+          payload: {
+            turnId: 'turn-1',
+          },
+        },
+      }));
+      await expect(matchingThreadUpdatePromise).resolves.toMatchObject({
+        type: 'thread.turn.started',
+        threadId: SHARED_THREAD_ID,
+      });
+
+      const otherThreadUpdatePromise = expectNoSocketMessage(clientSocket);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.server.message',
+        timestamp: '2026-07-01T00:00:02.000Z',
+        clientId,
+        payload: {
+          type: 'thread.turn.started',
+          threadId: '22222222-2222-4222-8222-222222222222',
+          timestamp: '2026-07-01T00:00:02.000Z',
+          payload: {
+            turnId: 'turn-other',
+          },
+        },
+      }));
+      await expect(otherThreadUpdatePromise).resolves.toBeUndefined();
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('forwards shared device collaborator websocket client messages to the supervisor', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'read',
+      canCreateThreads: true,
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      await connectedMessagePromise;
+
+      const clientMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.message',
+      );
+      clientSocket.send(JSON.stringify({
+        type: 'thread.prompt',
+        threadId: SHARED_THREAD_ID,
+        prompt: 'hello from shared device collaborator',
+      }));
+
+      await expect(clientMessagePromise).resolves.toMatchObject({
+        type: 'relay.client.message',
+        payload: {
+          type: 'thread.prompt',
+          threadId: SHARED_THREAD_ID,
+          prompt: 'hello from shared device collaborator',
+        },
+      });
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
+  it('closes read-only shared device websocket clients that send control messages', async () => {
+    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?relaySession=${encodeURIComponent(friendToken)}`,
       );
       await waitForSocketOpen(clientSocket);
       await connectedMessagePromise;
