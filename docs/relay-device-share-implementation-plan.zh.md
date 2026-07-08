@@ -240,7 +240,7 @@ Rules:
 - [x] Thread grant keeps current behavior.
 - [ ] Workspace grant allows threads/files under that workspace only. This can be deferred.
 - [x] Device grant allows full device navigation with bounded operations.
-- [ ] If multiple active grants match, use highest capability:
+- [x] If multiple active grants match, use highest capability:
   - `control > read`
   - `write > read > none`
   - `canCreateThreads = true` if any matching grant allows it.
@@ -518,6 +518,7 @@ Implementation note:
 - Portal refresh and thread-list polling do not create audit events.
 - HTTP/WebSocket thread opens, thread creation, prompt send, and workspace read/write paths create typed audit events.
 - Existing legacy access rows are normalized to `access`.
+- `effectiveAccess` merges all matching grants for the requested device/thread/workspace boundary, so split capabilities such as thread control plus device workspace write resolve to one highest-capability effective access.
 
 ## E2E Plan
 

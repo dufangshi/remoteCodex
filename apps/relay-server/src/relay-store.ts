@@ -1704,7 +1704,8 @@ export class RelayStore {
     const grants = rows
       .map((row) => this.rowToGrant(row))
       .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
-    return grants.find((grant) => this.grantMatchesScope(grant, scope)) ?? null;
+    const matchingGrants = grants.filter((grant) => this.grantMatchesScope(grant, scope));
+    return matchingGrants.length > 0 ? mergeMatchingGrants(matchingGrants, scope) : null;
   }
 
   private grantMatchesScope(
@@ -1716,12 +1717,6 @@ export class RelayStore {
   ) {
     if (grant.scope === 'thread') {
       if (!scope.threadId || grant.threadId !== scope.threadId) {
-        return false;
-      }
-      if (
-        scope.workspaceId &&
-        (!grant.workspaceId || grant.workspaceId !== scope.workspaceId || grant.workspaceAccess === 'none')
-      ) {
         return false;
       }
       return true;
@@ -2112,6 +2107,84 @@ function normalizeWorkspaceIds(values: string[] | null | undefined) {
     return [];
   }
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+}
+
+function mergeMatchingGrants(
+  grants: RelayAccessGrantDto[],
+  scope: {
+    threadId?: string | null;
+    workspaceId?: string | null;
+  },
+) {
+  const sorted = [...grants].sort(compareGrantCapability);
+  const grantScope = mergedGrantScope(sorted);
+  const representative = sorted.find((grant) => grant.scope === grantScope) ?? sorted[0]!;
+  const threadAccess = sorted.reduce(
+    (best, grant) => maxThreadAccess(best, grant.threadAccess),
+    'read' as RelayThreadAccessDto,
+  );
+  const workspaceAccess = sorted.reduce(
+    (best, grant) => maxWorkspaceAccess(best, grant.workspaceAccess),
+    'none' as RelayWorkspaceAccessDto,
+  );
+  return {
+    ...representative,
+    scope: grantScope,
+    threadId: grantScope === 'thread' ? scope.threadId ?? representative.threadId : null,
+    workspaceId: grantScope === 'workspace' ? scope.workspaceId ?? representative.workspaceId : null,
+    threadAccess,
+    workspaceAccess,
+    canCreateThreads: sorted.some((grant) => grant.canCreateThreads),
+  };
+}
+
+function mergedGrantScope(grants: RelayAccessGrantDto[]): RelayShareScopeDto {
+  if (grants.some((grant) => grant.scope === 'device')) {
+    return 'device';
+  }
+  if (grants.some((grant) => grant.scope === 'workspace')) {
+    return 'workspace';
+  }
+  return 'thread';
+}
+
+function maxThreadAccess(left: RelayThreadAccessDto, right: RelayThreadAccessDto): RelayThreadAccessDto {
+  return threadAccessScore(right) > threadAccessScore(left) ? right : left;
+}
+
+function maxWorkspaceAccess(
+  left: RelayWorkspaceAccessDto,
+  right: RelayWorkspaceAccessDto,
+): RelayWorkspaceAccessDto {
+  return workspaceAccessScore(right) > workspaceAccessScore(left) ? right : left;
+}
+
+function compareGrantCapability(left: RelayAccessGrantDto, right: RelayAccessGrantDto) {
+  return (
+    threadAccessScore(right.threadAccess) - threadAccessScore(left.threadAccess) ||
+    workspaceAccessScore(right.workspaceAccess) - workspaceAccessScore(left.workspaceAccess) ||
+    Number(right.canCreateThreads) - Number(left.canCreateThreads) ||
+    grantScopeScore(right.scope) - grantScopeScore(left.scope) ||
+    right.createdAt.localeCompare(left.createdAt)
+  );
+}
+
+function threadAccessScore(value: RelayThreadAccessDto) {
+  return value === 'control' ? 2 : value === 'read' ? 1 : 0;
+}
+
+function workspaceAccessScore(value: RelayWorkspaceAccessDto) {
+  return value === 'write' ? 2 : value === 'read' ? 1 : 0;
+}
+
+function grantScopeScore(value: RelayShareScopeDto) {
+  if (value === 'thread') {
+    return 3;
+  }
+  if (value === 'workspace') {
+    return 2;
+  }
+  return 1;
 }
 
 function normalizeAccessEventKind(value: string | null | undefined): RelayAccessEventKindDto {

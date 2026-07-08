@@ -1410,6 +1410,54 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('uses the highest capability when multiple active grants match', async () => {
+    const { app, ownerToken, friendToken, deviceId, grantId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'write',
+      canCreateThreads: true,
+    });
+
+    const threadGrantResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/grants',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        targetIdentifier: 'friend',
+        deviceId,
+        scope: 'thread',
+        threadId: SHARED_THREAD_ID,
+        workspaceId: SHARED_WORKSPACE_ID,
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+        canCreateThreads: false,
+      },
+    });
+    expect(threadGrantResponse.statusCode).toBe(200);
+    const threadGrantId = threadGrantResponse.json().id as string;
+
+    const accessResponse = await app.inject({
+      method: 'GET',
+      url: `/relay/access?deviceId=${deviceId}&threadId=${SHARED_THREAD_ID}&workspaceId=${SHARED_WORKSPACE_ID}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+
+    expect(accessResponse.statusCode).toBe(200);
+    expect(accessResponse.json()).toMatchObject({
+      grantId,
+      scope: 'device',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      canCreateThreads: true,
+    });
+    expect(accessResponse.json().grantId).not.toBe(threadGrantId);
+
+    await app.close();
+  });
+
   it('rejects sharing a relay device with yourself', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();
