@@ -25,6 +25,9 @@ final class WorkspaceDetailViewModel: ObservableObject {
     @Published var newThreadOptionsLoading = false
     @Published var newThreadRuntimeBusyProvider: String?
     @Published var newThreadOptionsError: String?
+    @Published var relayAccess: RelayEffectiveAccessSummary?
+    @Published var relayAccessLoading = false
+    @Published var relayAccessError: String?
 
     let workspaceId: String
     let environment: AppEnvironment
@@ -50,11 +53,37 @@ final class WorkspaceDetailViewModel: ObservableObject {
     }
 
     var canStartNewThread: Bool {
-        !newThreadProvider.isEmpty &&
+        canCreateThreadForRelay &&
+            !newThreadProvider.isEmpty &&
             !newThreadModel.isEmpty &&
             !loading &&
             !newThreadOptionsLoading &&
             newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true
+    }
+
+    var canCreateThreadForRelay: Bool {
+        guard connection.mode == .relay else { return true }
+        guard !relayAccessLoading, relayAccessError == nil else { return false }
+        guard let relayAccess else { return false }
+        guard relayAccess.kind == "shared" else { return true }
+        return relayAccess.canCreateThreads && relayAccess.threadAccess == "control"
+    }
+
+    var relayCreateThreadBlockedMessage: String? {
+        guard connection.mode == .relay else { return nil }
+        if relayAccessLoading {
+            return "Checking relay permission for new threads..."
+        }
+        if let relayAccessError {
+            return relayAccessError
+        }
+        guard let relayAccess else {
+            return "Checking relay permission for new threads..."
+        }
+        guard relayAccess.kind == "shared" else { return nil }
+        return relayAccess.canCreateThreads && relayAccess.threadAccess == "control"
+            ? nil
+            : "This shared device does not allow creating new threads."
     }
 
     func refresh() async {
@@ -106,6 +135,11 @@ final class WorkspaceDetailViewModel: ObservableObject {
     }
 
     func startThread() async -> String? {
+        await loadRelayAccessIfNeeded()
+        guard canCreateThreadForRelay else {
+            newThreadOptionsError = relayCreateThreadBlockedMessage ?? "Shared device does not allow new threads."
+            return nil
+        }
         guard canStartNewThread else {
             newThreadOptionsError = "Install this runtime before creating a thread."
             return nil
@@ -128,8 +162,37 @@ final class WorkspaceDetailViewModel: ObservableObject {
     }
 
     func loadNewThreadOptionsIfNeeded() async {
+        await loadRelayAccessIfNeeded()
+        guard canCreateThreadForRelay else {
+            newThreadOptionsError = relayCreateThreadBlockedMessage
+            return
+        }
         guard newThreadBackends.isEmpty || visibleNewThreadModels.isEmpty else { return }
         await loadNewThreadOptions()
+    }
+
+    func loadRelayAccessIfNeeded(force: Bool = false) async {
+        guard connection.mode == .relay, let deviceId = connection.relayDeviceId?.trimmedNonEmpty else {
+            relayAccess = nil
+            relayAccessError = nil
+            relayAccessLoading = false
+            return
+        }
+        if !force, relayAccess != nil || relayAccessLoading {
+            return
+        }
+        relayAccessLoading = true
+        relayAccessError = nil
+        defer { relayAccessLoading = false }
+        do {
+            relayAccess = try await client.fetchRelayAccess(
+                deviceId: deviceId,
+                workspaceId: workspaceId
+            )
+        } catch {
+            relayAccess = nil
+            relayAccessError = error.localizedDescription
+        }
     }
 
     func loadNewThreadOptions() async {

@@ -39,10 +39,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.RelayEffectiveAccessSummary
 import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorModelOption
 import com.remotecodex.android.api.SupervisorThreadSummary
@@ -85,6 +87,11 @@ fun WorkspaceDetailScreen(
     var agentBackends by remember(supervisorConnection) { mutableStateOf<List<SupervisorAgentBackend>>(emptyList()) }
     var agentBackendsLoading by remember(supervisorConnection) { mutableStateOf(false) }
     var agentBackendsError by remember(supervisorConnection) { mutableStateOf<String?>(null) }
+    var relayAccess by remember(workspaceId, supervisorConnection) {
+        mutableStateOf<RelayEffectiveAccessSummary?>(null)
+    }
+    var relayAccessLoading by remember(workspaceId, supervisorConnection) { mutableStateOf(false) }
+    var relayAccessError by remember(workspaceId, supervisorConnection) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(supervisorConnection) {
         agentBackendsLoading = true
@@ -100,6 +107,48 @@ fun WorkspaceDetailScreen(
                 agentBackendsError = error.message ?: "Backend list failed."
             }
     }
+
+    LaunchedEffect(supervisorConnection, workspaceId) {
+        val deviceId = supervisorConnection.relayDeviceId?.trim().orEmpty()
+        if (supervisorConnection.mode != SupervisorConnectionMode.Relay || deviceId.isBlank()) {
+            relayAccess = null
+            relayAccessLoading = false
+            relayAccessError = null
+            return@LaunchedEffect
+        }
+        relayAccessLoading = true
+        relayAccessError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.fetchRelayAccess(
+                    deviceId = deviceId,
+                    workspaceId = workspaceId,
+                )
+            }
+        }
+        relayAccessLoading = false
+        result
+            .onSuccess { access ->
+                relayAccess = access
+                relayAccessError = null
+            }
+            .onFailure { error ->
+                relayAccess = null
+                relayAccessError = error.message ?: "Unable to verify relay thread permissions."
+            }
+    }
+
+    val relayCanCreateThread = relayAccess.canCreateThreadFromSharedDevice(
+        mode = supervisorConnection.mode,
+        loading = relayAccessLoading,
+        error = relayAccessError,
+    )
+    val relayCreateThreadBlockedMessage = relayCreateThreadBlockedMessage(
+        mode = supervisorConnection.mode,
+        loading = relayAccessLoading,
+        access = relayAccess,
+        error = relayAccessError,
+    )
 
     fun runAction(label: String, action: suspend () -> Unit) {
         actionBusy = label
@@ -175,10 +224,16 @@ fun WorkspaceDetailScreen(
             WorkspaceThreadsSection(
                 threads = workspaceThreads,
                 loading = homeSnapshotLoading,
+                canStartThread = relayCanCreateThread,
+                startDisabledMessage = relayCreateThreadBlockedMessage,
                 onOpenThread = onOpenThread,
                 onStartThread = {
                     actionError = null
-                    startDialogOpen = true
+                    if (relayCanCreateThread) {
+                        startDialogOpen = true
+                    } else {
+                        actionError = relayCreateThreadBlockedMessage ?: "Shared device does not allow new threads."
+                    }
                 },
             )
         }
@@ -225,6 +280,11 @@ fun WorkspaceDetailScreen(
                 }
             },
             onStartThread = { draft ->
+                if (!relayCanCreateThread) {
+                    actionError = relayCreateThreadBlockedMessage ?: "Shared device does not allow new threads."
+                    startDialogOpen = false
+                    return@WorkspaceStartThreadDialog
+                }
                 runAction("start") {
                     val thread = client.startThread(
                         StartSupervisorThreadRequest(
@@ -736,6 +796,8 @@ private data class WorkspaceStartThreadDraft(
 private fun WorkspaceThreadsSection(
     threads: List<SupervisorThreadSummary>,
     loading: Boolean,
+    canStartThread: Boolean,
+    startDisabledMessage: String?,
     onOpenThread: (String) -> Unit,
     onStartThread: () -> Unit,
 ) {
@@ -743,13 +805,25 @@ private fun WorkspaceThreadsSection(
         WorkspaceSectionHeader(
             title = "Threads",
             detail = if (loading) "Refreshing..." else "${threads.size} in this workspace",
-            actionLabel = "New",
-            onAction = onStartThread,
+            actionLabel = if (canStartThread) "New" else null,
+            onAction = if (canStartThread) onStartThread else null,
         )
+        if (!canStartThread && !startDisabledMessage.isNullOrBlank()) {
+            Text(
+                text = startDisabledMessage,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         if (threads.isEmpty()) {
             WorkspaceInfoRow(
                 title = if (loading) "Loading threads" else "No workspace threads",
-                detail = "Start a thread from this workspace to keep follow-up work scoped to the project root.",
+                detail = if (canStartThread) {
+                    "Start a thread from this workspace to keep follow-up work scoped to the project root."
+                } else {
+                    startDisabledMessage ?: "New threads are disabled for this shared device."
+                },
                 meta = "thread",
                 contentDescription = "Workspace threads empty",
             )
@@ -764,6 +838,54 @@ private fun WorkspaceThreadsSection(
                 )
             }
         }
+    }
+}
+
+private fun RelayEffectiveAccessSummary?.canCreateThreadFromSharedDevice(
+    mode: SupervisorConnectionMode,
+    loading: Boolean,
+    error: String?,
+): Boolean {
+    if (mode != SupervisorConnectionMode.Relay) {
+        return true
+    }
+    if (loading || error != null) {
+        return false
+    }
+    if (this == null) {
+        return false
+    }
+    if (!kind.equals("shared", ignoreCase = true)) {
+        return true
+    }
+    return canCreateThreads && threadAccess.equals("control", ignoreCase = true)
+}
+
+private fun relayCreateThreadBlockedMessage(
+    mode: SupervisorConnectionMode,
+    loading: Boolean,
+    access: RelayEffectiveAccessSummary?,
+    error: String?,
+): String? {
+    if (mode != SupervisorConnectionMode.Relay) {
+        return null
+    }
+    if (loading) {
+        return "Checking relay permission for new threads..."
+    }
+    if (error != null) {
+        return error
+    }
+    if (access == null) {
+        return "Checking relay permission for new threads..."
+    }
+    if (!access.kind.equals("shared", ignoreCase = true)) {
+        return null
+    }
+    return if (access.canCreateThreads && access.threadAccess.equals("control", ignoreCase = true)) {
+        null
+    } else {
+        "This shared device does not allow creating new threads."
     }
 }
 
