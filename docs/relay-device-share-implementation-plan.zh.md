@@ -373,7 +373,7 @@ Migration compatibility:
 
 - [x] Existing `sharedWithMe` and `sharedByMe` can remain for one release.
 - [x] New UI should consume the new grouped fields.
-- [ ] Mobile clients should tolerate missing grouped fields during rollout.
+- [x] Mobile clients should tolerate missing grouped fields during rollout.
 
 验收：
 
@@ -463,8 +463,8 @@ Android and iOS should mirror web semantics:
 - [x] Device cards show owner and permission chips.
 - [x] Shared device opens the normal workspace list.
 - [ ] Thread creation is available only when allowed.
-- [ ] Workspace file actions are hidden or disabled according to `workspaceAccess`.
-- [ ] Thread composer is read-only for Viewer.
+- [x] Workspace file actions are hidden or disabled according to `workspaceAccess`.
+- [x] Thread composer is read-only for Viewer.
 - [x] Share management appears under Shared by me.
 
 Mobile navigation:
@@ -476,7 +476,7 @@ Mobile navigation:
 
 - [ ] Android relay smoke with owner and target accounts.
 - [ ] iOS relay smoke with owner and target accounts.
-- [ ] No mobile-only route assumes all devices are owned.
+- [x] No mobile-only route assumes all devices are owned.
 
 ## Security and Audit
 

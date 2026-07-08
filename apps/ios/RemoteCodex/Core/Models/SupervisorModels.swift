@@ -780,6 +780,43 @@ struct RelayAccessGrantSummary: Codable, Equatable, Identifiable {
     }
 }
 
+struct RelayEffectiveAccessSummary: Codable, Equatable {
+    var kind: String
+    var grantId: String?
+    var shareId: String?
+    var scope: String?
+    var threadAccess: String
+    var workspaceAccess: String
+    var workspaceId: String?
+    var workspaceScope: String?
+    var canCreateThreads: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case grantId
+        case shareId
+        case scope
+        case threadAccess
+        case workspaceAccess
+        case workspaceId
+        case workspaceScope
+        case canCreateThreads
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "owner"
+        grantId = try container.decodeIfPresent(String.self, forKey: .grantId)
+        shareId = try container.decodeIfPresent(String.self, forKey: .shareId)
+        scope = try container.decodeIfPresent(String.self, forKey: .scope)
+        threadAccess = try container.decodeIfPresent(String.self, forKey: .threadAccess) ?? "write"
+        workspaceAccess = try container.decodeIfPresent(String.self, forKey: .workspaceAccess) ?? "write"
+        workspaceId = try container.decodeIfPresent(String.self, forKey: .workspaceId)
+        workspaceScope = try container.decodeIfPresent(String.self, forKey: .workspaceScope)
+        canCreateThreads = try container.decodeIfPresent(Bool.self, forKey: .canCreateThreads) ?? true
+    }
+}
+
 struct RelaySessionShareSummary: Codable, Equatable, Identifiable {
     var id: String
     var ownerUserId: String

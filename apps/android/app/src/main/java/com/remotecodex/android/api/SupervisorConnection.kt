@@ -704,6 +704,18 @@ data class RelayAccessGrantSummary(
     val accessEvents: List<RelaySessionShareAccessSummary> = emptyList(),
 )
 
+data class RelayEffectiveAccessSummary(
+    val kind: String,
+    val grantId: String?,
+    val shareId: String?,
+    val scope: String?,
+    val threadAccess: String,
+    val workspaceAccess: String,
+    val workspaceId: String?,
+    val workspaceScope: String?,
+    val canCreateThreads: Boolean,
+)
+
 data class RelaySessionShareSummary(
     val id: String,
     val ownerUserId: String,

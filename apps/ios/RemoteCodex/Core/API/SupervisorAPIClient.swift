@@ -337,6 +337,26 @@ final class SupervisorAPIClient: @unchecked Sendable {
         try await requestJSON("/relay/portal")
     }
 
+    func fetchRelayAccess(
+        deviceId: String,
+        threadId: String? = nil,
+        workspaceId: String? = nil
+    ) async throws -> RelayEffectiveAccessSummary {
+        let queryItems: [(String, String?)] = [
+            ("deviceId", deviceId),
+            ("threadId", threadId),
+            ("workspaceId", workspaceId)
+        ]
+            .compactMap { key, value -> String? in
+                guard let value = value?.trimmedNonEmpty else {
+                    return nil
+                }
+                return "\(key.urlQueryEncoded)=\(value.urlQueryEncoded)"
+            }
+            .joined(separator: "&")
+        return try await requestJSON("/relay/access?\(queryItems)")
+    }
+
     func createRelayDevice(name: String) async throws -> RelayCreateDeviceResult {
         try await requestJSON(
             "/relay/devices",

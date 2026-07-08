@@ -311,6 +311,19 @@ class SupervisorApiClient(
         return requestJson("/relay/portal").toRelayPortalSummary()
     }
 
+    fun fetchRelayAccess(
+        deviceId: String,
+        threadId: String? = null,
+        workspaceId: String? = null,
+    ): RelayEffectiveAccessSummary {
+        val query = buildQuery(
+            "deviceId" to deviceId,
+            "threadId" to threadId,
+            "workspaceId" to workspaceId,
+        )
+        return requestJson("/relay/access$query").toRelayEffectiveAccessSummary()
+    }
+
     fun createRelayDevice(name: String): RelayCreateDeviceResult {
         val body = JSONObject()
             .put("name", name)
@@ -1137,6 +1150,20 @@ private fun JSONObject.toRelayAccessGrantSummary(): RelayAccessGrantSummary {
                 accessedAt = item.getString("accessedAt"),
             )
         },
+    )
+}
+
+private fun JSONObject.toRelayEffectiveAccessSummary(): RelayEffectiveAccessSummary {
+    return RelayEffectiveAccessSummary(
+        kind = optString("kind", "owner"),
+        grantId = optNullableString("grantId"),
+        shareId = optNullableString("shareId"),
+        scope = optNullableString("scope"),
+        threadAccess = optString("threadAccess", "write"),
+        workspaceAccess = optString("workspaceAccess", "write"),
+        workspaceId = optNullableString("workspaceId"),
+        workspaceScope = optNullableString("workspaceScope"),
+        canCreateThreads = optBoolean("canCreateThreads", true),
     )
 }
 

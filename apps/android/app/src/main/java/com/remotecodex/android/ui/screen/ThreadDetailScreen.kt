@@ -30,12 +30,14 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.api.ForkThreadRequest
+import com.remotecodex.android.api.RelayEffectiveAccessSummary
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
 import com.remotecodex.android.api.ResumeThreadRequest
 import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorShellEvent
@@ -151,6 +153,12 @@ fun ThreadDetailScreen(
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
     var threadActionBusy by remember(threadId) { mutableStateOf(false) }
     var threadActionError by remember(threadId) { mutableStateOf<String?>(null) }
+    var relayAccess by remember(threadId, supervisorConnection) {
+        mutableStateOf<RelayEffectiveAccessSummary?>(null)
+    }
+    var relayAccessError by remember(threadId, supervisorConnection) {
+        mutableStateOf<String?>(null)
+    }
     var socketConnection by remember(threadId, supervisorConnection) {
         mutableStateOf<SupervisorSocketConnection?>(null)
     }
@@ -161,6 +169,8 @@ fun ThreadDetailScreen(
     val eventSocketClient = remember(supervisorConnection) {
         SupervisorEventSocketClient(supervisorConnection)
     }
+    val currentWorkspaceId = threadProjectionState?.detail?.workspace?.id
+    val relayAccessRestrictions = relayAccess.toRelayAccessRestrictions()
     val clipboardManager = LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val workspaceUploadPicker = rememberLauncherForActivityResult(
@@ -190,6 +200,9 @@ fun ThreadDetailScreen(
     }
 
     suspend fun ensureThreadLoadedForPrompt(): Result<Unit> {
+        if (relayAccessRestrictions.threadReadOnly) {
+            return Result.failure(IllegalStateException("This shared thread is view-only."))
+        }
         val currentState = threadProjectionState ?: return Result.success(Unit)
         val currentDetail = currentState.detail
         if (currentDetail.thread.isLoaded && currentDetail.thread.status != "not_loaded") {
@@ -251,6 +264,33 @@ fun ThreadDetailScreen(
                     ?: selectedWorkspaceFilePath
             }
             .onFailure { throwable -> error = throwable.message ?: "Thread detail failed." }
+    }
+
+    LaunchedEffect(supervisorConnection, threadId, currentWorkspaceId) {
+        val deviceId = supervisorConnection.relayDeviceId?.trim().orEmpty()
+        if (supervisorConnection.mode != SupervisorConnectionMode.Relay || deviceId.isBlank()) {
+            relayAccess = null
+            relayAccessError = null
+            return@LaunchedEffect
+        }
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.fetchRelayAccess(
+                    deviceId = deviceId,
+                    threadId = threadId,
+                    workspaceId = currentWorkspaceId,
+                )
+            }
+        }
+        result
+            .onSuccess { access ->
+                relayAccess = access
+                relayAccessError = null
+            }
+            .onFailure { throwable ->
+                relayAccess = null
+                relayAccessError = throwable.message ?: "Could not resolve relay access."
+            }
     }
 
     LaunchedEffect(threadId, eventSocketClient) {
@@ -783,6 +823,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceFilePath) {
         val path = pendingWorkspaceFilePath ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanRead) {
+            pendingWorkspaceFilePath = null
+            workspaceActionMessage = "Workspace access is disabled for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -804,6 +849,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceLoadMore) {
         if (!pendingWorkspaceLoadMore) return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanRead) {
+            pendingWorkspaceLoadMore = false
+            workspaceActionMessage = "Workspace access is disabled for this shared device."
+            return@LaunchedEffect
+        }
         val currentFile = detail?.workspacePreview?.selectedFile
         val path = currentFile?.path?.takeIf { it.isNotBlank() }
         val nextOffset = currentFile?.nextOffset
@@ -841,6 +891,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceDownloadPath) {
         val path = pendingWorkspaceDownloadPath ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanRead) {
+            pendingWorkspaceDownloadPath = null
+            workspaceActionMessage = "Workspace access is disabled for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         val result = withContext(Dispatchers.IO) {
@@ -863,6 +918,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceRawOpenPath) {
         val path = pendingWorkspaceRawOpenPath ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanRead) {
+            pendingWorkspaceRawOpenPath = null
+            workspaceActionMessage = "Workspace access is disabled for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         val result = withContext(Dispatchers.IO) {
@@ -890,6 +950,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceRawCopyPath) {
         val path = pendingWorkspaceRawCopyPath ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanRead) {
+            pendingWorkspaceRawCopyPath = null
+            workspaceActionMessage = "Workspace access is disabled for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         val result = withContext(Dispatchers.IO) {
@@ -909,6 +974,12 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceSave) {
         val saveRequest = pendingWorkspaceSave ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanWrite) {
+            pendingWorkspaceSave = null
+            workspaceSaveBusy = false
+            workspaceActionMessage = "Workspace is read-only for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         workspaceSaveBusy = true
@@ -940,6 +1011,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceUploadNote) {
         if (!pendingWorkspaceUploadNote) return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanWrite) {
+            pendingWorkspaceUploadNote = false
+            workspaceActionMessage = "Workspace is read-only for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         val filename = "android-upload-${System.currentTimeMillis()}.txt"
@@ -983,6 +1059,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingWorkspaceUploadFile) {
         val uploadRequest = pendingWorkspaceUploadFile ?: return@LaunchedEffect
+        if (!relayAccessRestrictions.workspaceCanWrite) {
+            pendingWorkspaceUploadFile = null
+            workspaceActionMessage = "Workspace is read-only for this shared device."
+            return@LaunchedEffect
+        }
         error = null
         workspaceActionMessage = null
         val result = withContext(Dispatchers.IO) {
@@ -1170,7 +1251,7 @@ fun ThreadDetailScreen(
             timelineAuxiliary = withPendingRequestBusy.timelineAuxiliary.copy(
                 loadingEarlier = loadingEarlier,
             ),
-        )
+        ).withRelayAccessRestrictions(relayAccessRestrictions, relayAccessError)
     }
     if (currentDetail != null) {
         ThreadDetailSurface(
@@ -1181,12 +1262,20 @@ fun ThreadDetailScreen(
             supervisorConnection = supervisorConnection,
             homeSnapshot = homeSnapshot,
             homeSnapshotLoading = homeSnapshotLoading,
-            homeSnapshotError = error ?: homeSnapshotError,
+            homeSnapshotError = error ?: relayAccessError ?: homeSnapshotError,
             onThemeModeSelected = onThemeModeSelected,
             onChangeConnection = onChangeConnection,
-            onSubmitPrompt = { prompt -> pendingPrompt = prompt },
-            onSubmitPromptRequest = { request -> pendingPromptRequest = request },
-            onPickPromptAttachment = { kind ->
+            onSubmitPrompt = if (relayAccessRestrictions.threadReadOnly) {
+                null
+            } else {
+                { prompt -> pendingPrompt = prompt }
+            },
+            onSubmitPromptRequest = if (relayAccessRestrictions.threadReadOnly) {
+                null
+            } else {
+                { request -> pendingPromptRequest = request }
+            },
+            onPickPromptAttachment = if (relayAccessRestrictions.threadReadOnly) null else { kind ->
                 pendingPromptAttachmentKind = kind
                 promptAttachmentPicker.launch(
                     when (kind) {
@@ -1250,23 +1339,23 @@ fun ThreadDetailScreen(
             onLoadMoreWorkspacePreview = {
                 pendingWorkspaceLoadMore = true
             },
-            onDownloadWorkspaceFile = { path ->
+            onDownloadWorkspaceFile = if (relayAccessRestrictions.workspaceCanRead) { path ->
                 pendingWorkspaceDownloadPath = path
-            },
-            onOpenWorkspaceRawFile = { path ->
+            } else null,
+            onOpenWorkspaceRawFile = if (relayAccessRestrictions.workspaceCanRead) { path ->
                 pendingWorkspaceRawOpenPath = path
-            },
-            onCopyWorkspaceRawFile = { path ->
+            } else null,
+            onCopyWorkspaceRawFile = if (relayAccessRestrictions.workspaceCanRead) { path ->
                 pendingWorkspaceRawCopyPath = path
-            },
-            onSaveWorkspaceFile = { path, content ->
+            } else null,
+            onSaveWorkspaceFile = if (relayAccessRestrictions.workspaceCanWrite) { path, content ->
                 if (!workspaceSaveBusy) {
                     pendingWorkspaceSave = PendingWorkspaceFileSave(path = path, content = content)
                 }
-            },
-            onUploadWorkspaceNote = {
-                workspaceUploadPicker.launch(arrayOf("*/*"))
-            },
+            } else null,
+            onUploadWorkspaceNote = if (relayAccessRestrictions.workspaceCanWrite) {
+                { workspaceUploadPicker.launch(arrayOf("*/*")) }
+            } else null,
             onDenyPendingRequest = { request ->
                 if (resolvingRequestId == null) {
                     pendingRequestResponse = PendingRequestResponse(
@@ -1351,6 +1440,76 @@ private data class PendingWorkspaceFileSave(
     val path: String,
     val content: String,
 )
+
+private data class RelayAccessRestrictions(
+    val threadReadOnly: Boolean = false,
+    val workspaceCanRead: Boolean = true,
+    val workspaceCanWrite: Boolean = true,
+)
+
+private fun RelayEffectiveAccessSummary?.toRelayAccessRestrictions(): RelayAccessRestrictions {
+    if (this == null || !kind.equals("shared", ignoreCase = true)) {
+        return RelayAccessRestrictions()
+    }
+    return RelayAccessRestrictions(
+        threadReadOnly = !threadAccess.equals("write", ignoreCase = true),
+        workspaceCanRead = !workspaceAccess.equals("none", ignoreCase = true),
+        workspaceCanWrite = workspaceAccess.equals("write", ignoreCase = true),
+    )
+}
+
+private fun ThreadDetailPreview.withRelayAccessRestrictions(
+    restrictions: RelayAccessRestrictions,
+    accessError: String?,
+): ThreadDetailPreview {
+    val composerMessage = when {
+        accessError != null -> accessError
+        restrictions.threadReadOnly -> "This shared thread is view-only."
+        else -> null
+    }
+    val workspaceMessage = when {
+        !restrictions.workspaceCanRead -> "Workspace access is disabled for this shared device."
+        !restrictions.workspaceCanWrite -> "Workspace is read-only for this shared device."
+        else -> null
+    }
+    val nextWorkspace = workspacePreview.copy(
+        nodes = if (restrictions.workspaceCanRead) workspacePreview.nodes else emptyList(),
+        toolEvents = if (restrictions.workspaceCanRead) workspacePreview.toolEvents else emptyList(),
+        selectedFile = if (restrictions.workspaceCanRead) {
+            workspacePreview.selectedFile
+        } else {
+            workspacePreview.selectedFile.copy(
+                title = "Workspace unavailable",
+                language = "text",
+                sizeLabel = "",
+                truncatedLabel = null,
+                content = "Workspace access is disabled for this shared device.",
+                path = "",
+                sizeBytes = null,
+                nextOffset = null,
+                truncated = false,
+                loading = false,
+            )
+        },
+        statusMessage = workspacePreview.statusMessage ?: workspaceMessage,
+    )
+    return copy(
+        composer = composer.copy(
+            error = composer.error ?: composerMessage,
+            toolboxItems = if (restrictions.threadReadOnly) emptyList() else composer.toolboxItems,
+            prompt = if (restrictions.threadReadOnly) {
+                composer.prompt.copy(
+                    disabled = true,
+                    placeholder = "View-only shared thread",
+                    attachments = emptyList(),
+                )
+            } else {
+                composer.prompt
+            },
+        ),
+        workspacePreview = nextWorkspace,
+    )
+}
 
 private data class OptimisticSteer(
     val id: String,

@@ -2,6 +2,7 @@ package com.remotecodex.android.api
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -649,6 +650,43 @@ class SupervisorApiClientTest {
         assertTrue(portal.sharedDevicesWithMe.single().canCreateThreads)
         assertEquals("Team server", portal.grantsByMe.single().label)
         assertEquals("https://relay.example.test/relay/portal", transport.requests.single().url)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
+    fun fetchRelayAccessUsesAccountScopedEndpoint() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"kind":"shared","grantId":"grant-1","shareId":null,"scope":"device","threadAccess":"read","workspaceAccess":"write","workspaceId":"workspace-1","workspaceScope":"all","canCreateThreads":true}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val access = client.fetchRelayAccess(
+            deviceId = "device-1",
+            threadId = "thread-1",
+            workspaceId = "workspace-1",
+        )
+
+        assertEquals("shared", access.kind)
+        assertEquals("grant-1", access.grantId)
+        assertNull(access.shareId)
+        assertEquals("read", access.threadAccess)
+        assertEquals("write", access.workspaceAccess)
+        assertTrue(access.canCreateThreads)
+        assertEquals(
+            "https://relay.example.test/relay/access?deviceId=device-1&threadId=thread-1&workspaceId=workspace-1",
+            transport.requests.single().url,
+        )
         assertEquals("relay-token", transport.requests.single().bearerToken)
     }
 

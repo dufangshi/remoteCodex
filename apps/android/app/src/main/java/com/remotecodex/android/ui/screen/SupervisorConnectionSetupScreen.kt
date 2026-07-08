@@ -163,10 +163,10 @@ fun SupervisorConnectionSetupScreen(
                 .onSuccess { portal ->
                     relayPortal = portal
                     if (!silent || statusMessage != null) {
-                        statusMessage = if (portal.devices.isEmpty()) {
+                        statusMessage = if (!relayPortalHasAnySelectableDevice(portal)) {
                             "Relay login succeeded. Register a device to connect a backend."
                         } else {
-                            relayPortalStatusMessage(portal.devices, relayDeviceId)
+                            relayPortalStatusMessage(portal, relayDeviceId)
                         }
                     }
                 }
@@ -344,7 +344,7 @@ fun SupervisorConnectionSetupScreen(
                 .onSuccess { (token, portal) ->
                     authToken = token
                     relayPortal = portal
-                    relayDeviceId = relayDeviceId.takeIf { current -> portal.devices.any { it.id == current } }.orEmpty()
+                    relayDeviceId = relayDeviceId.takeIf { current -> relayPortalHasSelectableDevice(portal, current) }.orEmpty()
                     onSavedDeviceUpsert(
                         device.copy(
                             authToken = token,
@@ -353,7 +353,7 @@ fun SupervisorConnectionSetupScreen(
                         ),
                     )
                     route = ConnectionSetupRoute.RelayDevices
-                    statusMessage = relayPortalStatusMessage(portal.devices, relayDeviceId)
+                    statusMessage = relayPortalStatusMessage(portal, relayDeviceId)
                 }
                 .onFailure { error ->
                     errorMessage = userFacingConnectionError(error)
@@ -454,7 +454,7 @@ fun SupervisorConnectionSetupScreen(
                 .onSuccess { (token, portal) ->
                     authToken = token
                     relayPortal = portal
-                    relayDeviceId = relayDeviceId.takeIf { current -> portal.devices.any { it.id == current } }.orEmpty()
+                    relayDeviceId = relayDeviceId.takeIf { current -> relayPortalHasSelectableDevice(portal, current) }.orEmpty()
                     onConnectionStateSaved(
                         SupervisorConnectionConfig(
                             mode = SupervisorConnectionMode.Relay,
@@ -466,10 +466,10 @@ fun SupervisorConnectionSetupScreen(
                     )
                     route = ConnectionSetupRoute.RelayDevices
                     relayRegisterDialogOpen = false
-                    statusMessage = if (portal.devices.isEmpty()) {
+                    statusMessage = if (!relayPortalHasAnySelectableDevice(portal)) {
                         "Relay account ready. Register a backend device."
                     } else {
-                        relayPortalStatusMessage(portal.devices, relayDeviceId)
+                        relayPortalStatusMessage(portal, relayDeviceId)
                     }
                 }
                 .onFailure { error ->
@@ -808,17 +808,17 @@ fun SupervisorConnectionSetupScreen(
                                 revokeDeviceTarget = null
                                 relayPortal = portal
                                 val revokedSelectedDevice = relayDeviceId == revokedId
-                                relayDeviceId = relayDeviceId.takeIf { it != revokedId && portal.devices.any { device -> device.id == it } }.orEmpty()
+                                relayDeviceId = relayDeviceId.takeIf { it != revokedId && relayPortalHasSelectableDevice(portal, it) }.orEmpty()
                                 if (revokedSelectedDevice) {
                                     onRelayDeviceSelectionCleared()
                                 }
                                 if (createdDevice?.device?.id == revokedId) {
                                     createdDevice = null
                                 }
-                                statusMessage = if (portal.devices.isEmpty()) {
+                                statusMessage = if (!relayPortalHasAnySelectableDevice(portal)) {
                                     "Device revoked. Register another backend device to connect."
                                 } else {
-                                    "Device revoked. ${relayPortalStatusMessage(portal.devices, relayDeviceId)}"
+                                    "Device revoked. ${relayPortalStatusMessage(portal, relayDeviceId)}"
                                 }
                             }
                             .onFailure { error ->
@@ -2529,15 +2529,36 @@ private fun deviceStatusLine(device: RelayDeviceSummary): String {
     }
 }
 
-private fun relayPortalStatusMessage(devices: List<RelayDeviceSummary>, selectedDeviceId: String): String {
-    val onlineCount = devices.count { it.connected }
-    val selected = devices.firstOrNull { it.id == selectedDeviceId }
+private fun relayPortalHasSelectableDevice(portal: RelayPortalSummary, deviceId: String): Boolean {
+    if (deviceId.isBlank()) {
+        return false
+    }
+    return portal.devices.any { it.id == deviceId } ||
+        portal.sharedDevicesWithMe.any { it.deviceId == deviceId }
+}
+
+private fun relayPortalHasAnySelectableDevice(portal: RelayPortalSummary): Boolean {
+    return portal.devices.isNotEmpty() || portal.sharedDevicesWithMe.isNotEmpty()
+}
+
+private fun relayPortalStatusMessage(portal: RelayPortalSummary, selectedDeviceId: String): String {
+    val ownedDevices = portal.devices
+    val sharedDevices = portal.sharedDevicesWithMe
+    val selectableCount = ownedDevices.size + sharedDevices.size
+    val onlineCount = ownedDevices.count { it.connected }
+    val selected = ownedDevices.firstOrNull { it.id == selectedDeviceId }
+    val selectedShared = sharedDevices.firstOrNull { it.deviceId == selectedDeviceId }
     val selectedStatus = when {
         selected == null -> "Choose any online backend to connect."
         selected.connected -> "Last connected backend is online."
         else -> "Last connected backend is offline."
     }
-    return "Loaded ${devices.size} device${if (devices.size == 1) "" else "s"}; $onlineCount online. $selectedStatus"
+    val selectedMessage = if (selectedShared != null && selected == null) {
+        "Last selected backend is shared by ${selectedShared.ownerUsername}."
+    } else {
+        selectedStatus
+    }
+    return "Loaded $selectableCount device${if (selectableCount == 1) "" else "s"}; $onlineCount owned online. $selectedMessage"
 }
 
 private fun workspaceAccessLabel(access: String): String {
