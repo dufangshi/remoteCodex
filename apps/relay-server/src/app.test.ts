@@ -3044,6 +3044,65 @@ describe('relay server', () => {
     }
   });
 
+  it('closes shared device websocket clients after grant revocation on the next event', async () => {
+    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      const connectedMessage = await connectedMessagePromise;
+      const clientId = connectedMessage.clientId as string;
+
+      const revokeResponse = await app.inject({
+        method: 'DELETE',
+        url: `/relay/grants/${grantId}`,
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      expect(revokeResponse.statusCode).toBe(200);
+
+      const closeEventPromise = waitForSocketClose(clientSocket);
+      supervisorSocket.send(JSON.stringify({
+        type: 'relay.server.message',
+        timestamp: '2026-07-01T00:00:01.000Z',
+        clientId,
+        payload: {
+          type: 'thread.turn.started',
+          threadId: SHARED_THREAD_ID,
+          timestamp: '2026-07-01T00:00:01.000Z',
+          payload: {
+            turnId: 'turn-1',
+          },
+        },
+      }));
+
+      const closeEvent = await closeEventPromise;
+      expect(closeEvent.code).toBe(1008);
+      expect(closeEvent.reason).toContain('no longer allowed');
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
   it('forwards shared device collaborator websocket client messages to the supervisor', async () => {
     const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
       threadAccess: 'control',

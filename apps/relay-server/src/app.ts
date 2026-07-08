@@ -39,6 +39,8 @@ interface SupervisorConnection extends DeviceConnectionStatus {
     {
       socket: { send: (message: string) => void; readyState: number; close: (code?: number, reason?: string) => void };
       threadId: string | null;
+      deviceId: string;
+      user: RelayUserDto;
       access: EffectiveRelayAccess;
     }
   >;
@@ -691,6 +693,18 @@ export function buildRelayServer(
 
           if (parsed.type === 'relay.server.message') {
             const clientConnection = connection.clientSockets.get(parsed.clientId);
+            if (clientConnection) {
+              const eventThreadId = threadIdFromSocketPayload(parsed.payload);
+              const freshAccess = store.effectiveAccess(clientConnection.user.id, clientConnection.deviceId, {
+                threadId: clientConnection.threadId ?? eventThreadId,
+              });
+              if (!freshAccess) {
+                connection.clientSockets.delete(parsed.clientId);
+                clientConnection.socket.close(1008, 'Shared access is no longer allowed.');
+                return;
+              }
+              clientConnection.access = freshAccess;
+            }
             if (
               clientConnection &&
               clientConnection.socket.readyState === WEBSOCKET_OPEN &&
@@ -749,7 +763,7 @@ export function buildRelayServer(
         if (access.kind === 'shared') {
           recordRelayAccess(store, access, session.user, threadId ? 'open_thread' : 'open_device');
         }
-        connectRelayWebsocket(supervisor, socket, threadId, access);
+        connectRelayWebsocket(supervisor, socket, store, session.user, deviceId, threadId, access);
       },
     });
 
@@ -783,7 +797,7 @@ export function buildRelayServer(
         if (access.kind === 'shared') {
           recordRelayAccess(store, access, session.user, threadId ? 'open_thread' : 'open_device');
         }
-        connectRelayWebsocket(supervisor, socket, threadId, access);
+        connectRelayWebsocket(supervisor, socket, store, session.user, deviceId, threadId, access);
       },
     });
   });
@@ -1022,11 +1036,14 @@ function connectRelayWebsocket(
     close: (code?: number, reason?: string) => void;
     on: any;
   },
+  store: RelayStore,
+  user: RelayUserDto,
+  deviceId: string,
   threadId: string | null,
   access: EffectiveRelayAccess,
 ) {
   const clientId = randomUUID();
-  supervisor.clientSockets.set(clientId, { socket, threadId, access });
+  supervisor.clientSockets.set(clientId, { socket, threadId, deviceId, user, access });
   sendToSupervisor(supervisor, {
     type: 'relay.client.connected',
     timestamp: new Date().toISOString(),
@@ -1041,7 +1058,20 @@ function connectRelayWebsocket(
       return;
     }
 
-    if (access.kind === 'shared' && access.threadAccess !== 'control') {
+    const freshAccess = store.effectiveAccess(user.id, deviceId, {
+      threadId: threadId ?? threadIdFromSocketPayload(payload),
+    });
+    if (!freshAccess) {
+      supervisor.clientSockets.delete(clientId);
+      socket.close(1008, 'Shared access is no longer allowed.');
+      return;
+    }
+    const clientConnection = supervisor.clientSockets.get(clientId);
+    if (clientConnection) {
+      clientConnection.access = freshAccess;
+    }
+
+    if (freshAccess.kind === 'shared' && freshAccess.threadAccess !== 'control') {
       socket.close(1008, 'Shared read-only session cannot control supervisor.');
       return;
     }
@@ -1062,6 +1092,10 @@ function connectRelayWebsocket(
       clientId,
     });
   });
+}
+
+function threadIdFromSocketPayload(payload: unknown) {
+  return isObject(payload) && typeof payload.threadId === 'string' ? payload.threadId : null;
 }
 
 function sendToSupervisor(supervisor: SupervisorConnection, message: RelaySupervisorEnvelope) {

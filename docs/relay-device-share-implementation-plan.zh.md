@@ -495,7 +495,7 @@ Required tests:
   - [x] access relay admin
   - [x] mutate registration settings
 - [x] Revoke cuts access for HTTP requests immediately.
-- [ ] Revoke closes or invalidates WebSocket on next permission check.
+- [x] Revoke closes or invalidates WebSocket on next permission check.
 - [x] Expired grant is denied.
 
 Audit event plan:
