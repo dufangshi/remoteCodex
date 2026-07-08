@@ -205,10 +205,10 @@ export interface RelayEffectiveAccessDto {
 Preferred path: introduce new table instead of overloading `relay_shares`.
 
 - [x] Add `relay_access_grants`.
-- [ ] Add `relay_access_grant_workspace_ids` if selected workspaces are supported in this phase.
+- [x] Defer `relay_access_grant_workspace_ids`; selected-workspace grants are V1.1.
 - [x] Add `relay_access_grant_events`.
 - [x] Keep `relay_shares` readable for existing deployments.
-- [ ] Option A: migrate existing `relay_shares` rows into `relay_access_grants(scope='thread')`.
+- [x] Do not use Option A in V1; compatibility read path maps old shares into grant objects.
 - [x] Option B: keep compatibility read path that maps old shares into grant objects.
 
 Current V1 implementation note:
@@ -271,7 +271,7 @@ Rules:
 
 - [x] Owner keeps full access.
 - [x] Thread grant keeps current behavior.
-- [ ] Workspace grant allows threads/files under that workspace only. This can be deferred.
+- [x] Defer workspace-scope grant enforcement to V1.1.
 - [x] Device grant allows full device navigation with bounded operations.
 - [x] If multiple active grants match, use highest capability:
   - `control > read`
@@ -608,18 +608,13 @@ Current automated smoke coverage:
 9. `ios: support shared relay devices`
 10. `test: add relay device share e2e`
 
-## Open Questions
+## V1 Decisions And Follow-Ups
 
-- [ ] V1 是否允许 device share 创建/import workspace？
-  - 推荐：不允许。只允许访问已有 workspace。
-- [ ] V1 是否支持 selected workspaces？
-  - 推荐：先不做。先实现 all-device share，后续再加 allowlist。
-- [ ] Shared user 是否能 rename/delete threads？
-  - 推荐：Collaborator 可 rename 自己创建的 thread；delete 暂时 owner-only 或 Operator-only，需另行确认。
-- [ ] Shared device 是否在 portal 里显示 workspace/thread counts？
-  - 推荐：在线时显示，离线时显示上次缓存，失败不阻塞入口。
-- [ ] Revoke 后是否主动关闭 WebSocket？
-  - 推荐：V1 至少下一次请求和下一次 socket reconnect 失效；V1.1 做主动断开。
+- [x] V1 不允许 shared device user 创建/import/delete workspace。只允许访问已有 workspace。
+- [x] V1 不支持 selected workspaces。先实现 all-device share，后续再加 allowlist。
+- [x] V1 不给 shared user 开放 thread rename/delete。后续可单独设计“只能管理自己创建的 thread”或 Operator-only 删除。
+- [x] V1 不要求 shared device 在 portal 里显示 workspace/thread counts。后续可在线时显示、离线时显示上次缓存，失败不阻塞入口。
+- [x] V1 revoke 后立即拒绝后续 HTTP/access 请求，并在下一次 shared WebSocket 权限检查时断开。主动广播断开所有已连接 socket 作为 V1.1 hardening。
 
 ## Definition of Done
 
