@@ -17,7 +17,13 @@ function initials(username: string | null | undefined) {
   return Array.from(normalized).slice(0, 2).join('').toUpperCase();
 }
 
-export function RelayUserMenu() {
+export function RelayUserMenu({
+  className = '',
+  menuAlign = 'left',
+}: {
+  className?: string;
+  menuAlign?: 'left' | 'right';
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
@@ -62,12 +68,12 @@ export function RelayUserMenu() {
   }
 
   return (
-    <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.55rem)] z-50">
+    <div className={`relative z-50 inline-flex shrink-0 ${className}`.trim()}>
       <button
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`Relay account menu for ${user.username}`}
-        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] text-sm font-semibold text-[var(--theme-fg)] shadow-lg transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
@@ -75,7 +81,9 @@ export function RelayUserMenu() {
       </button>
       {open ? (
         <div
-          className="absolute right-0 mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)]"
+          className={`absolute mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)] ${
+            menuAlign === 'right' ? 'right-0' : 'left-0'
+          }`}
           role="menu"
         >
           <div className="border-b border-[var(--theme-border)] px-3 py-2">

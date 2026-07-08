@@ -23,11 +23,8 @@ import {
   type ThemeMode,
 } from './components/AppShellNavContext';
 import {
-  AppShellMenuButton,
-  AppShellNavigationMenu,
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
-import { RelayUserMenu } from './components/RelayUserMenu';
 import { LoginPage } from './pages/LoginPage';
 import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
@@ -147,8 +144,6 @@ function AppShell({
   const isWorkspacesRoute =
     location.pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
-  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute;
-
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname, location.search]);
@@ -195,14 +190,6 @@ function AppShell({
             : 'min-h-screen'
         }`}
       >
-        {isWorkspacesRoute ? <RelayUserMenu /> : null}
-        {!usesInlineTopbar && !ownsNavigationShell && (
-          <div className="fixed left-4 top-4 z-50">
-            <AppShellMenuButton />
-            <AppShellNavigationMenu className="mt-3 w-[min(22rem,calc(100vw-2rem))]" />
-          </div>
-        )}
-
         <main
           className={`mx-auto w-full ${
             isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
@@ -213,7 +200,7 @@ function AppShell({
               ? isThreadDetailRoute
                 ? 'pt-0'
                 : isThreadsRoute
-                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                  ? 'pt-[env(safe-area-inset-top)] sm:pt-0'
                   : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
               : isWorkspacesRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
@@ -222,7 +209,7 @@ function AppShell({
             isViewportLockedRoute
               ? isThreadDetailRoute
                 ? 'overflow-hidden overscroll-none px-0'
-                : 'overflow-hidden overscroll-none px-0 sm:px-6'
+                : 'overflow-hidden overscroll-none px-0'
               : 'px-4 sm:px-6'
           }`}
         >

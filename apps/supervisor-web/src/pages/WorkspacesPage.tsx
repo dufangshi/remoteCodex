@@ -2,13 +2,10 @@ import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type { RuntimeConfigDto, WorkspaceDto } from '@remote-codex/shared';
-import {
-  AppShellMenuButton,
-  AppShellNavigationMenu,
-} from '../components/AppShellNavigation';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
+import { RelayUserMenu } from '../components/RelayUserMenu';
 import {
   deleteWorkspace,
   fetchRuntimeConfig,
@@ -215,28 +212,25 @@ export function WorkspacesPage() {
   return (
     <div className="space-y-4">
       <div className="host-topbar sticky top-[env(safe-area-inset-top)] z-20 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-4">
-        <div className="relative">
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            <AppShellMenuButton />
-            <Link
-              to={currentRelayScopedPath('/threads/import')}
-              className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
-            >
-              Import
-            </Link>
-            <Link
-              to={currentRelayScopedPath('/workspaces/new')}
-              className="ui-action-primary inline-flex h-8 shrink-0 items-center rounded-md px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
-            >
-              Create
-            </Link>
-            <div className="min-w-0 flex-1 text-right">
-              <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">
-                Workspaces
-              </p>
-            </div>
+        <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+          <RelayUserMenu />
+          <Link
+            to={currentRelayScopedPath('/threads/import')}
+            className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+          >
+            Import
+          </Link>
+          <Link
+            to={currentRelayScopedPath('/workspaces/new')}
+            className="ui-action-primary inline-flex h-8 shrink-0 items-center rounded-md px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+          >
+            Create
+          </Link>
+          <div className="min-w-0 flex-1 text-right">
+            <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">
+              Workspaces
+            </p>
           </div>
-          <AppShellNavigationMenu className="absolute left-0 top-[calc(100%+0.5rem)] z-30 w-[min(22rem,calc(100vw-1rem))]" />
         </div>
       </div>
 

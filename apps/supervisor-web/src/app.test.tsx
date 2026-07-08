@@ -150,7 +150,7 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', {
-        name: /Run Codex on your private machine from anywhere/i,
+        name: /Connect a private Codex supervisor/i,
       })).toBeInTheDocument();
     });
     expect(

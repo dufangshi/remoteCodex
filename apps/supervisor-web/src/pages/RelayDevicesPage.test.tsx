@@ -204,7 +204,8 @@ describe('RelayDevicesPage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(await screen.findByLabelText('Device name'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
+    fireEvent.change(screen.getByLabelText('Device name'), {
       target: { value: 'Studio Mac' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create device token' }));

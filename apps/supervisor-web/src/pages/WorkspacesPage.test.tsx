@@ -144,16 +144,17 @@ describe('WorkspacesPage', () => {
     return { toggleNav };
   }
 
-  it('shows the compact topbar actions and opens workspace threads from the row body', async () => {
-    const { toggleNav } = renderPage();
+  it('shows compact topbar actions without the legacy app navigation menu and opens workspace threads from the row body', async () => {
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
       expect(screen.getByText('Recent Workspace')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /open navigation/i }));
-    expect(toggleNav).toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: /open navigation/i }),
+    ).not.toBeInTheDocument();
 
     expect(screen.getByRole('link', { name: /^Import$/i })).toHaveAttribute(
       'href',
@@ -172,7 +173,7 @@ describe('WorkspacesPage', () => {
     });
   });
 
-  it('renders the unified menu with workspaces disabled on the workspaces page', async () => {
+  it('does not render the removed app navigation menu on the workspaces page', async () => {
     renderPage({ navOpen: true });
 
     await waitFor(() => {
@@ -180,17 +181,19 @@ describe('WorkspacesPage', () => {
     });
 
     expect(
-      screen.getByRole('button', { name: /^Workspaces$/i }),
-    ).toBeDisabled();
+      screen.queryByRole('button', { name: /^Workspaces$/i }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /^Settings$/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /^Settings$/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /^Threads$/i }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /^New Thread$/i }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Import$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Create$/i })).toBeInTheDocument();
   });
 
   it('renames a workspace only after save is clicked', async () => {

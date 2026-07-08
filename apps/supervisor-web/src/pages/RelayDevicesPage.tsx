@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Trash2, X } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -22,6 +22,7 @@ import {
   updateRelayShare,
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
+import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
 
@@ -94,6 +95,7 @@ export function RelayDevicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
   const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(null);
+  const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const hasLoadedPortalRef = useRef(false);
 
   const load = useCallback(async (options?: {
@@ -144,6 +146,7 @@ export function RelayDevicesPage() {
       const result = await createRelayDevice({ name: deviceName });
       setCreatedDevice(result);
       setDeviceName('');
+      setAddDeviceOpen(false);
       await load({ showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to create device.'));
@@ -241,59 +244,39 @@ export function RelayDevicesPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
-      <div className="mx-auto w-full max-w-6xl space-y-5 pr-12 sm:pr-0">
-        <header className="border-b border-[var(--theme-border)] pb-5">
-          <div>
-            <Link className="text-sm text-[var(--theme-accent-strong)]" to="/">
-              Relay home
-            </Link>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-              Relay portal
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-              Devices and shared sessions
-            </h1>
+    <main className="min-h-screen bg-[var(--app-bg)] px-4 pb-6 text-[var(--app-fg)] sm:px-6">
+      <div className="mx-auto w-full max-w-6xl space-y-5">
+        <header className="sticky top-0 z-30 -mx-4 border-b border-[var(--theme-border)] bg-[color-mix(in_srgb,var(--app-bg)_94%,transparent)] px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+          <div className="mx-auto flex w-full max-w-6xl items-center gap-3">
+            <RelayUserMenu />
+            <div className="min-w-0 flex-1">
+              <Link className="text-xs font-medium text-[var(--theme-accent-strong)]" to="/">
+                Relay home
+              </Link>
+              <div className="mt-1 flex min-w-0 items-center gap-3">
+                <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+                  Relay portal
+                </p>
+                <h1 className="truncate text-lg font-semibold text-[var(--theme-fg)]">
+                  Devices and shared sessions
+                </h1>
+              </div>
+            </div>
+            <button
+              className="relay-button-primary inline-flex h-9 shrink-0 items-center gap-2"
+              onClick={() => setAddDeviceOpen(true)}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Add
+            </button>
           </div>
         </header>
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {createdDevice ? <DeviceTokenPanel result={createdDevice} /> : null}
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
-          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-            <div className="mb-4 flex items-start gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)]">
-                <Plus className="h-4 w-4" />
-              </span>
-              <div>
-                <h2 className="text-base font-semibold text-[var(--theme-fg)]">Add device</h2>
-                <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                  Create a token for one private supervisor.
-                </p>
-              </div>
-            </div>
-            <form className="space-y-3" onSubmit={addDevice}>
-              <label className="block text-sm text-[var(--theme-fg-soft)]">
-                Device name
-                <input
-                  className="relay-input mt-2 w-full"
-                  onChange={(event) => setDeviceName(event.target.value)}
-                  placeholder="MacBook Pro"
-                  value={deviceName}
-                />
-              </label>
-              <button
-                className="relay-button-primary inline-flex h-10 w-full items-center justify-center gap-2"
-                disabled={busy === 'create' || !deviceName.trim()}
-                type="submit"
-              >
-                <MonitorSmartphone className="h-4 w-4" />
-                Create device token
-              </button>
-            </form>
-          </section>
-
+        <section className="grid gap-4 lg:grid-cols-[minmax(22rem,0.86fr)_minmax(0,1.14fr)]">
           <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
@@ -331,51 +314,62 @@ export function RelayDevicesPage() {
               </div>
             )}
           </section>
+
+          <div className="space-y-4">
+            <ShareSection
+              count={portal?.sharedWithMe.length ?? 0}
+              emptyText="No sessions have been shared with this account yet."
+              loading={loading}
+              loadingText="Loading shared sessions..."
+              shares={portal?.sharedWithMe ?? []}
+              title="Shared with me"
+              subtitle="Sessions another relay user has shared with this account."
+              renderShare={(share) => (
+                <SharedSessionRow
+                  key={share.id}
+                  mode="incoming"
+                  share={share}
+                  onOpen={() => openSharedSession(share)}
+                />
+              )}
+            />
+
+            <ShareSection
+              count={portal?.sharedByMe.length ?? 0}
+              emptyText="No sessions have been shared by this account yet."
+              loading={loading}
+              loadingText="Loading shared sessions..."
+              shares={portal?.sharedByMe ?? []}
+              title="Shared by me"
+              subtitle="Threads this relay account has shared with other users."
+              renderShare={(share) => (
+                <SharedSessionRow
+                  busy={busy === `share:${share.id}`}
+                  expanded={expandedShareId === share.id}
+                  key={share.id}
+                  mode="outgoing"
+                  share={share}
+                  onOpen={() => openSharedSession(share)}
+                  onEdit={() => setEditingShare(share)}
+                  onRevoke={() => void revokeSharedSession(share)}
+                  onToggleAccess={() => {
+                    setExpandedShareId((current) => (current === share.id ? null : share.id));
+                  }}
+                />
+              )}
+            />
+          </div>
         </section>
-
-        <ShareSection
-          count={portal?.sharedWithMe.length ?? 0}
-          emptyText="No sessions have been shared with this account yet."
-          loading={loading}
-          loadingText="Loading shared sessions..."
-          shares={portal?.sharedWithMe ?? []}
-          title="Shared with me"
-          subtitle="Sessions another relay user has shared with this account."
-          renderShare={(share) => (
-            <SharedSessionRow
-              key={share.id}
-              mode="incoming"
-              share={share}
-              onOpen={() => openSharedSession(share)}
-            />
-          )}
-        />
-
-        <ShareSection
-          count={portal?.sharedByMe.length ?? 0}
-          emptyText="No sessions have been shared by this account yet."
-          loading={loading}
-          loadingText="Loading shared sessions..."
-          shares={portal?.sharedByMe ?? []}
-          title="Shared by me"
-          subtitle="Threads this relay account has shared with other users."
-          renderShare={(share) => (
-            <SharedSessionRow
-              busy={busy === `share:${share.id}`}
-              expanded={expandedShareId === share.id}
-              key={share.id}
-              mode="outgoing"
-              share={share}
-              onOpen={() => openSharedSession(share)}
-              onEdit={() => setEditingShare(share)}
-              onRevoke={() => void revokeSharedSession(share)}
-              onToggleAccess={() => {
-                setExpandedShareId((current) => (current === share.id ? null : share.id));
-              }}
-            />
-          )}
-        />
       </div>
+      {addDeviceOpen ? (
+        <AddDeviceDialog
+          busy={busy === 'create'}
+          deviceName={deviceName}
+          onChangeDeviceName={setDeviceName}
+          onClose={() => setAddDeviceOpen(false)}
+          onSubmit={addDevice}
+        />
+      ) : null}
       {editingShare ? (
         <SharePermissionsDialog
           busy={busy === `share:${editingShare.id}`}
@@ -385,6 +379,72 @@ export function RelayDevicesPage() {
         />
       ) : null}
     </main>
+  );
+}
+
+function AddDeviceDialog({
+  busy,
+  deviceName,
+  onChangeDeviceName,
+  onClose,
+  onSubmit,
+}: {
+  busy: boolean;
+  deviceName: string;
+  onChangeDeviceName: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+      <form
+        className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        onSubmit={onSubmit}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+              Relay device
+            </p>
+            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">Add device</h2>
+            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+              Create a token for one private supervisor.
+            </p>
+          </div>
+          <button
+            aria-label="Close add device dialog"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)] transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <label className="mt-5 block text-sm text-[var(--theme-fg-soft)]">
+          Device name
+          <input
+            autoFocus
+            className="relay-input mt-2 w-full"
+            onChange={(event) => onChangeDeviceName(event.target.value)}
+            placeholder="MacBook Pro"
+            value={deviceName}
+          />
+        </label>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="relay-button-primary inline-flex items-center gap-2"
+            disabled={busy || !deviceName.trim()}
+            type="submit"
+          >
+            <MonitorSmartphone className="h-4 w-4" />
+            Create device token
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -423,7 +483,7 @@ function ShareSection({
           {loadingText}
         </p>
       ) : shares.length ? (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3">
           {shares.map((share) => renderShare(share))}
         </div>
       ) : (
