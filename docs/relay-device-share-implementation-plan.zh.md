@@ -462,7 +462,7 @@ Android and iOS should mirror web semantics:
 - [x] Relay Portal includes Shared devices.
 - [x] Device cards show owner and permission chips.
 - [x] Shared device opens the normal workspace list.
-- [ ] Thread creation is available only when allowed.
+- [x] Thread creation is available only when allowed.
 - [x] Workspace file actions are hidden or disabled according to `workspaceAccess`.
 - [x] Thread composer is read-only for Viewer.
 - [x] Share management appears under Shared by me.
