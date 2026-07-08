@@ -489,11 +489,11 @@ Required tests:
 - [x] Shared device Operator can write files.
 - [ ] Shared device user cannot:
   - [x] delete device
-  - [ ] copy device setup token
+  - [x] copy device setup token
   - [x] restart runtime
-  - [ ] install/update runtime
-  - [ ] access relay admin
-  - [ ] mutate registration settings
+  - [x] install/update runtime
+  - [x] access relay admin
+  - [x] mutate registration settings
 - [x] Revoke cuts access for HTTP requests immediately.
 - [ ] Revoke closes or invalidates WebSocket on next permission check.
 - [x] Expired grant is denied.

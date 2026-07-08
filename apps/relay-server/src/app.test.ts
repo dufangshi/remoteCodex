@@ -1444,6 +1444,71 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('keeps shared device users out of owner and relay admin operations', async () => {
+    const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      canCreateThreads: true,
+    });
+
+    const portalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(portalResponse.statusCode).toBe(200);
+    expect(portalResponse.json().devices).toEqual([]);
+    expect(portalResponse.json().sharedDevicesWithMe[0]).not.toHaveProperty('token');
+
+    const deleteDeviceResponse = await app.inject({
+      method: 'DELETE',
+      url: `/relay/devices/${deviceId}`,
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(deleteDeviceResponse.statusCode).toBe(404);
+
+    const adminResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/admin',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(adminResponse.statusCode).toBe(403);
+
+    const registrationResponse = await app.inject({
+      method: 'PATCH',
+      url: '/relay/admin/settings/registration',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+      payload: {
+        registrationEnabled: false,
+      },
+    });
+    expect(registrationResponse.statusCode).toBe(403);
+
+    for (const url of [
+      `/relay/devices/${deviceId}/api/agent-runtimes/codex/install`,
+      `/relay/devices/${deviceId}/api/agent-runtimes/codex/update`,
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(response.statusCode, url).toBe(403);
+    }
+
+    await app.close();
+  });
+
   it('keeps shared device collaborators out of workspace mutations', async () => {
     const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
       threadAccess: 'control',
