@@ -219,7 +219,7 @@ Unique active grant policy:
 验收：
 
 - [x] Fresh DB starts.
-- [ ] Existing DB with `relay_shares` starts.
+- [x] Existing DB with `relay_shares` starts.
 - [x] Existing thread shares still appear in portal.
 - [x] Revoked/expired grants are not effective.
 

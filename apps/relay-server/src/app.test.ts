@@ -967,6 +967,94 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('starts with an existing relay_shares database from before access grants', async () => {
+    const config = testConfig();
+    await fs.mkdir(config.dataDir, { recursive: true });
+    const sqlite = new Database(path.join(config.dataDir, 'relay-store.sqlite'));
+    sqlite.exec(`
+      CREATE TABLE relay_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE relay_users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        username TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        password_hash TEXT NOT NULL
+      );
+      CREATE TABLE relay_devices (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        token_preview TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE relay_shares (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        owner_username TEXT,
+        target_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        target_username TEXT,
+        device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+        device_name TEXT,
+        thread_id TEXT NOT NULL,
+        label TEXT,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+      CREATE TABLE relay_share_access_events (
+        id TEXT PRIMARY KEY,
+        share_id TEXT NOT NULL REFERENCES relay_shares(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        username TEXT NOT NULL,
+        accessed_at TEXT NOT NULL
+      );
+      INSERT INTO relay_users (
+        id, email, username, role, enabled, created_at, password_salt, password_hash
+      ) VALUES
+        ('owner-user', 'owner@example.test', 'owner', 'user', 1, '2026-01-01T00:00:00.000Z', 'salt', 'hash'),
+        ('friend-user', 'friend@example.test', 'friend', 'user', 1, '2026-01-01T00:00:00.000Z', 'salt', 'hash');
+      INSERT INTO relay_devices (
+        id, owner_user_id, name, token_hash, token_preview, created_at
+      ) VALUES (
+        'device-1', 'owner-user', 'legacy device', 'legacy-token-hash', 'rcd_legacy', '2026-01-01T00:00:00.000Z'
+      );
+      INSERT INTO relay_shares (
+        id, owner_user_id, owner_username, target_user_id, target_username, device_id, device_name, thread_id, label, created_at, revoked_at
+      ) VALUES (
+        'share-1', 'owner-user', 'owner', 'friend-user', 'friend', 'device-1', 'legacy device', '${SHARED_THREAD_ID}', 'legacy share', '2026-01-01T00:00:00.000Z', NULL
+      );
+    `);
+    sqlite.close();
+
+    const app = buildRelayServer(config);
+    await app.ready();
+
+    const migrated = new Database(path.join(config.dataDir, 'relay-store.sqlite'));
+    const shareColumns = (migrated.prepare('PRAGMA table_info(relay_shares)').all() as Array<{ name: string }>)
+      .map((column) => column.name);
+    const grantColumns = (migrated.prepare('PRAGMA table_info(relay_access_grants)').all() as Array<{ name: string }>)
+      .map((column) => column.name);
+    migrated.close();
+
+    expect(shareColumns).toEqual(expect.arrayContaining([
+      'thread_title',
+      'workspace_id',
+      'workspace_label',
+      'thread_access',
+      'workspace_access',
+      'expires_at',
+    ]));
+    expect(grantColumns).toEqual(expect.arrayContaining(['scope', 'workspace_ids', 'can_create_threads']));
+
+    await app.close();
+  });
+
   it('lets explicit config override a persisted registration setting on restart', async () => {
     const dataDir = `/tmp/remote-codex-relay-test-${crypto.randomUUID()}`;
     const firstApp = buildRelayServer(
