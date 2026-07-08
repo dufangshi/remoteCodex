@@ -73,6 +73,42 @@ const sharedSession = {
   expiresAt: null,
 };
 
+const sharedDeviceGrant = {
+  id: 'grant-device-1',
+  ownerUserId: 'owner-user',
+  ownerUsername: 'owner',
+  targetUserId: relayUser.id,
+  targetUsername: relayUser.username,
+  deviceId: 'device-shared',
+  deviceName: 'Owner workstation',
+  scope: 'device',
+  threadId: null,
+  threadTitle: null,
+  workspaceId: null,
+  workspaceLabel: null,
+  workspaceScope: 'all',
+  workspaceIds: [],
+  label: 'Office server',
+  threadAccess: 'control',
+  workspaceAccess: 'read',
+  canCreateThreads: true,
+  createdAt: now,
+  revokedAt: null,
+  expiresAt: null,
+  lastAccessedAt: now,
+  lastAccessedByUsername: relayUser.username,
+  accessEvents: [
+    {
+      id: 'event-open-device',
+      grantId: 'grant-device-1',
+      actorUserId: relayUser.id,
+      actorUsername: relayUser.username,
+      kind: 'open_device',
+      createdAt: now,
+    },
+  ],
+};
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     status,
@@ -83,10 +119,11 @@ function json(route: Route, body: unknown, status = 200) {
 
 async function installRelayMocks(
   page: Page,
-  options: { access?: 'owner' | 'shared' } = {},
+  options: { access?: 'owner' | 'shared'; includeSharedDevice?: boolean } = {},
 ) {
   const access = options.access ?? 'shared';
   const currentUser = access === 'owner' ? ownerUser : relayUser;
+  const includeSharedDevice = options.includeSharedDevice ?? false;
   const createdShares: Record<string, unknown>[] = [];
   const createShareRequests: Record<string, unknown>[] = [];
 
@@ -113,7 +150,10 @@ async function installRelayMocks(
         user: currentUser,
         devices: [],
         sharedWithMe: access === 'shared' ? [sharedSession] : [],
+        sharedDevicesWithMe: access === 'shared' && includeSharedDevice ? [sharedDeviceGrant] : [],
+        sharedThreadsWithMe: [],
         sharedByMe: createdShares,
+        grantsByMe: [],
       });
     }
 
@@ -123,10 +163,30 @@ async function installRelayMocks(
         : {
             kind: 'shared',
             shareId: sharedSession.id,
+            grantId: includeSharedDevice ? sharedDeviceGrant.id : null,
+            scope: includeSharedDevice ? 'device' : 'thread',
             threadAccess: 'read',
             workspaceAccess: 'read',
             workspaceId: sharedWorkspace.id,
+            workspaceScope: includeSharedDevice ? 'all' : null,
+            canCreateThreads: includeSharedDevice,
           });
+    }
+
+    if (path === '/relay/devices/device-shared/api/workspaces') {
+      return json(route, [sharedWorkspace]);
+    }
+
+    if (path === '/relay/devices/device-shared/api/config/runtime') {
+      return json(route, {
+        mode: 'relay',
+        version: 'e2e',
+        environment: 'test',
+        workspaceRoot: '/tmp',
+        port: 8788,
+        authEnabled: true,
+        relayEnabled: true,
+      });
     }
 
     if (path === '/relay/shares' && request.method() === 'POST') {
@@ -308,6 +368,33 @@ test.describe('relay shared session actions', () => {
     await page.getByRole('button', { name: 'Share', exact: true }).click();
     await expect(page.getByText('Only the owner can share this session.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Share session' })).toBeDisabled();
+  });
+
+  test('opens a shared device from Relay Devices and loads its workspace list', async ({
+    page,
+  }) => {
+    await installRelayMocks(page, { includeSharedDevice: true });
+
+    await page.goto('/relay-devices');
+    await expect(page.getByRole('heading', { name: 'Shared devices' })).toBeVisible();
+    const sharedDeviceCard = page.locator('article').filter({ hasText: 'Office server' });
+    await expect(sharedDeviceCard).toBeVisible();
+    await expect(sharedDeviceCard.getByText('Collaborator')).toBeVisible();
+    await expect(sharedDeviceCard.getByText('Workspace read')).toBeVisible();
+
+    await sharedDeviceCard.getByRole('button', { name: 'Open', exact: true }).click();
+
+    await expect(page).toHaveURL(/\/devices\/device-shared\/workspaces/);
+    await expect(page.getByText('Shared workspace').first()).toBeVisible();
+
+    const selectedDeviceId = await page.evaluate(() =>
+      window.localStorage.getItem('remote-codex-relay-device-id'),
+    );
+    const selectedThreadId = await page.evaluate(() =>
+      window.localStorage.getItem('remote-codex-relay-thread-id'),
+    );
+    expect(selectedDeviceId).toBe('device-shared');
+    expect(selectedThreadId).toBeNull();
   });
 
   test('creates an owner share from Thread actions and refreshes Shared by me', async ({

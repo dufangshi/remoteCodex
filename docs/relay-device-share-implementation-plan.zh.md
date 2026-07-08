@@ -588,6 +588,12 @@ Success marker:
 RELAY_DEVICE_SHARE_E2E_OK
 ```
 
+Current automated smoke coverage:
+
+- [x] Playwright mocked web flow opens an incoming thread share from Relay Devices.
+- [x] Playwright mocked web flow opens an incoming device share from Relay Devices and loads its workspace list.
+- [x] Playwright mocked web flow verifies owner thread-share creation from Thread actions still works.
+
 ## Suggested Commit Plan
 
 1. `docs: plan relay device sharing`
