@@ -268,6 +268,7 @@ export function RelayDevicesPage() {
     threadAccess: RelayThreadAccessDto;
     workspaceAccess: RelayWorkspaceAccessDto;
     canCreateThreads: boolean;
+    expiresAt: string | null;
   }) {
     setBusy(`grant:${grant.id}`);
     setError(null);
@@ -277,7 +278,6 @@ export function RelayDevicesPage() {
         workspaceId: grant.workspaceId,
         workspaceScope: grant.workspaceScope,
         workspaceIds: grant.workspaceIds,
-        expiresAt: grant.expiresAt,
       });
       setEditingGrant(null);
       await load({ showLoading: false });
@@ -309,6 +309,7 @@ export function RelayDevicesPage() {
     label: string | null;
     threadAccess: RelayThreadAccessDto;
     workspaceAccess: RelayWorkspaceAccessDto;
+    expiresAt: string | null;
   }) {
     setBusy(`share:${share.id}`);
     setError(null);
@@ -316,7 +317,6 @@ export function RelayDevicesPage() {
       await updateRelayShare(share.id, {
         ...input,
         workspaceId: share.workspaceId,
-        expiresAt: share.expiresAt,
       });
       setEditingShare(null);
       await load({ showLoading: false });
@@ -1018,12 +1018,14 @@ function SharePermissionsDialog({
     label: string | null;
     threadAccess: RelayThreadAccessDto;
     workspaceAccess: RelayWorkspaceAccessDto;
+    expiresAt: string | null;
   }) => void;
   share: RelaySessionShareDto;
 }) {
   const [label, setLabel] = useState(share.label ?? '');
   const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(share.threadAccess);
   const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(share.workspaceAccess);
+  const [expiresAt, setExpiresAt] = useState(toDatetimeLocalValue(share.expiresAt));
   const workspaceAccessLocked = !share.workspaceId;
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1032,13 +1034,14 @@ function SharePermissionsDialog({
       label: label.trim() || null,
       threadAccess,
       workspaceAccess: workspaceAccessLocked ? 'none' : workspaceAccess,
+      expiresAt: fromDatetimeLocalValue(expiresAt),
     });
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
       <form
-        className="w-full max-w-lg rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
         onSubmit={submit}
       >
         <div>
@@ -1086,6 +1089,19 @@ function SharePermissionsDialog({
               This share was created without a workspace scope, so only thread access can be changed.
             </p>
           ) : null}
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Expiration
+            <input
+              aria-label="Expiration"
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setExpiresAt(event.target.value)}
+              type="datetime-local"
+              value={expiresAt}
+            />
+            <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+              Leave empty for no expiration.
+            </span>
+          </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
@@ -1246,12 +1262,14 @@ function GrantPermissionsDialog({
     threadAccess: RelayThreadAccessDto;
     workspaceAccess: RelayWorkspaceAccessDto;
     canCreateThreads: boolean;
+    expiresAt: string | null;
   }) => void;
 }) {
   const [label, setLabel] = useState(grant.label ?? '');
   const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(grant.threadAccess);
   const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(grant.workspaceAccess);
   const [canCreateThreads, setCanCreateThreads] = useState(grant.canCreateThreads);
+  const [expiresAt, setExpiresAt] = useState(toDatetimeLocalValue(grant.expiresAt));
   const canCreateThreadsAvailable = grant.scope !== 'thread';
   const workspaceAccessLocked = grant.scope === 'thread' && !grant.workspaceId;
 
@@ -1262,13 +1280,14 @@ function GrantPermissionsDialog({
       threadAccess,
       workspaceAccess: workspaceAccessLocked ? 'none' : workspaceAccess,
       canCreateThreads: canCreateThreadsAvailable ? canCreateThreads : false,
+      expiresAt: fromDatetimeLocalValue(expiresAt),
     });
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
       <form
-        className="w-full max-w-lg rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
         onSubmit={submit}
       >
         <div>
@@ -1324,6 +1343,19 @@ function GrantPermissionsDialog({
               />
             </label>
           ) : null}
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Expiration
+            <input
+              aria-label="Expiration"
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setExpiresAt(event.target.value)}
+              type="datetime-local"
+              value={expiresAt}
+            />
+            <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+              Leave empty for no expiration.
+            </span>
+          </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
@@ -1522,6 +1554,37 @@ function relayWebsocketBaseUrl() {
 
 function formatRelayTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
+}
+
+function toDatetimeLocalValue(value: string | null | undefined) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+  ].join('');
+}
+
+function fromDatetimeLocalValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function shareTitleText(share: RelaySessionShareDto) {

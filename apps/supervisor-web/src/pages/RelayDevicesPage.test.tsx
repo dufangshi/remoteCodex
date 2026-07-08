@@ -402,13 +402,24 @@ describe('RelayDevicesPage', () => {
     fireEvent.change(screen.getByLabelText('Thread access'), {
       target: { value: 'control' },
     });
+    fireEvent.change(screen.getByLabelText('Expiration'), {
+      target: { value: '2026-07-10T12:30' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save permissions' }));
 
+    const expectedExpiration = new Date('2026-07-10T12:30').toISOString();
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         '/relay/shares/share-1',
         expect.objectContaining({
           method: 'PATCH',
+          body: JSON.stringify({
+            label: 'Review session',
+            threadAccess: 'control',
+            workspaceAccess: 'read',
+            expiresAt: expectedExpiration,
+            workspaceId: 'workspace-1',
+          }),
         }),
       );
     });
@@ -419,6 +430,48 @@ describe('RelayDevicesPage', () => {
         '/relay/shares/share-1',
         expect.objectContaining({
           method: 'DELETE',
+        }),
+      );
+    });
+  });
+
+  it('edits device grant expiration from Shared by me', async () => {
+    renderPage([], [], [], {
+      grantsByMe: [
+        {
+          ...sharedDeviceGrant,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          label: 'Office server',
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Office server')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Permissions' }));
+    fireEvent.change(screen.getByLabelText('Expiration'), {
+      target: { value: '2026-07-11T09:15' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save permissions' }));
+
+    const expectedExpiration = new Date('2026-07-11T09:15').toISOString();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/grants/grant-device-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({
+            label: 'Office server',
+            threadAccess: 'control',
+            workspaceAccess: 'write',
+            canCreateThreads: true,
+            expiresAt: expectedExpiration,
+            workspaceId: null,
+            workspaceScope: 'all',
+            workspaceIds: [],
+          }),
         }),
       );
     });

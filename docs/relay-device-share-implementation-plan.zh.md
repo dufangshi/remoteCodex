@@ -429,7 +429,7 @@ Shared by me management:
 - [x] Device grants show device name instead of thread title.
 - [x] Thread grants preserve current thread/workspace title display.
 - [x] Manage button can edit access fields.
-- [ ] Manage button can edit expiration.
+- [x] Manage button can edit expiration.
 - [x] Revoke button revokes grant.
 - [x] Access popover shows latest events.
 
