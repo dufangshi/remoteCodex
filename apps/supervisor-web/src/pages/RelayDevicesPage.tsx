@@ -245,38 +245,45 @@ export function RelayDevicesPage() {
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 pb-6 text-[var(--app-fg)] sm:px-6">
-      <div className="mx-auto w-full max-w-6xl space-y-5">
-        <header className="sticky top-0 z-30 -mx-4 border-b border-[var(--theme-border)] bg-[color-mix(in_srgb,var(--app-bg)_94%,transparent)] px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
-          <div className="mx-auto flex w-full max-w-6xl items-center gap-3">
+      <div className="mx-auto w-full max-w-[1600px] space-y-5">
+        <header className="host-topbar sticky top-[env(safe-area-inset-top)] z-30 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-4">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <RelayUserMenu />
-            <div className="min-w-0 flex-1">
-              <Link className="text-xs font-medium text-[var(--theme-accent-strong)]" to="/">
-                Relay home
-              </Link>
-              <div className="mt-1 flex min-w-0 items-center gap-3">
-                <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-                  Relay portal
-                </p>
-                <h1 className="truncate text-lg font-semibold text-[var(--theme-fg)]">
-                  Devices and shared sessions
-                </h1>
-              </div>
-            </div>
             <button
-              className="relay-button-primary inline-flex h-9 shrink-0 items-center gap-2"
+              className="ui-action-primary inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
               onClick={() => setAddDeviceOpen(true)}
               type="button"
             >
               <Plus className="h-4 w-4" />
               Add
             </button>
+            <Link
+              className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+              to="/"
+            >
+              Relay home
+            </Link>
+            <div className="min-w-0 flex-1 text-right">
+              <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">
+                Relay portal
+              </p>
+            </div>
           </div>
         </header>
+
+        <section className="border-b border-[var(--theme-border)] pb-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+            Relay portal
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-[var(--theme-fg)]">
+            Devices and shared sessions
+          </h1>
+        </section>
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {createdDevice ? <DeviceTokenPanel result={createdDevice} /> : null}
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(22rem,0.86fr)_minmax(0,1.14fr)]">
+        <section className="grid gap-4 xl:grid-cols-[minmax(42rem,0.9fr)_minmax(0,1.1fr)]">
           <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
@@ -525,7 +532,7 @@ function SharedSessionRow({
   return (
     <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
             {shareTitle}
           </p>
@@ -740,7 +747,7 @@ function DeviceRow({
   return (
     <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
@@ -758,9 +765,9 @@ function DeviceRow({
               : `Offline. Last heartbeat: ${formatRelayTimestamp(device.lastHeartbeatAt)}`}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
           <button
-            className="relay-button-secondary inline-flex items-center gap-2"
+            className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
             onClick={onCopySetup}
             title={
               setupTokenAvailable
@@ -774,7 +781,7 @@ function DeviceRow({
             {copiedSetup ? 'Copied' : 'Copy setup'}
           </button>
           <button
-            className="relay-button-primary inline-flex items-center gap-2"
+            className="relay-button-primary inline-flex h-10 items-center gap-2 whitespace-nowrap"
             disabled={!device.connected}
             onClick={onConnect}
             type="button"
@@ -783,13 +790,14 @@ function DeviceRow({
             Connect
           </button>
           <button
-            className="relay-button-secondary inline-flex items-center gap-2"
+            aria-label={`Delete ${device.name}`}
+            className="relay-button-secondary inline-flex h-10 w-10 items-center justify-center px-0"
             disabled={busy}
             onClick={onDelete}
+            title={`Delete ${device.name}`}
             type="button"
           >
             <Trash2 className="h-4 w-4" />
-            Delete
           </button>
         </div>
       </div>

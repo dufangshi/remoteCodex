@@ -19,7 +19,7 @@ function errorMessage(caught: unknown, fallback: string) {
       : fallback;
 }
 
-export function RelayAccountPage() {
+export function RelayAccountSettingsPanel({ className = '' }: { className?: string }) {
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [username, setUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -93,6 +93,100 @@ export function RelayAccountPage() {
   }
 
   return (
+    <div className={`space-y-5 ${className}`.trim()}>
+      {loading ? (
+        <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 text-sm text-[var(--theme-fg-muted)]">
+          Loading account...
+        </section>
+      ) : !session?.authenticated ? (
+        <section className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-4 text-sm text-[var(--status-danger-fg)]">
+          Relay login is required.
+        </section>
+      ) : (
+        <>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          {message ? <Notice tone="success">{message}</Notice> : null}
+
+          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+            <div className="mb-4">
+              <h2 className="text-base font-semibold text-[var(--theme-fg)]">Profile</h2>
+              <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+                Username changes apply to future shares and login.
+              </p>
+            </div>
+            <form className="space-y-4" onSubmit={saveProfile}>
+              <label className="block text-sm text-[var(--theme-fg-soft)]">
+                Email
+                <input
+                  className="relay-input mt-2 w-full"
+                  disabled
+                  readOnly
+                  value={session.user?.email ?? ''}
+                />
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <label className="block flex-1 text-sm text-[var(--theme-fg-soft)]">
+                  Username
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setUsername(event.target.value)}
+                    value={username}
+                  />
+                </label>
+                <button
+                  className="relay-button-primary inline-flex h-10 items-center justify-center gap-2"
+                  disabled={savingProfile || !username.trim()}
+                  type="submit"
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </button>
+              </div>
+              <button
+                className="relay-button-secondary inline-flex items-center gap-2"
+                onClick={() => setVerifyClicked(true)}
+                type="button"
+              >
+                {verifyClicked ? <CheckCircle2 className="h-4 w-4" /> : <MailCheck className="h-4 w-4" />}
+                {verifyClicked ? 'Verification queued' : 'Verify email'}
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+            <div className="mb-4">
+              <h2 className="text-base font-semibold text-[var(--theme-fg)]">Password</h2>
+              <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+                Use at least 8 characters.
+              </p>
+            </div>
+            <form className="grid gap-4 sm:grid-cols-3" onSubmit={savePassword}>
+              <PasswordInput label="Current password" value={currentPassword} onChange={setCurrentPassword} />
+              <PasswordInput label="New password" value={newPassword} onChange={setNewPassword} />
+              <PasswordInput label="Confirm password" value={confirmPassword} onChange={setConfirmPassword} />
+              <button
+                className="relay-button-primary inline-flex h-10 items-center justify-center gap-2 sm:col-span-3 sm:w-fit"
+                disabled={
+                  savingPassword ||
+                  !currentPassword ||
+                  newPassword.length < 8 ||
+                  !confirmPassword
+                }
+                type="submit"
+              >
+                <Save className="h-4 w-4" />
+                Change password
+              </button>
+            </form>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function RelayAccountPage() {
+  return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
       <div className="mx-auto w-full max-w-4xl space-y-5 pr-12 sm:pr-0">
         <header className="border-b border-[var(--theme-border)] pb-5">
@@ -106,94 +200,7 @@ export function RelayAccountPage() {
             Account settings
           </h1>
         </header>
-
-        {loading ? (
-          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 text-sm text-[var(--theme-fg-muted)]">
-            Loading account...
-          </section>
-        ) : !session?.authenticated ? (
-          <section className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-4 text-sm text-[var(--status-danger-fg)]">
-            Relay login is required.
-          </section>
-        ) : (
-          <>
-            {error ? <Notice tone="danger">{error}</Notice> : null}
-            {message ? <Notice tone="success">{message}</Notice> : null}
-
-            <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-              <div className="mb-4">
-                <h2 className="text-base font-semibold text-[var(--theme-fg)]">Profile</h2>
-                <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                  Username changes apply to future shares and login.
-                </p>
-              </div>
-              <form className="space-y-4" onSubmit={saveProfile}>
-                <label className="block text-sm text-[var(--theme-fg-soft)]">
-                  Email
-                  <input
-                    className="relay-input mt-2 w-full"
-                    disabled
-                    readOnly
-                    value={session.user?.email ?? ''}
-                  />
-                </label>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <label className="block flex-1 text-sm text-[var(--theme-fg-soft)]">
-                    Username
-                    <input
-                      className="relay-input mt-2 w-full"
-                      onChange={(event) => setUsername(event.target.value)}
-                      value={username}
-                    />
-                  </label>
-                  <button
-                    className="relay-button-primary inline-flex h-10 items-center justify-center gap-2"
-                    disabled={savingProfile || !username.trim()}
-                    type="submit"
-                  >
-                    <Save className="h-4 w-4" />
-                    Save
-                  </button>
-                </div>
-                <button
-                  className="relay-button-secondary inline-flex items-center gap-2"
-                  onClick={() => setVerifyClicked(true)}
-                  type="button"
-                >
-                  {verifyClicked ? <CheckCircle2 className="h-4 w-4" /> : <MailCheck className="h-4 w-4" />}
-                  {verifyClicked ? 'Verification queued' : 'Verify email'}
-                </button>
-              </form>
-            </section>
-
-            <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-              <div className="mb-4">
-                <h2 className="text-base font-semibold text-[var(--theme-fg)]">Password</h2>
-                <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                  Use at least 8 characters.
-                </p>
-              </div>
-              <form className="grid gap-4 sm:grid-cols-3" onSubmit={savePassword}>
-                <PasswordInput label="Current password" value={currentPassword} onChange={setCurrentPassword} />
-                <PasswordInput label="New password" value={newPassword} onChange={setNewPassword} />
-                <PasswordInput label="Confirm password" value={confirmPassword} onChange={setConfirmPassword} />
-                <button
-                  className="relay-button-primary inline-flex h-10 items-center justify-center gap-2 sm:col-span-3 sm:w-fit"
-                  disabled={
-                    savingPassword ||
-                    !currentPassword ||
-                    newPassword.length < 8 ||
-                    !confirmPassword
-                  }
-                  type="submit"
-                >
-                  <Save className="h-4 w-4" />
-                  Change password
-                </button>
-              </form>
-            </section>
-          </>
-        )}
+        <RelayAccountSettingsPanel />
       </div>
     </main>
   );

@@ -1,4 +1,4 @@
-import { LogOut, MonitorSmartphone, Settings } from 'lucide-react';
+import { LogOut, MonitorSmartphone, Settings, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
@@ -8,6 +8,7 @@ import {
   relayLogout,
   relayModeActive,
 } from '../lib/api';
+import { RelayAccountSettingsPanel } from '../pages/RelayAccountPage';
 
 function initials(username: string | null | undefined) {
   const normalized = username?.trim() ?? '';
@@ -28,6 +29,7 @@ export function RelayUserMenu({
   const location = useLocation();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [open, setOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   useEffect(() => {
     if (!relayModeActive()) {
@@ -52,6 +54,7 @@ export function RelayUserMenu({
 
   useEffect(() => {
     setOpen(false);
+    setAccountOpen(false);
   }, [location.pathname]);
 
   const user = session?.user ?? null;
@@ -92,14 +95,18 @@ export function RelayUserMenu({
             </p>
             <p className="truncate text-xs text-[var(--theme-fg-muted)]">{user.email}</p>
           </div>
-          <Link
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+          <button
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+            onClick={() => {
+              setOpen(false);
+              setAccountOpen(true);
+            }}
             role="menuitem"
-            to="/relay-account"
+            type="button"
           >
             <Settings className="h-4 w-4" />
             Account settings
-          </Link>
+          </button>
           <Link
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
             role="menuitem"
@@ -117,6 +124,37 @@ export function RelayUserMenu({
             <LogOut className="h-4 w-4" />
             Logout
           </button>
+        </div>
+      ) : null}
+      {accountOpen ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm sm:py-10"
+          role="dialog"
+        >
+          <section className="w-full max-w-3xl rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
+            <header className="flex items-start justify-between gap-4 border-b border-[var(--theme-border)] px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+                  Relay Account
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-[var(--theme-fg)]">
+                  Account settings
+                </h2>
+              </div>
+              <button
+                aria-label="Close account settings"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+                onClick={() => setAccountOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="max-h-[min(78vh,48rem)] overflow-y-auto p-5">
+              <RelayAccountSettingsPanel />
+            </div>
+          </section>
         </div>
       ) : null}
     </div>
