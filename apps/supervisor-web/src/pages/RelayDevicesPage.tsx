@@ -1,6 +1,6 @@
 import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Share2, Trash2, X } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import type {
   RelayCreateDeviceResultDto,
@@ -124,6 +124,7 @@ function sanitizeGrantMetadata(grant: RelayAccessGrantDto): RelayAccessGrantDto 
 
 export function RelayDevicesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
   const [deviceName, setDeviceName] = useState('');
   const [createdDevice, setCreatedDevice] = useState<RelayCreateDeviceResultDto | null>(null);
@@ -138,6 +139,7 @@ export function RelayDevicesPage() {
   const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(null);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const hasLoadedPortalRef = useRef(false);
+  const handledShareDeviceRequestRef = useRef<string | null>(null);
 
   const load = useCallback(async (options?: {
     showLoading?: boolean;
@@ -178,6 +180,24 @@ export function RelayDevicesPage() {
       window.clearInterval(intervalId);
     };
   }, [load]);
+
+  useEffect(() => {
+    const requestedDeviceId = searchParams.get('shareDevice');
+    if (!requestedDeviceId || !portal || handledShareDeviceRequestRef.current === requestedDeviceId) {
+      return;
+    }
+
+    const device = portal.devices.find((entry) => entry.id === requestedDeviceId);
+    if (!device) {
+      return;
+    }
+
+    handledShareDeviceRequestRef.current = requestedDeviceId;
+    setSharingDevice(device);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('shareDevice');
+    setSearchParams(nextParams, { replace: true });
+  }, [portal, searchParams, setSearchParams]);
 
   async function addDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

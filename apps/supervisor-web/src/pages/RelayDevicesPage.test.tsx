@@ -94,6 +94,7 @@ function renderPage(
     sharedThreadsWithMe?: RelayAccessGrantDto[];
     grantsByMe?: RelayAccessGrantDto[];
   } = {},
+  initialEntry = '/relay-devices',
 ) {
   vi.stubGlobal(
     'fetch',
@@ -176,7 +177,7 @@ function renderPage(
   );
 
   render(
-    <MemoryRouter initialEntries={['/relay-devices']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/relay-devices" element={<RelayDevicesPage />} />
         <Route path="/workspaces" element={<div>Workspaces</div>} />
@@ -375,6 +376,19 @@ describe('RelayDevicesPage', () => {
         }),
       );
     });
+  });
+
+  it('opens the owned device share dialog from a shareDevice query parameter', async () => {
+    renderPage(
+      [device({ id: 'device-1', name: 'MacBook Pro', connected: true })],
+      [],
+      [],
+      {},
+      '/relay-devices?shareDevice=device-1',
+    );
+
+    expect(await screen.findByText('Share MacBook Pro')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share device' })).toBeInTheDocument();
   });
 
   it('manages sessions shared by the current relay account', async () => {

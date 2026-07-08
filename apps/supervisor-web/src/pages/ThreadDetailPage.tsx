@@ -717,6 +717,15 @@ export function ThreadDetailPage() {
       setShareBusy(false);
     }
   }, [loadThreadShares]);
+  const handleOpenDeviceSharing = useCallback(() => {
+    const deviceId = currentRelayDeviceIdFromPath();
+    if (!deviceId) {
+      return;
+    }
+
+    setExportDialogOpen(false);
+    navigate(`/relay-devices?shareDevice=${encodeURIComponent(deviceId)}`);
+  }, [navigate]);
   useEffect(() => {
     if (exportDialogOpen) {
       void loadThreadShares();
@@ -3410,6 +3419,7 @@ export function ThreadDetailPage() {
           {...(relayThreadCanShare
             ? {
                 onCreateShare: handleCreateThreadShare,
+                onOpenDeviceSharing: handleOpenDeviceSharing,
                 onRevokeShare: handleRevokeThreadShare,
               }
             : {})}
@@ -3442,6 +3452,7 @@ export function ThreadDetailPage() {
       handleCreateThreadShare,
       handleDeleteThread,
       handleExportTranscript,
+      handleOpenDeviceSharing,
       handleRevokeThreadShare,
       loadExportTurns,
       relayDeviceRouteActive,

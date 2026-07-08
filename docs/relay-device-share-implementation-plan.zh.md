@@ -444,14 +444,14 @@ Shared by me management:
 
 Thread UI share panel remains thread-specific.
 
-- [ ] Rename copy to "Share this thread" where needed.
-- [ ] Add small link/button "Share whole device" only if user is device owner.
-- [ ] Thread share creation still sends `scope='thread'`.
+- [x] Rename copy to "Share this thread" where needed.
+- [x] Add small link/button "Share whole device" only if user is device owner.
+- [x] Thread share creation still uses the thread-scoped `/relay/shares` path.
 
 验收:
 
-- [ ] Current thread sharing UX is not regressed.
-- [ ] Device sharing is discoverable but not mixed into thread-only defaults.
+- [x] Current thread sharing UX is not regressed.
+- [x] Device sharing is discoverable but not mixed into thread-only defaults.
 
 ## Mobile Design
 
