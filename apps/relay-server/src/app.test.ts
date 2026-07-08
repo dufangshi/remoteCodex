@@ -1302,6 +1302,7 @@ describe('relay server', () => {
       `/relay/devices/${deviceId}/api/agent-runtimes`,
       `/relay/devices/${deviceId}/api/agent-runtimes/codex/status`,
       `/relay/devices/${deviceId}/api/agent-runtimes/codex/models`,
+      `/relay/devices/${deviceId}/api/plugins`,
     ];
 
     for (const url of runtimeMetadataUrls) {

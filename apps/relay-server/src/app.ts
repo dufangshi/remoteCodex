@@ -1428,6 +1428,9 @@ function isAllowedSharedRuntimeMetadataRequest(method: string, pathname: string)
   if (pathname === '/api/agent-runtimes') {
     return true;
   }
+  if (pathname === '/api/plugins') {
+    return true;
+  }
   return /^\/api\/agent-runtimes\/[^/]+\/(?:status|models)$/.test(pathname);
 }
 
