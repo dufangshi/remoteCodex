@@ -302,6 +302,26 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    func openSharedGrant(_ grant: RelayAccessGrantSummary) {
+        let config = SupervisorConnectionConfig(
+            mode: .relay,
+            baseURL: baseURL,
+            authToken: authToken,
+            relayDeviceId: grant.deviceId
+        )
+        do {
+            try environment.settingsStore.writeSupervisorConnection(config)
+            if grant.threadId?.trimmedNonEmpty != nil {
+                onOpenRelaySharedThread(config, grant.toThreadShareSummary())
+            } else {
+                relayDeviceId = grant.deviceId
+                onReady(config, route)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func connectSavedDevice(_ device: SavedSupervisorDevice) async {
         switch device.mode {
         case .local:
@@ -832,12 +852,20 @@ struct ConnectionScreen: View {
         }
         .remoteCodexListRow()
         Section("Shared with me") {
+            let sharedDevices = model.relayPortal?.sharedDevicesWithMe ?? []
             let sharedSessions = model.relayPortal?.sharedWithMe ?? []
             if model.relayPortal == nil {
                 ProgressView("Loading shared sessions...")
-            } else if sharedSessions.isEmpty {
+            } else if sharedDevices.isEmpty && sharedSessions.isEmpty {
                 ContentUnavailableView("No Shared Threads", systemImage: "person.2.slash")
             } else {
+                ForEach(sharedDevices) { grant in
+                    RelaySharedGrantRow(
+                        grant: grant,
+                        mode: .incoming,
+                        onOpen: { model.openSharedGrant(grant) }
+                    )
+                }
                 ForEach(sharedSessions) { share in
                     RelaySharedSessionRow(
                         share: share,
@@ -849,12 +877,20 @@ struct ConnectionScreen: View {
         }
         .remoteCodexListRow()
         Section("Shared by me") {
+            let grants = model.relayPortal?.grantsByMe ?? []
             let sharedSessions = model.relayPortal?.sharedByMe ?? []
             if model.relayPortal == nil {
                 ProgressView("Loading shared sessions...")
-            } else if sharedSessions.isEmpty {
-                ContentUnavailableView("No Shared Threads", systemImage: "person.2")
+            } else if grants.isEmpty && sharedSessions.isEmpty {
+                ContentUnavailableView("No Shared Access", systemImage: "person.2")
             } else {
+                ForEach(grants) { grant in
+                    RelaySharedGrantRow(
+                        grant: grant,
+                        mode: .outgoing,
+                        onOpen: { model.openSharedGrant(grant) }
+                    )
+                }
                 ForEach(sharedSessions) { share in
                     RelaySharedSessionRow(
                         share: share,
@@ -1100,6 +1136,46 @@ private struct RelaySharedSessionRow: View {
     }
 }
 
+private struct RelaySharedGrantRow: View {
+    let grant: RelayAccessGrantSummary
+    let mode: RelayShareRowMode
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(grantTitle(grant))
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Open", action: onOpen)
+                    .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(mode == .incoming ? "From \(grant.ownerUsername)" : "To \(grant.targetUsername)")
+                Text("Device: \(grant.deviceName)")
+                if let workspace = grant.workspaceLabel?.trimmedNonEmpty {
+                    Text("Workspace: \(workspace)")
+                }
+            }
+            .font(.caption)
+            .remoteCodexStatusText()
+            .lineLimit(1)
+            HStack {
+                GraphBadge(text: grantScopeLabel(grant.scope), tone: .neutral)
+                GraphBadge(
+                    text: grant.threadAccess == "read" ? "View only" : "Collaborator",
+                    tone: grant.threadAccess == "read" ? .warning : .success
+                )
+                GraphBadge(text: workspaceAccessLabel(grant.workspaceAccess), tone: .neutral)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 private struct RelaySharePermissionsSheet: View {
     let busy: Bool
     let share: RelaySessionShareSummary
@@ -1187,6 +1263,49 @@ private func shareTitle(_ share: RelaySessionShareSummary) -> String {
         return "Thread unavailable"
     }
     return threadTitle
+}
+
+private func grantTitle(_ grant: RelayAccessGrantSummary) -> String {
+    grant.label?.trimmedNonEmpty
+        ?? grant.threadTitle?.trimmedNonEmpty
+        ?? grant.workspaceLabel?.trimmedNonEmpty
+        ?? grant.deviceName.trimmedNonEmpty
+        ?? "Shared device"
+}
+
+private func grantScopeLabel(_ scope: String) -> String {
+    switch scope {
+    case "device": return "Device"
+    case "workspace": return "Workspace"
+    default: return "Thread"
+    }
+}
+
+private extension RelayAccessGrantSummary {
+    func toThreadShareSummary() -> RelaySessionShareSummary {
+        RelaySessionShareSummary(
+            id: id,
+            ownerUserId: ownerUserId,
+            ownerUsername: ownerUsername,
+            targetUsername: targetUsername,
+            targetUserId: targetUserId,
+            deviceId: deviceId,
+            deviceName: deviceName,
+            threadId: threadId ?? "",
+            threadTitle: threadTitle,
+            workspaceId: workspaceId,
+            workspaceLabel: workspaceLabel,
+            label: label,
+            threadAccess: threadAccess,
+            workspaceAccess: workspaceAccess,
+            createdAt: createdAt,
+            revokedAt: revokedAt,
+            expiresAt: expiresAt,
+            lastAccessedAt: lastAccessedAt,
+            lastAccessedByUsername: lastAccessedByUsername,
+            accessEvents: accessEvents
+        )
+    }
 }
 
 private func relayDeviceStatusLine(_ device: RelayDeviceSummary) -> String {

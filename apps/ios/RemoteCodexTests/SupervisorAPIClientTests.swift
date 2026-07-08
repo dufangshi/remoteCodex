@@ -104,6 +104,29 @@ final class SupervisorAPIClientTests: XCTestCase {
                       "createdAt": "now",
                       "lastHeartbeatAt": "now"
                     }
+                  ],
+                  "sharedDevicesWithMe": [
+                    {
+                      "id": "grant-a",
+                      "ownerUserId": "owner",
+                      "ownerUsername": "owner",
+                      "targetUsername": "dev",
+                      "targetUserId": "dev",
+                      "deviceId": "device-shared",
+                      "deviceName": "Office server",
+                      "scope": "device",
+                      "threadId": null,
+                      "workspaceId": null,
+                      "workspaceScope": "all",
+                      "workspaceIds": [],
+                      "label": "Office server",
+                      "threadAccess": "control",
+                      "workspaceAccess": "write",
+                      "canCreateThreads": true,
+                      "createdAt": "now",
+                      "revokedAt": null,
+                      "expiresAt": null
+                    }
                   ]
                 }
                 """.utf8),
@@ -119,6 +142,9 @@ final class SupervisorAPIClientTests: XCTestCase {
 
         XCTAssertEqual(portal.devices.first?.id, "device-a")
         XCTAssertEqual(portal.devices.first?.online, true)
+        XCTAssertEqual(portal.sharedDevicesWithMe.first?.id, "grant-a")
+        XCTAssertEqual(portal.sharedDevicesWithMe.first?.scope, "device")
+        XCTAssertEqual(portal.sharedDevicesWithMe.first?.canCreateThreads, true)
     }
 
     func testHomeSnapshotUsesRelayDevicePaths() async throws {

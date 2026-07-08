@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.AuthLoginResult
+import com.remotecodex.android.api.RelayAccessGrantSummary
 import com.remotecodex.android.api.RelayCreateDeviceResult
 import com.remotecodex.android.api.RelayDeviceSummary
 import com.remotecodex.android.api.RelayPortalSummary
@@ -220,6 +221,42 @@ fun SupervisorConnectionSetupScreen(
         relayDeviceId = share.deviceId
         onConnectionStateSaved(config)
         onOpenRelaySharedThread(config, share)
+    }
+
+    fun openSharedGrant(grant: RelayAccessGrantSummary) {
+        if (authToken.isBlank()) {
+            errorMessage = "Log in to the relay before opening shared devices."
+            statusMessage = null
+            return
+        }
+        val config = SupervisorConnectionConfig(
+            mode = SupervisorConnectionMode.Relay,
+            baseUrl = baseUrl,
+            authToken = authToken,
+            relayDeviceId = grant.deviceId,
+            relayThreadId = grant.threadId,
+        )
+        relayDeviceId = grant.deviceId
+        onConnectionStateSaved(config)
+        if (grant.threadId != null) {
+            onOpenRelaySharedThread(
+                config,
+                grant.toThreadShareSummary(targetUsername = username.ifBlank { "user" }),
+            )
+            return
+        }
+        onConnectionReady(
+            config,
+            SupervisorConnectionCheck(
+                config = config,
+                authenticated = true,
+                authRequired = true,
+                sessionLabel = "Shared device",
+                healthLabel = "Relay shared access",
+                websocketUrl = config.websocketUrl(),
+            ),
+            route,
+        )
     }
 
     fun copyRelayDeviceSetup(device: RelayDeviceSummary) {
@@ -688,7 +725,9 @@ fun SupervisorConnectionSetupScreen(
                     RelayDevicesPanel(
                         devices = relayPortal?.devices.orEmpty(),
                         sharedWithMe = relayPortal?.sharedWithMe.orEmpty(),
+                        sharedDevicesWithMe = relayPortal?.sharedDevicesWithMe.orEmpty(),
                         sharedByMe = relayPortal?.sharedByMe.orEmpty(),
+                        grantsByMe = relayPortal?.grantsByMe.orEmpty(),
                         expandedShareId = expandedShareId,
                         selectedDeviceId = relayDeviceId,
                         createdDevice = createdDevice,
@@ -697,6 +736,7 @@ fun SupervisorConnectionSetupScreen(
                         onConnectDevice = { deviceId -> connectRelayDeviceSelection(deviceId) },
                         onCopySetup = { device -> copyRelayDeviceSetup(device) },
                         onOpenSharedSession = { share -> openSharedSession(share) },
+                        onOpenSharedGrant = { grant -> openSharedGrant(grant) },
                         onToggleShareAccess = { share ->
                             expandedShareId = if (expandedShareId == share.id) null else share.id
                         },
@@ -1477,7 +1517,9 @@ private fun RelayRegisterDialog(
 private fun RelayDevicesPanel(
     devices: List<RelayDeviceSummary>,
     sharedWithMe: List<RelaySessionShareSummary>,
+    sharedDevicesWithMe: List<RelayAccessGrantSummary>,
     sharedByMe: List<RelaySessionShareSummary>,
+    grantsByMe: List<RelayAccessGrantSummary>,
     expandedShareId: String?,
     selectedDeviceId: String,
     createdDevice: RelayCreateDeviceResult?,
@@ -1486,6 +1528,7 @@ private fun RelayDevicesPanel(
     onConnectDevice: (String) -> Unit,
     onCopySetup: (RelayDeviceSummary) -> Unit,
     onOpenSharedSession: (RelaySessionShareSummary) -> Unit,
+    onOpenSharedGrant: (RelayAccessGrantSummary) -> Unit,
     onToggleShareAccess: (RelaySessionShareSummary) -> Unit,
     onEditShare: (RelaySessionShareSummary) -> Unit,
     onRevokeShare: (RelaySessionShareSummary) -> Unit,
@@ -1524,6 +1567,35 @@ private fun RelayDevicesPanel(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
+        Text(
+            text = "Shared devices",
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (sharedDevicesWithMe.isEmpty()) {
+            Text(
+                text = "No shared devices for this relay account yet.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            sharedDevicesWithMe.forEach { grant ->
+                RelaySharedGrantRow(
+                    grant = grant,
+                    busy = busy,
+                    mode = RelayShareRowMode.Incoming,
+                    onOpen = { onOpenSharedGrant(grant) },
+                )
+            }
+        }
+
+        Text(
+            text = "Shared threads",
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
         if (sharedWithMe.isEmpty()) {
             Text(
                 text = "No shared threads for this relay account yet.",
@@ -1548,13 +1620,21 @@ private fun RelayDevicesPanel(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        if (sharedByMe.isEmpty()) {
+        if (sharedByMe.isEmpty() && grantsByMe.isEmpty()) {
             Text(
-                text = "No shared threads from this relay account yet.",
+                text = "No shared access from this relay account yet.",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
         } else {
+            grantsByMe.forEach { grant ->
+                RelaySharedGrantRow(
+                    grant = grant,
+                    busy = busy,
+                    mode = RelayShareRowMode.Outgoing,
+                    onOpen = { onOpenSharedGrant(grant) },
+                )
+            }
             sharedByMe.forEach { share ->
                 RelaySharedSessionRow(
                     share = share,
@@ -1801,6 +1881,132 @@ private fun shareTitle(share: RelaySessionShareSummary): String {
     val label = share.label?.trim()?.takeIf { it.isNotBlank() }
     return threadTitle?.takeUnless { label != null && it == label }
         ?: "Thread unavailable"
+}
+
+@Composable
+private fun RelaySharedGrantRow(
+    grant: RelayAccessGrantSummary,
+    busy: Boolean,
+    mode: RelayShareRowMode,
+    onOpen: () -> Unit,
+) {
+    val title = grantTitle(grant)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                GraphButton(
+                    label = "Open",
+                    enabled = !busy,
+                    variant = GraphButtonVariant.Default,
+                    size = GraphButtonSize.Small,
+                    icon = GraphActionIcon.Open,
+                    contentDescription = "Open shared access $title",
+                    onClick = onOpen,
+                )
+            }
+            Text(
+                text = if (mode == RelayShareRowMode.Incoming) "From ${grant.ownerUsername}" else "To ${grant.targetUsername}",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Device: ${grant.deviceName}",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            grant.workspaceLabel?.takeIf { it.isNotBlank() }?.let { workspace ->
+                Text(
+                    text = "Workspace: $workspace",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GraphBadge(
+                    label = grantScopeLabel(grant.scope),
+                    variant = GraphBadgeVariant.Outline,
+                )
+                GraphBadge(
+                    label = if (grant.threadAccess == "read") "View only" else "Collaborator",
+                    variant = if (grant.threadAccess == "read") GraphBadgeVariant.Secondary else GraphBadgeVariant.Outline,
+                )
+                GraphBadge(
+                    label = workspaceAccessLabel(grant.workspaceAccess),
+                    variant = GraphBadgeVariant.Secondary,
+                )
+            }
+        }
+    }
+}
+
+private fun grantTitle(grant: RelayAccessGrantSummary): String {
+    val label = grant.label?.trim()?.takeIf { it.isNotBlank() }
+    return label
+        ?: grant.threadTitle?.trim()?.takeIf { it.isNotBlank() }
+        ?: grant.workspaceLabel?.trim()?.takeIf { it.isNotBlank() }
+        ?: grant.deviceName.trim().takeIf { it.isNotBlank() }
+        ?: "Shared device"
+}
+
+private fun grantScopeLabel(scope: String): String {
+    return when (scope) {
+        "device" -> "Device"
+        "workspace" -> "Workspace"
+        else -> "Thread"
+    }
+}
+
+private fun RelayAccessGrantSummary.toThreadShareSummary(targetUsername: String): RelaySessionShareSummary {
+    return RelaySessionShareSummary(
+        id = id,
+        ownerUserId = ownerUserId,
+        ownerUsername = ownerUsername,
+        targetUsername = this.targetUsername.ifBlank { targetUsername },
+        targetUserId = targetUserId,
+        deviceId = deviceId,
+        deviceName = deviceName,
+        threadId = threadId.orEmpty(),
+        threadTitle = threadTitle,
+        workspaceId = workspaceId,
+        workspaceLabel = workspaceLabel,
+        label = label,
+        threadAccess = threadAccess,
+        workspaceAccess = workspaceAccess,
+        createdAt = createdAt,
+        revokedAt = revokedAt,
+        expiresAt = expiresAt,
+        lastAccessedAt = lastAccessedAt,
+        lastAccessedByUsername = lastAccessedByUsername,
+        accessEvents = accessEvents,
+    )
 }
 
 @Composable

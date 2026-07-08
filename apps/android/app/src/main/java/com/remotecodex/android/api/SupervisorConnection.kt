@@ -672,6 +672,36 @@ data class RelayPortalSummary(
     val devices: List<RelayDeviceSummary>,
     val sharedWithMe: List<RelaySessionShareSummary> = emptyList(),
     val sharedByMe: List<RelaySessionShareSummary> = emptyList(),
+    val sharedDevicesWithMe: List<RelayAccessGrantSummary> = emptyList(),
+    val sharedThreadsWithMe: List<RelayAccessGrantSummary> = emptyList(),
+    val grantsByMe: List<RelayAccessGrantSummary> = emptyList(),
+)
+
+data class RelayAccessGrantSummary(
+    val id: String,
+    val ownerUserId: String,
+    val ownerUsername: String,
+    val targetUsername: String,
+    val targetUserId: String,
+    val deviceId: String,
+    val deviceName: String,
+    val scope: String,
+    val threadId: String?,
+    val threadTitle: String?,
+    val workspaceId: String?,
+    val workspaceLabel: String?,
+    val workspaceScope: String?,
+    val workspaceIds: List<String>,
+    val label: String?,
+    val threadAccess: String,
+    val workspaceAccess: String,
+    val canCreateThreads: Boolean,
+    val createdAt: String,
+    val revokedAt: String?,
+    val expiresAt: String?,
+    val lastAccessedAt: String?,
+    val lastAccessedByUsername: String?,
+    val accessEvents: List<RelaySessionShareAccessSummary> = emptyList(),
 )
 
 data class RelaySessionShareSummary(

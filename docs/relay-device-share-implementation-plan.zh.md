@@ -459,17 +459,17 @@ Thread UI share panel remains thread-specific.
 
 Android and iOS should mirror web semantics:
 
-- [ ] Relay Portal includes Shared devices.
-- [ ] Device cards show owner and permission chips.
-- [ ] Shared device opens the normal workspace list.
+- [x] Relay Portal includes Shared devices.
+- [x] Device cards show owner and permission chips.
+- [x] Shared device opens the normal workspace list.
 - [ ] Thread creation is available only when allowed.
 - [ ] Workspace file actions are hidden or disabled according to `workspaceAccess`.
 - [ ] Thread composer is read-only for Viewer.
-- [ ] Share management appears under Shared by me.
+- [x] Share management appears under Shared by me.
 
 Mobile navigation:
 
-- [ ] Shared device should use the same selected relay device storage model as owned devices.
+- [x] Shared device should use the same selected relay device storage model as owned devices.
 - [ ] Back navigation should return to Relay Portal rather than dropping to unrelated local connection state.
 
 验收:

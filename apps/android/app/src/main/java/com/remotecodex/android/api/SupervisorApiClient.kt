@@ -1018,6 +1018,9 @@ private fun JSONObject.toRelayPortalSummary(): RelayPortalSummary {
     val devicesArray = optJSONArray("devices") ?: org.json.JSONArray()
     val sharedWithMeArray = optJSONArray("sharedWithMe") ?: org.json.JSONArray()
     val sharedByMeArray = optJSONArray("sharedByMe") ?: org.json.JSONArray()
+    val sharedDevicesWithMeArray = optJSONArray("sharedDevicesWithMe") ?: org.json.JSONArray()
+    val sharedThreadsWithMeArray = optJSONArray("sharedThreadsWithMe") ?: org.json.JSONArray()
+    val grantsByMeArray = optJSONArray("grantsByMe") ?: org.json.JSONArray()
     return RelayPortalSummary(
         devices = List(devicesArray.length()) { index ->
             devicesArray.getJSONObject(index).toRelayDeviceSummary()
@@ -1027,6 +1030,15 @@ private fun JSONObject.toRelayPortalSummary(): RelayPortalSummary {
         },
         sharedByMe = List(sharedByMeArray.length()) { index ->
             sharedByMeArray.getJSONObject(index).toRelaySessionShareSummary()
+        },
+        sharedDevicesWithMe = List(sharedDevicesWithMeArray.length()) { index ->
+            sharedDevicesWithMeArray.getJSONObject(index).toRelayAccessGrantSummary()
+        },
+        sharedThreadsWithMe = List(sharedThreadsWithMeArray.length()) { index ->
+            sharedThreadsWithMeArray.getJSONObject(index).toRelayAccessGrantSummary()
+        },
+        grantsByMe = List(grantsByMeArray.length()) { index ->
+            grantsByMeArray.getJSONObject(index).toRelayAccessGrantSummary()
         },
     )
 }
@@ -1078,6 +1090,46 @@ private fun JSONObject.toRelaySessionShareSummary(): RelaySessionShareSummary {
             com.remotecodex.android.api.RelaySessionShareAccessSummary(
                 id = item.getString("id"),
                 shareId = item.getString("shareId"),
+                userId = item.getString("userId"),
+                username = item.optString("username", "unknown"),
+                accessedAt = item.getString("accessedAt"),
+            )
+        },
+    )
+}
+
+private fun JSONObject.toRelayAccessGrantSummary(): RelayAccessGrantSummary {
+    val workspaceIdsArray = optJSONArray("workspaceIds") ?: org.json.JSONArray()
+    val accessEventsArray = optJSONArray("accessEvents") ?: org.json.JSONArray()
+    return RelayAccessGrantSummary(
+        id = getString("id"),
+        ownerUserId = optString("ownerUserId"),
+        ownerUsername = optString("ownerUsername", "unknown"),
+        targetUsername = optString("targetUsername", "unknown"),
+        targetUserId = optString("targetUserId"),
+        deviceId = getString("deviceId"),
+        deviceName = optString("deviceName", "Remote Codex device"),
+        scope = optString("scope", "thread"),
+        threadId = optNullableString("threadId"),
+        threadTitle = optNullableString("threadTitle"),
+        workspaceId = optNullableString("workspaceId"),
+        workspaceLabel = optNullableString("workspaceLabel"),
+        workspaceScope = optNullableString("workspaceScope"),
+        workspaceIds = List(workspaceIdsArray.length()) { index -> workspaceIdsArray.optString(index) },
+        label = optNullableString("label"),
+        threadAccess = optString("threadAccess", "read"),
+        workspaceAccess = optString("workspaceAccess", "none"),
+        canCreateThreads = optBoolean("canCreateThreads", false),
+        createdAt = optString("createdAt"),
+        revokedAt = optNullableString("revokedAt"),
+        expiresAt = optNullableString("expiresAt"),
+        lastAccessedAt = optNullableString("lastAccessedAt"),
+        lastAccessedByUsername = optNullableString("lastAccessedByUsername"),
+        accessEvents = List(accessEventsArray.length()) { index ->
+            val item = accessEventsArray.getJSONObject(index)
+            RelaySessionShareAccessSummary(
+                id = item.getString("id"),
+                shareId = item.optString("shareId", getString("id")),
                 userId = item.getString("userId"),
                 username = item.optString("username", "unknown"),
                 accessedAt = item.getString("accessedAt"),

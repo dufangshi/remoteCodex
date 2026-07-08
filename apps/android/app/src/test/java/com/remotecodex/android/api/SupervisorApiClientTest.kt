@@ -623,7 +623,7 @@ class SupervisorApiClientTest {
         val transport = RecordingTransport(
             SupervisorHttpResponse(
                 200,
-                """{"user":{"id":"u1","email":"dev@example.test","username":"dev","role":"user","enabled":true,"createdAt":"2026-01-01T00:00:00.000Z"},"devices":[{"id":"device-1","ownerUserId":"u1","name":"Home workstation","tokenPreview":"rcd_abc...xyz","connected":true,"connectedAt":"2026-01-02T00:00:00.000Z","lastHeartbeatAt":"2026-01-02T00:00:30.000Z","createdAt":"2026-01-01T00:00:00.000Z"}],"sharedWithMe":[{"id":"share-1","ownerUserId":"owner-1","ownerUsername":"owner","targetUsername":"dev","targetUserId":"u1","deviceId":"device-shared","deviceName":"Owner Mac","threadId":"thread-shared","workspaceId":"workspace-shared","label":"Shared run","threadAccess":"read","workspaceAccess":"read","createdAt":"2026-01-03T00:00:00.000Z","revokedAt":null,"expiresAt":null}],"sharedByMe":[]}""",
+                """{"user":{"id":"u1","email":"dev@example.test","username":"dev","role":"user","enabled":true,"createdAt":"2026-01-01T00:00:00.000Z"},"devices":[{"id":"device-1","ownerUserId":"u1","name":"Home workstation","tokenPreview":"rcd_abc...xyz","connected":true,"connectedAt":"2026-01-02T00:00:00.000Z","lastHeartbeatAt":"2026-01-02T00:00:30.000Z","createdAt":"2026-01-01T00:00:00.000Z"}],"sharedWithMe":[{"id":"share-1","ownerUserId":"owner-1","ownerUsername":"owner","targetUsername":"dev","targetUserId":"u1","deviceId":"device-shared","deviceName":"Owner Mac","threadId":"thread-shared","workspaceId":"workspace-shared","label":"Shared run","threadAccess":"read","workspaceAccess":"read","createdAt":"2026-01-03T00:00:00.000Z","revokedAt":null,"expiresAt":null}],"sharedByMe":[],"sharedDevicesWithMe":[{"id":"grant-1","ownerUserId":"owner-1","ownerUsername":"owner","targetUsername":"dev","targetUserId":"u1","deviceId":"device-shared","deviceName":"Owner Mac","scope":"device","threadId":null,"workspaceId":null,"workspaceScope":"all","workspaceIds":[],"label":"Office server","threadAccess":"control","workspaceAccess":"write","canCreateThreads":true,"createdAt":"2026-01-04T00:00:00.000Z","revokedAt":null,"expiresAt":null}],"grantsByMe":[{"id":"grant-2","ownerUserId":"u1","ownerUsername":"dev","targetUsername":"friend","targetUserId":"friend-1","deviceId":"device-1","deviceName":"Home workstation","scope":"device","threadId":null,"workspaceId":null,"workspaceScope":"all","workspaceIds":[],"label":"Team server","threadAccess":"read","workspaceAccess":"read","canCreateThreads":false,"createdAt":"2026-01-05T00:00:00.000Z","revokedAt":null,"expiresAt":null}]}""",
             ),
         )
         val client = SupervisorApiClient(
@@ -644,6 +644,10 @@ class SupervisorApiClientTest {
         assertEquals("Shared run", portal.sharedWithMe.single().label)
         assertEquals("thread-shared", portal.sharedWithMe.single().threadId)
         assertEquals("read", portal.sharedWithMe.single().workspaceAccess)
+        assertEquals("Office server", portal.sharedDevicesWithMe.single().label)
+        assertEquals("device", portal.sharedDevicesWithMe.single().scope)
+        assertTrue(portal.sharedDevicesWithMe.single().canCreateThreads)
+        assertEquals("Team server", portal.grantsByMe.single().label)
         assertEquals("https://relay.example.test/relay/portal", transport.requests.single().url)
         assertEquals("relay-token", transport.requests.single().bearerToken)
     }
