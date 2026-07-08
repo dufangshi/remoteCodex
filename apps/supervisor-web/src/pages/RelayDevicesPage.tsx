@@ -249,14 +249,6 @@ export function RelayDevicesPage() {
         <header className="host-topbar sticky top-[env(safe-area-inset-top)] z-30 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-4">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <RelayUserMenu />
-            <button
-              className="ui-action-primary inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
-              onClick={() => setAddDeviceOpen(true)}
-              type="button"
-            >
-              <Plus className="h-4 w-4" />
-              Add
-            </button>
             <Link
               className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
               to="/"
@@ -292,9 +284,14 @@ export function RelayDevicesPage() {
                   Connect to an online device before opening workspaces.
                 </p>
               </div>
-              <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
-                {portal?.devices.length ?? 0}
-              </span>
+              <button
+                className="relay-button-secondary inline-flex h-9 shrink-0 items-center gap-2 px-3"
+                onClick={() => setAddDeviceOpen(true)}
+                type="button"
+              >
+                <Plus className="h-4 w-4" />
+                Add
+              </button>
             </div>
             {loading ? (
               <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">

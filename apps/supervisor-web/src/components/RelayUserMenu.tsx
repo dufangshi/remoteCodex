@@ -1,5 +1,6 @@
 import { LogOut, MonitorSmartphone, Settings, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import type { RelaySessionDto } from '@remote-codex/shared';
@@ -59,6 +60,41 @@ export function RelayUserMenu({
 
   const user = session?.user ?? null;
   const label = useMemo(() => initials(user?.username), [user?.username]);
+  const accountDialog =
+    accountOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            aria-modal="true"
+            className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm sm:py-10"
+            role="dialog"
+          >
+            <section className="w-full max-w-3xl rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
+              <header className="flex items-start justify-between gap-4 border-b border-[var(--theme-border)] px-5 py-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+                    Relay Account
+                  </p>
+                  <h2 className="mt-1 text-xl font-semibold text-[var(--theme-fg)]">
+                    Account settings
+                  </h2>
+                </div>
+                <button
+                  aria-label="Close account settings"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+                  onClick={() => setAccountOpen(false)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div className="max-h-[min(78vh,48rem)] overflow-y-auto p-5">
+                <RelayAccountSettingsPanel />
+              </div>
+            </section>
+          </div>,
+          document.body,
+        )
+      : null;
 
   if (!relayModeActive() || !user) {
     return null;
@@ -126,37 +162,7 @@ export function RelayUserMenu({
           </button>
         </div>
       ) : null}
-      {accountOpen ? (
-        <div
-          aria-modal="true"
-          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm sm:py-10"
-          role="dialog"
-        >
-          <section className="w-full max-w-3xl rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
-            <header className="flex items-start justify-between gap-4 border-b border-[var(--theme-border)] px-5 py-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-                  Relay Account
-                </p>
-                <h2 className="mt-1 text-xl font-semibold text-[var(--theme-fg)]">
-                  Account settings
-                </h2>
-              </div>
-              <button
-                aria-label="Close account settings"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
-                onClick={() => setAccountOpen(false)}
-                type="button"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </header>
-            <div className="max-h-[min(78vh,48rem)] overflow-y-auto p-5">
-              <RelayAccountSettingsPanel />
-            </div>
-          </section>
-        </div>
-      ) : null}
+      {accountDialog}
     </div>
   );
 }
