@@ -8,6 +8,16 @@ val androidThreadWebDir = rootProject.layout.projectDirectory.dir("thread-web")
 val androidThreadWebDistDir = androidThreadWebDir.dir("dist")
 val androidThreadWebAssetsDir = layout.projectDirectory.dir("src/main/assets/thread-ui")
 val remoteThreadUiPackageDir = repoRoot.parentFile.resolve("remote-codex-thread-ui/packages/thread-ui")
+val remoteCodexVersion = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
+    .find(repoRoot.resolve("package.json").readText())
+    ?.groupValues
+    ?.get(1)
+    ?: "0.0.1"
+val remoteCodexVersionCode = remoteCodexVersion
+    .split(".")
+    .take(3)
+    .fold(0) { code, part -> (code * 100) + (part.toIntOrNull() ?: 0) }
+    .coerceAtLeast(1)
 
 val buildAndroidThreadWeb by tasks.registering(Exec::class) {
     workingDir = repoRoot
@@ -45,8 +55,8 @@ android {
         applicationId = "com.remotecodex.android"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = remoteCodexVersionCode
+        versionName = remoteCodexVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

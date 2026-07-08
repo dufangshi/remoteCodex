@@ -25,7 +25,7 @@ final class HomeViewModel: ObservableObject {
     @Published var themeMode: ThemeMode
 
     let connection: SupervisorConnectionConfig
-    private let environment: AppEnvironment
+    let environment: AppEnvironment
 
     init(environment: AppEnvironment, connection: SupervisorConnectionConfig) {
         self.environment = environment
@@ -305,17 +305,41 @@ final class HomeViewModel: ObservableObject {
     func loadSettings() async {
         settings.loading = true
         settings.errorMessage = nil
+        settings.pluginErrorMessage = nil
+        var errors: [String] = []
+
         do {
             settings.runtimeConfig = try await client.fetchRuntimeConfig()
+        } catch {
+            settings.runtimeConfig = nil
+            errors.append("Runtime: \(error.localizedDescription)")
+        }
+
+        do {
             let workspaceSettings = try await client.fetchWorkspaceSettings()
             settings.workspaceSettings = workspaceSettings
             settings.devHomeDraft = workspaceSettings.devHome
             settings.defaultBackendDraft = workspaceSettings.defaultBackend
+        } catch {
+            settings.workspaceSettings = nil
+            errors.append("Workspace defaults: \(error.localizedDescription)")
+        }
+
+        do {
             settings.agentBackends = try await client.listAgentBackends()
+        } catch {
+            settings.agentBackends = []
+            errors.append("Agent runtimes: \(error.localizedDescription)")
+        }
+
+        do {
             settings.plugins = try await client.listPlugins()
         } catch {
-            settings.errorMessage = error.localizedDescription
+            settings.plugins = []
+            settings.pluginErrorMessage = error.localizedDescription
         }
+
+        settings.errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
         settings.loading = false
     }
 
@@ -323,14 +347,15 @@ final class HomeViewModel: ObservableObject {
         do {
             let updated = try await client.updatePlugin(pluginId: plugin.id, request: UpdateSupervisorPluginRequest(enabled: enabled))
             settings.plugins = settings.plugins.map { $0.id == updated.id ? updated : $0 }
+            settings.pluginErrorMessage = nil
         } catch {
-            settings.errorMessage = error.localizedDescription
+            settings.pluginErrorMessage = error.localizedDescription
         }
     }
 
     func importPluginManifest() async {
         settings.importingPlugin = true
-        settings.errorMessage = nil
+        settings.pluginErrorMessage = nil
         do {
             let plugin = try await client.importPlugin(
                 ImportSupervisorPluginRequest(
@@ -343,7 +368,7 @@ final class HomeViewModel: ObservableObject {
             settings.pluginManifestDraft = ""
             settings.pluginImportEnabled = true
         } catch {
-            settings.errorMessage = error.localizedDescription
+            settings.pluginErrorMessage = error.localizedDescription
         }
         settings.importingPlugin = false
     }
@@ -394,6 +419,7 @@ struct HomeSettingsState {
     var savingWorkspaceSettings = false
     var pluginManifestDraft = ""
     var pluginImportEnabled = true
+    var pluginErrorMessage: String?
     var importingPlugin = false
     var agentBackends: [SupervisorAgentBackend] = []
     var plugins: [SupervisorPluginSummary] = []
@@ -458,6 +484,7 @@ struct HomeScreen: View {
     @State private var showingNewThread = false
     @State private var showingImportThread = false
     @State private var showingSettings = false
+    @State private var showingAccounts = false
     @State private var renameTarget: SupervisorWorkspaceSummary?
     @State private var renameDraft = ""
     @State private var deleteTarget: SupervisorWorkspaceSummary?
@@ -505,7 +532,17 @@ struct HomeScreen: View {
             importThreadSheet
         }
         .sheet(isPresented: $showingSettings) {
-            HomeSettingsView(model: model, onThemeModeSelected: onThemeModeSelected)
+            AppSettingsSheet(
+                environment: model.environment,
+                connection: model.connection,
+                onThemeModeSelected: onThemeModeSelected
+            )
+        }
+        .sheet(isPresented: $showingAccounts) {
+            RelayAccountSettingsSheet(
+                environment: model.environment,
+                connection: model.connection
+            )
         }
         .sheet(item: $renameTarget) { workspace in
             renameWorkspaceSheet(workspace)
@@ -537,16 +574,10 @@ struct HomeScreen: View {
                 Label("Settings", systemImage: "gearshape")
             }
             Button {
-                Task { await model.refresh() }
+                showingAccounts = true
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label("Accounts", systemImage: "person.crop.circle")
             }
-            Divider()
-            Button(action: onChangeConnection) {
-                Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(RemoteCodexTheme.foreground)
-            }
-            .tint(RemoteCodexTheme.foreground)
         }
     }
 
@@ -591,12 +622,15 @@ struct HomeScreen: View {
             HStack {
                 Text("Workspaces")
                 Spacer()
-                Button("Add") {
-                    showingCreateWorkspace = true
-                }
-                Button("Import") {
-                    showingImportThread = true
-                }
+                BareAddButton(
+                    accessibilityLabel: "Add workspace",
+                    action: { showingCreateWorkspace = true }
+                )
+                BareIconButton(
+                    systemImage: "tray.and.arrow.down",
+                    accessibilityLabel: "Import session",
+                    action: { showingImportThread = true }
+                )
             }
         }
         .remoteCodexListRow()
@@ -985,6 +1019,7 @@ private struct HomeSettingsView: View {
                         .font(.footnote.monospaced())
                         .textInputAutocapitalization(.never)
                     Toggle("Enable on import", isOn: $model.settings.pluginImportEnabled)
+                        .tint(RemoteCodexTheme.accent)
                     Button(model.settings.importingPlugin ? "Importing..." : "Import plugin manifest") {
                         Task { await model.importPluginManifest() }
                     }
@@ -992,6 +1027,10 @@ private struct HomeSettingsView: View {
                         model.settings.importingPlugin ||
                             model.settings.pluginManifestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
+                    if let pluginError = model.settings.pluginErrorMessage {
+                        Text(pluginError)
+                            .remoteCodexErrorText()
+                    }
                     ForEach(model.settings.plugins) { plugin in
                         Toggle(plugin.name, isOn: Binding(
                             get: { plugin.enabled },
@@ -999,6 +1038,7 @@ private struct HomeSettingsView: View {
                                 Task { await model.setPlugin(plugin, enabled: enabled) }
                             }
                         ))
+                        .tint(RemoteCodexTheme.accent)
                     }
                 }
             }

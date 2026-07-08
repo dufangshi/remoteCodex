@@ -33,12 +33,13 @@ final class ConnectionViewModel: ObservableObject {
     @Published var lastRelayRefreshAt: Date?
 
     private let environment: AppEnvironment
-    private let onReady: (SupervisorConnectionConfig) -> Void
+    private let onReady: (SupervisorConnectionConfig, ConnectionSetupRoute) -> Void
     private let onOpenRelaySharedThread: (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void
 
     init(
         environment: AppEnvironment,
-        onReady: @escaping (SupervisorConnectionConfig) -> Void,
+        initialRoute: ConnectionSetupRoute? = nil,
+        onReady: @escaping (SupervisorConnectionConfig, ConnectionSetupRoute) -> Void,
         onOpenRelaySharedThread: @escaping (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void
     ) {
         self.environment = environment
@@ -52,7 +53,9 @@ final class ConnectionViewModel: ObservableObject {
         relayDeviceId = savedRelayDeviceId
         authToken = savedAuthToken
         savedDevices = environment.settingsStore.readSavedSupervisorDevices()
-        if saved?.mode == .relay, !savedAuthToken.isEmpty, savedRelayDeviceId.isEmpty {
+        if let initialRoute {
+            route = initialRoute
+        } else if saved?.mode == .relay, !savedAuthToken.isEmpty, savedRelayDeviceId.isEmpty {
             route = .relayDevices
         } else {
             route = .modeSelect
@@ -113,7 +116,7 @@ final class ConnectionViewModel: ObservableObject {
             )
             refreshSavedDevices()
             statusMessage = "\(check.sessionLabel). \(check.healthLabel)."
-            onReady(config)
+            onReady(config, route)
         }
     }
 
@@ -129,7 +132,7 @@ final class ConnectionViewModel: ObservableObject {
                 name: deviceName
             )
             refreshSavedDevices()
-            onReady(config)
+            onReady(config, route)
         }
     }
 
@@ -263,7 +266,7 @@ final class ConnectionViewModel: ObservableObject {
             try environment.settingsStore.writeSupervisorConnection(config)
             try environment.settingsStore.upsertSavedSupervisorDevice(config: config)
             refreshSavedDevices()
-            onReady(config)
+            onReady(config, route)
         }
     }
 
@@ -280,7 +283,7 @@ final class ConnectionViewModel: ObservableObject {
             refreshSavedDevices()
             relayDeviceId = device.id
             statusMessage = "Device saved. Workspaces will load when the backend connects."
-            onReady(config)
+            onReady(config, route)
         }
     }
 
@@ -319,7 +322,7 @@ final class ConnectionViewModel: ObservableObject {
                 try environment.settingsStore.writeSupervisorConnection(config)
                 try environment.settingsStore.upsertSavedSupervisorDevice(config: config, name: device.name)
                 refreshSavedDevices()
-                onReady(config)
+                onReady(config, route)
             }
         case .relay:
             let config = environment.settingsStore.supervisorConnection(for: device)
@@ -383,6 +386,8 @@ enum RelayAuthMode: String, CaseIterable, Identifiable {
 
 struct ConnectionScreen: View {
     @StateObject private var model: ConnectionViewModel
+    let environment: AppEnvironment
+    let onThemeModeSelected: (ThemeMode) -> Void
     @State private var offlineDevice: RelayDeviceSummary?
     @State private var revokeDevice: RelayDeviceSummary?
     @State private var editingShare: RelaySessionShareSummary?
@@ -391,18 +396,25 @@ struct ConnectionScreen: View {
     @State private var expandedShareId: String?
     @State private var showingAddDevice = false
     @State private var showingCreateRelayDevice = false
+    @State private var showingSettings = false
+    @State private var showingAccounts = false
     private let onBack: (() -> Void)?
 
     init(
         environment: AppEnvironment,
-        onReady: @escaping (SupervisorConnectionConfig) -> Void,
+        initialRoute: ConnectionSetupRoute? = nil,
+        onReady: @escaping (SupervisorConnectionConfig, ConnectionSetupRoute) -> Void,
         onOpenRelaySharedThread: @escaping (SupervisorConnectionConfig, RelaySessionShareSummary) -> Void = { _, _ in },
+        onThemeModeSelected: @escaping (ThemeMode) -> Void = { _ in },
         onBack: (() -> Void)? = nil
     ) {
+        self.environment = environment
+        self.onThemeModeSelected = onThemeModeSelected
         self.onBack = onBack
         _model = StateObject(
             wrappedValue: ConnectionViewModel(
                 environment: environment,
+                initialRoute: initialRoute,
                 onReady: onReady,
                 onOpenRelaySharedThread: onOpenRelaySharedThread
             )
@@ -435,29 +447,21 @@ struct ConnectionScreen: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    if model.route == .relayDevices {
-                        model.createdDevice = nil
-                        model.errorMessage = nil
-                        showingCreateRelayDevice = true
-                    } else {
-                        model.beginAddingDevice()
-                        showingAddDevice = true
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(RemoteCodexTheme.primaryForeground)
-                        .frame(width: 44, height: 44)
-                        .background(RemoteCodexTheme.primary, in: Circle())
-                        .overlay {
-                            Circle().stroke(RemoteCodexTheme.borderStrong.opacity(0.32), lineWidth: 1)
-                        }
-                        .shadow(color: RemoteCodexTheme.pageBackground.opacity(0.24), radius: 8, x: 0, y: 4)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(model.route == .relayDevices ? "Create relay device" : "Add device")
+                connectionMenu
             }
+        }
+        .sheet(isPresented: $showingSettings) {
+            AppSettingsSheet(
+                environment: environment,
+                connection: relayAccountConnection,
+                onThemeModeSelected: onThemeModeSelected
+            )
+        }
+        .sheet(isPresented: $showingAccounts) {
+            RelayAccountSettingsSheet(
+                environment: environment,
+                connection: relayAccountConnection
+            )
         }
         .sheet(isPresented: $showingAddDevice, onDismiss: {
             if model.route != .relayDevices {
@@ -569,6 +573,41 @@ struct ConnectionScreen: View {
         }
     }
 
+    private var connectionMenu: some View {
+        FloatingActionMenu(accessibilityIdentifier: "connection-action-menu", appliesFloatingPadding: false) {
+            Button {
+                showingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            Button {
+                showingAccounts = true
+            } label: {
+                Label("Accounts", systemImage: "person.crop.circle")
+            }
+        }
+    }
+
+    private var relayAccountConnection: SupervisorConnectionConfig {
+        SupervisorConnectionConfig(
+            mode: .relay,
+            baseURL: model.baseURL,
+            authToken: model.authToken,
+            relayDeviceId: model.relayDeviceId
+        )
+    }
+
+    private func showAddAction() {
+        if model.route == .relayDevices {
+            model.createdDevice = nil
+            model.errorMessage = nil
+            showingCreateRelayDevice = true
+        } else {
+            model.beginAddingDevice()
+            showingAddDevice = true
+        }
+    }
+
     private var deleteDeviceAlertPresented: Binding<Bool> {
         Binding(
             get: { deleteDevice != nil },
@@ -629,7 +668,7 @@ struct ConnectionScreen: View {
     }
 
     private var savedDevicesSection: some View {
-        Section("Connections") {
+        Section {
             if model.savedDevices.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Cards are stored on this iOS device and can be connected, edited, or deleted independently.")
@@ -669,6 +708,16 @@ struct ConnectionScreen: View {
                         deleteDevice = device
                     }
                 )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    Task { await model.connectSavedDevice(device) }
+                }
+            }
+        } header: {
+            HStack {
+                Text("Connections")
+                Spacer()
+                BareAddButton(accessibilityLabel: "Add device", action: showAddAction)
             }
         }
         .remoteCodexListRow()
@@ -736,15 +785,7 @@ struct ConnectionScreen: View {
 
     @ViewBuilder
     private var relayDeviceSection: some View {
-        Section("Relay Devices") {
-            if let refreshedAt = model.lastRelayRefreshAt {
-                HStack {
-                    Spacer()
-                    Text("Updated \(refreshedAt.formatted(date: .omitted, time: .standard))")
-                        .font(.caption)
-                        .remoteCodexStatusText()
-                }
-            }
+        Section {
             if model.busy {
                 ProgressView("Working...")
             }
@@ -773,6 +814,20 @@ struct ConnectionScreen: View {
                     },
                     onRevoke: { revokeDevice = device }
                 )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if device.online {
+                        Task { await model.connectRelayDevice(device) }
+                    } else {
+                        offlineDevice = device
+                    }
+                }
+            }
+        } header: {
+            HStack {
+                Text("Relay Devices")
+                Spacer()
+                BareAddButton(accessibilityLabel: "Create relay device", action: showAddAction)
             }
         }
         .remoteCodexListRow()
@@ -934,7 +989,9 @@ private struct SavedDeviceRow: View {
                 GraphBadge(text: device.modeLabel, tone: .neutral)
             }
             HStack {
-                Button(device.mode == .relay ? "Relay Portal" : "Connect", action: onConnect)
+                if device.mode != .relay {
+                    Button("Connect", action: onConnect)
+                }
                 Button("Edit", action: onEdit)
                 Button("Delete", role: .destructive, action: onDelete)
             }
@@ -984,27 +1041,34 @@ private struct RelaySharedSessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(shareTitle(share))
                     .font(.headline)
                     .lineLimit(1)
-                Spacer()
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if mode == .incoming {
                     Button("Open", action: onOpen)
                         .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                        .fixedSize(horizontal: true, vertical: false)
                 } else {
                     HStack(spacing: 8) {
                         Button("Open", action: onOpen)
                             .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                            .fixedSize(horizontal: true, vertical: false)
                         Menu {
                             Button("Permissions", action: onEdit)
                             Button("Access history", action: onToggleAccess)
                             Button("Revoke", role: .destructive, action: onRevoke)
                         } label: {
                             Text("Manage")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                         }
                         .buttonStyle(RemoteCodexSecondaryButtonStyle())
+                        .fixedSize(horizontal: true, vertical: false)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             VStack(alignment: .leading, spacing: 3) {

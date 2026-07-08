@@ -99,6 +99,26 @@ final class SupervisorAPIClient: @unchecked Sendable {
         )
     }
 
+    func fetchRelaySession() async throws -> RelaySession {
+        try await requestJSON("/relay/auth/session")
+    }
+
+    func updateRelayAccount(username: String) async throws -> RelayUser {
+        try await requestJSON(
+            "/relay/account",
+            method: "PATCH",
+            body: ["username": username]
+        )
+    }
+
+    func updateRelayPassword(currentPassword: String, newPassword: String) async throws -> RelayUser {
+        try await requestJSON(
+            "/relay/account/password",
+            method: "PATCH",
+            body: ["currentPassword": currentPassword, "newPassword": newPassword]
+        )
+    }
+
     func fetchHealth() async throws -> SupervisorHealth {
         let path = switch config.mode {
         case .local, .server:
@@ -379,7 +399,7 @@ final class SupervisorAPIClient: @unchecked Sendable {
         do {
             return try decoder.decode(T.self, from: response.body.isEmpty ? Data("{}".utf8) : response.body)
         } catch {
-            throw SupervisorAPIError.parse("Response was not valid JSON.")
+            throw SupervisorAPIError.parse(invalidJSONMessage(response: response))
         }
     }
 
@@ -407,7 +427,7 @@ final class SupervisorAPIClient: @unchecked Sendable {
         do {
             return try decoder.decode(T.self, from: response.body.isEmpty ? Data("{}".utf8) : response.body)
         } catch {
-            throw SupervisorAPIError.parse("Response was not valid JSON.")
+            throw SupervisorAPIError.parse(invalidJSONMessage(response: response))
         }
     }
 
@@ -517,6 +537,19 @@ private func parseErrorMessage(_ data: Data) -> String? {
     }
     return (json["message"] as? String)?.trimmedNonEmpty
         ?? (json["error"] as? String)?.trimmedNonEmpty
+}
+
+private func invalidJSONMessage(response: SupervisorHTTPResponse) -> String {
+    let contentType = response.headers["Content-Type"] ?? response.headers["content-type"]
+    let bodyText = String(data: response.body, encoding: .utf8)?
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\r", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let preview = bodyText?.isEmpty == false ? String(bodyText!.prefix(120)) : nil
+    let suffix = [contentType.map { "content-type \($0)" }, preview.map { "body \($0)" }]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+    return suffix.isEmpty ? "Response was not valid JSON." : "Response was not valid JSON (\(suffix))."
 }
 
 func buildQuery(_ values: [String: String?]) -> String {

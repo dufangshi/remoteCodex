@@ -84,7 +84,7 @@ fun SupervisorConnectionSetupScreen(
     savedDevices: List<SavedSupervisorDevice> = emptyList(),
     activeDeviceId: String? = null,
     initialRoute: ConnectionSetupRoute = ConnectionSetupRoute.ModeSelect,
-    onConnectionReady: (SupervisorConnectionConfig, SupervisorConnectionCheck) -> Unit,
+    onConnectionReady: (SupervisorConnectionConfig, SupervisorConnectionCheck, ConnectionSetupRoute) -> Unit,
     onOpenRelaySharedThread: (SupervisorConnectionConfig, RelaySessionShareSummary) -> Unit = { _, _ -> },
     onConnectionStateSaved: (SupervisorConnectionConfig) -> Unit = {},
     onSavedDeviceUpsert: (SavedSupervisorDevice) -> Unit = {},
@@ -196,7 +196,7 @@ fun SupervisorConnectionSetupScreen(
             result
                 .onSuccess { (config, check) ->
                     statusMessage = "${check.sessionLabel}. ${check.healthLabel}."
-                    onConnectionReady(config, check)
+                    onConnectionReady(config, check, route)
                 }
                 .onFailure { error ->
                     errorMessage = userFacingConnectionError(error)
@@ -260,7 +260,7 @@ fun SupervisorConnectionSetupScreen(
                         ),
                     )
                     statusMessage = "${check.sessionLabel}. ${check.healthLabel}."
-                    onConnectionReady(config, check)
+                    onConnectionReady(config, check, route)
                 }
                 .onFailure { error ->
                     errorMessage = userFacingConnectionError(error)
@@ -384,7 +384,7 @@ fun SupervisorConnectionSetupScreen(
                         )
                     }
                     statusMessage = "${check.sessionLabel}. ${check.healthLabel}."
-                    onConnectionReady(config, check)
+                    onConnectionReady(config, check, route)
                 }
                 .onFailure { error ->
                     errorMessage = userFacingConnectionError(error)
@@ -494,7 +494,7 @@ fun SupervisorConnectionSetupScreen(
     ) {
         Column(
             modifier = Modifier
-                .align(Alignment.Center)
+                .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1586,6 +1586,7 @@ private fun RelayDeviceRow(
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
             .border(1.dp, if (selected) ThreadColors.Info.copy(alpha = 0.42f) else ThreadColors.Border, RoundedCornerShape(12.dp))
+            .clickable(enabled = !busy && device.connected, onClick = onConnect)
             .padding(10.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(9.dp),

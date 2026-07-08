@@ -327,6 +327,8 @@ final class SupervisorAPIClientTests: XCTestCase {
             switch (request.method, request.url.path) {
             case ("GET", "/api/config/runtime"):
                 return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.runtimeJSON.utf8), headers: [:])
+            case ("GET", "/api/plugins"):
+                return SupervisorHTTPResponse(statusCode: 200, body: Data("[\(Self.pluginJSON)]".utf8), headers: [:])
             case ("PATCH", "/api/config/workspace-settings"):
                 XCTAssertEqual(request.jsonBodyString("devHome"), "/Users/dev")
                 return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.workspaceSettingsJSON.utf8), headers: [:])
@@ -351,6 +353,7 @@ final class SupervisorAPIClientTests: XCTestCase {
         let settings = try await client.updateWorkspaceSettings(
             UpdateSupervisorWorkspaceSettingsRequest(devHome: "/Users/dev", defaultBackend: nil)
         )
+        let plugins = try await client.listPlugins()
         let plugin = try await client.updatePlugin(
             pluginId: "plugin/one",
             request: UpdateSupervisorPluginRequest(enabled: false)
@@ -361,6 +364,9 @@ final class SupervisorAPIClientTests: XCTestCase {
 
         XCTAssertEqual(runtime.appName, "Remote Codex")
         XCTAssertEqual(settings.devHome, "/Users/dev")
+        XCTAssertEqual(plugins.first?.capabilities?.artifactTypes?.first?.type, "terminal")
+        XCTAssertEqual(plugins.first?.capabilities?.threadPanels?.first?.kind, "terminal")
+        XCTAssertEqual(plugins.first?.capabilities?.mcpServers?.first?.command, "remote-codex-terminal")
         XCTAssertFalse(plugin.enabled)
         XCTAssertEqual(imported.id, "plugin/one")
     }
@@ -580,7 +586,32 @@ private extension SupervisorAPIClientTests {
     """
 
     static let pluginJSON = """
-    {"id":"plugin/one","name":"Plugin One","version":"1.0.0","enabled":false,"source":"local","capabilities":[]}
+    {
+      "id": "plugin/one",
+      "name": "Plugin One",
+      "version": "1.0.0",
+      "description": "Built-in durable terminal panel backed by the supervisor.",
+      "remoteCodex": "0.1.0",
+      "enabled": false,
+      "source": "builtin",
+      "capabilities": {
+        "artifactTypes": [
+          {"type": "terminal", "title": "Terminal", "fileExtensions": ["log"]}
+        ],
+        "timelineRenderers": ["terminal"],
+        "threadPanels": [
+          {"id": "terminal", "label": "Terminal", "kind": "terminal", "artifactTypes": ["terminal"]}
+        ],
+        "modelHints": [
+          {"id": "terminal", "text": "Use the durable terminal when requested."}
+        ],
+        "mcpServers": [
+          {"id": "terminal", "name": "Terminal", "command": "remote-codex-terminal", "args": ["serve"], "env": {"MODE": "test"}}
+        ],
+        "frontend": {"entry": "dist/index.js", "style": "dist/style.css"},
+        "backend": {"entry": "dist/backend.js"}
+      }
+    }
     """
 
     static let workspaceTreeJSON = """

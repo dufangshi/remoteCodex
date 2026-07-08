@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 struct ThreadDetailWebViewScreen: View {
+    let environment: AppEnvironment
     let connection: SupervisorConnectionConfig
     let threadId: String
     let themeMode: ThemeMode
@@ -41,6 +42,8 @@ struct ThreadDetailWebViewScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var bridge = ThreadDetailWebBridge()
     @State private var attachmentPickerResult: ThreadDetailWebAttachmentPickerResult?
+    @State private var showingSettings = false
+    @State private var showingAccounts = false
 
     var body: some View {
         Group {
@@ -103,6 +106,19 @@ struct ThreadDetailWebViewScreen: View {
         .edgeSwipeBack(action: returnToWorkspaceLevel)
         .overlay(alignment: .topTrailing) {
             threadMenu
+        }
+        .sheet(isPresented: $showingSettings) {
+            AppSettingsSheet(
+                environment: environment,
+                connection: connection,
+                onThemeModeSelected: onThemeModeSelected
+            )
+        }
+        .sheet(isPresented: $showingAccounts) {
+            RelayAccountSettingsSheet(
+                environment: environment,
+                connection: connection
+            )
         }
         .overlay(alignment: .bottom) {
             if let error = bridge.errorMessage {
@@ -210,18 +226,16 @@ struct ThreadDetailWebViewScreen: View {
 
     private var threadMenu: some View {
         FloatingActionMenu(accessibilityIdentifier: "thread-webview-menu", appliesFloatingPadding: false) {
-            Button(action: returnToWorkspaceLevel) {
-                Label("Workspace", systemImage: "folder")
+            Button {
+                showingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
             }
-            Button(action: onClose) {
-                Label("Home", systemImage: "house")
+            Button {
+                showingAccounts = true
+            } label: {
+                Label("Accounts", systemImage: "person.crop.circle")
             }
-            Divider()
-            Button(action: onChangeConnection) {
-                Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(RemoteCodexTheme.foreground)
-            }
-            .tint(RemoteCodexTheme.foreground)
         }
         .padding(.trailing, 12)
     }

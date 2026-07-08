@@ -802,9 +802,56 @@ struct SupervisorPluginSummary: Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var version: String?
+    var description: String?
+    var remoteCodex: String?
     var enabled: Bool
     var source: String?
-    var capabilities: [String]?
+    var capabilities: SupervisorPluginCapabilities?
+}
+
+struct SupervisorPluginCapabilities: Codable, Equatable {
+    var artifactTypes: [SupervisorPluginArtifactType]?
+    var timelineRenderers: [String]?
+    var threadPanels: [SupervisorPluginThreadPanel]?
+    var modelHints: [SupervisorPluginModelHint]?
+    var mcpServers: [SupervisorPluginMcpServer]?
+    var frontend: SupervisorPluginFrontend?
+    var backend: SupervisorPluginBackend?
+}
+
+struct SupervisorPluginArtifactType: Codable, Equatable {
+    var type: String
+    var title: String
+    var fileExtensions: [String]?
+}
+
+struct SupervisorPluginThreadPanel: Codable, Equatable {
+    var id: String
+    var label: String
+    var kind: String?
+    var artifactTypes: [String]
+}
+
+struct SupervisorPluginModelHint: Codable, Equatable {
+    var id: String
+    var text: String
+}
+
+struct SupervisorPluginMcpServer: Codable, Equatable {
+    var id: String
+    var name: String
+    var command: String
+    var args: [String]?
+    var env: [String: String]?
+}
+
+struct SupervisorPluginFrontend: Codable, Equatable {
+    var entry: String?
+    var style: String?
+}
+
+struct SupervisorPluginBackend: Codable, Equatable {
+    var entry: String?
 }
 
 struct ImportSupervisorPluginRequest: Codable, Equatable {

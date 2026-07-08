@@ -75,11 +75,9 @@ class MainActivity : ComponentActivity() {
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
             var homeSnapshotRefreshNonce by remember { mutableIntStateOf(0) }
             var accountPanelOpen by remember { mutableStateOf(false) }
-            var devicesReturnRoute by remember { mutableStateOf<ConnectedRoute?>(null) }
             var workspaceHomeBackRoute by remember { mutableStateOf<ConnectionRoute?>(null) }
             fun openDevicesScreen() {
-                devicesReturnRoute = (connectionRoute as? ConnectionRoute.Workspace)?.connectedRoute
-                    ?: settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute()
+                workspaceHomeBackRoute = null
                 accountPanelOpen = false
                 connectionRoute = ConnectionRoute.ModeSelect
             }
@@ -104,33 +102,24 @@ class MainActivity : ComponentActivity() {
             RemoteCodexTheme(dark = darkThemeActive) {
                 BackHandler(
                     enabled = !launchThreadWebFixture &&
-                        (accountPanelOpen || shouldHandleBack(connectionRoute) || devicesReturnRoute != null || workspaceHomeBackRoute != null),
+                        (accountPanelOpen || shouldHandleBack(connectionRoute) || workspaceHomeBackRoute != null),
                 ) {
                     if (accountPanelOpen) {
                         accountPanelOpen = false
                         return@BackHandler
                     }
                     connectionRoute = when (val route = connectionRoute) {
-                        ConnectionRoute.ModeSelect -> {
-                            val returnRoute = devicesReturnRoute
-                            devicesReturnRoute = null
-                            if (returnRoute == null) route else ConnectionRoute.Workspace(returnRoute)
-                        }
+                        ConnectionRoute.ModeSelect -> route
                         ConnectionRoute.ServerAuth,
                         ConnectionRoute.RelayAuth,
                         -> ConnectionRoute.ModeSelect
                         ConnectionRoute.RelayDevices -> {
-                            val selected = supervisorConnection?.relayDeviceId
-                            if (selected.isNullOrBlank()) {
-                                ConnectionRoute.RelayAuth
-                            } else {
-                                ConnectionRoute.Workspace(settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute())
-                            }
+                            workspaceHomeBackRoute = null
+                            ConnectionRoute.ModeSelect
                         }
                         is ConnectionRoute.Workspace -> when (route.connectedRoute) {
                             ConnectedRoute.Home -> {
                                 val returnRoute = workspaceHomeBackRoute
-                                workspaceHomeBackRoute = null
                                 returnRoute ?: route
                             }
                             ConnectedRoute.ThreadPreview,
@@ -211,18 +200,18 @@ class MainActivity : ComponentActivity() {
                                     ConnectionRoute.RelayDevices -> ConnectionSetupRoute.RelayDevices
                                     is ConnectionRoute.Workspace -> ConnectionSetupRoute.ModeSelect
                                 },
-                                onConnectionReady = { config: SupervisorConnectionConfig, _ ->
+                                onConnectionReady = { config: SupervisorConnectionConfig, _, sourceRoute ->
                                     settingsRepository.writeSupervisorConnection(config)
                                     supervisorConnection = config
-                                    devicesReturnRoute = null
                                     workspaceHomeBackRoute =
-                                        if (route == ConnectionRoute.RelayDevices) ConnectionRoute.RelayDevices else null
-                                    connectionRoute = ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
+                                        if (sourceRoute == ConnectionSetupRoute.RelayDevices) ConnectionRoute.RelayDevices else null
+                                    settingsRepository.writeLastRoute(config, SavedAppRoute.Home)
+                                    connectionRoute = ConnectionRoute.Workspace(ConnectedRoute.Home)
                                 },
                                 onOpenRelaySharedThread = { config, share ->
                                     settingsRepository.writeSupervisorConnection(config)
                                     supervisorConnection = config
-                                    devicesReturnRoute = null
+                                    workspaceHomeBackRoute = ConnectionRoute.RelayDevices
                                     settingsRepository.writeLastRoute(
                                         config,
                                         SavedAppRoute.ThreadDetail(
@@ -266,19 +255,13 @@ class MainActivity : ComponentActivity() {
                                 onBack = {
                                     connectionRoute = when (route) {
                                         ConnectionRoute.RelayDevices -> {
-                                            val selected = supervisorConnection?.relayDeviceId
-                                            if (selected.isNullOrBlank()) ConnectionRoute.RelayAuth else ConnectionRoute.Workspace(
-                                                settingsRepository.readLastRoute(supervisorConnection).toConnectedRoute(),
-                                            )
+                                            workspaceHomeBackRoute = null
+                                            ConnectionRoute.ModeSelect
                                         }
                                         ConnectionRoute.ServerAuth,
                                         ConnectionRoute.RelayAuth,
                                         -> ConnectionRoute.ModeSelect
-                                        ConnectionRoute.ModeSelect -> {
-                                            val returnRoute = devicesReturnRoute
-                                            devicesReturnRoute = null
-                                            if (returnRoute == null) ConnectionRoute.ModeSelect else ConnectionRoute.Workspace(returnRoute)
-                                        }
+                                        ConnectionRoute.ModeSelect -> ConnectionRoute.ModeSelect
                                         is ConnectionRoute.Workspace -> route
                                     }
                                 },

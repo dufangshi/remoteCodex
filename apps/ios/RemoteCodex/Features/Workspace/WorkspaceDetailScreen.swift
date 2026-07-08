@@ -27,8 +27,8 @@ final class WorkspaceDetailViewModel: ObservableObject {
     @Published var newThreadOptionsError: String?
 
     let workspaceId: String
-    private let environment: AppEnvironment
-    private let connection: SupervisorConnectionConfig
+    let environment: AppEnvironment
+    let connection: SupervisorConnectionConfig
 
     init(environment: AppEnvironment, connection: SupervisorConnectionConfig, workspaceId: String) {
         self.environment = environment
@@ -419,10 +419,15 @@ private extension SupervisorWorkspaceTreeNode {
 
 struct WorkspaceDetailScreen: View {
     @StateObject private var model: WorkspaceDetailViewModel
+    let environment: AppEnvironment
+    let connection: SupervisorConnectionConfig
     let onOpenThread: (String) -> Void
     let onChangeConnection: () -> Void
     let onBack: () -> Void
+    let onThemeModeSelected: (ThemeMode) -> Void
     @State private var showingNewThread = false
+    @State private var showingSettings = false
+    @State private var showingAccounts = false
 
     init(
         environment: AppEnvironment,
@@ -430,8 +435,11 @@ struct WorkspaceDetailScreen: View {
         workspaceId: String,
         onOpenThread: @escaping (String) -> Void,
         onChangeConnection: @escaping () -> Void,
-        onBack: @escaping () -> Void
+        onBack: @escaping () -> Void,
+        onThemeModeSelected: @escaping (ThemeMode) -> Void = { _ in }
     ) {
+        self.environment = environment
+        self.connection = connection
         _model = StateObject(
             wrappedValue: WorkspaceDetailViewModel(
                 environment: environment,
@@ -442,6 +450,7 @@ struct WorkspaceDetailScreen: View {
         self.onOpenThread = onOpenThread
         self.onChangeConnection = onChangeConnection
         self.onBack = onBack
+        self.onThemeModeSelected = onThemeModeSelected
     }
 
     var body: some View {
@@ -463,6 +472,19 @@ struct WorkspaceDetailScreen: View {
         .sheet(isPresented: $showingNewThread) {
             newThreadSheet
         }
+        .sheet(isPresented: $showingSettings) {
+            AppSettingsSheet(
+                environment: environment,
+                connection: connection,
+                onThemeModeSelected: onThemeModeSelected
+            )
+        }
+        .sheet(isPresented: $showingAccounts) {
+            RelayAccountSettingsSheet(
+                environment: environment,
+                connection: connection
+            )
+        }
         .sheet(item: $model.previewFile) { file in
             QuickLookPreview(url: file.url)
         }
@@ -473,20 +495,16 @@ struct WorkspaceDetailScreen: View {
             accessibilityIdentifier: "workspace-action-menu",
             appliesFloatingPadding: false
         ) {
-            Button(action: onBack) {
-                Label("Workspaces", systemImage: "folder")
+            Button {
+                showingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
             }
             Button {
-                Task { await model.refresh() }
+                showingAccounts = true
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label("Accounts", systemImage: "person.crop.circle")
             }
-            Divider()
-            Button(action: onChangeConnection) {
-                Label("Devices", systemImage: "iphone")
-                    .foregroundStyle(RemoteCodexTheme.foreground)
-            }
-            .tint(RemoteCodexTheme.foreground)
         }
     }
 
@@ -528,7 +546,7 @@ struct WorkspaceDetailScreen: View {
             HStack {
                 Text("Threads")
                 Spacer()
-                Button("New") {
+                BareAddButton(accessibilityLabel: "New thread") {
                     showingNewThread = true
                 }
             }

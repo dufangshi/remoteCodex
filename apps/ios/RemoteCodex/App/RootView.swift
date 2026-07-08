@@ -4,7 +4,8 @@ struct RootView: View {
     let environment: AppEnvironment
     @State private var route: AppRoute
     @State private var connection: SupervisorConnectionConfig?
-    @State private var connectionSetupReturnRoute: AppRoute?
+    @State private var connectionInitialRoute: ConnectionSetupRoute?
+    @State private var homeBackConnectionRoute: ConnectionSetupRoute?
     @State private var themeMode: ThemeMode
 
     init(environment: AppEnvironment) {
@@ -23,13 +24,17 @@ struct RootView: View {
             case .connection:
                 ConnectionScreen(
                     environment: environment,
-                    onReady: { config in
+                    initialRoute: connectionInitialRoute,
+                    onReady: { config, sourceRoute in
                         connection = config
-                        connectionSetupReturnRoute = nil
+                        connectionInitialRoute = sourceRoute == .relayDevices ? .relayDevices : .modeSelect
+                        homeBackConnectionRoute = connectionInitialRoute
                         route = .home
                     },
                     onOpenRelaySharedThread: openRelaySharedThread,
-                    onBack: returnFromConnectionSetup
+                    onThemeModeSelected: { mode in
+                        themeMode = mode
+                    }
                 )
             case .home:
                 if let connection {
@@ -44,8 +49,8 @@ struct RootView: View {
                             environment.settingsStore.writeLastRoute(.threadDetail(threadId), for: connection)
                             route = .threadDetail(threadId)
                         },
-                        onChangeConnection: returnToConnectionSetup,
-                        onBack: returnToConnectionSetup,
+                        onChangeConnection: { returnToConnectionSetup(initialRoute: .modeSelect) },
+                        onBack: returnFromWorkspaceHome,
                         onThemeModeSelected: { mode in
                             themeMode = mode
                         }
@@ -53,14 +58,18 @@ struct RootView: View {
                 } else {
                     ConnectionScreen(
                         environment: environment,
-                        onReady: { config in
-                        connection = config
-                        connectionSetupReturnRoute = nil
-                        route = .home
-                    },
-                    onOpenRelaySharedThread: openRelaySharedThread,
-                    onBack: returnFromConnectionSetup
-                )
+                        initialRoute: connectionInitialRoute,
+                        onReady: { config, sourceRoute in
+                            connection = config
+                            connectionInitialRoute = sourceRoute == .relayDevices ? .relayDevices : .modeSelect
+                            homeBackConnectionRoute = connectionInitialRoute
+                            route = .home
+                        },
+                        onOpenRelaySharedThread: openRelaySharedThread,
+                        onThemeModeSelected: { mode in
+                            themeMode = mode
+                        }
+                    )
                 }
             case let .workspaceDetail(workspaceId):
                 if let connection {
@@ -72,10 +81,13 @@ struct RootView: View {
                             environment.settingsStore.writeLastRoute(.threadDetail(threadId), for: connection)
                             route = .threadDetail(threadId)
                         },
-                        onChangeConnection: returnToConnectionSetup,
+                        onChangeConnection: { returnToConnectionSetup(initialRoute: .modeSelect) },
                         onBack: {
                             environment.settingsStore.writeLastRoute(.home, for: connection)
                             route = .home
+                        },
+                        onThemeModeSelected: { mode in
+                            themeMode = mode
                         }
                     )
                 } else {
@@ -84,6 +96,7 @@ struct RootView: View {
             case let .threadDetail(threadId):
                 if let connection {
                     ThreadDetailWebViewScreen(
+                        environment: environment,
                         connection: connection,
                         threadId: threadId,
                         themeMode: themeMode,
@@ -123,7 +136,7 @@ struct RootView: View {
                             environment.settingsStore.writeLastRoute(.workspaceDetail(workspaceId), for: connection)
                             route = .workspaceDetail(workspaceId)
                         },
-                        onChangeConnection: returnToConnectionSetup,
+                        onChangeConnection: { returnToConnectionSetup(initialRoute: .modeSelect) },
                         onThemeModeSelected: { mode in
                             themeMode = mode
                             environment.settingsStore.writeThemeMode(mode)
@@ -148,20 +161,20 @@ struct RootView: View {
         .background(RemoteCodexTheme.pageBackground)
     }
 
-    private func returnToConnectionSetup() {
-        connectionSetupReturnRoute = route == .connection ? nil : route
+    private func returnToConnectionSetup(initialRoute: ConnectionSetupRoute) {
+        connectionInitialRoute = initialRoute
         route = .connection
     }
 
-    private func returnFromConnectionSetup() {
-        guard let returnRoute = connectionSetupReturnRoute, connection != nil else { return }
-        connectionSetupReturnRoute = nil
-        route = returnRoute
+    private func returnFromWorkspaceHome() {
+        connectionInitialRoute = homeBackConnectionRoute ?? .modeSelect
+        route = .connection
     }
 
     private func openRelaySharedThread(config: SupervisorConnectionConfig, share: RelaySessionShareSummary) {
         connection = config
-        connectionSetupReturnRoute = nil
+        connectionInitialRoute = .relayDevices
+        homeBackConnectionRoute = .relayDevices
         environment.settingsStore.writeLastRoute(.threadDetail(share.threadId), for: config)
         route = .threadDetail(share.threadId)
     }
@@ -352,6 +365,7 @@ struct FloatingActionMenu<Content: View>: View {
     let accessibilityIdentifier: String
     let appliesFloatingPadding: Bool
     @ViewBuilder var content: () -> Content
+    @State private var isPresented = false
 
     init(
         accessibilityIdentifier: String = "floating-action-menu",
@@ -364,19 +378,333 @@ struct FloatingActionMenu<Content: View>: View {
     }
 
     var body: some View {
-        Menu {
-            content()
-        } label: {
-            Image(systemName: "ellipsis.vertical")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(RemoteCodexTheme.foregroundSoft)
-                .frame(width: 44, height: 44)
-                .background(RemoteCodexTheme.surfaceStrong, in: Circle())
-        }
-        .buttonStyle(.plain)
+        VerticalEllipsisMenuIcon()
+            .onTapGesture {
+                isPresented = true
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Menu")
+            .accessibilityAddTraits(.isButton)
+        .background(Color.clear)
         .accessibilityIdentifier(accessibilityIdentifier)
         .padding(.top, appliesFloatingPadding ? 8 : 0)
         .padding(.trailing, appliesFloatingPadding ? 12 : 0)
+        .confirmationDialog("", isPresented: $isPresented, titleVisibility: .hidden) {
+            content()
+        }
+    }
+}
+
+struct BareIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(RemoteCodexTheme.foreground)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct BareAddButton: View {
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        BareIconButton(
+            systemImage: "plus",
+            accessibilityLabel: accessibilityLabel,
+            action: action
+        )
+    }
+}
+
+private struct VerticalEllipsisMenuIcon: View {
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { _ in
+                Circle()
+                    .fill(RemoteCodexTheme.foreground)
+                    .frame(width: 5, height: 5)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .background(Color.clear)
+        .contentShape(Rectangle())
+    }
+}
+
+struct AppSettingsSheet: View {
+    let onThemeModeSelected: (ThemeMode) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var model: HomeViewModel
+    @State private var themeMode: ThemeMode
+    private let canLoadSupervisorSettings: Bool
+
+    init(
+        environment: AppEnvironment,
+        connection: SupervisorConnectionConfig?,
+        onThemeModeSelected: @escaping (ThemeMode) -> Void
+    ) {
+        self.onThemeModeSelected = onThemeModeSelected
+        let settingsConnection = connection ?? SupervisorConnectionConfig(mode: .local, baseURL: "http://127.0.0.1:8787")
+        _model = StateObject(wrappedValue: HomeViewModel(environment: environment, connection: settingsConnection))
+        _themeMode = State(initialValue: environment.settingsStore.readThemeMode())
+        canLoadSupervisorSettings = connection != nil &&
+            !(settingsConnection.mode == .relay && settingsConnection.relayDeviceId?.trimmedNonEmpty == nil)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Appearance") {
+                    Picker("Theme", selection: $themeMode) {
+                        ForEach(ThemeMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue.capitalized).tag(mode)
+                        }
+                    }
+                    .onChange(of: themeMode) { _, mode in
+                        model.setTheme(mode)
+                        onThemeModeSelected(mode)
+                    }
+                }
+                if canLoadSupervisorSettings {
+                    if model.settings.loading {
+                        ProgressView("Loading settings...")
+                    }
+                    if let error = model.settings.errorMessage {
+                        Text(error).remoteCodexErrorText()
+                    }
+                    if let runtime = model.settings.runtimeConfig {
+                        Section("Runtime") {
+                            LabeledContent("App", value: runtime.appName)
+                            LabeledContent("Version", value: runtime.appVersion)
+                            LabeledContent("Mode", value: runtime.mode)
+                            LabeledContent("Workspace root", value: runtime.workspaceRoot)
+                        }
+                    }
+                    if let workspace = model.settings.workspaceSettings {
+                        Section("Workspace Defaults") {
+                            TextField("Dev home", text: $model.settings.devHomeDraft)
+                                .textInputAutocapitalization(.never)
+                            TextField("Default backend", text: $model.settings.defaultBackendDraft)
+                                .textInputAutocapitalization(.never)
+                            Button(model.settings.savingWorkspaceSettings ? "Saving..." : "Save workspace defaults") {
+                                Task { await model.saveWorkspaceSettings() }
+                            }
+                            .disabled(model.settings.savingWorkspaceSettings || model.settings.devHomeDraft.isEmpty)
+                            LabeledContent("Current root", value: workspace.workspaceRoot)
+                        }
+                    }
+                    Section("Agent Runtimes") {
+                        if model.settings.agentBackends.isEmpty && !model.settings.loading {
+                            Text("No runtime data loaded.")
+                                .remoteCodexStatusText()
+                        }
+                        ForEach(model.settings.agentBackends) { backend in
+                            LabeledContent(backend.displayName, value: backend.statusState)
+                        }
+                    }
+                    Section("Plugins") {
+                        TextEditor(text: $model.settings.pluginManifestDraft)
+                            .frame(minHeight: 120)
+                            .font(.footnote.monospaced())
+                            .textInputAutocapitalization(.never)
+                        Toggle("Enable on import", isOn: $model.settings.pluginImportEnabled)
+                            .tint(RemoteCodexTheme.accent)
+                        Button(model.settings.importingPlugin ? "Importing..." : "Import plugin manifest") {
+                            Task { await model.importPluginManifest() }
+                        }
+                        .disabled(
+                            model.settings.importingPlugin ||
+                                model.settings.pluginManifestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                        if let pluginError = model.settings.pluginErrorMessage {
+                            Text(pluginError)
+                                .remoteCodexErrorText()
+                        }
+                        ForEach(model.settings.plugins) { plugin in
+                            Toggle(plugin.name, isOn: Binding(
+                                get: { plugin.enabled },
+                                set: { enabled in
+                                    Task { await model.setPlugin(plugin, enabled: enabled) }
+                                }
+                            ))
+                            .tint(RemoteCodexTheme.accent)
+                        }
+                    }
+                } else {
+                    Section("Supervisor Settings") {
+                        ContentUnavailableView(
+                            "Connect a device first",
+                            systemImage: "iphone.and.arrow.forward",
+                            description: Text("Runtime, workspace, and plugin settings are available after a supervisor device is selected.")
+                        )
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .remoteCodexScreenSurface()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task {
+                if canLoadSupervisorSettings {
+                    await model.loadSettings()
+                }
+            }
+        }
+    }
+}
+
+struct RelayAccountSettingsSheet: View {
+    let environment: AppEnvironment
+    let connection: SupervisorConnectionConfig
+    @Environment(\.dismiss) private var dismiss
+    @State private var session: RelaySession?
+    @State private var username = ""
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var loading = false
+    @State private var savingProfile = false
+    @State private var savingPassword = false
+    @State private var message: String?
+    @State private var errorMessage: String?
+
+    private var client: SupervisorAPIClient {
+        environment.apiClientFactory(connection)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if connection.mode != .relay {
+                    Section {
+                        ContentUnavailableView(
+                            "Relay Account Unavailable",
+                            systemImage: "person.crop.circle.badge.exclamationmark",
+                            description: Text("Account settings are available for relay connections.")
+                        )
+                    }
+                } else {
+                    if loading {
+                        ProgressView("Loading account...")
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).remoteCodexErrorText()
+                    }
+                    if let message {
+                        Text(message)
+                            .foregroundStyle(RemoteCodexTheme.success)
+                    }
+                    if let user = session?.user {
+                        Section("Profile") {
+                            LabeledContent("Email", value: user.email)
+                            TextField("Username", text: $username)
+                                .textInputAutocapitalization(.never)
+                            Button(savingProfile ? "Saving..." : "Save username") {
+                                Task { await saveProfile() }
+                            }
+                            .disabled(savingProfile || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        Section("Password") {
+                            SecureField("Current password", text: $currentPassword)
+                            SecureField("New password", text: $newPassword)
+                            SecureField("Confirm password", text: $confirmPassword)
+                            Button(savingPassword ? "Saving..." : "Change password") {
+                                Task { await savePassword() }
+                            }
+                            .disabled(
+                                savingPassword ||
+                                    currentPassword.isEmpty ||
+                                    newPassword.count < 8 ||
+                                    confirmPassword.isEmpty
+                            )
+                        }
+                    } else if !loading {
+                        ContentUnavailableView(
+                            "Relay Login Required",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("Sign in to a relay account before managing account settings.")
+                        )
+                    }
+                }
+            }
+            .navigationTitle("Accounts")
+            .remoteCodexScreenSurface()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        guard connection.mode == .relay else { return }
+        loading = true
+        errorMessage = nil
+        defer { loading = false }
+        do {
+            let nextSession = try await client.fetchRelaySession()
+            session = nextSession
+            username = nextSession.user?.username ?? ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveProfile() async {
+        savingProfile = true
+        message = nil
+        errorMessage = nil
+        defer { savingProfile = false }
+        do {
+            let user = try await client.updateRelayAccount(username: username)
+            session = RelaySession(
+                authenticated: true,
+                user: user,
+                registrationEnabled: session?.registrationEnabled ?? true
+            )
+            username = user.username
+            message = "Account updated."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func savePassword() async {
+        guard newPassword == confirmPassword else {
+            errorMessage = "New passwords do not match."
+            return
+        }
+        savingPassword = true
+        message = nil
+        errorMessage = nil
+        defer { savingPassword = false }
+        do {
+            _ = try await client.updateRelayPassword(
+                currentPassword: currentPassword,
+                newPassword: newPassword
+            )
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+            message = "Password changed."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
