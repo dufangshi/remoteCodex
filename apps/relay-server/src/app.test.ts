@@ -1693,6 +1693,46 @@ describe('relay server', () => {
       expect(response.statusCode, url).toBe(403);
     }
 
+    const providerConfigMutationRequests = [
+      {
+        method: 'PATCH',
+        url: `/relay/devices/${deviceId}/api/config/workspace-settings`,
+        payload: { workspaceRoot: '/tmp/shared' },
+      },
+      {
+        method: 'PATCH',
+        url: `/relay/devices/${deviceId}/api/config/providers/codex/files/config.toml`,
+        payload: { content: 'model = "gpt-5.5"\n' },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/config/providers/codex/archives`,
+        payload: { label: 'shared mutation' },
+      },
+      {
+        method: 'PATCH',
+        url: `/relay/devices/${deviceId}/api/config/providers/codex/archives/archive-1`,
+        payload: { label: 'shared mutation' },
+      },
+      {
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/config/providers/codex/archives/archive-1/apply`,
+        payload: {},
+      },
+    ] as const;
+
+    for (const request of providerConfigMutationRequests) {
+      const response = await app.inject({
+        method: request.method,
+        url: request.url,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: request.payload,
+      });
+      expect(response.statusCode, `${request.method} ${request.url}`).toBe(403);
+    }
+
     await app.close();
   });
 

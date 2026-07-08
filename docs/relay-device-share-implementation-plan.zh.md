@@ -301,7 +301,7 @@ Still forbidden for shared users:
 - [x] delete device
 - [x] relay admin APIs
 - [x] runtime restart/build/install
-- [ ] provider host config mutation
+- [x] provider host config mutation
 - [x] workspace create/import/delete unless explicitly added later
 
 Special list behavior:
