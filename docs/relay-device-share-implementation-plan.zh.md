@@ -507,15 +507,16 @@ Mobile navigation:
 
 验收:
 
-- [ ] Android relay smoke with owner and target accounts.
+- [x] Android relay smoke with owner and target accounts.
 - [ ] iOS relay smoke with owner and target accounts.
 - [x] No mobile-only route assumes all devices are owned.
 
 当前移动端验证记录:
 
 - Android: `SupervisorApiClientTest` 已通过，覆盖 shared device / effective access DTO 与 relay API 解析。
+- Android: 本地 relay + tmux relay-supervisor + emulator smoke 已通过；owner 创建 device grant 给 target，target token 启动 Android app 后显示 shared device 的 workspace，且 shared-device 视角隐藏 Add / Import Session / Pin / Rename / Delete。截图: `/tmp/remote-codex-android-shared-device-gated.png`。
 - iOS: `SupervisorAPIClientTests` 与 `PhaseOneViewModelTests` 已通过，覆盖 shared device DTO、relay API 路径与连接视图模型签名。
-- 以上不替代真实 owner/target 双账号 relay smoke，因此两个 smoke checkbox 暂不勾选。
+- iOS API/model 测试不替代真实 owner/target 双账号 relay smoke，因此 iOS smoke checkbox 暂不勾选。
 
 ## Security and Audit
 

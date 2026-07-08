@@ -45,6 +45,7 @@ import com.remotecodex.android.api.ImportSupervisorPluginRequest
 import com.remotecodex.android.api.SupervisorAgentBackend
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorPluginSummary
@@ -118,6 +119,7 @@ fun SupervisorHomeScreen(
     var workspaceSettings by remember(supervisorConnection) { mutableStateOf(initialWorkspaceSettings) }
     var agentBackends by remember(supervisorConnection) { mutableStateOf(initialAgentBackends) }
     var sessionUsername by remember(supervisorConnection) { mutableStateOf<String?>(null) }
+    var selectedRelayDeviceShared by remember(supervisorConnection) { mutableStateOf(false) }
     var backendSettingsLoading by remember { mutableStateOf(false) }
     var backendSettingsSaving by remember { mutableStateOf(false) }
     var backendSettingsError by remember { mutableStateOf<String?>(null) }
@@ -132,9 +134,18 @@ fun SupervisorHomeScreen(
         initialWorkspaceSettings?.let { workspaceSettings = it }
     }
     LaunchedEffect(supervisorConnection) {
-        sessionUsername = withContext(Dispatchers.IO) {
-            runCatching { client.fetchAuthSession().username }.getOrNull()
+        val (username, isSharedDevice) = withContext(Dispatchers.IO) {
+            val username = runCatching { client.fetchAuthSession().username }.getOrNull()
+            val deviceId = supervisorConnection.relayDeviceId?.trim().orEmpty()
+            val shared = supervisorConnection.mode == SupervisorConnectionMode.Relay &&
+                deviceId.isNotEmpty() &&
+                runCatching {
+                    client.fetchRelayPortal().sharedDevicesWithMe.any { it.deviceId == deviceId }
+                }.getOrDefault(false)
+            username to shared
         }
+        sessionUsername = username
+        selectedRelayDeviceShared = isSharedDevice
     }
     LaunchedEffect(initialAgentBackends) {
         if (initialAgentBackends != null) {
@@ -389,7 +400,8 @@ fun SupervisorHomeScreen(
                     detail = "Trusted project roots",
                 )
             }
-            item {
+            if (!selectedRelayDeviceShared) {
+                item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -418,6 +430,7 @@ fun SupervisorHomeScreen(
                     )
                 }
             }
+            }
             val workspaces = homeSnapshot?.workspaces.orEmpty()
                 .sortedWith(
                     compareByDescending<SupervisorWorkspaceSummary> { it.isFavorite }
@@ -427,11 +440,18 @@ fun SupervisorHomeScreen(
                 item {
                     EmptyHomeRow(
                         title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
-                        detail = homeSnapshotError ?: "Add a trusted project root to start threads from this Android client.",
-                        actionLabel = "New Workspace",
-                        onClick = {
-                            workspaceActionError = null
-                            workspaceDialog = WorkspaceActionDialog.Create
+                        detail = homeSnapshotError
+                            ?: if (selectedRelayDeviceShared) {
+                                "No workspaces are available on this shared device yet."
+                            } else {
+                                "Add a trusted project root to start threads from this Android client."
+                            },
+                        actionLabel = if (selectedRelayDeviceShared) null else "New Workspace",
+                        onClick = if (selectedRelayDeviceShared) null else {
+                            {
+                                workspaceActionError = null
+                                workspaceDialog = WorkspaceActionDialog.Create
+                            }
                         },
                     )
                 }
@@ -456,6 +476,7 @@ fun SupervisorHomeScreen(
                             workspaceActionError = null
                             workspaceDialog = WorkspaceActionDialog.Delete(workspace)
                         },
+                        ownerActionsEnabled = !selectedRelayDeviceShared,
                     )
                 }
             }
@@ -911,6 +932,7 @@ private fun WorkspaceSummaryRow(
     onToggleFavorite: () -> Unit,
     onRenameWorkspace: () -> Unit,
     onDeleteWorkspace: () -> Unit,
+    ownerActionsEnabled: Boolean,
 ) {
     Column(
         modifier = Modifier
@@ -955,35 +977,37 @@ private fun WorkspaceSummaryRow(
                 )
             }
         }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            GraphButton(
-                label = if (workspace.isFavorite) "Unpin" else "Pin",
-                enabled = !busy,
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Toggle pinned workspace ${workspace.label}",
-                onClick = onToggleFavorite,
-            )
-            GraphButton(
-                label = "Rename",
-                enabled = !busy,
-                variant = GraphButtonVariant.Outline,
-                size = GraphButtonSize.Small,
-                contentDescription = "Rename workspace ${workspace.label}",
-                onClick = onRenameWorkspace,
-            )
-            GraphButton(
-                label = "Delete",
-                enabled = !busy,
-                variant = GraphButtonVariant.Destructive,
-                size = GraphButtonSize.Small,
-                contentDescription = "Delete workspace ${workspace.label}",
-                onClick = onDeleteWorkspace,
-            )
+        if (ownerActionsEnabled) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GraphButton(
+                    label = if (workspace.isFavorite) "Unpin" else "Pin",
+                    enabled = !busy,
+                    variant = GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Toggle pinned workspace ${workspace.label}",
+                    onClick = onToggleFavorite,
+                )
+                GraphButton(
+                    label = "Rename",
+                    enabled = !busy,
+                    variant = GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Rename workspace ${workspace.label}",
+                    onClick = onRenameWorkspace,
+                )
+                GraphButton(
+                    label = "Delete",
+                    enabled = !busy,
+                    variant = GraphButtonVariant.Destructive,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Delete workspace ${workspace.label}",
+                    onClick = onDeleteWorkspace,
+                )
+            }
         }
     }
 }
@@ -1688,8 +1712,8 @@ private fun ShellProcessSummaryRow(
 private fun EmptyHomeRow(
     title: String,
     detail: String,
-    actionLabel: String,
-    onClick: () -> Unit,
+    actionLabel: String?,
+    onClick: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -1716,13 +1740,15 @@ private fun EmptyHomeRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        GraphButton(
-            label = actionLabel,
-            variant = GraphButtonVariant.Secondary,
-            size = GraphButtonSize.Small,
-            contentDescription = actionLabel,
-            onClick = onClick,
-        )
+        if (actionLabel != null && onClick != null) {
+            GraphButton(
+                label = actionLabel,
+                variant = GraphButtonVariant.Secondary,
+                size = GraphButtonSize.Small,
+                contentDescription = actionLabel,
+                onClick = onClick,
+            )
+        }
     }
 }
 
