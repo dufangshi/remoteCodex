@@ -282,6 +282,34 @@ async function answerNextRelayRequest(
   return requestMessage;
 }
 
+async function answerNextRelayRequestWith(
+  supervisorSocket: WebSocket,
+  predicate: (message: any) => boolean,
+  response: {
+    statusCode?: number;
+    headers?: Record<string, string>;
+    body?: unknown;
+  } = {},
+) {
+  const requestMessage = await waitForSocketMessageMatching(
+    supervisorSocket,
+    (message) => message.type === 'relay.request' && predicate(message),
+  );
+  supervisorSocket.send(JSON.stringify({
+    type: 'relay.response',
+    timestamp: '2026-07-01T00:00:04.000Z',
+    requestId: requestMessage.requestId,
+    payload: {
+      statusCode: response.statusCode ?? 200,
+      headers: response.headers ?? {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(response.body ?? { ok: true }),
+    },
+  }));
+  return requestMessage;
+}
+
 async function answerRelayRequestsByPath(
   supervisorSocket: WebSocket,
   responsesByPath: Map<string, unknown>,
@@ -1496,6 +1524,374 @@ describe('relay server', () => {
     expect(threadsAfterRevokeResponse.statusCode).toBe(403);
 
     await app.close();
+  });
+
+  it('runs the local relay two-account device-share E2E permission flow', async () => {
+    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } = await setupDeviceGrantRelaySession({
+      threadAccess: 'read',
+      workspaceAccess: 'read',
+      canCreateThreads: false,
+      label: 'Office server access',
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let ownerClientSocket: WebSocket | null = null;
+    let friendClientSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+
+      const friendPortalResponse = await app.inject({
+        method: 'GET',
+        url: '/relay/portal',
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(friendPortalResponse.statusCode).toBe(200);
+      expect(friendPortalResponse.json().sharedDevicesWithMe).toEqual([
+        expect.objectContaining({
+          id: grantId,
+          deviceId,
+          deviceName: 'Owner workstation',
+          scope: 'device',
+          label: 'Office server access',
+          threadAccess: 'read',
+          workspaceAccess: 'read',
+          canCreateThreads: false,
+        }),
+      ]);
+
+      const workspacesResponsePromise = app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/workspaces`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === '/api/workspaces',
+        {
+          body: [
+            {
+              id: SHARED_WORKSPACE_ID,
+              label: 'Shared workspace',
+              absPath: '/tmp/shared-workspace',
+            },
+          ],
+        },
+      );
+      const workspacesResponse = await workspacesResponsePromise;
+      expect(workspacesResponse.statusCode).toBe(200);
+      expect(workspacesResponse.json()).toEqual([
+        expect.objectContaining({
+          id: SHARED_WORKSPACE_ID,
+          label: 'Shared workspace',
+        }),
+      ]);
+
+      const threadsResponsePromise = app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === '/api/threads',
+        {
+          body: [
+            {
+              id: SHARED_THREAD_ID,
+              workspaceId: SHARED_WORKSPACE_ID,
+              title: 'Shared thread',
+              status: 'idle',
+            },
+          ],
+        },
+      );
+      const threadsResponse = await threadsResponsePromise;
+      expect(threadsResponse.statusCode).toBe(200);
+      expect(threadsResponse.json()).toEqual([
+        expect.objectContaining({
+          id: SHARED_THREAD_ID,
+          workspaceId: SHARED_WORKSPACE_ID,
+        }),
+      ]);
+
+      const transcriptResponsePromise = app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === `/api/threads/${SHARED_THREAD_ID}`,
+        {
+          body: {
+            thread: {
+              id: SHARED_THREAD_ID,
+              workspaceId: SHARED_WORKSPACE_ID,
+              title: 'Shared thread',
+              status: 'idle',
+            },
+            turns: [],
+          },
+        },
+      );
+      const transcriptResponse = await transcriptResponsePromise;
+      expect(transcriptResponse.statusCode).toBe(200);
+      expect(transcriptResponse.json()).toMatchObject({
+        thread: {
+          id: SHARED_THREAD_ID,
+          title: 'Shared thread',
+        },
+      });
+
+      const viewerPromptResponse = await app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/prompt`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          prompt: 'viewer should be blocked',
+        },
+      });
+      expect(viewerPromptResponse.statusCode).toBe(403);
+
+      const collaboratorGrantResponse = await app.inject({
+        method: 'PATCH',
+        url: `/relay/grants/${grantId}`,
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+        payload: {
+          label: 'Office collaborator',
+          threadAccess: 'control',
+          workspaceAccess: 'read',
+          canCreateThreads: true,
+        },
+      });
+      expect(collaboratorGrantResponse.statusCode).toBe(200);
+      expect(collaboratorGrantResponse.json()).toMatchObject({
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+        canCreateThreads: true,
+      });
+
+      const createThreadResponsePromise = app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/start`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          workspaceId: SHARED_WORKSPACE_ID,
+          title: 'Friend-created thread',
+        },
+      });
+      const createThreadRequest = await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === '/api/threads/start',
+        {
+          body: {
+            id: 'thread-created-by-friend',
+            workspaceId: SHARED_WORKSPACE_ID,
+            title: 'Friend-created thread',
+          },
+        },
+      );
+      expect(JSON.parse(createThreadRequest.payload.body)).toMatchObject({
+        workspaceId: SHARED_WORKSPACE_ID,
+        title: 'Friend-created thread',
+      });
+      const createThreadResponse = await createThreadResponsePromise;
+      expect(createThreadResponse.statusCode).toBe(200);
+      expect(createThreadResponse.json()).toMatchObject({
+        id: 'thread-created-by-friend',
+      });
+
+      const promptResponsePromise = app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/threads/${SHARED_THREAD_ID}/prompt`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          prompt: 'collaborator can prompt',
+        },
+      });
+      const promptRequest = await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === `/api/threads/${SHARED_THREAD_ID}/prompt`,
+        {
+          body: {
+            id: SHARED_THREAD_ID,
+            status: 'running',
+          },
+        },
+      );
+      expect(JSON.parse(promptRequest.payload.body)).toEqual({
+        prompt: 'collaborator can prompt',
+      });
+      const promptResponse = await promptResponsePromise;
+      expect(promptResponse.statusCode).toBe(200);
+
+      const ownerConnectedPromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      ownerClientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?threadId=${encodeURIComponent(SHARED_THREAD_ID)}&relaySession=${encodeURIComponent(ownerToken)}`,
+      );
+      await waitForSocketOpen(ownerClientSocket);
+      const ownerConnectedMessage = await ownerConnectedPromise;
+      const ownerClientId = ownerConnectedMessage.clientId as string;
+
+      const friendConnectedPromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      friendClientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?threadId=${encodeURIComponent(SHARED_THREAD_ID)}&relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(friendClientSocket);
+      const friendConnectedMessage = await friendConnectedPromise;
+      const friendClientId = friendConnectedMessage.clientId as string;
+
+      const ownerUpdatePromise = waitForSocketMessage(ownerClientSocket);
+      const friendUpdatePromise = waitForSocketMessage(friendClientSocket);
+      for (const clientId of [ownerClientId, friendClientId]) {
+        supervisorSocket.send(JSON.stringify({
+          type: 'relay.server.message',
+          timestamp: '2026-07-01T00:00:05.000Z',
+          clientId,
+          payload: {
+            type: 'thread.turn.started',
+            threadId: SHARED_THREAD_ID,
+            timestamp: '2026-07-01T00:00:05.000Z',
+            payload: {
+              turnId: 'turn-streaming',
+            },
+          },
+        }));
+      }
+      await expect(ownerUpdatePromise).resolves.toMatchObject({
+        type: 'thread.turn.started',
+        threadId: SHARED_THREAD_ID,
+      });
+      await expect(friendUpdatePromise).resolves.toMatchObject({
+        type: 'thread.turn.started',
+        threadId: SHARED_THREAD_ID,
+      });
+
+      const collaboratorWriteResponse = await app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          path: 'README.md',
+          content: 'blocked while workspace is read-only',
+        },
+      });
+      expect(collaboratorWriteResponse.statusCode).toBe(403);
+
+      const operatorGrantResponse = await app.inject({
+        method: 'PATCH',
+        url: `/relay/grants/${grantId}`,
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+        payload: {
+          label: 'Office operator',
+          threadAccess: 'control',
+          workspaceAccess: 'write',
+          canCreateThreads: true,
+        },
+      });
+      expect(operatorGrantResponse.statusCode).toBe(200);
+      expect(operatorGrantResponse.json()).toMatchObject({
+        workspaceAccess: 'write',
+      });
+
+      const operatorWriteResponsePromise = app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+        payload: {
+          path: 'README.md',
+          content: 'operator can write',
+        },
+      });
+      const operatorWriteRequest = await answerNextRelayRequestWith(
+        supervisorSocket,
+        (message) => message.payload?.path === `/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        {
+          body: {
+            ok: true,
+          },
+        },
+      );
+      expect(JSON.parse(operatorWriteRequest.payload.body)).toEqual({
+        path: 'README.md',
+        content: 'operator can write',
+      });
+      const operatorWriteResponse = await operatorWriteResponsePromise;
+      expect(operatorWriteResponse.statusCode).toBe(200);
+
+      const runtimeRestartResponse = await app.inject({
+        method: 'POST',
+        url: `/relay/devices/${deviceId}/api/agent-runtimes/codex/restart`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(runtimeRestartResponse.statusCode).toBe(403);
+
+      const revokeResponse = await app.inject({
+        method: 'DELETE',
+        url: `/relay/grants/${grantId}`,
+        headers: {
+          authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      expect(revokeResponse.statusCode).toBe(200);
+
+      const accessAfterRevokeResponse = await app.inject({
+        method: 'GET',
+        url: `/relay/access?deviceId=${deviceId}`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(accessAfterRevokeResponse.statusCode).toBe(403);
+
+      const threadsAfterRevokeResponse = await app.inject({
+        method: 'GET',
+        url: `/relay/devices/${deviceId}/api/threads`,
+        headers: {
+          authorization: `Bearer ${friendToken}`,
+        },
+      });
+      expect(threadsAfterRevokeResponse.statusCode).toBe(403);
+    } finally {
+      ownerClientSocket?.close();
+      friendClientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
   });
 
   it('uses the highest capability when multiple active grants match', async () => {

@@ -566,21 +566,21 @@ Setup:
 
 Scenarios:
 
-- [ ] A creates Viewer device grant to B.
-- [ ] B sees shared device.
-- [ ] B sees workspaces and threads.
-- [ ] B can open transcript.
-- [ ] B cannot prompt.
-- [ ] A upgrades B to Collaborator.
-- [ ] B can create a new thread if `canCreateThreads=true`.
-- [ ] B can send prompt and receives stream.
-- [ ] A simultaneously sees stream updates.
-- [ ] B cannot write file with workspace read.
-- [ ] A upgrades B to Operator.
-- [ ] B can upload/edit a file.
-- [ ] B cannot restart runtime.
-- [ ] A revokes grant.
-- [ ] B loses access.
+- [x] A creates Viewer device grant to B.
+- [x] B sees shared device.
+- [x] B sees workspaces and threads.
+- [x] B can open transcript.
+- [x] B cannot prompt.
+- [x] A upgrades B to Collaborator.
+- [x] B can create a new thread if `canCreateThreads=true`.
+- [x] B can send prompt and receives stream.
+- [x] A simultaneously sees stream updates.
+- [x] B cannot write file with workspace read.
+- [x] A upgrades B to Operator.
+- [x] B can upload/edit a file.
+- [x] B cannot restart runtime.
+- [x] A revokes grant.
+- [x] B loses access.
 
 Success marker:
 
@@ -590,6 +590,7 @@ RELAY_DEVICE_SHARE_E2E_OK
 
 Current automated smoke coverage:
 
+- [x] Relay-server Vitest E2E `runs the local relay two-account device-share E2E permission flow`.
 - [x] Playwright mocked web flow opens an incoming thread share from Relay Devices.
 - [x] Playwright mocked web flow opens an incoming device share from Relay Devices and loads its workspace list.
 - [x] Playwright mocked web flow verifies owner thread-share creation from Thread actions still works.
@@ -627,5 +628,5 @@ Current automated smoke coverage:
 - [x] Android and iOS can open shared devices.
 - [x] Permission matrix has tests.
 - [x] Relay admin/runtime/device-token boundaries remain closed.
-- [ ] Local two-account E2E passes.
+- [x] Local two-account E2E passes.
 - [x] Docs updated with user-facing behavior.
