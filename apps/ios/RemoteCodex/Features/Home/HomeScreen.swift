@@ -23,6 +23,7 @@ final class HomeViewModel: ObservableObject {
     @Published var importThreadSessionId = ""
     @Published var settings = HomeSettingsState()
     @Published var themeMode: ThemeMode
+    @Published var selectedRelayDeviceIsShared = false
 
     let connection: SupervisorConnectionConfig
     let environment: AppEnvironment
@@ -101,15 +102,23 @@ final class HomeViewModel: ObservableObject {
     }
 
     var canImportThread: Bool {
+        ownerActionsEnabled &&
         !importThreadProvider.isEmpty &&
             importThreadSessionId.trimmedNonEmpty != nil &&
             !loading &&
             !newThreadOptionsLoading
     }
 
+    var ownerActionsEnabled: Bool {
+        !selectedRelayDeviceIsShared
+    }
+
     func refresh() async {
         await runBusy {
-            snapshot = try await client.fetchHomeSnapshot()
+            async let homeSnapshot = client.fetchHomeSnapshot()
+            async let sharedDevice = isCurrentRelayDeviceShared()
+            snapshot = try await homeSnapshot
+            selectedRelayDeviceIsShared = await sharedDevice
             if newThreadWorkspaceId.isEmpty {
                 newThreadWorkspaceId = snapshot?.workspaces.first?.id ?? ""
             }
@@ -117,6 +126,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func createWorkspace() async {
+        guard ownerActionsEnabled else { return }
         await runBusy {
             _ = try await client.createWorkspace(
                 CreateSupervisorWorkspaceRequest(
@@ -131,6 +141,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func toggleFavorite(_ workspace: SupervisorWorkspaceSummary) async {
+        guard ownerActionsEnabled else { return }
         await runBusy {
             _ = try await client.setWorkspaceFavorite(workspaceId: workspace.id, isFavorite: !workspace.isFavorite)
             snapshot = try await client.fetchHomeSnapshot()
@@ -145,6 +156,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func deleteWorkspace(_ workspace: SupervisorWorkspaceSummary) async {
+        guard ownerActionsEnabled else { return }
         await runBusy {
             _ = try await client.deleteWorkspace(workspace: workspace)
             snapshot = try await client.fetchHomeSnapshot()
@@ -152,6 +164,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func renameWorkspace(_ workspace: SupervisorWorkspaceSummary, label: String) async {
+        guard ownerActionsEnabled else { return }
         await runBusy {
             _ = try await client.updateWorkspace(
                 workspaceId: workspace.id,
@@ -300,6 +313,20 @@ final class HomeViewModel: ObservableObject {
         newThreadModel = candidates.first { $0.model == newThreadModel }?.model
             ?? candidates.first { $0.isDefault }?.model
             ?? candidates[0].model
+    }
+
+    private func isCurrentRelayDeviceShared() async -> Bool {
+        guard connection.mode == .relay, let deviceId = connection.relayDeviceId?.trimmedNonEmpty else {
+            return false
+        }
+        do {
+            let portal = try await client.fetchRelayPortal()
+            return portal.sharedDevicesWithMe.contains { grant in
+                grant.deviceId == deviceId && grant.revokedAt == nil
+            }
+        } catch {
+            return false
+        }
     }
 
     func loadSettings() async {
@@ -606,6 +633,7 @@ struct HomeScreen: View {
             ForEach(model.visibleWorkspaces) { workspace in
                 WorkspaceRow(
                     workspace: workspace,
+                    ownerActionsEnabled: model.ownerActionsEnabled,
                     onOpen: {
                         Task { await model.openWorkspace(workspace) }
                         onOpenWorkspace(workspace.id)
@@ -622,15 +650,17 @@ struct HomeScreen: View {
             HStack {
                 Text("Workspaces")
                 Spacer()
-                BareAddButton(
-                    accessibilityLabel: "Add workspace",
-                    action: { showingCreateWorkspace = true }
-                )
-                BareIconButton(
-                    systemImage: "tray.and.arrow.down",
-                    accessibilityLabel: "Import session",
-                    action: { showingImportThread = true }
-                )
+                if model.ownerActionsEnabled {
+                    BareAddButton(
+                        accessibilityLabel: "Add workspace",
+                        action: { showingCreateWorkspace = true }
+                    )
+                    BareIconButton(
+                        systemImage: "tray.and.arrow.down",
+                        accessibilityLabel: "Import session",
+                        action: { showingImportThread = true }
+                    )
+                }
             }
         }
         .remoteCodexListRow()
@@ -880,6 +910,7 @@ struct HomeScreen: View {
 
 private struct WorkspaceRow: View {
     let workspace: SupervisorWorkspaceSummary
+    let ownerActionsEnabled: Bool
     let onOpen: () -> Void
     let onPin: () -> Void
     let onRename: () -> Void
@@ -902,13 +933,15 @@ private struct WorkspaceRow: View {
             Text(workspace.absPath)
                 .font(.caption.monospaced())
                 .remoteCodexStatusText()
-            HStack {
-                Button(workspace.isFavorite ? "Unpin" : "Pin", action: onPin)
-                Button("Rename", action: onRename)
-                Button("Delete", role: .destructive, action: onDelete)
+            if ownerActionsEnabled {
+                HStack {
+                    Button(workspace.isFavorite ? "Unpin" : "Pin", action: onPin)
+                    Button("Rename", action: onRename)
+                    Button("Delete", role: .destructive, action: onDelete)
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
             }
-            .font(.caption)
-            .buttonStyle(.borderless)
         }
     }
 }
