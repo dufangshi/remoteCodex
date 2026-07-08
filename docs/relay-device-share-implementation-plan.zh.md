@@ -257,7 +257,7 @@ Implementation targets:
 
 验收:
 
-- [ ] Unit tests for owner, thread grant, device grant, expired, revoked, and self-share rejection.
+- [x] Unit tests for owner, thread grant, device grant, expired, revoked, and self-share rejection.
 - [x] Existing thread-share tests still pass.
 
 ## Relay Forwarding Design
@@ -274,13 +274,13 @@ Change `forwardRelayHttp(...)` to distinguish:
 Allowed for device grant:
 
 - [x] `GET /api/threads`
-- [ ] `GET /api/threads/:threadId`
-- [ ] `GET /api/threads/:threadId/items/:itemId/detail`
-- [ ] transcript export and image asset paths
+- [x] `GET /api/threads/:threadId`
+- [x] `GET /api/threads/:threadId/items/:itemId/detail`
+- [x] transcript export and image asset paths
 - [x] `GET /api/workspaces`
-- [ ] `GET /api/workspaces/:workspaceId`
-- [ ] workspace file read paths when `workspaceAccess !== none`
-- [ ] workspace file write paths when `workspaceAccess === write`
+- [x] `GET /api/workspaces/:workspaceId`
+- [x] workspace file read paths when `workspaceAccess !== none`
+- [x] workspace file write paths when `workspaceAccess === write`
 - [x] runtime metadata reads needed for toolbox:
   - `GET /api/agent-runtimes`
   - `GET /api/plugins`
@@ -299,10 +299,10 @@ Still forbidden for shared users:
 
 - [x] device token/setup token reads
 - [x] delete device
-- [ ] relay admin APIs
+- [x] relay admin APIs
 - [x] runtime restart/build/install
 - [ ] provider host config mutation
-- [ ] workspace create/import/delete unless explicitly added later
+- [x] workspace create/import/delete unless explicitly added later
 
 Special list behavior:
 
@@ -487,7 +487,7 @@ Required tests:
 - [x] Shared device Viewer cannot prompt.
 - [x] Shared device Collaborator cannot write files.
 - [x] Shared device Operator can write files.
-- [ ] Shared device user cannot:
+- [x] Shared device user cannot:
   - [x] delete device
   - [x] copy device setup token
   - [x] restart runtime

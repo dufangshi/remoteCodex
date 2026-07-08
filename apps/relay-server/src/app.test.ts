@@ -1410,6 +1410,56 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('rejects sharing a relay device with yourself', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const ownerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'owner@example.test',
+        username: 'owner',
+        password: 'password123',
+      },
+    });
+    const ownerToken = ownerResponse.json().token as string;
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        name: 'Office server',
+      },
+    });
+    const deviceId = deviceResponse.json().device.id;
+
+    const grantResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/grants',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+      },
+      payload: {
+        targetIdentifier: 'owner',
+        deviceId,
+        scope: 'device',
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+      },
+    });
+
+    expect(grantResponse.statusCode).toBe(400);
+    expect(grantResponse.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'You cannot share access with yourself.',
+    });
+
+    await app.close();
+  });
+
   it('keeps shared device viewers out of HTTP prompt and workspace mutations', async () => {
     const { app, friendToken, deviceId } = await setupDeviceGrantRelaySession({
       threadAccess: 'read',
