@@ -1086,6 +1086,25 @@ describe('relay server', () => {
         workspaceAccess: 'read',
       }),
     ]);
+    expect(friendPortalResponse.json().sharedThreadsWithMe).toEqual([
+      expect.objectContaining({
+        id: shareResponse.json().id,
+        scope: 'thread',
+        deviceId,
+        deviceName: 'Owner workstation',
+        ownerUsername: 'owner',
+        targetUsername: 'friend',
+        threadId: 'thread-1',
+        workspaceId: '33333333-3333-4333-8333-333333333333',
+        workspaceScope: 'selected',
+        workspaceIds: ['33333333-3333-4333-8333-333333333333'],
+        label: 'Review session',
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+        canCreateThreads: false,
+      }),
+    ]);
+    expect(friendPortalResponse.json().sharedDevicesWithMe).toEqual([]);
 
     const ownerPortalBeforeAccessResponse = await app.inject({
       method: 'GET',
@@ -1100,6 +1119,21 @@ describe('relay server', () => {
         deviceId,
         targetUsername: 'friend',
         threadId: 'thread-1',
+        lastAccessedAt: null,
+        lastAccessedByUsername: null,
+        accessEvents: [],
+      }),
+    ]);
+    expect(ownerPortalBeforeAccessResponse.json().grantsByMe).toEqual([
+      expect.objectContaining({
+        id: shareResponse.json().id,
+        scope: 'thread',
+        deviceId,
+        targetUsername: 'friend',
+        threadId: 'thread-1',
+        workspaceId: '33333333-3333-4333-8333-333333333333',
+        workspaceScope: 'selected',
+        workspaceIds: ['33333333-3333-4333-8333-333333333333'],
         lastAccessedAt: null,
         lastAccessedByUsername: null,
         accessEvents: [],
@@ -1149,10 +1183,14 @@ describe('relay server', () => {
     expect(accessResponse.statusCode).toBe(200);
     expect(accessResponse.json()).toMatchObject({
       kind: 'shared',
+      grantId: shareResponse.json().id,
       shareId: shareResponse.json().id,
+      scope: 'thread',
       threadAccess: 'read',
       workspaceAccess: 'read',
       workspaceId: '33333333-3333-4333-8333-333333333333',
+      workspaceScope: 'selected',
+      canCreateThreads: false,
     });
 
     await app.close();
@@ -2336,6 +2374,17 @@ describe('relay server', () => {
     });
     expect(blockedAfterRevokeResponse.statusCode).toBe(403);
 
+    const friendPortalResponse = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${friendToken}`,
+      },
+    });
+    expect(friendPortalResponse.statusCode).toBe(200);
+    expect(friendPortalResponse.json().sharedWithMe).toEqual([]);
+    expect(friendPortalResponse.json().sharedThreadsWithMe).toEqual([]);
+
     await app.close();
   });
 
@@ -2393,6 +2442,17 @@ describe('relay server', () => {
       workspaceAccess: 'write',
       threadId: SHARED_THREAD_ID,
     });
+    expect(friendPortalResponse.json().sharedThreadsWithMe[0]).toMatchObject({
+      id: shareId,
+      scope: 'thread',
+      label: 'Pair review',
+      threadAccess: 'control',
+      workspaceAccess: 'write',
+      threadId: SHARED_THREAD_ID,
+      workspaceScope: 'selected',
+      workspaceIds: [SHARED_WORKSPACE_ID],
+      canCreateThreads: false,
+    });
 
     await app.close();
   });
@@ -2413,6 +2473,7 @@ describe('relay server', () => {
     });
     expect(friendPortalResponse.statusCode).toBe(200);
     expect(friendPortalResponse.json().sharedWithMe).toEqual([]);
+    expect(friendPortalResponse.json().sharedThreadsWithMe).toEqual([]);
 
     const accessResponse = await app.inject({
       method: 'GET',

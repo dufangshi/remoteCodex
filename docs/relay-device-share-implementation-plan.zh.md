@@ -127,7 +127,7 @@ export interface RelayAccessGrantDto {
 }
 ```
 
-- [ ] 新增 create/update input：
+- [x] 新增 create/update input：
 
 ```ts
 export interface CreateRelayAccessGrantInput {
@@ -146,7 +146,7 @@ export interface CreateRelayAccessGrantInput {
 }
 ```
 
-- [ ] 扩展 `RelayEffectiveAccessDto`：
+- [x] 扩展 `RelayEffectiveAccessDto`：
 
 ```ts
 export interface RelayEffectiveAccessDto {
@@ -212,9 +212,9 @@ CREATE TABLE IF NOT EXISTS relay_access_grants (
 
 Unique active grant policy:
 
-- [ ] One active grant per `(owner_user_id, target_user_id, device_id, scope, thread_id, workspace_id)`.
-- [ ] For device scope, `thread_id` and `workspace_id` are null.
-- [ ] Creating the same active grant updates permissions instead of duplicating rows.
+- [x] One active grant per `(owner_user_id, target_user_id, device_id, scope, thread_id, workspace_id)`.
+- [x] For device scope, `thread_id` and `workspace_id` are null.
+- [x] Creating the same active grant updates permissions instead of duplicating rows.
 
 验收：
 
@@ -354,8 +354,8 @@ New endpoints:
 
 Compatibility:
 
-- [ ] Existing `POST /relay/shares` maps to `POST /relay/grants` with `scope='thread'`.
-- [ ] Existing `PATCH /relay/shares/:shareId` and `DELETE /relay/shares/:shareId` keep working.
+- [x] Existing `POST /relay/shares` remains compatible and is exposed through thread grant DTOs.
+- [x] Existing `PATCH /relay/shares/:shareId` and `DELETE /relay/shares/:shareId` keep working.
 
 Portal DTO:
 
@@ -371,15 +371,15 @@ export interface RelayPortalSummaryDto {
 
 Migration compatibility:
 
-- [ ] Existing `sharedWithMe` and `sharedByMe` can remain for one release.
+- [x] Existing `sharedWithMe` and `sharedByMe` can remain for one release.
 - [x] New UI should consume the new grouped fields.
 - [ ] Mobile clients should tolerate missing grouped fields during rollout.
 
 验收：
 
 - [x] API tests cover create/update/revoke device grant.
-- [ ] API tests cover compatibility thread share endpoint.
-- [ ] API tests cover portal summary grouping.
+- [x] API tests cover compatibility thread share endpoint.
+- [x] API tests cover portal summary grouping.
 
 ## Web UI Design
 
