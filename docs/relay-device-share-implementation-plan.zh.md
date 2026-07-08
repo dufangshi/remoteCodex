@@ -1,6 +1,8 @@
 # Relay Device Share Implementation Plan
 
-> Status: planning document only. This branch starts from `main` at the point where relay thread sharing already exists.
+> Status: implementation in progress on `codex/relay-device-share`.
+> The V1 target is all-device sharing with explicit read/control/write capabilities.
+> Selected-workspace grants remain a V1.1 follow-up unless called out below.
 
 ## Goal
 
@@ -29,6 +31,37 @@
 这些限制说明：device share 不应通过伪造 `threadId="*"` 实现，而应成为新的 first-class grant scope。
 
 ## Product Semantics
+
+### V1 user-facing behavior
+
+在 V1 里，device share 是“把一台 relay device 暴露给另一个 relay account”，但不是把设备 owner 权限完整转交出去。
+
+Owner 可以：
+
+- 在 Relay Portal 的 device 卡片或 thread share panel 里创建 whole-device share。
+- 给目标账号设置 Viewer / Collaborator / Operator 权限。
+- 修改权限、修改过期时间、查看最近访问事件、撤销授权。
+- 继续独占设备级管理权限，例如 copy setup token、delete device、runtime install/restart、host config mutation、relay admin。
+
+Shared user 可以：
+
+- 在 Relay Portal 看到 Shared devices。
+- 打开 shared device，进入正常 workspace/thread 页面。
+- 根据 `threadAccess` 查看或控制 thread。
+- 根据 `workspaceAccess` 读取或写入 workspace 文件。
+- 在 `canCreateThreads=true` 时创建新 thread。
+
+Shared user 不可以：
+
+- 复制 device setup token 或删除 device。
+- 修改 relay 注册策略、runtime 安装/更新/重启、provider host config、workspace defaults 等 host 级配置。
+- 创建/import/delete workspace。V1 只允许访问已有 workspace。
+
+UI 语义：
+
+- Thread share 仍然是当前 thread 的分享，不隐式变成 whole-device share。
+- Whole-device share 是一个单独动作，入口在 Relay Portal device card 和 thread share panel 的辅助入口里。
+- Shared by me 需要显示 scope、device/workspace/thread 名字、权限 chips、过期时间、最近访问人和最近访问时间。
 
 ### Share scopes
 
@@ -583,10 +616,10 @@ RELAY_DEVICE_SHARE_E2E_OK
 
 ## Definition of Done
 
-- [ ] Thread share existing behavior unchanged.
-- [ ] Device share works for web.
-- [ ] Android and iOS can open shared devices.
-- [ ] Permission matrix has tests.
-- [ ] Relay admin/runtime/device-token boundaries remain closed.
+- [x] Thread share existing behavior unchanged.
+- [x] Device share works for web.
+- [x] Android and iOS can open shared devices.
+- [x] Permission matrix has tests.
+- [x] Relay admin/runtime/device-token boundaries remain closed.
 - [ ] Local two-account E2E passes.
-- [ ] Docs updated with user-facing behavior.
+- [x] Docs updated with user-facing behavior.
