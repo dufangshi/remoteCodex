@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  RelayAccessGrantDto,
   RelayPortalSummaryDto,
   RelaySessionShareDto,
 } from '@remote-codex/shared';
@@ -57,10 +58,42 @@ const sharedSession: RelaySessionShareDto = {
   accessEvents: [],
 };
 
+const sharedDeviceGrant: RelayAccessGrantDto = {
+  id: 'grant-device-1',
+  ownerUserId: 'owner-1',
+  ownerUsername: 'owner',
+  targetUserId: 'user-1',
+  targetUsername: 'user',
+  deviceId: 'device-shared',
+  deviceName: 'Owner Mac',
+  scope: 'device',
+  threadId: null,
+  threadTitle: null,
+  workspaceId: null,
+  workspaceLabel: null,
+  workspaceScope: 'all',
+  workspaceIds: [],
+  label: null,
+  threadAccess: 'control',
+  workspaceAccess: 'write',
+  canCreateThreads: true,
+  createdAt: '2026-06-18T00:00:00.000Z',
+  revokedAt: null,
+  expiresAt: null,
+  lastAccessedAt: null,
+  lastAccessedByUsername: null,
+  accessEvents: [],
+};
+
 function renderPage(
   devices: ReturnType<typeof device>[],
   sharedWithMe: Array<typeof sharedSession> = [],
   sharedByMe: Array<typeof sharedSession> = [],
+  grants: {
+    sharedDevicesWithMe?: RelayAccessGrantDto[];
+    sharedThreadsWithMe?: RelayAccessGrantDto[];
+    grantsByMe?: RelayAccessGrantDto[];
+  } = {},
 ) {
   vi.stubGlobal(
     'fetch',
@@ -74,7 +107,43 @@ function renderPage(
             devices,
             sharedWithMe,
             sharedByMe,
+            sharedDevicesWithMe: grants.sharedDevicesWithMe ?? [],
+            sharedThreadsWithMe: grants.sharedThreadsWithMe ?? [],
+            grantsByMe: grants.grantsByMe,
           }),
+        });
+      }
+      if (url === '/relay/grants' && init?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...sharedDeviceGrant,
+            id: 'grant-created',
+            ownerUserId: 'user-1',
+            ownerUsername: 'user',
+            targetUserId: 'friend-1',
+            targetUsername: 'friend',
+            deviceId: 'device-1',
+            deviceName: 'MacBook Pro',
+            label: 'Office server',
+          }),
+        });
+      }
+      if (url === '/relay/grants/grant-device-1' && init?.method === 'PATCH') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...sharedDeviceGrant,
+            label: 'Updated device access',
+            threadAccess: 'read',
+            workspaceAccess: 'read',
+          }),
+        });
+      }
+      if (url === '/relay/grants/grant-device-1' && init?.method === 'DELETE') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...sharedDeviceGrant, revokedAt: '2026-06-18T00:05:00.000Z' }),
         });
       }
       if (url === '/relay/shares/share-1' && init?.method === 'PATCH') {
@@ -114,6 +183,10 @@ function renderPage(
         <Route
           path="/devices/:relayDeviceId/threads/:threadId"
           element={<div>Shared thread</div>}
+        />
+        <Route
+          path="/devices/:relayDeviceId/workspaces"
+          element={<div>Shared device workspaces</div>}
         />
       </Routes>
     </MemoryRouter>,
@@ -247,6 +320,61 @@ describe('RelayDevicesPage', () => {
     });
     expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
     expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
+  });
+
+  it('opens a device shared with the current relay account', async () => {
+    renderPage([], [], [], { sharedDevicesWithMe: [sharedDeviceGrant] });
+
+    const deviceTitle = await screen.findByText('Owner Mac');
+    const deviceCard = deviceTitle.closest('article');
+    expect(deviceCard).not.toBeNull();
+
+    fireEvent.click(within(deviceCard as HTMLElement).getByRole('button', { name: 'Open' }));
+
+    await screen.findByText('Shared device workspaces');
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
+    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBeNull();
+  });
+
+  it('creates device-level grants from an owned relay device', async () => {
+    renderPage([device({ id: 'device-1', name: 'MacBook Pro', connected: true, token: 'rcd_real_device_token' })]);
+
+    await screen.findByText('MacBook Pro');
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    fireEvent.change(screen.getByLabelText('Relay account'), {
+      target: { value: 'friend@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'Office server' },
+    });
+    fireEvent.change(screen.getByLabelText('Thread access'), {
+      target: { value: 'control' },
+    });
+    fireEvent.change(screen.getByLabelText('Workspace access'), {
+      target: { value: 'write' },
+    });
+    fireEvent.click(screen.getByLabelText('Can create new threads'));
+    fireEvent.click(screen.getByRole('button', { name: 'Share device' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/grants',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            targetIdentifier: 'friend@example.test',
+            label: 'Office server',
+            threadAccess: 'control',
+            workspaceAccess: 'write',
+            canCreateThreads: true,
+            deviceId: 'device-1',
+            scope: 'device',
+            workspaceScope: 'all',
+            workspaceIds: [],
+          }),
+        }),
+      );
+    });
   });
 
   it('manages sessions shared by the current relay account', async () => {

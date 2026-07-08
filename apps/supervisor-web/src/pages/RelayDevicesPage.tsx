@@ -1,9 +1,10 @@
-import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Share2, Trash2, X } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type {
   RelayCreateDeviceResultDto,
+  RelayAccessGrantDto,
   RelayDeviceDto,
   RelayPortalSummaryDto,
   RelaySessionShareDto,
@@ -12,13 +13,16 @@ import type {
 } from '@remote-codex/shared';
 import {
   ApiError,
+  createRelayGrant,
   createRelayDevice,
   deleteRelayDevice,
   enableRelayMode,
   fetchRelayPortal,
+  revokeRelayGrant,
   revokeRelayShare,
   setSelectedRelayDeviceId,
   setSelectedRelayThreadId,
+  updateRelayGrant,
   updateRelayShare,
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
@@ -46,6 +50,9 @@ export function mergeRelayPortalSummary(
     ...next,
     sharedWithMe: mergeShareMetadata(previous.sharedWithMe, next.sharedWithMe),
     sharedByMe: mergeShareMetadata(previous.sharedByMe, next.sharedByMe),
+    sharedDevicesWithMe: mergeGrantMetadata(previous.sharedDevicesWithMe ?? [], next.sharedDevicesWithMe ?? []),
+    sharedThreadsWithMe: mergeGrantMetadata(previous.sharedThreadsWithMe ?? [], next.sharedThreadsWithMe ?? []),
+    grantsByMe: mergeGrantMetadata(previous.grantsByMe ?? [], next.grantsByMe ?? []),
   };
 }
 
@@ -54,6 +61,9 @@ function sanitizeRelayPortalSummary(summary: RelayPortalSummaryDto): RelayPortal
     ...summary,
     sharedWithMe: summary.sharedWithMe.map(sanitizeShareMetadata),
     sharedByMe: summary.sharedByMe.map(sanitizeShareMetadata),
+    sharedDevicesWithMe: (summary.sharedDevicesWithMe ?? []).map(sanitizeGrantMetadata),
+    sharedThreadsWithMe: (summary.sharedThreadsWithMe ?? []).map(sanitizeGrantMetadata),
+    grantsByMe: (summary.grantsByMe ?? []).map(sanitizeGrantMetadata),
   };
 }
 
@@ -84,6 +94,34 @@ function sanitizeShareMetadata(share: RelaySessionShareDto): RelaySessionShareDt
   };
 }
 
+function mergeGrantMetadata(
+  previousGrants: RelayAccessGrantDto[],
+  nextGrants: RelayAccessGrantDto[],
+) {
+  const previousById = new Map(previousGrants.map((grant) => [grant.id, grant]));
+  return nextGrants.map((grant) => {
+    const previous = previousById.get(grant.id);
+    if (!previous) {
+      return sanitizeGrantMetadata(grant);
+    }
+    const nextThreadTitle = stableGrantThreadTitle(grant);
+    const previousThreadTitle = stableGrantThreadTitle(previous);
+    return {
+      ...grant,
+      threadTitle: nextThreadTitle ?? previousThreadTitle,
+      workspaceLabel: grant.workspaceLabel ?? previous.workspaceLabel,
+      deviceName: grant.deviceName?.trim() || previous.deviceName,
+    };
+  });
+}
+
+function sanitizeGrantMetadata(grant: RelayAccessGrantDto): RelayAccessGrantDto {
+  return {
+    ...grant,
+    threadTitle: stableGrantThreadTitle(grant),
+  };
+}
+
 export function RelayDevicesPage() {
   const navigate = useNavigate();
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
@@ -94,7 +132,10 @@ export function RelayDevicesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
+  const [expandedGrantId, setExpandedGrantId] = useState<string | null>(null);
   const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(null);
+  const [editingGrant, setEditingGrant] = useState<RelayAccessGrantDto | null>(null);
+  const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(null);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const hasLoadedPortalRef = useRef(false);
 
@@ -186,6 +227,84 @@ export function RelayDevicesPage() {
     navigate(threadHref(share.threadId, share.deviceId));
   }
 
+  function openSharedGrant(grant: RelayAccessGrantDto) {
+    setSelectedRelayDeviceId(grant.deviceId);
+    setSelectedRelayThreadId(grant.threadId);
+    if (grant.threadId) {
+      navigate(threadHref(grant.threadId, grant.deviceId));
+      return;
+    }
+    navigate(workspacesHref(grant.deviceId));
+  }
+
+  async function createDeviceGrant(device: RelayDeviceDto, input: {
+    targetIdentifier: string;
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+    canCreateThreads: boolean;
+  }) {
+    setBusy(`grant:create:${device.id}`);
+    setError(null);
+    try {
+      await createRelayGrant({
+        ...input,
+        deviceId: device.id,
+        scope: 'device',
+        workspaceScope: 'all',
+        workspaceIds: [],
+      });
+      setSharingDevice(null);
+      await load({ showLoading: false });
+    } catch (caught) {
+      setError(errorMessage(caught, 'Unable to share device.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function updateAccessGrant(grant: RelayAccessGrantDto, input: {
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+    canCreateThreads: boolean;
+  }) {
+    setBusy(`grant:${grant.id}`);
+    setError(null);
+    try {
+      await updateRelayGrant(grant.id, {
+        ...input,
+        workspaceId: grant.workspaceId,
+        workspaceScope: grant.workspaceScope,
+        workspaceIds: grant.workspaceIds,
+        expiresAt: grant.expiresAt,
+      });
+      setEditingGrant(null);
+      await load({ showLoading: false });
+    } catch (caught) {
+      setError(errorMessage(caught, 'Unable to update shared access.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeAccessGrant(grant: RelayAccessGrantDto) {
+    if (!window.confirm(`Remove sharing access for "${grantTitleText(grant)}"?`)) {
+      return;
+    }
+    setBusy(`grant:${grant.id}`);
+    setError(null);
+    try {
+      await revokeRelayGrant(grant.id);
+      setExpandedGrantId((current) => (current === grant.id ? null : current));
+      await load({ showLoading: false });
+    } catch (caught) {
+      setError(errorMessage(caught, 'Unable to remove shared access.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function updateSharedSession(share: RelaySessionShareDto, input: {
     label: string | null;
     threadAccess: RelayThreadAccessDto;
@@ -242,6 +361,10 @@ export function RelayDevicesPage() {
       // Clipboard access can be unavailable in non-secure contexts.
     }
   }
+
+  const sharedDevicesWithMe = portal?.sharedDevicesWithMe ?? [];
+  const outgoingGrants = portal?.grantsByMe ?? [];
+  const useGrantBackedOutgoing = outgoingGrants.length > 0 || (portal?.sharedByMe.length ?? 0) === 0;
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 pb-6 text-[var(--app-fg)] sm:px-6">
@@ -308,6 +431,7 @@ export function RelayDevicesPage() {
                     onConnect={() => connectDevice(device)}
                     onCopySetup={() => void copySupervisorSetup(device)}
                     onDelete={() => void removeDevice(device)}
+                    onShare={() => setSharingDevice(device)}
                     setupTokenAvailable={Boolean(device.token)}
                   />
                 ))}
@@ -338,30 +462,75 @@ export function RelayDevicesPage() {
               )}
             />
 
-            <ShareSection
-              count={portal?.sharedByMe.length ?? 0}
-              emptyText="No sessions have been shared by this account yet."
+            <GrantSection
+              count={sharedDevicesWithMe.length}
+              emptyText="No devices have been shared with this account yet."
+              grants={sharedDevicesWithMe}
               loading={loading}
-              loadingText="Loading shared sessions..."
-              shares={portal?.sharedByMe ?? []}
-              title="Shared by me"
-              subtitle="Threads this relay account has shared with other users."
-              renderShare={(share) => (
-                <SharedSessionRow
-                  busy={busy === `share:${share.id}`}
-                  expanded={expandedShareId === share.id}
-                  key={share.id}
-                  mode="outgoing"
-                  share={share}
-                  onOpen={() => openSharedSession(share)}
-                  onEdit={() => setEditingShare(share)}
-                  onRevoke={() => void revokeSharedSession(share)}
-                  onToggleAccess={() => {
-                    setExpandedShareId((current) => (current === share.id ? null : share.id));
-                  }}
+              loadingText="Loading shared devices..."
+              title="Shared devices"
+              subtitle="Devices another relay user has shared with this account."
+              renderGrant={(grant) => (
+                <GrantRow
+                  key={grant.id}
+                  grant={grant}
+                  mode="incoming"
+                  onOpen={() => openSharedGrant(grant)}
                 />
               )}
             />
+
+            {useGrantBackedOutgoing ? (
+              <GrantSection
+                count={outgoingGrants.length}
+                emptyText="No access has been shared by this account yet."
+                grants={outgoingGrants}
+                loading={loading}
+                loadingText="Loading shared access..."
+                title="Shared by me"
+                subtitle="Threads and devices this relay account has shared with other users."
+                renderGrant={(grant) => (
+                  <GrantRow
+                    busy={busy === `grant:${grant.id}`}
+                    expanded={expandedGrantId === grant.id}
+                    key={grant.id}
+                    grant={grant}
+                    mode="outgoing"
+                    onOpen={() => openSharedGrant(grant)}
+                    onEdit={() => setEditingGrant(grant)}
+                    onRevoke={() => void revokeAccessGrant(grant)}
+                    onToggleAccess={() => {
+                      setExpandedGrantId((current) => (current === grant.id ? null : grant.id));
+                    }}
+                  />
+                )}
+              />
+            ) : (
+              <ShareSection
+                count={portal?.sharedByMe.length ?? 0}
+                emptyText="No sessions have been shared by this account yet."
+                loading={loading}
+                loadingText="Loading shared sessions..."
+                shares={portal?.sharedByMe ?? []}
+                title="Shared by me"
+                subtitle="Threads this relay account has shared with other users."
+                renderShare={(share) => (
+                  <SharedSessionRow
+                    busy={busy === `share:${share.id}`}
+                    expanded={expandedShareId === share.id}
+                    key={share.id}
+                    mode="outgoing"
+                    share={share}
+                    onOpen={() => openSharedSession(share)}
+                    onEdit={() => setEditingShare(share)}
+                    onRevoke={() => void revokeSharedSession(share)}
+                    onToggleAccess={() => {
+                      setExpandedShareId((current) => (current === share.id ? null : share.id));
+                    }}
+                  />
+                )}
+              />
+            )}
           </div>
         </section>
       </div>
@@ -380,6 +549,22 @@ export function RelayDevicesPage() {
           share={editingShare}
           onClose={() => setEditingShare(null)}
           onSave={(input) => void updateSharedSession(editingShare, input)}
+        />
+      ) : null}
+      {editingGrant ? (
+        <GrantPermissionsDialog
+          busy={busy === `grant:${editingGrant.id}`}
+          grant={editingGrant}
+          onClose={() => setEditingGrant(null)}
+          onSave={(input) => void updateAccessGrant(editingGrant, input)}
+        />
+      ) : null}
+      {sharingDevice ? (
+        <ShareDeviceDialog
+          busy={busy === `grant:create:${sharingDevice.id}`}
+          device={sharingDevice}
+          onClose={() => setSharingDevice(null)}
+          onShare={(input) => void createDeviceGrant(sharingDevice, input)}
         />
       ) : null}
     </main>
@@ -489,6 +674,53 @@ function ShareSection({
       ) : shares.length ? (
         <div className="grid gap-3">
           {shares.map((share) => renderShare(share))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
+          {emptyText}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function GrantSection({
+  count,
+  emptyText,
+  grants,
+  loading,
+  loadingText,
+  renderGrant,
+  subtitle,
+  title,
+}: {
+  count: number;
+  emptyText: string;
+  grants: RelayAccessGrantDto[];
+  loading: boolean;
+  loadingText: string;
+  renderGrant: (grant: RelayAccessGrantDto) => React.ReactNode;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{title}</h2>
+          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">{subtitle}</p>
+        </div>
+        <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+          {count}
+        </span>
+      </div>
+      {loading ? (
+        <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
+          {loadingText}
+        </p>
+      ) : grants.length ? (
+        <div className="grid gap-3">
+          {grants.map((grant) => renderGrant(grant))}
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
@@ -630,6 +862,150 @@ function SharedSessionRow({
   );
 }
 
+function GrantRow({
+  busy = false,
+  expanded = false,
+  grant,
+  mode,
+  onEdit,
+  onOpen,
+  onRevoke,
+  onToggleAccess,
+}: {
+  busy?: boolean;
+  expanded?: boolean;
+  grant: RelayAccessGrantDto;
+  mode: 'incoming' | 'outgoing';
+  onEdit?: () => void;
+  onOpen?: () => void;
+  onRevoke?: () => void;
+  onToggleAccess?: () => void;
+}) {
+  const title = grantTitleText(grant);
+  const scopeLabel = grantScopeLabel(grant);
+  const workspaceLabel = grant.workspaceLabel?.trim() || (grant.scope === 'device' ? 'All workspaces' : 'Workspace unavailable');
+  const threadLabel = grant.scope === 'thread'
+    ? (stableGrantThreadTitle(grant) ?? 'Thread unavailable')
+    : grant.scope === 'workspace'
+      ? 'Workspace access'
+      : 'Whole device';
+  const label = grant.label?.trim() || null;
+  const lastAccessLabel = grant.lastAccessedAt
+    ? `${grant.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(grant.lastAccessedAt)}`
+    : 'Not accessed yet';
+
+  return (
+    <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{title}</p>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--theme-fg-muted)]">
+              {scopeLabel}
+            </span>
+          </div>
+          <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
+            <p className="truncate">
+              Workspace: <span className="text-[var(--theme-fg-soft)]">{workspaceLabel}</span>
+            </p>
+            <p className="truncate">
+              {grant.scope === 'thread' ? 'Thread' : 'Access'}: <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
+            </p>
+            {label ? (
+              <p className="truncate">
+                Label: <span className="text-[var(--theme-fg-soft)]">{label}</span>
+              </p>
+            ) : null}
+            <p className="truncate">
+              {mode === 'incoming' ? `From ${grant.ownerUsername}` : `To ${grant.targetUsername}`}
+            </p>
+            <p className="truncate">Device: {grant.deviceName}</p>
+          </div>
+          {mode === 'outgoing' ? (
+            <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+              Last access: {lastAccessLabel}
+            </p>
+          ) : null}
+          <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {grant.threadAccess === 'read' ? 'View only' : 'Collaborator'}
+            </span>
+            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+              {workspaceAccessLabel(grant.workspaceAccess)}
+            </span>
+            {grant.canCreateThreads ? (
+              <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
+                Can create threads
+              </span>
+            ) : null}
+          </p>
+        </div>
+        {mode === 'incoming' ? (
+          <button
+            className="relay-button-primary inline-flex items-center gap-2"
+            onClick={onOpen}
+            type="button"
+          >
+            Open
+          </button>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="relay-button-primary inline-flex items-center gap-2"
+              onClick={onOpen}
+              type="button"
+            >
+              Open
+            </button>
+            <button
+              className="relay-button-secondary inline-flex items-center gap-2"
+              disabled={busy}
+              onClick={onEdit}
+              type="button"
+            >
+              Permissions
+            </button>
+            <button
+              className="relay-button-secondary inline-flex items-center gap-2"
+              onClick={onToggleAccess}
+              type="button"
+            >
+              Access
+              <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            </button>
+            <button
+              className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
+              disabled={busy}
+              onClick={onRevoke}
+              type="button"
+            >
+              Revoke
+            </button>
+          </div>
+        )}
+      </div>
+      {mode === 'outgoing' && expanded ? (
+        <div className="absolute right-3 top-[calc(100%-0.5rem)] z-20 w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3 shadow-xl">
+          {grant.accessEvents.length ? (
+            <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
+              {grant.accessEvents.map((event) => (
+                <li className="flex items-center justify-between gap-3" key={event.id}>
+                  <span className="font-medium text-[var(--theme-fg)]">{event.username}</span>
+                  <span>{formatRelayTimestamp(event.accessedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              This shared access has not been used yet.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function SharePermissionsDialog({
   busy,
   onClose,
@@ -724,6 +1100,244 @@ function SharePermissionsDialog({
   );
 }
 
+function ShareDeviceDialog({
+  busy,
+  device,
+  onClose,
+  onShare,
+}: {
+  busy: boolean;
+  device: RelayDeviceDto;
+  onClose: () => void;
+  onShare: (input: {
+    targetIdentifier: string;
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+    canCreateThreads: boolean;
+  }) => void;
+}) {
+  const [targetIdentifier, setTargetIdentifier] = useState('');
+  const [label, setLabel] = useState('');
+  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>('read');
+  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>('read');
+  const [canCreateThreads, setCanCreateThreads] = useState(false);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onShare({
+      targetIdentifier: targetIdentifier.trim(),
+      label: label.trim() || null,
+      threadAccess,
+      workspaceAccess,
+      canCreateThreads,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+      <form
+        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        onSubmit={submit}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+              Relay device
+            </p>
+            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">Share {device.name}</h2>
+            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+              Give another relay account access to this device and its workspaces.
+            </p>
+          </div>
+          <button
+            aria-label="Close share device dialog"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)] transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Relay account
+            <input
+              autoFocus
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setTargetIdentifier(event.target.value)}
+              placeholder="username or email"
+              value={targetIdentifier}
+            />
+          </label>
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Label
+            <input
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="Optional note shown in Shared by me"
+              value={label}
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm text-[var(--theme-fg-soft)]">
+              Thread access
+              <select
+                className="relay-input mt-2 w-full"
+                onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+                value={threadAccess}
+              >
+                <option value="read">View only</option>
+                <option value="control">Collaborator</option>
+              </select>
+            </label>
+            <label className="block text-sm text-[var(--theme-fg-soft)]">
+              Workspace access
+              <select
+                className="relay-input mt-2 w-full"
+                onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+                value={workspaceAccess}
+              >
+                <option value="none">No workspace</option>
+                <option value="read">Workspace read</option>
+                <option value="write">Workspace write</option>
+              </select>
+            </label>
+          </div>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-soft)]">
+            Can create new threads
+            <input
+              checked={canCreateThreads}
+              className="h-4 w-4 accent-[var(--theme-accent)]"
+              onChange={(event) => setCanCreateThreads(event.target.checked)}
+              type="checkbox"
+            />
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="relay-button-primary inline-flex items-center gap-2"
+            disabled={busy || !targetIdentifier.trim()}
+            type="submit"
+          >
+            <Share2 className="h-4 w-4" />
+            Share device
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function GrantPermissionsDialog({
+  busy,
+  grant,
+  onClose,
+  onSave,
+}: {
+  busy: boolean;
+  grant: RelayAccessGrantDto;
+  onClose: () => void;
+  onSave: (input: {
+    label: string | null;
+    threadAccess: RelayThreadAccessDto;
+    workspaceAccess: RelayWorkspaceAccessDto;
+    canCreateThreads: boolean;
+  }) => void;
+}) {
+  const [label, setLabel] = useState(grant.label ?? '');
+  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(grant.threadAccess);
+  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(grant.workspaceAccess);
+  const [canCreateThreads, setCanCreateThreads] = useState(grant.canCreateThreads);
+  const canCreateThreadsAvailable = grant.scope !== 'thread';
+  const workspaceAccessLocked = grant.scope === 'thread' && !grant.workspaceId;
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({
+      label: label.trim() || null,
+      threadAccess,
+      workspaceAccess: workspaceAccessLocked ? 'none' : workspaceAccess,
+      canCreateThreads: canCreateThreadsAvailable ? canCreateThreads : false,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+      <form
+        className="w-full max-w-lg rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        onSubmit={submit}
+      >
+        <div>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared access permissions</h2>
+          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+            {grant.targetUsername} can access {grantTitleText(grant)}.
+          </p>
+        </div>
+        <div className="mt-5 space-y-4">
+          <label className="block text-sm text-[var(--theme-fg-soft)]">
+            Label
+            <input
+              className="relay-input mt-2 w-full"
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="Optional shared access label"
+              value={label}
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm text-[var(--theme-fg-soft)]">
+              Thread access
+              <select
+                className="relay-input mt-2 w-full"
+                onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+                value={threadAccess}
+              >
+                <option value="read">View only</option>
+                <option value="control">Collaborator</option>
+              </select>
+            </label>
+            <label className="block text-sm text-[var(--theme-fg-soft)]">
+              Workspace access
+              <select
+                className="relay-input mt-2 w-full"
+                disabled={workspaceAccessLocked}
+                onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+                value={workspaceAccessLocked ? 'none' : workspaceAccess}
+              >
+                <option value="none">No workspace</option>
+                <option value="read">Workspace read</option>
+                <option value="write">Workspace write</option>
+              </select>
+            </label>
+          </div>
+          {canCreateThreadsAvailable ? (
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-soft)]">
+              Can create new threads
+              <input
+                checked={canCreateThreads}
+                className="h-4 w-4 accent-[var(--theme-accent)]"
+                onChange={(event) => setCanCreateThreads(event.target.checked)}
+                type="checkbox"
+              />
+            </label>
+          ) : null}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button className="relay-button-primary" disabled={busy} type="submit">
+            Save permissions
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function DeviceRow({
   device,
   busy,
@@ -731,6 +1345,7 @@ function DeviceRow({
   onConnect,
   onCopySetup,
   onDelete,
+  onShare,
   setupTokenAvailable,
 }: {
   device: RelayDeviceDto;
@@ -739,6 +1354,7 @@ function DeviceRow({
   onConnect: () => void;
   onCopySetup: () => void;
   onDelete: () => void;
+  onShare: () => void;
   setupTokenAvailable: boolean;
 }) {
   return (
@@ -785,6 +1401,14 @@ function DeviceRow({
           >
             <Plug className="h-4 w-4" />
             Connect
+          </button>
+          <button
+            className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
+            onClick={onShare}
+            type="button"
+          >
+            <Share2 className="h-4 w-4" />
+            Share
           </button>
           <button
             aria-label={`Delete ${device.name}`}
@@ -913,7 +1537,41 @@ function stableShareThreadTitle(share: RelaySessionShareDto) {
   return label && threadTitle === label ? null : threadTitle;
 }
 
-function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {
+function grantTitleText(grant: RelayAccessGrantDto) {
+  if (grant.scope === 'device') {
+    return grant.deviceName?.trim() || 'Shared device';
+  }
+  if (grant.scope === 'workspace') {
+    return grant.workspaceLabel?.trim() || grant.deviceName?.trim() || 'Shared workspace';
+  }
+  return stableGrantThreadTitle(grant) ?? 'Thread unavailable';
+}
+
+function stableGrantThreadTitle(grant: RelayAccessGrantDto) {
+  if (grant.scope !== 'thread') {
+    return grant.threadTitle?.trim() || null;
+  }
+  const threadTitle = grant.threadTitle?.trim();
+  if (!threadTitle) {
+    return null;
+  }
+  const label = grant.label?.trim();
+  return label && threadTitle === label ? null : threadTitle;
+}
+
+function grantScopeLabel(grant: RelayAccessGrantDto) {
+  switch (grant.scope) {
+    case 'device':
+      return 'Device';
+    case 'workspace':
+      return 'Workspace';
+    case 'thread':
+    default:
+      return 'Thread';
+  }
+}
+
+function workspaceAccessLabel(access: RelayWorkspaceAccessDto) {
   switch (access) {
     case 'write':
       return 'Workspace write';

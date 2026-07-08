@@ -372,7 +372,7 @@ export interface RelayPortalSummaryDto {
 Migration compatibility:
 
 - [ ] Existing `sharedWithMe` and `sharedByMe` can remain for one release.
-- [ ] New UI should consume the new grouped fields.
+- [x] New UI should consume the new grouped fields.
 - [ ] Mobile clients should tolerate missing grouped fields during rollout.
 
 验收：
@@ -425,19 +425,20 @@ Share device dialog fields:
 
 Shared by me management:
 
-- [ ] Group by scope: Device, Workspace, Thread.
-- [ ] Device grants show device name instead of thread title.
-- [ ] Thread grants preserve current thread/workspace title display.
-- [ ] Manage button can edit role and expiration.
-- [ ] Revoke button revokes grant.
-- [ ] Access popover shows latest events.
+- [x] Shared by me supports device/thread/workspace grant rows with scope labels.
+- [x] Device grants show device name instead of thread title.
+- [x] Thread grants preserve current thread/workspace title display.
+- [x] Manage button can edit access fields.
+- [ ] Manage button can edit expiration.
+- [x] Revoke button revokes grant.
+- [x] Access popover shows latest events.
 
 验收:
 
-- [ ] Owner can create a device share from portal.
-- [ ] Target sees shared device in portal without owning it.
-- [ ] Target opens shared device and lands on `/devices/:deviceId/workspaces`.
-- [ ] Existing shared thread Open still lands on `/devices/:deviceId/threads/:threadId`.
+- [x] Owner can create a device share from portal.
+- [x] Target sees shared device in portal without owning it.
+- [x] Target opens shared device and lands on `/devices/:deviceId/workspaces`.
+- [x] Existing shared thread Open still lands on `/devices/:deviceId/threads/:threadId`.
 
 ### Phase 8: Thread share panel
 
