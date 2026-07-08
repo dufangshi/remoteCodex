@@ -2033,12 +2033,19 @@ private fun ShareAccessHistory(events: List<RelaySessionShareAccessSummary>) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = event.username,
-                        color = ThreadColors.Foreground,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = accessEventKindLabel(event.kind),
+                            color = ThreadColors.Foreground,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = event.username,
+                            color = ThreadColors.ForegroundMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                     Text(
                         text = shortRelayTimestamp(event.accessedAt),
                         color = ThreadColors.ForegroundMuted,
@@ -2047,6 +2054,18 @@ private fun ShareAccessHistory(events: List<RelaySessionShareAccessSummary>) {
                 }
             }
         }
+    }
+}
+
+private fun accessEventKindLabel(kind: String?): String {
+    return when (kind) {
+        "open_device" -> "Opened device"
+        "open_thread" -> "Opened thread"
+        "create_thread" -> "Created thread"
+        "send_prompt" -> "Sent prompt"
+        "read_workspace_file" -> "Read workspace"
+        "write_workspace_file" -> "Wrote workspace"
+        else -> "Access"
     }
 }
 

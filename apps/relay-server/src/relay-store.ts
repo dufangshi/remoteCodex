@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import type {
   CreateRelayAccessGrantInput,
   CreateRelaySessionShareInput,
+  RelayAccessEventKindDto,
   RelayAccessGrantDto,
   RelayAccessGrantEventDto,
   RelayAdminDeviceDto,
@@ -935,7 +936,11 @@ export class RelayStore {
     };
   }
 
-  recordShareAccess(share: RelaySessionShareDto, user: RelayUserDto) {
+  recordShareAccess(
+    share: RelaySessionShareDto,
+    user: RelayUserDto,
+    kind: RelayAccessEventKindDto = 'access',
+  ) {
     if (share.revokedAt || (share.expiresAt && share.expiresAt <= new Date().toISOString())) {
       return;
     }
@@ -944,14 +949,18 @@ export class RelayStore {
       .prepare(
         `
           INSERT INTO relay_share_access_events (
-            id, share_id, user_id, username, accessed_at
-          ) VALUES (?, ?, ?, ?, ?)
+            id, share_id, user_id, username, kind, accessed_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
         `,
       )
-      .run(crypto.randomUUID(), share.id, user.id, user.username, accessedAt);
+      .run(crypto.randomUUID(), share.id, user.id, user.username, kind, accessedAt);
   }
 
-  recordGrantAccess(grant: RelayAccessGrantDto, user: RelayUserDto) {
+  recordGrantAccess(
+    grant: RelayAccessGrantDto,
+    user: RelayUserDto,
+    kind: RelayAccessEventKindDto = 'access',
+  ) {
     if (grant.revokedAt || (grant.expiresAt && grant.expiresAt <= new Date().toISOString())) {
       return;
     }
@@ -960,11 +969,11 @@ export class RelayStore {
       .prepare(
         `
           INSERT INTO relay_access_grant_events (
-            id, grant_id, user_id, username, accessed_at
-          ) VALUES (?, ?, ?, ?, ?)
+            id, grant_id, user_id, username, kind, accessed_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
         `,
       )
-      .run(crypto.randomUUID(), grant.id, user.id, user.username, accessedAt);
+      .run(crypto.randomUUID(), grant.id, user.id, user.username, kind, accessedAt);
   }
 
   private publicShare(share: RelaySessionShareDto): RelaySessionShareDto {
@@ -1061,6 +1070,7 @@ export class RelayStore {
         share_id TEXT NOT NULL REFERENCES relay_shares(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
         username TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'access',
         accessed_at TEXT NOT NULL
       );
 
@@ -1099,6 +1109,7 @@ export class RelayStore {
         grant_id TEXT NOT NULL REFERENCES relay_access_grants(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
         username TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'access',
         accessed_at TEXT NOT NULL
       );
 
@@ -1140,6 +1151,8 @@ export class RelayStore {
     this.ensureColumn('relay_access_grants', 'workspace_scope', "TEXT NOT NULL DEFAULT 'all'");
     this.ensureColumn('relay_access_grants', 'workspace_ids', "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn('relay_access_grants', 'can_create_threads', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('relay_share_access_events', 'kind', "TEXT NOT NULL DEFAULT 'access'");
+    this.ensureColumn('relay_access_grant_events', 'kind', "TEXT NOT NULL DEFAULT 'access'");
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
@@ -1476,6 +1489,7 @@ export class RelayStore {
       shareId: row.share_id,
       userId: row.user_id,
       username: row.username,
+      kind: normalizeAccessEventKind(row.kind),
       accessedAt: row.accessed_at,
     }));
   }
@@ -1497,6 +1511,7 @@ export class RelayStore {
       grantId: row.grant_id,
       userId: row.user_id,
       username: row.username,
+      kind: normalizeAccessEventKind(row.kind),
       accessedAt: row.accessed_at,
     }));
   }
@@ -1770,6 +1785,7 @@ export class RelayStore {
         grantId: event.shareId,
         userId: event.userId,
         username: event.username,
+        kind: event.kind,
         accessedAt: event.accessedAt,
       })),
     };
@@ -1999,6 +2015,7 @@ interface ShareAccessRow {
   share_id: string;
   user_id: string;
   username: string;
+  kind: string | null;
   accessed_at: string;
 }
 
@@ -2031,6 +2048,7 @@ interface GrantAccessRow {
   grant_id: string;
   user_id: string;
   username: string;
+  kind: string | null;
   accessed_at: string;
 }
 
@@ -2094,6 +2112,20 @@ function normalizeWorkspaceIds(values: string[] | null | undefined) {
     return [];
   }
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+}
+
+function normalizeAccessEventKind(value: string | null | undefined): RelayAccessEventKindDto {
+  switch (value) {
+    case 'open_device':
+    case 'open_thread':
+    case 'create_thread':
+    case 'send_prompt':
+    case 'read_workspace_file':
+    case 'write_workspace_file':
+      return value;
+    default:
+      return 'access';
+  }
 }
 
 function parseWorkspaceIds(value: string | null | undefined) {

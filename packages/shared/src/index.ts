@@ -206,14 +206,25 @@ export interface RelaySessionShareAccessDto {
   shareId: string;
   userId: string;
   username: string;
+  kind: RelayAccessEventKindDto;
   accessedAt: string;
 }
+
+export type RelayAccessEventKindDto =
+  | 'access'
+  | 'open_device'
+  | 'open_thread'
+  | 'create_thread'
+  | 'send_prompt'
+  | 'read_workspace_file'
+  | 'write_workspace_file';
 
 export interface RelayAccessGrantEventDto {
   id: string;
   grantId: string;
   userId: string;
   username: string;
+  kind: RelayAccessEventKindDto;
   accessedAt: string;
 }
 

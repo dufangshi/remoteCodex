@@ -1092,6 +1092,7 @@ private fun JSONObject.toRelaySessionShareSummary(): RelaySessionShareSummary {
                 shareId = item.getString("shareId"),
                 userId = item.getString("userId"),
                 username = item.optString("username", "unknown"),
+                kind = item.optString("kind", "access"),
                 accessedAt = item.getString("accessedAt"),
             )
         },
@@ -1132,6 +1133,7 @@ private fun JSONObject.toRelayAccessGrantSummary(): RelayAccessGrantSummary {
                 shareId = item.optString("shareId", getString("id")),
                 userId = item.getString("userId"),
                 username = item.optString("username", "unknown"),
+                kind = item.optString("kind", "access"),
                 accessedAt = item.getString("accessedAt"),
             )
         },

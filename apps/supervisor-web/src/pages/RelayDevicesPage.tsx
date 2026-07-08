@@ -866,7 +866,12 @@ function SharedSessionRow({
             <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
               {share.accessEvents.map((event) => (
                 <li className="flex items-center justify-between gap-3" key={event.id}>
-                  <span className="font-medium text-[var(--theme-fg)]">{event.username}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-[var(--theme-fg)]">
+                      {accessEventKindLabel(event.kind)}
+                    </span>
+                    <span className="block truncate">{event.username}</span>
+                  </span>
                   <span>{formatRelayTimestamp(event.accessedAt)}</span>
                 </li>
               ))}
@@ -1010,7 +1015,12 @@ function GrantRow({
             <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
               {grant.accessEvents.map((event) => (
                 <li className="flex items-center justify-between gap-3" key={event.id}>
-                  <span className="font-medium text-[var(--theme-fg)]">{event.username}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-[var(--theme-fg)]">
+                      {accessEventKindLabel(event.kind)}
+                    </span>
+                    <span className="block truncate">{event.username}</span>
+                  </span>
                   <span>{formatRelayTimestamp(event.accessedAt)}</span>
                 </li>
               ))}
@@ -1663,5 +1673,25 @@ function workspaceAccessLabel(access: RelayWorkspaceAccessDto) {
     case 'none':
     default:
       return 'No workspace';
+  }
+}
+
+function accessEventKindLabel(kind: string | null | undefined) {
+  switch (kind) {
+    case 'open_device':
+      return 'Opened device';
+    case 'open_thread':
+      return 'Opened thread';
+    case 'create_thread':
+      return 'Created thread';
+    case 'send_prompt':
+      return 'Sent prompt';
+    case 'read_workspace_file':
+      return 'Read workspace';
+    case 'write_workspace_file':
+      return 'Wrote workspace';
+    case 'access':
+    default:
+      return 'Access';
   }
 }

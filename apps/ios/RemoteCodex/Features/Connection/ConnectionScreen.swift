@@ -1373,8 +1373,13 @@ private struct ShareAccessHistory: View {
             } else {
                 ForEach(events) { event in
                     HStack {
-                        Text(event.username)
-                            .font(.caption.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(accessEventKindLabel(event.kind))
+                                .font(.caption.weight(.semibold))
+                            Text(event.username)
+                                .font(.caption)
+                                .remoteCodexStatusText()
+                        }
                         Spacer()
                         Text(shortRelayTimestamp(event.accessedAt))
                             .font(.caption)
@@ -1390,6 +1395,25 @@ private struct ShareAccessHistory: View {
             RoundedRectangle(cornerRadius: RemoteCodexTheme.panelRadius)
                 .stroke(RemoteCodexTheme.border, lineWidth: 1)
         }
+    }
+}
+
+private func accessEventKindLabel(_ kind: String?) -> String {
+    switch kind {
+    case "open_device":
+        "Opened device"
+    case "open_thread":
+        "Opened thread"
+    case "create_thread":
+        "Created thread"
+    case "send_prompt":
+        "Sent prompt"
+    case "read_workspace_file":
+        "Read workspace"
+    case "write_workspace_file":
+        "Wrote workspace"
+    default:
+        "Access"
     }
 }
 

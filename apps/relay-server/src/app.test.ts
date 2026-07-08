@@ -1167,6 +1167,7 @@ describe('relay server', () => {
           expect.objectContaining({
             username: 'friend',
             shareId: shareResponse.json().id,
+            kind: 'open_thread',
           }),
         ],
       }),

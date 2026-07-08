@@ -732,6 +732,7 @@ data class RelaySessionShareAccessSummary(
     val shareId: String,
     val userId: String,
     val username: String,
+    val kind: String = "access",
     val accessedAt: String,
 )
 

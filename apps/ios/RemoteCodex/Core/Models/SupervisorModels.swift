@@ -855,7 +855,43 @@ struct RelaySessionShareAccessSummary: Codable, Equatable, Identifiable {
     var shareId: String
     var userId: String
     var username: String
+    var kind: String
     var accessedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case shareId
+        case userId
+        case username
+        case kind
+        case accessedAt
+    }
+
+    init(
+        id: String,
+        shareId: String,
+        userId: String,
+        username: String,
+        kind: String = "access",
+        accessedAt: String
+    ) {
+        self.id = id
+        self.shareId = shareId
+        self.userId = userId
+        self.username = username
+        self.kind = kind
+        self.accessedAt = accessedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        shareId = try container.decodeIfPresent(String.self, forKey: .shareId) ?? ""
+        userId = try container.decode(String.self, forKey: .userId)
+        username = try container.decodeIfPresent(String.self, forKey: .username) ?? "unknown"
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "access"
+        accessedAt = try container.decode(String.self, forKey: .accessedAt)
+    }
 }
 
 struct RelayDeviceSummary: Codable, Equatable, Identifiable {

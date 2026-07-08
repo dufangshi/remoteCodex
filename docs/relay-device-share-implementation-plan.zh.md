@@ -500,18 +500,24 @@ Required tests:
 
 Audit event plan:
 
-- [ ] Record grant access on meaningful actions, not every 3-second poll.
-- [ ] Suggested event kinds:
+- [x] Record grant access on meaningful actions, not every 3-second poll.
+- [x] Suggested event kinds:
   - `open_device`
   - `open_thread`
   - `create_thread`
   - `send_prompt`
   - `read_workspace_file`
   - `write_workspace_file`
-- [ ] Shared by me should show:
+- [x] Shared by me should show:
   - last accessed by whom
   - last accessed at
   - expandable recent event list
+
+Implementation note:
+
+- Portal refresh and thread-list polling do not create audit events.
+- HTTP/WebSocket thread opens, thread creation, prompt send, and workspace read/write paths create typed audit events.
+- Existing legacy access rows are normalized to `access`.
 
 ## E2E Plan
 

@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import type {
   ApiErrorShape,
+  RelayAccessEventKindDto,
   RelayAdminSummaryDto,
   RelayAdminThreadDto,
   RelayAdminWorkspaceDto,
@@ -746,7 +747,7 @@ export function buildRelayServer(
         }
 
         if (access.kind === 'shared') {
-          recordRelayAccess(store, access, session.user);
+          recordRelayAccess(store, access, session.user, threadId ? 'open_thread' : 'open_device');
         }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
@@ -780,7 +781,7 @@ export function buildRelayServer(
           return;
         }
         if (access.kind === 'shared') {
-          recordRelayAccess(store, access, session.user);
+          recordRelayAccess(store, access, session.user, threadId ? 'open_thread' : 'open_device');
         }
         connectRelayWebsocket(supervisor, socket, threadId, access);
       },
@@ -909,7 +910,13 @@ async function forwardRelayHttp(input: {
   }
 
   if (access?.kind === 'shared') {
-    recordRelayAccess(input.store, access, input.user);
+    const accessEventKind = relayAccessEventKindFromRequest(
+      input.request.method,
+      input.targetPath,
+    );
+    if (accessEventKind) {
+      recordRelayAccess(input.store, access, input.user, accessEventKind);
+    }
   }
   const conversationEvent = conversationEventFromRequest(
     input.request.method,
@@ -1487,15 +1494,20 @@ function relayAccessDto(access: EffectiveRelayAccess): RelayEffectiveAccessDto {
   };
 }
 
-function recordRelayAccess(store: RelayStore, access: EffectiveRelayAccess, user: RelayUserDto) {
+function recordRelayAccess(
+  store: RelayStore,
+  access: EffectiveRelayAccess,
+  user: RelayUserDto,
+  kind: RelayAccessEventKindDto,
+) {
   if (access.kind !== 'shared') {
     return;
   }
   if (access.share) {
-    store.recordShareAccess(access.share, user);
+    store.recordShareAccess(access.share, user, kind);
     return;
   }
-  store.recordGrantAccess(access.grant, user);
+  store.recordGrantAccess(access.grant, user, kind);
 }
 
 function firstAccessibleConnectedDevice(
@@ -1559,6 +1571,39 @@ function conversationEventFromRequest(method: string, pathValue: string, body: u
       threadId: decodeURIComponent(promptMatch[1]!),
       workspaceId: null,
     };
+  }
+  return null;
+}
+
+function relayAccessEventKindFromRequest(
+  method: string,
+  pathValue: string,
+): RelayAccessEventKindDto | null {
+  const methodName = method.toUpperCase();
+  const pathname = new URL(pathValue, 'http://relay.local').pathname;
+  if (methodName === 'POST' && pathname === '/api/threads/start') {
+    return 'create_thread';
+  }
+  if (methodName === 'POST' && /^\/api\/threads\/[^/]+\/prompt$/.test(pathname)) {
+    return 'send_prompt';
+  }
+  if (methodName === 'GET' && /^\/api\/threads\/[^/]+$/.test(pathname)) {
+    return 'open_thread';
+  }
+  if (methodName === 'GET' && /^\/api\/workspaces\/[^/]+$/.test(pathname)) {
+    return 'open_device';
+  }
+  if (
+    methodName === 'GET' &&
+    /^\/api\/workspaces\/[^/]+\/(?:files\/(?:tree|preview|raw|download)|artifacts(?:\/[^/]+(?:\/download)?)?)$/.test(pathname)
+  ) {
+    return 'read_workspace_file';
+  }
+  if (
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(methodName) &&
+    /^\/api\/workspaces\/[^/]+\/files(?:\/(?:upload|move))?$/.test(pathname)
+  ) {
+    return 'write_workspace_file';
   }
   return null;
 }
