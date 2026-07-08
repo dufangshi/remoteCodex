@@ -13,8 +13,11 @@ struct RootView: View {
         let savedConnection = environment.settingsStore.readSupervisorConnection()
         let readyConnection = Self.readyConnection(savedConnection)
         let savedRoute = environment.settingsStore.readLastRoute(for: readyConnection)
+        let initialHomeBackRoute = Self.initialHomeBackRoute(for: readyConnection)
         _connection = State(initialValue: readyConnection)
         _route = State(initialValue: readyConnection == nil ? .connection : savedRoute.appRoute)
+        _homeBackConnectionRoute = State(initialValue: initialHomeBackRoute)
+        _connectionInitialRoute = State(initialValue: initialHomeBackRoute)
         _themeMode = State(initialValue: environment.settingsStore.readThemeMode())
     }
 
@@ -185,6 +188,13 @@ struct RootView: View {
             return nil
         }
         return connection
+    }
+
+    private static func initialHomeBackRoute(for connection: SupervisorConnectionConfig?) -> ConnectionSetupRoute? {
+        guard connection?.mode == .relay, connection?.relayDeviceId?.trimmedNonEmpty != nil else {
+            return nil
+        }
+        return .relayDevices
     }
 
     private var useThreadWebViewFixture: Bool {

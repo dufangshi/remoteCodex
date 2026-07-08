@@ -75,7 +75,9 @@ class MainActivity : ComponentActivity() {
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
             var homeSnapshotRefreshNonce by remember { mutableIntStateOf(0) }
             var accountPanelOpen by remember { mutableStateOf(false) }
-            var workspaceHomeBackRoute by remember { mutableStateOf<ConnectionRoute?>(null) }
+            var workspaceHomeBackRoute by remember(supervisorConnection) {
+                mutableStateOf(initialWorkspaceHomeBackRoute(supervisorConnection))
+            }
             fun openDevicesScreen() {
                 workspaceHomeBackRoute = null
                 accountPanelOpen = false
@@ -595,5 +597,16 @@ private fun initialConnectionRoute(
         config.mode == SupervisorConnectionMode.Relay && config.authToken.isNullOrBlank() -> ConnectionRoute.RelayAuth
         config.mode == SupervisorConnectionMode.Relay && config.relayDeviceId.isNullOrBlank() -> ConnectionRoute.RelayDevices
         else -> ConnectionRoute.Workspace(settingsRepository.readLastRoute(config).toConnectedRoute())
+    }
+}
+
+private fun initialWorkspaceHomeBackRoute(config: SupervisorConnectionConfig?): ConnectionRoute? {
+    return if (
+        config?.mode == SupervisorConnectionMode.Relay &&
+        !config.relayDeviceId.isNullOrBlank()
+    ) {
+        ConnectionRoute.RelayDevices
+    } else {
+        null
     }
 }

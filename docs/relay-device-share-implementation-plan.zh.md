@@ -470,7 +470,7 @@ Android and iOS should mirror web semantics:
 Mobile navigation:
 
 - [x] Shared device should use the same selected relay device storage model as owned devices.
-- [ ] Back navigation should return to Relay Portal rather than dropping to unrelated local connection state.
+- [x] Back navigation should return to Relay Portal rather than dropping to unrelated local connection state.
 
 验收:
 
