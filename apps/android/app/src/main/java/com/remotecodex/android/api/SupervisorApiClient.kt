@@ -368,6 +368,59 @@ class SupervisorApiClient(
         ).toRelaySessionShareSummary()
     }
 
+    fun createRelayGrant(
+        targetIdentifier: String,
+        deviceId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Boolean,
+    ): RelayAccessGrantSummary {
+        val body = JSONObject()
+            .put("targetIdentifier", targetIdentifier)
+            .put("deviceId", deviceId)
+            .put("scope", "device")
+            .put("label", label ?: JSONObject.NULL)
+            .put("threadAccess", threadAccess)
+            .put("workspaceAccess", workspaceAccess)
+            .put("canCreateThreads", canCreateThreads)
+            .toString()
+        return requestJson(
+            "/relay/grants",
+            method = "POST",
+            body = body,
+        ).toRelayAccessGrantSummary()
+    }
+
+    fun updateRelayGrant(
+        grantId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Boolean,
+        expiresAt: String?,
+    ): RelayAccessGrantSummary {
+        val body = JSONObject()
+            .put("label", label ?: JSONObject.NULL)
+            .put("threadAccess", threadAccess)
+            .put("workspaceAccess", workspaceAccess)
+            .put("canCreateThreads", canCreateThreads)
+            .put("expiresAt", expiresAt ?: JSONObject.NULL)
+            .toString()
+        return requestJson(
+            "/relay/grants/${urlEncodePathSegment(grantId)}",
+            method = "PATCH",
+            body = body,
+        ).toRelayAccessGrantSummary()
+    }
+
+    fun revokeRelayGrant(grantId: String): RelayAccessGrantSummary {
+        return requestJson(
+            "/relay/grants/${urlEncodePathSegment(grantId)}",
+            method = "DELETE",
+        ).toRelayAccessGrantSummary()
+    }
+
     fun fetchThreadDetail(threadId: String, limit: Int? = null, beforeTurnId: String? = null): SupervisorThreadDetail {
         val query = buildQuery(
             "limit" to limit?.toString(),

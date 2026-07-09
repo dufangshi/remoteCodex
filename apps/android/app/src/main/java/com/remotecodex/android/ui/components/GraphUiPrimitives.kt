@@ -103,6 +103,7 @@ enum class GraphActionIcon {
     Home,
     Devices,
     Pin,
+    Share,
 }
 
 enum class GraphSelectionTone {
@@ -683,6 +684,28 @@ private fun GraphActionGlyph(
                 line(0.50f, 0.18f, 0.50f, 0.58f)
                 line(0.30f, 0.58f, 0.70f, 0.58f)
                 line(0.50f, 0.58f, 0.50f, 0.86f)
+            }
+            GraphActionIcon.Share -> {
+                drawCircle(
+                    color = color,
+                    radius = size.width * 0.09f,
+                    center = Offset(size.width * 0.30f, size.height * 0.50f),
+                    style = stroke,
+                )
+                drawCircle(
+                    color = color,
+                    radius = size.width * 0.09f,
+                    center = Offset(size.width * 0.68f, size.height * 0.28f),
+                    style = stroke,
+                )
+                drawCircle(
+                    color = color,
+                    radius = size.width * 0.09f,
+                    center = Offset(size.width * 0.68f, size.height * 0.72f),
+                    style = stroke,
+                )
+                line(0.38f, 0.46f, 0.60f, 0.33f)
+                line(0.38f, 0.54f, 0.60f, 0.67f)
             }
         }
     }

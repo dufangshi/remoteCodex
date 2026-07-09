@@ -384,7 +384,6 @@ export function RelayDevicesPage() {
 
   const sharedDevicesWithMe = portal?.sharedDevicesWithMe ?? [];
   const outgoingGrants = portal?.grantsByMe ?? [];
-  const useGrantBackedOutgoing = outgoingGrants.length > 0 || (portal?.sharedByMe.length ?? 0) === 0;
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 pb-6 text-[var(--app-fg)] sm:px-6">
@@ -500,57 +499,55 @@ export function RelayDevicesPage() {
               )}
             />
 
-            {useGrantBackedOutgoing ? (
-              <GrantSection
-                count={outgoingGrants.length}
-                emptyText="No access has been shared by this account yet."
-                grants={outgoingGrants}
-                loading={loading}
-                loadingText="Loading shared access..."
-                title="Shared by me"
-                subtitle="Threads and devices this relay account has shared with other users."
-                renderGrant={(grant) => (
-                  <GrantRow
-                    busy={busy === `grant:${grant.id}`}
-                    expanded={expandedGrantId === grant.id}
-                    key={grant.id}
-                    grant={grant}
-                    mode="outgoing"
-                    onOpen={() => openSharedGrant(grant)}
-                    onEdit={() => setEditingGrant(grant)}
-                    onRevoke={() => void revokeAccessGrant(grant)}
-                    onToggleAccess={() => {
-                      setExpandedGrantId((current) => (current === grant.id ? null : grant.id));
-                    }}
-                  />
-                )}
-              />
-            ) : (
-              <ShareSection
-                count={portal?.sharedByMe.length ?? 0}
-                emptyText="No sessions have been shared by this account yet."
-                loading={loading}
-                loadingText="Loading shared sessions..."
-                shares={portal?.sharedByMe ?? []}
-                title="Shared by me"
-                subtitle="Threads this relay account has shared with other users."
-                renderShare={(share) => (
-                  <SharedSessionRow
-                    busy={busy === `share:${share.id}`}
-                    expanded={expandedShareId === share.id}
-                    key={share.id}
-                    mode="outgoing"
-                    share={share}
-                    onOpen={() => openSharedSession(share)}
-                    onEdit={() => setEditingShare(share)}
-                    onRevoke={() => void revokeSharedSession(share)}
-                    onToggleAccess={() => {
-                      setExpandedShareId((current) => (current === share.id ? null : share.id));
-                    }}
-                  />
-                )}
-              />
-            )}
+            <GrantSection
+              count={outgoingGrants.length}
+              emptyText="No devices have been shared by this account yet."
+              grants={outgoingGrants}
+              loading={loading}
+              loadingText="Loading shared devices..."
+              title="Shared devices by me"
+              subtitle="Devices this relay account has shared with other users."
+              renderGrant={(grant) => (
+                <GrantRow
+                  busy={busy === `grant:${grant.id}`}
+                  expanded={expandedGrantId === grant.id}
+                  key={grant.id}
+                  grant={grant}
+                  mode="outgoing"
+                  onOpen={() => openSharedGrant(grant)}
+                  onEdit={() => setEditingGrant(grant)}
+                  onRevoke={() => void revokeAccessGrant(grant)}
+                  onToggleAccess={() => {
+                    setExpandedGrantId((current) => (current === grant.id ? null : grant.id));
+                  }}
+                />
+              )}
+            />
+
+            <ShareSection
+              count={portal?.sharedByMe.length ?? 0}
+              emptyText="No threads have been shared by this account yet."
+              loading={loading}
+              loadingText="Loading shared threads..."
+              shares={portal?.sharedByMe ?? []}
+              title="Shared threads by me"
+              subtitle="Threads this relay account has shared with other users."
+              renderShare={(share) => (
+                <SharedSessionRow
+                  busy={busy === `share:${share.id}`}
+                  expanded={expandedShareId === share.id}
+                  key={share.id}
+                  mode="outgoing"
+                  share={share}
+                  onOpen={() => openSharedSession(share)}
+                  onEdit={() => setEditingShare(share)}
+                  onRevoke={() => void revokeSharedSession(share)}
+                  onToggleAccess={() => {
+                    setExpandedShareId((current) => (current === share.id ? null : share.id));
+                  }}
+                />
+              )}
+            />
           </div>
         </section>
       </div>
@@ -1221,7 +1218,7 @@ function ShareDeviceDialog({
             <input
               className="relay-input mt-2 w-full"
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Optional note shown in Shared by me"
+              placeholder="Optional note shown in Shared devices by me"
               value={label}
             />
           </label>

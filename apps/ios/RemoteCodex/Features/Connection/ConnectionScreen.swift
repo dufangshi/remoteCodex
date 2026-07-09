@@ -243,6 +243,60 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    func createRelayGrant(
+        device: RelayDeviceSummary,
+        targetIdentifier: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Bool
+    ) async {
+        await runBusy {
+            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+            _ = try await environment.apiClientFactory(config).createRelayGrant(
+                targetIdentifier: targetIdentifier,
+                deviceId: device.id,
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: workspaceAccess,
+                canCreateThreads: canCreateThreads
+            )
+            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            lastRelayRefreshAt = Date()
+        }
+    }
+
+    func updateRelayGrant(
+        _ grant: RelayAccessGrantSummary,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Bool
+    ) async {
+        await runBusy {
+            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+            _ = try await environment.apiClientFactory(config).updateRelayGrant(
+                grantId: grant.id,
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: workspaceAccess,
+                canCreateThreads: canCreateThreads,
+                expiresAt: grant.expiresAt
+            )
+            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            lastRelayRefreshAt = Date()
+        }
+    }
+
+    func revokeRelayGrant(_ grant: RelayAccessGrantSummary) async {
+        await runBusy {
+            let config = SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+            _ = try await environment.apiClientFactory(config).revokeRelayGrant(grantId: grant.id)
+            relayPortal = try await environment.apiClientFactory(config).fetchRelayPortal()
+            lastRelayRefreshAt = Date()
+        }
+    }
+
     func copyRelayDeviceSetup(_ device: RelayDeviceSummary) {
         guard let token = device.token?.trimmedNonEmpty else {
             errorMessage = "This device token is not available. Create a new device token to copy setup."
@@ -410,10 +464,14 @@ struct ConnectionScreen: View {
     let onThemeModeSelected: (ThemeMode) -> Void
     @State private var offlineDevice: RelayDeviceSummary?
     @State private var revokeDevice: RelayDeviceSummary?
+    @State private var sharingRelayDevice: RelayDeviceSummary?
     @State private var editingShare: RelaySessionShareSummary?
     @State private var revokeShare: RelaySessionShareSummary?
+    @State private var editingGrant: RelayAccessGrantSummary?
+    @State private var revokeGrant: RelayAccessGrantSummary?
     @State private var deleteDevice: SavedSupervisorDevice?
     @State private var expandedShareId: String?
+    @State private var expandedGrantId: String?
     @State private var showingAddDevice = false
     @State private var showingCreateRelayDevice = false
     @State private var showingSettings = false
@@ -493,6 +551,26 @@ struct ConnectionScreen: View {
         .sheet(isPresented: $showingCreateRelayDevice) {
             createRelayDeviceSheet
         }
+        .sheet(item: $sharingRelayDevice) { device in
+            RelayDeviceShareSheet(
+                busy: model.busy,
+                device: device,
+                onCancel: { sharingRelayDevice = nil },
+                onShare: { targetIdentifier, label, threadAccess, workspaceAccess, canCreateThreads in
+                    Task {
+                        await model.createRelayGrant(
+                            device: device,
+                            targetIdentifier: targetIdentifier,
+                            label: label,
+                            threadAccess: threadAccess,
+                            workspaceAccess: workspaceAccess,
+                            canCreateThreads: canCreateThreads
+                        )
+                        sharingRelayDevice = nil
+                    }
+                }
+            )
+        }
         .sheet(item: $model.editingDevice) { _ in
             editDeviceSheet
         }
@@ -510,6 +588,25 @@ struct ConnectionScreen: View {
                             workspaceAccess: workspaceAccess
                         )
                         editingShare = nil
+                    }
+                }
+            )
+        }
+        .sheet(item: $editingGrant) { grant in
+            RelayGrantPermissionsSheet(
+                busy: model.busy,
+                grant: grant,
+                onCancel: { editingGrant = nil },
+                onSave: { label, threadAccess, workspaceAccess, canCreateThreads in
+                    Task {
+                        await model.updateRelayGrant(
+                            grant,
+                            label: label,
+                            threadAccess: threadAccess,
+                            workspaceAccess: workspaceAccess,
+                            canCreateThreads: canCreateThreads
+                        )
+                        editingGrant = nil
                     }
                 }
             )
@@ -569,6 +666,20 @@ struct ConnectionScreen: View {
             }
         } message: {
             Text("Remove access to \(revokeShare.map(shareTitle) ?? "this thread").")
+        }
+        .alert("Revoke Shared Device?", isPresented: revokeGrantAlertPresented) {
+            Button("Cancel", role: .cancel) {
+                revokeGrant = nil
+            }
+            Button("Revoke", role: .destructive) {
+                guard let grant = revokeGrant else { return }
+                Task {
+                    await model.revokeRelayGrant(grant)
+                    revokeGrant = nil
+                }
+            }
+        } message: {
+            Text("Remove \(revokeGrant?.targetUsername ?? "this user's") access to \(revokeGrant.map(grantTitle) ?? "this device").")
         }
     }
 
@@ -667,6 +778,17 @@ struct ConnectionScreen: View {
             set: { presented in
                 if !presented {
                     revokeShare = nil
+                }
+            }
+        )
+    }
+
+    private var revokeGrantAlertPresented: Binding<Bool> {
+        Binding(
+            get: { revokeGrant != nil },
+            set: { presented in
+                if !presented {
+                    revokeGrant = nil
                 }
             }
         )
@@ -832,6 +954,7 @@ struct ConnectionScreen: View {
                     onCopySetup: {
                         model.copyRelayDeviceSetup(device)
                     },
+                    onShare: { sharingRelayDevice = device },
                     onRevoke: { revokeDevice = device }
                 )
                 .contentShape(Rectangle())
@@ -851,13 +974,12 @@ struct ConnectionScreen: View {
             }
         }
         .remoteCodexListRow()
-        Section("Shared with me") {
+        Section("Shared devices with me") {
             let sharedDevices = model.relayPortal?.sharedDevicesWithMe ?? []
-            let sharedSessions = model.relayPortal?.sharedWithMe ?? []
             if model.relayPortal == nil {
-                ProgressView("Loading shared sessions...")
-            } else if sharedDevices.isEmpty && sharedSessions.isEmpty {
-                ContentUnavailableView("No Shared Threads", systemImage: "person.2.slash")
+                ProgressView("Loading shared devices...")
+            } else if sharedDevices.isEmpty {
+                ContentUnavailableView("No Shared Devices", systemImage: "person.2.slash")
             } else {
                 ForEach(sharedDevices) { grant in
                     RelaySharedGrantRow(
@@ -866,6 +988,16 @@ struct ConnectionScreen: View {
                         onOpen: { model.openSharedGrant(grant) }
                     )
                 }
+            }
+        }
+        .remoteCodexListRow()
+        Section("Shared threads with me") {
+            let sharedSessions = model.relayPortal?.sharedWithMe ?? []
+            if model.relayPortal == nil {
+                ProgressView("Loading shared threads...")
+            } else if sharedSessions.isEmpty {
+                ContentUnavailableView("No Shared Threads", systemImage: "person.2.slash")
+            } else {
                 ForEach(sharedSessions) { share in
                     RelaySharedSessionRow(
                         share: share,
@@ -876,21 +1008,36 @@ struct ConnectionScreen: View {
             }
         }
         .remoteCodexListRow()
-        Section("Shared by me") {
+        Section("Shared devices by me") {
             let grants = model.relayPortal?.grantsByMe ?? []
-            let sharedSessions = model.relayPortal?.sharedByMe ?? []
             if model.relayPortal == nil {
-                ProgressView("Loading shared sessions...")
-            } else if grants.isEmpty && sharedSessions.isEmpty {
-                ContentUnavailableView("No Shared Access", systemImage: "person.2")
+                ProgressView("Loading shared devices...")
+            } else if grants.isEmpty {
+                ContentUnavailableView("No Shared Devices", systemImage: "person.2")
             } else {
                 ForEach(grants) { grant in
                     RelaySharedGrantRow(
                         grant: grant,
                         mode: .outgoing,
-                        onOpen: { model.openSharedGrant(grant) }
+                        expanded: expandedGrantId == grant.id,
+                        onOpen: { model.openSharedGrant(grant) },
+                        onEdit: { editingGrant = grant },
+                        onRevoke: { revokeGrant = grant },
+                        onToggleAccess: {
+                            expandedGrantId = expandedGrantId == grant.id ? nil : grant.id
+                        }
                     )
                 }
+            }
+        }
+        .remoteCodexListRow()
+        Section("Shared threads by me") {
+            let sharedSessions = model.relayPortal?.sharedByMe ?? []
+            if model.relayPortal == nil {
+                ProgressView("Loading shared threads...")
+            } else if sharedSessions.isEmpty {
+                ContentUnavailableView("No Shared Threads", systemImage: "person.2")
+            } else {
                 ForEach(sharedSessions) { share in
                     RelaySharedSessionRow(
                         share: share,
@@ -1042,6 +1189,7 @@ private struct RelayDeviceRow: View {
     let selected: Bool
     let onConnect: () -> Void
     let onCopySetup: () -> Void
+    let onShare: () -> Void
     let onRevoke: () -> Void
 
     var body: some View {
@@ -1059,6 +1207,7 @@ private struct RelayDeviceRow: View {
                     .disabled(device.token?.trimmedNonEmpty == nil)
                 Button(selected ? "Connected" : "Connect", action: onConnect)
                     .disabled(selected)
+                Button("Share", action: onShare)
                 Button("Revoke", role: .destructive, action: onRevoke)
             }
             .buttonStyle(.borderless)
@@ -1139,7 +1288,11 @@ private struct RelaySharedSessionRow: View {
 private struct RelaySharedGrantRow: View {
     let grant: RelayAccessGrantSummary
     let mode: RelayShareRowMode
+    var expanded = false
     let onOpen: () -> Void
+    var onEdit: () -> Void = {}
+    var onRevoke: () -> Void = {}
+    var onToggleAccess: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1149,9 +1302,29 @@ private struct RelaySharedGrantRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Open", action: onOpen)
-                    .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                if mode == .incoming {
+                    Button("Open", action: onOpen)
+                        .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                        .fixedSize(horizontal: true, vertical: false)
+                } else {
+                    HStack(spacing: 8) {
+                        Button("Open", action: onOpen)
+                            .buttonStyle(RemoteCodexPrimaryButtonStyle())
+                            .fixedSize(horizontal: true, vertical: false)
+                        Menu {
+                            Button("Permissions", action: onEdit)
+                            Button("Access history", action: onToggleAccess)
+                            Button("Revoke", role: .destructive, action: onRevoke)
+                        } label: {
+                            Text("Manage")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .buttonStyle(RemoteCodexSecondaryButtonStyle())
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                     .fixedSize(horizontal: true, vertical: false)
+                }
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(mode == .incoming ? "From \(grant.ownerUsername)" : "To \(grant.targetUsername)")
@@ -1171,8 +1344,164 @@ private struct RelaySharedGrantRow: View {
                 )
                 GraphBadge(text: workspaceAccessLabel(grant.workspaceAccess), tone: .neutral)
             }
+            if mode == .outgoing, expanded {
+                ShareAccessHistory(events: grant.accessEvents)
+            }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct RelayDeviceShareSheet: View {
+    let busy: Bool
+    let device: RelayDeviceSummary
+    let onCancel: () -> Void
+    let onShare: (String, String?, String, String, Bool) -> Void
+    @State private var targetIdentifier = ""
+    @State private var label: String
+    @State private var threadAccess = "control"
+    @State private var workspaceAccess = "write"
+    @State private var canCreateThreads = true
+
+    init(
+        busy: Bool,
+        device: RelayDeviceSummary,
+        onCancel: @escaping () -> Void,
+        onShare: @escaping (String, String?, String, String, Bool) -> Void
+    ) {
+        self.busy = busy
+        self.device = device
+        self.onCancel = onCancel
+        self.onShare = onShare
+        _label = State(initialValue: device.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Device: \(device.name)")
+                    Text("Share every workspace and thread reachable through this relay device.")
+                        .font(.caption)
+                        .remoteCodexStatusText()
+                }
+                Section("Recipient") {
+                    TextField("Relay username or email", text: $targetIdentifier)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Label", text: $label)
+                }
+                relayGrantAccessFields(
+                    threadAccess: $threadAccess,
+                    workspaceAccess: $workspaceAccess,
+                    canCreateThreads: $canCreateThreads
+                )
+            }
+            .navigationTitle("Share Device")
+            .remoteCodexScreenSurface()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Share") {
+                        onShare(
+                            targetIdentifier.trimmedNonEmpty ?? "",
+                            label.trimmedNonEmpty,
+                            threadAccess,
+                            workspaceAccess,
+                            canCreateThreads
+                        )
+                    }
+                    .disabled(busy || targetIdentifier.trimmedNonEmpty == nil)
+                }
+            }
+        }
+    }
+}
+
+private struct RelayGrantPermissionsSheet: View {
+    let busy: Bool
+    let grant: RelayAccessGrantSummary
+    let onCancel: () -> Void
+    let onSave: (String?, String, String, Bool) -> Void
+    @State private var label: String
+    @State private var threadAccess: String
+    @State private var workspaceAccess: String
+    @State private var canCreateThreads: Bool
+
+    init(
+        busy: Bool,
+        grant: RelayAccessGrantSummary,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping (String?, String, String, Bool) -> Void
+    ) {
+        self.busy = busy
+        self.grant = grant
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _label = State(initialValue: grant.label ?? "")
+        _threadAccess = State(initialValue: grant.threadAccess)
+        _workspaceAccess = State(initialValue: grant.workspaceAccess)
+        _canCreateThreads = State(initialValue: grant.canCreateThreads)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("To \(grant.targetUsername)")
+                    Text("Device: \(grant.deviceName)")
+                }
+                Section("Label") {
+                    TextField("Shared device label", text: $label)
+                }
+                relayGrantAccessFields(
+                    threadAccess: $threadAccess,
+                    workspaceAccess: $workspaceAccess,
+                    canCreateThreads: $canCreateThreads
+                )
+            }
+            .navigationTitle("Permissions")
+            .remoteCodexScreenSurface()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(label.trimmedNonEmpty, threadAccess, workspaceAccess, canCreateThreads)
+                    }
+                    .disabled(busy)
+                }
+            }
+        }
+    }
+}
+
+@ViewBuilder
+private func relayGrantAccessFields(
+    threadAccess: Binding<String>,
+    workspaceAccess: Binding<String>,
+    canCreateThreads: Binding<Bool>
+) -> some View {
+    Section("Thread access") {
+        Picker("Thread access", selection: threadAccess) {
+            Text("View only").tag("read")
+            Text("Collaborator").tag("control")
+        }
+        .pickerStyle(.segmented)
+    }
+    Section("Workspace access") {
+        Picker("Workspace access", selection: workspaceAccess) {
+            Text("None").tag("none")
+            Text("Read").tag("read")
+            Text("Write").tag("write")
+        }
+        .pickerStyle(.segmented)
+        Toggle("Allow creating threads", isOn: canCreateThreads)
     }
 }
 

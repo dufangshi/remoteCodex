@@ -29,6 +29,24 @@ private struct UpdateRelayShareRequest: Encodable {
     var expiresAt: String?
 }
 
+private struct CreateRelayGrantRequest: Encodable {
+    var targetIdentifier: String
+    var deviceId: String
+    var scope: String
+    var label: String?
+    var threadAccess: String
+    var workspaceAccess: String
+    var canCreateThreads: Bool
+}
+
+private struct UpdateRelayGrantRequest: Encodable {
+    var label: String?
+    var threadAccess: String
+    var workspaceAccess: String
+    var canCreateThreads: Bool
+    var expiresAt: String?
+}
+
 protocol SupervisorHTTPTransport {
     func request(_ request: SupervisorHTTPRequest) async throws -> SupervisorHTTPResponse
 }
@@ -396,6 +414,57 @@ final class SupervisorAPIClient: @unchecked Sendable {
     func revokeRelayShare(shareId: String) async throws -> RelaySessionShareSummary {
         try await requestJSON(
             "/relay/shares/\(shareId.urlPathEncoded)",
+            method: "DELETE"
+        )
+    }
+
+    func createRelayGrant(
+        targetIdentifier: String,
+        deviceId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Bool
+    ) async throws -> RelayAccessGrantSummary {
+        try await requestJSON(
+            "/relay/grants",
+            method: "POST",
+            body: CreateRelayGrantRequest(
+                targetIdentifier: targetIdentifier,
+                deviceId: deviceId,
+                scope: "device",
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: workspaceAccess,
+                canCreateThreads: canCreateThreads
+            )
+        )
+    }
+
+    func updateRelayGrant(
+        grantId: String,
+        label: String?,
+        threadAccess: String,
+        workspaceAccess: String,
+        canCreateThreads: Bool,
+        expiresAt: String?
+    ) async throws -> RelayAccessGrantSummary {
+        try await requestJSON(
+            "/relay/grants/\(grantId.urlPathEncoded)",
+            method: "PATCH",
+            body: UpdateRelayGrantRequest(
+                label: label,
+                threadAccess: threadAccess,
+                workspaceAccess: workspaceAccess,
+                canCreateThreads: canCreateThreads,
+                expiresAt: expiresAt
+            )
+        )
+    }
+
+    func revokeRelayGrant(grantId: String) async throws -> RelayAccessGrantSummary {
+        try await requestJSON(
+            "/relay/grants/\(grantId.urlPathEncoded)",
             method: "DELETE"
         )
     }
