@@ -54,6 +54,7 @@ const reasoningEffortValues = [
   'high',
   'xhigh',
   'max',
+  'ultra',
 ] as [ReasoningEffortDto, ...ReasoningEffortDto[]];
 
 const createThreadSchema = z.object({

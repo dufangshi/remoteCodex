@@ -81,6 +81,7 @@ export class FakeCodexManager extends EventEmitter {
     threadId: string;
     prompt: string;
     developerInstructions?: string | null;
+    effort?: ReasoningEffort | null;
     serviceTier?: 'fast' | 'flex' | null;
   }> = [];
   resumeThreadCalls: Array<{
@@ -234,6 +235,7 @@ export class FakeCodexManager extends EventEmitter {
       ...(input.developerInstructions !== undefined
         ? { developerInstructions: input.developerInstructions }
         : {}),
+      ...(input.effort !== undefined ? { effort: input.effort } : {}),
       ...(input.serviceTier !== undefined
         ? { serviceTier: input.serviceTier }
         : {}),

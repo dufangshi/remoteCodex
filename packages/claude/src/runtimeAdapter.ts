@@ -364,6 +364,7 @@ interface ClaudeTokenUsageBreakdown {
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
 }
@@ -792,6 +793,8 @@ function addClaudeUsage(
     totalTokens: left.totalTokens + right.totalTokens,
     inputTokens: left.inputTokens + right.inputTokens,
     cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens,
+    cacheWriteInputTokens:
+      left.cacheWriteInputTokens + right.cacheWriteInputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     reasoningOutputTokens: left.reasoningOutputTokens + right.reasoningOutputTokens,
   };
@@ -821,6 +824,7 @@ function normalizeClaudeUsage(value: unknown): ClaudeTokenUsageBreakdown | null 
     totalTokens,
     inputTokens,
     cachedInputTokens: cacheReadInputTokens,
+    cacheWriteInputTokens: cacheCreationInputTokens,
     outputTokens,
     reasoningOutputTokens: 0,
   };

@@ -702,7 +702,8 @@ export type ReasoningEffortDto =
   | 'medium'
   | 'high'
   | 'xhigh'
-  | 'max';
+  | 'max'
+  | 'ultra';
 export type CollaborationModeDto = 'default' | 'plan';
 export type SandboxModeDto = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -894,6 +895,7 @@ export interface ThreadTurnTokenBreakdownDto {
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteInputTokens?: number;
   outputTokens: number;
   reasoningOutputTokens: number;
 }
@@ -912,6 +914,7 @@ export interface ThreadTurnPriceEstimateDto {
   currency: 'USD';
   inputUsd: number;
   cachedInputUsd: number;
+  cacheWriteInputUsd?: number;
   outputUsd: number;
   totalUsd: number;
 }

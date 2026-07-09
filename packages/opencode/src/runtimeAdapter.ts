@@ -439,6 +439,13 @@ function openCodeUsageFromTokens(tokens: unknown) {
   const cachedInputTokens = nonNegativeNumberValue(
     tokens.cachedInputTokens ?? tokens.cached_input_tokens ?? cache?.read,
   ) ?? 0;
+  const cacheWriteInputTokens = nonNegativeNumberValue(
+    tokens.cacheWriteInputTokens ??
+      tokens.cache_write_input_tokens ??
+      tokens.cacheWriteTokens ??
+      tokens.cache_write_tokens ??
+      cache?.write,
+  ) ?? 0;
   const totalTokens = nonNegativeNumberValue(tokens.total ?? tokens.totalTokens ?? tokens.total_tokens)
     ?? inputTokens + outputTokens;
 
@@ -451,6 +458,7 @@ function openCodeUsageFromTokens(tokens: unknown) {
       totalTokens,
       inputTokens,
       cachedInputTokens,
+      ...(cacheWriteInputTokens > 0 ? { cacheWriteInputTokens } : {}),
       outputTokens,
       reasoningOutputTokens,
     },
@@ -524,6 +532,13 @@ function turnTokenUsage(messages: unknown[], model: ReturnType<typeof parseModel
       totalTokens: sum.totalTokens + usage.totalTokens,
       inputTokens: sum.inputTokens + usage.inputTokens,
       cachedInputTokens: sum.cachedInputTokens + usage.cachedInputTokens,
+      ...((sum.cacheWriteInputTokens ?? 0) + (usage.cacheWriteInputTokens ?? 0) > 0
+        ? {
+            cacheWriteInputTokens:
+              (sum.cacheWriteInputTokens ?? 0) +
+              (usage.cacheWriteInputTokens ?? 0),
+          }
+        : {}),
       outputTokens: sum.outputTokens + usage.outputTokens,
       reasoningOutputTokens: sum.reasoningOutputTokens + usage.reasoningOutputTokens,
     }), firstRecord);

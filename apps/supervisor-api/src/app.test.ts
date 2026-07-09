@@ -5692,6 +5692,60 @@ describe('supervisor api', () => {
     });
   });
 
+  it('accepts GPT-5.6 max and ultra reasoning efforts through the prompt API', async () => {
+    fakeCodexManager.models = [
+      {
+        ...fakeCodexManager.models[0]!,
+        id: 'gpt-5.6-sol',
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6 Sol',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Low' },
+          { reasoningEffort: 'xhigh', description: 'Extra high' },
+          { reasoningEffort: 'max', description: 'Max' },
+          { reasoningEffort: 'ultra', description: 'Ultra' },
+        ],
+        defaultReasoningEffort: 'medium',
+      },
+    ];
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'max',
+        approvalMode: 'yolo',
+        title: 'GPT-5.6 reasoning',
+      },
+    });
+
+    expect(createResponse.statusCode).toBe(200);
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Use subagents for this task.',
+        reasoningEffort: 'ultra',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
+      prompt: 'Use subagents for this task.',
+      effort: 'ultra',
+    });
+  });
+
   it('imports a local Codex session and reuses transcript history before resume', async () => {
     const importedWorkspace = path.join(tempDir, 'imported-project');
     await fs.mkdir(importedWorkspace);

@@ -63,7 +63,9 @@ export type ReasoningEffort =
   | 'low'
   | 'medium'
   | 'high'
-  | 'xhigh';
+  | 'xhigh'
+  | 'max'
+  | 'ultra';
 
 export type CollaborationModeKind = 'default' | 'plan';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';

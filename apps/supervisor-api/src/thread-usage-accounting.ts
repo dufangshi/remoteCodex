@@ -29,6 +29,7 @@ export interface ThreadTurnTokenUsageBreakdown {
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
 }
@@ -185,11 +186,33 @@ export function buildTurnTokenBreakdown(
   payload: Record<string, unknown> | null | undefined,
 ): ThreadTurnTokenUsageBreakdown | null {
   const usage = isRecord(payload) ? payload : null;
+  const inputDetails = isRecord(
+    usage?.inputTokensDetails ?? usage?.input_tokens_details,
+  )
+    ? (usage?.inputTokensDetails ?? usage?.input_tokens_details) as Record<string, unknown>
+    : null;
+  const cache = isRecord(usage?.cache) ? usage.cache : null;
   const totalTokens = numberOrNull(usage?.totalTokens ?? usage?.total_tokens);
   const inputTokens = numberOrNull(usage?.inputTokens ?? usage?.input_tokens);
   const cachedInputTokens = numberOrNull(
-    usage?.cachedInputTokens ?? usage?.cached_input_tokens,
+    usage?.cachedInputTokens ??
+      usage?.cached_input_tokens ??
+      inputDetails?.cachedTokens ??
+      inputDetails?.cached_tokens ??
+      cache?.read,
   );
+  const cacheWriteInputTokens =
+    numberOrNull(
+      usage?.cacheWriteInputTokens ??
+        usage?.cache_write_input_tokens ??
+        usage?.cacheWriteTokens ??
+        usage?.cache_write_tokens ??
+        usage?.cacheCreationInputTokens ??
+        usage?.cache_creation_input_tokens ??
+        inputDetails?.cacheWriteTokens ??
+        inputDetails?.cache_write_tokens ??
+        cache?.write,
+    ) ?? 0;
   const outputTokens = numberOrNull(usage?.outputTokens ?? usage?.output_tokens);
   const reasoningOutputTokens = numberOrNull(
     usage?.reasoningOutputTokens ?? usage?.reasoning_output_tokens,
@@ -209,6 +232,7 @@ export function buildTurnTokenBreakdown(
     totalTokens,
     inputTokens,
     cachedInputTokens,
+    cacheWriteInputTokens,
     outputTokens,
     reasoningOutputTokens,
   };
@@ -219,6 +243,7 @@ export function zeroTurnTokenBreakdown(): ThreadTurnTokenUsageBreakdown {
     totalTokens: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
   };
@@ -233,6 +258,10 @@ function subtractTurnTokenBreakdowns(
     inputTokens: Math.max(current.inputTokens - previous.inputTokens, 0),
     cachedInputTokens: Math.max(
       current.cachedInputTokens - previous.cachedInputTokens,
+      0,
+    ),
+    cacheWriteInputTokens: Math.max(
+      current.cacheWriteInputTokens - previous.cacheWriteInputTokens,
       0,
     ),
     outputTokens: Math.max(current.outputTokens - previous.outputTokens, 0),
@@ -310,7 +339,10 @@ function cumulativeTotalFromStoredThreadTurnTokenUsageState(
   }
 
   if (!state.baselineTotal) {
-    return state.usage.total;
+    return {
+      ...state.usage.total,
+      cacheWriteInputTokens: state.usage.total.cacheWriteInputTokens ?? 0,
+    };
   }
 
   return {
@@ -318,6 +350,9 @@ function cumulativeTotalFromStoredThreadTurnTokenUsageState(
     inputTokens: state.baselineTotal.inputTokens + state.usage.total.inputTokens,
     cachedInputTokens:
       state.baselineTotal.cachedInputTokens + state.usage.total.cachedInputTokens,
+    cacheWriteInputTokens:
+      state.baselineTotal.cacheWriteInputTokens +
+      (state.usage.total.cacheWriteInputTokens ?? 0),
     outputTokens: state.baselineTotal.outputTokens + state.usage.total.outputTokens,
     reasoningOutputTokens:
       state.baselineTotal.reasoningOutputTokens +

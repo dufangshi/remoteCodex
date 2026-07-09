@@ -52,6 +52,90 @@ describe('modelPricing', () => {
     expect(estimate?.totalUsd).toBeCloseTo(0.05025, 10);
   });
 
+  it('prices GPT-5.6 aliases and cache writes with the published rates', () => {
+    const usage = {
+      ...sampleUsage,
+      total: {
+        ...sampleUsage.total,
+        cacheWriteInputTokens: 200,
+      },
+      last: {
+        ...sampleUsage.last,
+        cacheWriteInputTokens: 200,
+      },
+      modelContextWindow: 353_400,
+    };
+
+    expect(contextWindowForModel('gpt-5.6')).toBe(353_400);
+    expect(contextWindowForModel('openai/gpt-5.6-sol')).toBe(353_400);
+    expect(supportsFastMode('gpt-5.6-terra')).toBe(true);
+    expect(buildTurnPricingSnapshot('gpt-5.6-luna', false)).toEqual({
+      pricingModelKey: 'gpt-5.6-luna',
+      pricingTierKey: 'standard',
+    });
+
+    const solEstimate = estimateTurnPrice(usage, {
+      pricingModelKey: 'gpt-5.6-sol',
+      pricingTierKey: 'standard',
+    });
+    expect(solEstimate).toMatchObject({
+      pricingModelKey: 'gpt-5.6-sol',
+      inputUsd: 0.004,
+      cachedInputUsd: 0.00025,
+      cacheWriteInputUsd: 0.00125,
+      outputUsd: 0.045,
+    });
+    expect(solEstimate?.totalUsd).toBeCloseTo(0.0505, 10);
+
+    const terraEstimate = estimateTurnPrice(usage, {
+      pricingModelKey: 'gpt-5.6-terra',
+      pricingTierKey: 'standard',
+    });
+    expect(terraEstimate?.cacheWriteInputUsd).toBeCloseTo(0.000625, 10);
+
+    const lunaEstimate = estimateTurnPrice(usage, {
+      pricingModelKey: 'gpt-5.6-luna',
+      pricingTierKey: 'standard',
+    });
+    expect(lunaEstimate?.cacheWriteInputUsd).toBeCloseTo(0.00025, 10);
+  });
+
+  it('applies GPT-5.6 long-context rates above 272K input tokens', () => {
+    const estimate = estimateTurnPrice(
+      {
+        total: {
+          totalTokens: 301_000,
+          inputTokens: 300_000,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1_000,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 301_000,
+          inputTokens: 300_000,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1_000,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 353_400,
+      },
+      {
+        pricingModelKey: 'gpt-5.6-sol',
+        pricingTierKey: 'standard',
+      },
+    );
+
+    expect(estimate).toMatchObject({
+      inputUsd: 3,
+      cachedInputUsd: 0,
+      cacheWriteInputUsd: 0,
+      outputUsd: 0.045,
+    });
+    expect(estimate?.totalUsd).toBeCloseTo(3.045, 10);
+  });
+
   it('uses the gpt-5.5-specific fast multiplier and marks it fast-capable', () => {
     expect(supportsFastMode('gpt-5.5')).toBe(true);
     expect(contextWindowForModel('gpt-5.5')).toBe(272000);

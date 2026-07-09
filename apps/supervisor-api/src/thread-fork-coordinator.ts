@@ -36,6 +36,7 @@ interface ThreadForkCallbacks {
     | 'high'
     | 'xhigh'
     | 'max'
+    | 'ultra'
     | null;
   buildThreadPatch(
     remoteSession: Parameters<ThreadSessionCoordinator['forkThreadSession']>[0] extends never

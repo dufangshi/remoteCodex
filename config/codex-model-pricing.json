@@ -9,6 +9,50 @@
     }
   },
   "models": {
+    "gpt-5.6": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "outputUsdPerMillion": 30,
+      "supportsFastMode": true,
+      "contextWindowTokens": 353400,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-sol": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "outputUsdPerMillion": 30,
+      "supportsFastMode": true,
+      "contextWindowTokens": 353400,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-terra": {
+      "inputUsdPerMillion": 2.5,
+      "cachedInputUsdPerMillion": 0.25,
+      "cacheWriteInputUsdPerMillion": 3.125,
+      "outputUsdPerMillion": 15,
+      "supportsFastMode": true,
+      "contextWindowTokens": 353400,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-luna": {
+      "inputUsdPerMillion": 1,
+      "cachedInputUsdPerMillion": 0.1,
+      "cacheWriteInputUsdPerMillion": 1.25,
+      "outputUsdPerMillion": 6,
+      "supportsFastMode": true,
+      "contextWindowTokens": 353400,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
     "gpt-5.5": {
       "inputUsdPerMillion": 5,
       "cachedInputUsdPerMillion": 0.5,

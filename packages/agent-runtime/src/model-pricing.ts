@@ -11,10 +11,14 @@ export type PricingTierKey = 'standard' | 'fast';
 interface ModelPricingEntry {
   inputUsdPerMillion: number;
   cachedInputUsdPerMillion: number;
+  cacheWriteInputUsdPerMillion?: number;
   outputUsdPerMillion: number;
   supportsFastMode: boolean;
   fastMultiplier?: number;
   contextWindowTokens?: number;
+  longContextThresholdTokens?: number;
+  longContextInputMultiplier?: number;
+  longContextOutputMultiplier?: number;
 }
 
 interface PricingTierConfig {
@@ -119,10 +123,14 @@ function parsePricingConfig(raw: unknown): PricingConfig {
     const entry = value as {
       inputUsdPerMillion?: unknown;
       cachedInputUsdPerMillion?: unknown;
+      cacheWriteInputUsdPerMillion?: unknown;
       outputUsdPerMillion?: unknown;
       supportsFastMode?: unknown;
       fastMultiplier?: unknown;
       contextWindowTokens?: unknown;
+      longContextThresholdTokens?: unknown;
+      longContextInputMultiplier?: unknown;
+      longContextOutputMultiplier?: unknown;
     };
 
     if (
@@ -132,6 +140,12 @@ function parsePricingConfig(raw: unknown): PricingConfig {
       typeof entry.supportsFastMode !== 'boolean'
     ) {
       throw new Error(`Pricing config model "${modelKey}" has invalid fields.`);
+    }
+    if (
+      entry.cacheWriteInputUsdPerMillion !== undefined &&
+      !isPositiveNumber(entry.cacheWriteInputUsdPerMillion)
+    ) {
+      throw new Error(`Pricing config model "${modelKey}" cacheWriteInputUsdPerMillion must be a non-negative number.`);
     }
     if (
       entry.fastMultiplier !== undefined &&
@@ -145,10 +159,22 @@ function parsePricingConfig(raw: unknown): PricingConfig {
     ) {
       throw new Error(`Pricing config model "${modelKey}" contextWindowTokens must be a non-negative number.`);
     }
+    for (const field of [
+      'longContextThresholdTokens',
+      'longContextInputMultiplier',
+      'longContextOutputMultiplier',
+    ] as const) {
+      if (entry[field] !== undefined && !isPositiveNumber(entry[field])) {
+        throw new Error(`Pricing config model "${modelKey}" ${field} must be a non-negative number.`);
+      }
+    }
 
     models[modelKey] = {
       inputUsdPerMillion: entry.inputUsdPerMillion as number,
       cachedInputUsdPerMillion: entry.cachedInputUsdPerMillion as number,
+      ...(entry.cacheWriteInputUsdPerMillion !== undefined
+        ? { cacheWriteInputUsdPerMillion: entry.cacheWriteInputUsdPerMillion as number }
+        : {}),
       outputUsdPerMillion: entry.outputUsdPerMillion as number,
       supportsFastMode: entry.supportsFastMode,
       ...(entry.fastMultiplier !== undefined
@@ -156,6 +182,15 @@ function parsePricingConfig(raw: unknown): PricingConfig {
         : {}),
       ...(entry.contextWindowTokens !== undefined
         ? { contextWindowTokens: entry.contextWindowTokens as number }
+        : {}),
+      ...(entry.longContextThresholdTokens !== undefined
+        ? { longContextThresholdTokens: entry.longContextThresholdTokens as number }
+        : {}),
+      ...(entry.longContextInputMultiplier !== undefined
+        ? { longContextInputMultiplier: entry.longContextInputMultiplier as number }
+        : {}),
+      ...(entry.longContextOutputMultiplier !== undefined
+        ? { longContextOutputMultiplier: entry.longContextOutputMultiplier as number }
         : {}),
     };
   }
@@ -293,24 +328,48 @@ export function estimateTurnPrice(
   }
 
   const nonCachedInputTokens = Math.max(
-    usage.total.inputTokens - usage.total.cachedInputTokens,
+    usage.total.inputTokens -
+      usage.total.cachedInputTokens -
+      (usage.total.cacheWriteInputTokens ?? 0),
     0,
   );
   const cachedInputTokens = Math.max(usage.total.cachedInputTokens, 0);
+  const cacheWriteInputTokens = Math.max(
+    usage.total.cacheWriteInputTokens ?? 0,
+    0,
+  );
   const outputTokens = Math.max(usage.total.outputTokens, 0);
-  const multiplier =
+  const tierMultiplier =
     tierKey === 'fast' && modelPricing.fastMultiplier !== undefined
       ? modelPricing.fastMultiplier
       : tier.multiplier;
+  const usesLongContextPricing =
+    typeof modelPricing.longContextThresholdTokens === 'number' &&
+    usage.total.inputTokens > modelPricing.longContextThresholdTokens;
+  const inputMultiplier =
+    tierMultiplier *
+    (usesLongContextPricing
+      ? modelPricing.longContextInputMultiplier ?? 1
+      : 1);
+  const outputMultiplier =
+    tierMultiplier *
+    (usesLongContextPricing
+      ? modelPricing.longContextOutputMultiplier ?? 1
+      : 1);
 
   const inputUsd =
-    (nonCachedInputTokens * modelPricing.inputUsdPerMillion * multiplier) /
+    (nonCachedInputTokens * modelPricing.inputUsdPerMillion * inputMultiplier) /
     TOKEN_PRICE_DENOMINATOR;
   const cachedInputUsd =
-    (cachedInputTokens * modelPricing.cachedInputUsdPerMillion * multiplier) /
+    (cachedInputTokens * modelPricing.cachedInputUsdPerMillion * inputMultiplier) /
+    TOKEN_PRICE_DENOMINATOR;
+  const cacheWriteInputUsd =
+    (cacheWriteInputTokens *
+      (modelPricing.cacheWriteInputUsdPerMillion ?? modelPricing.inputUsdPerMillion) *
+      inputMultiplier) /
     TOKEN_PRICE_DENOMINATOR;
   const outputUsd =
-    (outputTokens * modelPricing.outputUsdPerMillion * multiplier) /
+    (outputTokens * modelPricing.outputUsdPerMillion * outputMultiplier) /
     TOKEN_PRICE_DENOMINATOR;
 
   return {
@@ -319,7 +378,8 @@ export function estimateTurnPrice(
     currency: pricingConfig.currency,
     inputUsd,
     cachedInputUsd,
+    cacheWriteInputUsd,
     outputUsd,
-    totalUsd: inputUsd + cachedInputUsd + outputUsd,
+    totalUsd: inputUsd + cachedInputUsd + cacheWriteInputUsd + outputUsd,
   };
 }

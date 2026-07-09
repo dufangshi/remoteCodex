@@ -2,11 +2,34 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildThreadContextUsageFromPayload,
+  buildTurnTokenBreakdown,
   mergeThreadContextUsageFromPayload,
   shouldResetThreadContextUsageForTurnStart,
 } from './thread-usage-accounting';
 
 describe('buildThreadContextUsageFromPayload', () => {
+  it('normalizes cache write tokens from GPT-5.6 usage payloads', () => {
+    expect(
+      buildTurnTokenBreakdown({
+        total_tokens: 1_700,
+        input_tokens: 1_500,
+        input_tokens_details: {
+          cached_tokens: 500,
+          cache_write_tokens: 200,
+        },
+        output_tokens: 200,
+        reasoning_output_tokens: 50,
+      }),
+    ).toEqual({
+      totalTokens: 1_700,
+      inputTokens: 1_500,
+      cachedInputTokens: 500,
+      cacheWriteInputTokens: 200,
+      outputTokens: 200,
+      reasoningOutputTokens: 50,
+    });
+  });
+
   it('prefers the runtime context window over local model pricing metadata', () => {
     const usage = buildThreadContextUsageFromPayload(
       {
@@ -29,6 +52,30 @@ describe('buildThreadContextUsageFromPayload', () => {
       tokensInContextWindow: 500000,
       modelContextWindow: 1000000,
       updatedAt: '2026-05-22T00:00:00.000Z',
+    });
+  });
+
+  it('uses the effective Codex subscription GPT-5.6 window when runtime usage omits it', () => {
+    const usage = buildThreadContextUsageFromPayload(
+      {
+        last: {
+          totalTokens: 182_700,
+          inputTokens: 175_700,
+          cachedInputTokens: 0,
+          outputTokens: 7_000,
+          reasoningOutputTokens: 0,
+        },
+      },
+      'gpt-5.6-sol',
+      '2026-07-09T00:00:00.000Z',
+    );
+
+    expect(usage).toEqual({
+      availability: 'available',
+      remainingPercent: 50,
+      tokensInContextWindow: 182_700,
+      modelContextWindow: 353_400,
+      updatedAt: '2026-07-09T00:00:00.000Z',
     });
   });
 
