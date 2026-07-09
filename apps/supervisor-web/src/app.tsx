@@ -99,6 +99,77 @@ function readInitialAutoCollapseCompletedTurns() {
   return window.localStorage.getItem(AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY) !== 'false';
 }
 
+function formatDocumentTitle(pageTitle?: string | null) {
+  const trimmed = pageTitle?.trim();
+  return trimmed || 'Remote Codex';
+}
+
+function routeDocumentTitle(pathname: string) {
+  if (pathname === '/' || pathname === '/relay-portal') {
+    return 'Relay Portal';
+  }
+  if (pathname === '/relay-guide') {
+    return 'Relay Setup';
+  }
+  if (pathname === '/relay-admin') {
+    return 'Relay Admin';
+  }
+  if (pathname === '/relay-account') {
+    return 'Account';
+  }
+  if (pathname === '/relay-devices') {
+    return 'Devices and Shared Sessions';
+  }
+  if (
+    pathname === '/workspaces' ||
+    /^\/devices\/[^/]+\/workspaces$/.test(pathname)
+  ) {
+    return 'Workspaces';
+  }
+  if (
+    pathname === '/workspaces/new' ||
+    /^\/devices\/[^/]+\/workspaces\/new$/.test(pathname)
+  ) {
+    return 'New Workspace';
+  }
+  if (
+    pathname === '/threads' ||
+    /^\/devices\/[^/]+\/threads$/.test(pathname)
+  ) {
+    return 'Threads';
+  }
+  if (
+    pathname === '/threads/import' ||
+    /^\/devices\/[^/]+\/threads\/import$/.test(pathname)
+  ) {
+    return 'Import Thread';
+  }
+  if (
+    pathname === '/threads/new' ||
+    /^\/devices\/[^/]+\/threads\/new$/.test(pathname)
+  ) {
+    return 'New Thread';
+  }
+  if (
+    /^\/threads\/[^/]+$/.test(pathname) ||
+    /^\/devices\/[^/]+\/threads\/[^/]+$/.test(pathname)
+  ) {
+    return 'Thread';
+  }
+
+  return null;
+}
+
+function DocumentTitleUpdater() {
+  const location = useLocation();
+
+  useEffect(() => {
+    document.title = formatDocumentTitle(routeDocumentTitle(location.pathname));
+  }, [location.pathname]);
+
+  return null;
+}
+
 function systemThemePreference(): 'light' | 'dark' {
   if (
     typeof window !== 'undefined' &&
@@ -144,6 +215,7 @@ function AppShell({
   const isWorkspacesRoute =
     location.pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
+
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname, location.search]);
@@ -489,6 +561,7 @@ export function App() {
   return (
     <div className="theme-shell theme-scrollbar">
       <BrowserRouter>
+        <DocumentTitleUpdater />
         <RoutePluginProvider>
           <Routes>
             <Route path="/" element={<RootRoute />} />

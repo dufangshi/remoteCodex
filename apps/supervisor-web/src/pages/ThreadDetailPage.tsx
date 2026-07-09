@@ -1085,6 +1085,13 @@ export function ThreadDetailPage() {
     detailRef.current = detail;
   }, [detail]);
 
+  useEffect(() => {
+    if (!detail?.thread.title) {
+      return;
+    }
+    document.title = detail.thread.title;
+  }, [detail?.thread.title]);
+
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
       const requestId = pageContextRequestIdRef.current + 1;
