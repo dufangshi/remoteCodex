@@ -33,6 +33,9 @@ const ipaPath = resolveFirstExisting(
   ],
   'IPA',
 );
+const uploadDir = path.join(repoRoot, '.local', 'mobile-release', 'release-assets');
+const uploadApkPath = prepareStableAsset(apkPath, uploadDir, 'remote-codex-android.apk');
+const uploadIpaPath = prepareStableAsset(ipaPath, uploadDir, 'RemoteCodex.ipa');
 
 ensureGh();
 ensureRelease(tag);
@@ -41,8 +44,8 @@ run('gh', [
   'release',
   'upload',
   tag,
-  `${apkPath}#remote-codex-android.apk`,
-  `${ipaPath}#RemoteCodex.ipa`,
+  uploadApkPath,
+  uploadIpaPath,
   '--clobber',
 ]);
 
@@ -55,6 +58,8 @@ function parseArgs(values) {
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     switch (value) {
+      case '--':
+        break;
       case '--apk':
         parsed.apk = values[++index];
         break;
@@ -73,6 +78,15 @@ function parseArgs(values) {
     }
   }
   return parsed;
+}
+
+function prepareStableAsset(sourcePath, outputDir, stableName) {
+  fs.mkdirSync(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, stableName);
+  if (path.resolve(sourcePath) !== path.resolve(outputPath)) {
+    fs.copyFileSync(sourcePath, outputPath);
+  }
+  return outputPath;
 }
 
 function resolveFirstExisting(explicitPath, candidates, label) {
