@@ -76,11 +76,15 @@ export class IncusClient {
 
   async status(id: string): Promise<IncusInstanceStatus> {
     const name = instanceName(this.config, id);
-    const result = await this.run(['info', name, '--format=json']);
-    const parsed = JSON.parse(result.stdout) as {
+    const result = await this.run(['list', name, '--format=json']);
+    const instances = JSON.parse(result.stdout) as Array<{
       status?: string;
       status_code?: number;
-    };
+    }>;
+    const parsed = instances[0];
+    if (!parsed) {
+      throw new IncusCommandError('Incus instance was not found.', 1);
+    }
     return {
       id,
       name,
@@ -114,6 +118,19 @@ export class IncusClient {
     const safeSnapshotName = snapshotNameSchema.parse(snapshotName);
     await this.run(['snapshot', 'create', name, safeSnapshotName, '--reuse']);
     return { id, name: safeSnapshotName };
+  }
+
+  async restoreSnapshot(
+    id: string,
+    snapshotName: string,
+  ): Promise<IncusInstanceStatus> {
+    const current = await this.status(id);
+    if (current.status.toLowerCase() !== 'stopped') {
+      throw new Error('The instance must be stopped before snapshot restore.');
+    }
+    const safeSnapshotName = snapshotNameSchema.parse(snapshotName);
+    await this.run(['snapshot', 'restore', current.name, safeSnapshotName]);
+    return this.status(id);
   }
 
   async delete(id: string): Promise<{ id: string; deleted: boolean }> {

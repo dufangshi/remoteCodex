@@ -35,7 +35,7 @@ describe('IncusClient policy', () => {
       .mockResolvedValueOnce(result('', 1))
       .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(
-        result(JSON.stringify({ status: 'Stopped', status_code: 102 })),
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
       );
     const client = new IncusClient(config(), { run });
 
@@ -98,5 +98,32 @@ describe('IncusClient policy', () => {
       client.snapshot('11111111-1111-4111-8111-111111111111', '../escape'),
     ).rejects.toThrow();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('restores only a validated snapshot of a stopped managed instance', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
+      )
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
+      );
+    const client = new IncusClient(config(), { run });
+
+    await expect(
+      client.restoreSnapshot(sandboxId, 'phase3-checkpoint'),
+    ).resolves.toMatchObject({ status: 'Stopped' });
+    expect(run.mock.calls[1]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'snapshot',
+      'restore',
+      `rcd-${sandboxId}`,
+      'phase3-checkpoint',
+    ]);
   });
 });

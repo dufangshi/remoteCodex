@@ -48,6 +48,7 @@ async function setup(clientOverrides: Partial<IncusClient> = {}) {
     start: vi.fn().mockResolvedValue({ status: 'Running' }),
     stop: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     snapshot: vi.fn().mockResolvedValue({ name: 'checkpoint' }),
+    restoreSnapshot: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     delete: vi.fn().mockResolvedValue({ deleted: true }),
     ...clientOverrides,
   } as unknown as IncusClient;
@@ -184,6 +185,35 @@ describe('Incus host-agent API', () => {
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(409);
     expect(second.json().code).toBe('idempotency_key_conflict');
+    await app.close();
+  });
+
+  it('exposes snapshot restore as a validated idempotent operation', async () => {
+    const { app, client, token } = await setup();
+    const sandboxId = crypto.randomUUID();
+    const key = `restore-${crypto.randomUUID()}`;
+    const request = {
+      method: 'POST' as const,
+      url: `/v1/instances/${sandboxId}/snapshots/phase3-checkpoint/restore`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'idempotency-key': key,
+      },
+    };
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect(client.restoreSnapshot).toHaveBeenCalledTimes(1);
+    expect(client.restoreSnapshot).toHaveBeenCalledWith(
+      sandboxId,
+      'phase3-checkpoint',
+    );
+
+    const invalid = await app.inject({
+      ...request,
+      url: `/v1/instances/${sandboxId}/snapshots/..%2Fescape/restore`,
+      headers: { ...request.headers, 'idempotency-key': `${key}-invalid` },
+    });
+    expect(invalid.statusCode).toBe(400);
     await app.close();
   });
 });

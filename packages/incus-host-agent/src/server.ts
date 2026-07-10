@@ -136,6 +136,26 @@ export function buildIncusHostAgent(input: {
     );
   });
 
+  app.post(
+    '/v1/instances/:id/snapshots/:snapshotName/restore',
+    async (request, reply) => {
+      const { id, snapshotName } = z
+        .object({
+          id: hostedSandboxIdSchema,
+          snapshotName: snapshotNameSchema,
+        })
+        .parse(request.params);
+      return executeIdempotently(
+        request,
+        reply,
+        { ...input, inFlight },
+        'restore_snapshot',
+        id,
+        () => input.client.restoreSnapshot(id, snapshotName),
+      );
+    },
+  );
+
   app.delete('/v1/instances/:id', async (request, reply) => {
     const { id } = z
       .object({ id: hostedSandboxIdSchema })

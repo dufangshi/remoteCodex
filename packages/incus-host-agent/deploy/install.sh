@@ -6,7 +6,7 @@ if [ "${EUID}" -ne 0 ]; then
   exit 1
 fi
 
-artifact="${1:-dist/index.js}"
+artifact="${1:-dist/index.cjs}"
 if [ ! -f "${artifact}" ]; then
   echo "Missing host-agent artifact: ${artifact}" >&2
   exit 1
@@ -23,7 +23,7 @@ usermod -aG incus-admin remote-codex-incus
 install -d -o root -g root -m 0755 /opt/remote-codex-incus-host-agent /etc/remote-codex
 install -d -o remote-codex-incus -g remote-codex-incus -m 0700 \
   /var/lib/remote-codex-incus-host-agent /var/log/remote-codex-incus-host-agent
-install -o root -g root -m 0755 "${artifact}" /opt/remote-codex-incus-host-agent/index.js
+install -o root -g root -m 0755 "${artifact}" /opt/remote-codex-incus-host-agent/index.cjs
 install -o root -g root -m 0644 deploy/remote-codex-incus-host-agent.service \
   /etc/systemd/system/remote-codex-incus-host-agent.service
 
@@ -35,4 +35,5 @@ if [ ! -f /etc/remote-codex/incus-host-agent.env ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable --now remote-codex-incus-host-agent.service
+systemctl enable remote-codex-incus-host-agent.service
+systemctl restart remote-codex-incus-host-agent.service
