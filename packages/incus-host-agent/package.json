@@ -1,0 +1,21 @@
+{
+  "name": "@remote-codex/incus-host-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1"
+  }
+}

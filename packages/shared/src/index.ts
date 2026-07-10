@@ -1,6 +1,4 @@
-import type {
-  AgentBackendIdDto,
-} from './agent-providers';
+import type { AgentBackendIdDto } from './agent-providers';
 
 export {
   agentBackendIds,
@@ -337,6 +335,18 @@ export interface RelayAdminSummaryDto {
   registrationEnabled: boolean;
 }
 
+export type RelayHostedSandboxProviderDto = 'disabled' | 'incus';
+
+export interface RelayHostedSandboxCapabilityDto {
+  provider: RelayHostedSandboxProviderDto;
+  configured: boolean;
+  reachable: boolean;
+  available: boolean;
+  reasonCode: string | null;
+  reason: string | null;
+  checkedAt: string;
+}
+
 export type RelaySupervisorEnvelope =
   | {
       type: 'relay.connected';
@@ -596,7 +606,9 @@ export interface CreateWorkspaceFromGitInput {
   label?: string;
 }
 
-export type CreateWorkspaceInput = CreateWorkspaceFromPathInput | CreateWorkspaceFromGitInput;
+export type CreateWorkspaceInput =
+  | CreateWorkspaceFromPathInput
+  | CreateWorkspaceFromGitInput;
 
 export interface WorkspaceSettingsDto {
   workspaceRoot: string;
@@ -705,7 +717,10 @@ export type ReasoningEffortDto =
   | 'max'
   | 'ultra';
 export type CollaborationModeDto = 'default' | 'plan';
-export type SandboxModeDto = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type SandboxModeDto =
+  | 'read-only'
+  | 'workspace-write'
+  | 'danger-full-access';
 
 export interface ReasoningEffortOptionDto {
   reasoningEffort: ReasoningEffortDto;
@@ -1053,7 +1068,11 @@ export type AgentHookSourceDto =
   | 'legacyManagedConfigFile'
   | 'legacyManagedConfigMdm'
   | 'unknown';
-export type AgentHookTrustStatusDto = 'managed' | 'untrusted' | 'trusted' | 'modified';
+export type AgentHookTrustStatusDto =
+  | 'managed'
+  | 'untrusted'
+  | 'trusted'
+  | 'modified';
 
 export interface AgentHookDto {
   key: string;

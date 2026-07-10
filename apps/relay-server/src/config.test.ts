@@ -13,16 +13,24 @@ describe('relay server config', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await Promise.all(
-      tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+      tempDirs
+        .splice(0)
+        .map((dir) => fs.rm(dir, { recursive: true, force: true })),
     );
   });
 
   it('uses packaged supervisor web dist by default when it exists', async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-relay-config-'));
+    const tempDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'remote-codex-relay-config-'),
+    );
     tempDirs.push(tempDir);
     const distDir = path.join(tempDir, 'apps', 'supervisor-web', 'dist');
     await fs.mkdir(distDir, { recursive: true });
-    await fs.writeFile(path.join(distDir, 'index.html'), '<html></html>', 'utf8');
+    await fs.writeFile(
+      path.join(distDir, 'index.html'),
+      '<html></html>',
+      'utf8',
+    );
     vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
 
     const config = loadRelayServerConfig({
@@ -30,8 +38,16 @@ describe('relay server config', () => {
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
     } as any);
 
-    expect(fsSync.realpathSync(config.webDistDir!)).toBe(fsSync.realpathSync(distDir));
+    expect(fsSync.realpathSync(config.webDistDir!)).toBe(
+      fsSync.realpathSync(distDir),
+    );
     expect(config.supervisorToken).toBeNull();
+    expect(config.hostedSandbox).toEqual({
+      provider: 'disabled',
+      agentUrl: null,
+      agentToken: null,
+      requestTimeoutMs: 1500,
+    });
   });
 
   it('lets REMOTE_CODEX_RELAY_WEB_DIST_DIR override the default web dist', () => {
@@ -76,6 +92,10 @@ describe('relay server config', () => {
       REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: '',
       REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: '',
       REMOTE_CODEX_RELAY_WEB_DIST_DIR: '',
+      REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER: '',
+      REMOTE_CODEX_INCUS_HOST_AGENT_URL: '',
+      REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN: '',
+      REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS: '',
     } as any);
 
     expect(config.host).toBe('0.0.0.0');
@@ -88,6 +108,22 @@ describe('relay server config', () => {
     expect(config.registrationEnabled).toBe(true);
     expect(config.registrationEnabledConfigured).toBe(false);
     expect(config.registrationPassword).toBeNull();
+    expect(config.hostedSandbox.provider).toBe('disabled');
+  });
+
+  it('keeps relay configuration valid when Incus is selected but its agent is absent', () => {
+    const config = loadRelayServerConfig({
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
+      REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER: 'incus',
+    } as any);
+
+    expect(config.hostedSandbox).toEqual({
+      provider: 'incus',
+      agentUrl: null,
+      agentToken: null,
+      requestTimeoutMs: 1500,
+    });
   });
 
   it('loads explicit registration settings from namespaced environment variables', () => {
@@ -110,8 +146,9 @@ describe('relay server config', () => {
     } as any);
 
     const repoDistDir = path.resolve(process.cwd(), '../supervisor-web/dist');
-    const expectedDistDir =
-      fsSyncExists(path.join(repoDistDir, 'index.html')) ? repoDistDir : null;
+    const expectedDistDir = fsSyncExists(path.join(repoDistDir, 'index.html'))
+      ? repoDistDir
+      : null;
     expect(config.webDistDir).toBe(expectedDistDir);
   });
 });

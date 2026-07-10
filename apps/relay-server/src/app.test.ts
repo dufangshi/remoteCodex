@@ -28,17 +28,25 @@ function testConfig(
     registrationEnabledConfigured: false,
     registrationPassword: null,
     webDistDir: null,
+    hostedSandbox: {
+      provider: 'disabled',
+      agentUrl: null,
+      agentToken: null,
+      requestTimeoutMs: 25,
+    },
     ...overrides,
   };
 }
 
-async function setupSharedRelaySession(options: {
-  threadAccess?: 'read' | 'control';
-  workspaceAccess?: 'none' | 'read' | 'write';
-  workspaceId?: string | null;
-  expiresAt?: string | null;
-  label?: string | null;
-} = {}) {
+async function setupSharedRelaySession(
+  options: {
+    threadAccess?: 'read' | 'control';
+    workspaceAccess?: 'none' | 'read' | 'write';
+    workspaceId?: string | null;
+    expiresAt?: string | null;
+    label?: string | null;
+  } = {},
+) {
   const config = testConfig();
   const app = buildRelayServer(config);
   await app.ready();
@@ -106,13 +114,15 @@ async function setupSharedRelaySession(options: {
   };
 }
 
-async function setupDeviceGrantRelaySession(options: {
-  threadAccess?: 'read' | 'control';
-  workspaceAccess?: 'none' | 'read' | 'write';
-  canCreateThreads?: boolean;
-  expiresAt?: string | null;
-  label?: string | null;
-} = {}) {
+async function setupDeviceGrantRelaySession(
+  options: {
+    threadAccess?: 'read' | 'control';
+    workspaceAccess?: 'none' | 'read' | 'write';
+    canCreateThreads?: boolean;
+    expiresAt?: string | null;
+    label?: string | null;
+  } = {},
+) {
   const config = testConfig();
   const app = buildRelayServer(config);
   await app.ready();
@@ -194,9 +204,13 @@ async function waitForSocketOpen(socket: WebSocket) {
   }
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => resolve(), { once: true });
-    socket.addEventListener('error', () => reject(new Error('WebSocket failed to open.')), {
-      once: true,
-    });
+    socket.addEventListener(
+      'error',
+      () => reject(new Error('WebSocket failed to open.')),
+      {
+        once: true,
+      },
+    );
   });
 }
 
@@ -251,7 +265,9 @@ function expectNoSocketMessage(socket: WebSocket, durationMs = 80) {
       'message',
       (event) => {
         clearTimeout(timeout);
-        reject(new Error(`Unexpected websocket message: ${String(event.data)}`));
+        reject(
+          new Error(`Unexpected websocket message: ${String(event.data)}`),
+        );
       },
       { once: true },
     );
@@ -267,18 +283,20 @@ async function answerNextRelayRequest(
     supervisorSocket,
     (message) => message.type === 'relay.request' && predicate(message),
   );
-  supervisorSocket.send(JSON.stringify({
-    type: 'relay.response',
-    timestamp: '2026-07-01T00:00:04.000Z',
-    requestId: requestMessage.requestId,
-    payload: {
-      statusCode: 200,
-      headers: {
-        'content-type': 'application/json',
+  supervisorSocket.send(
+    JSON.stringify({
+      type: 'relay.response',
+      timestamp: '2026-07-01T00:00:04.000Z',
+      requestId: requestMessage.requestId,
+      payload: {
+        statusCode: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    },
-  }));
+    }),
+  );
   return requestMessage;
 }
 
@@ -295,18 +313,20 @@ async function answerNextRelayRequestWith(
     supervisorSocket,
     (message) => message.type === 'relay.request' && predicate(message),
   );
-  supervisorSocket.send(JSON.stringify({
-    type: 'relay.response',
-    timestamp: '2026-07-01T00:00:04.000Z',
-    requestId: requestMessage.requestId,
-    payload: {
-      statusCode: response.statusCode ?? 200,
-      headers: response.headers ?? {
-        'content-type': 'application/json',
+  supervisorSocket.send(
+    JSON.stringify({
+      type: 'relay.response',
+      timestamp: '2026-07-01T00:00:04.000Z',
+      requestId: requestMessage.requestId,
+      payload: {
+        statusCode: response.statusCode ?? 200,
+        headers: response.headers ?? {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(response.body ?? { ok: true }),
       },
-      body: JSON.stringify(response.body ?? { ok: true }),
-    },
-  }));
+    }),
+  );
   return requestMessage;
 }
 
@@ -324,7 +344,11 @@ async function answerRelayRequestsByPath(
     };
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error(`Timed out waiting for relay paths: ${[...pendingPaths].join(', ')}`));
+      reject(
+        new Error(
+          `Timed out waiting for relay paths: ${[...pendingPaths].join(', ')}`,
+        ),
+      );
     }, 3000);
     const onError = () => {
       cleanup();
@@ -341,18 +365,20 @@ async function answerRelayRequestsByPath(
       }
       pendingPaths.delete(requestPath);
       seen.push(message);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.response',
-        timestamp: '2026-07-01T00:00:04.000Z',
-        requestId: message.requestId,
-        payload: {
-          statusCode: 200,
-          headers: {
-            'content-type': 'application/json',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.response',
+          timestamp: '2026-07-01T00:00:04.000Z',
+          requestId: message.requestId,
+          payload: {
+            statusCode: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify(responsesByPath.get(requestPath)),
           },
-          body: JSON.stringify(responsesByPath.get(requestPath)),
-        },
-      }));
+        }),
+      );
       if (pendingPaths.size === 0) {
         cleanup();
         resolve(seen);
@@ -439,7 +465,9 @@ describe('relay server', () => {
       },
     });
 
-    expect(disabledResponse.headers['access-control-allow-origin']).toBeUndefined();
+    expect(
+      disabledResponse.headers['access-control-allow-origin'],
+    ).toBeUndefined();
     await disabled.close();
 
     const enabled = buildRelayServer(testConfig(), {
@@ -461,8 +489,12 @@ describe('relay server', () => {
 
     expect(enabledResponse.statusCode).toBe(204);
     expect(enabledResponse.headers['access-control-allow-origin']).toBe('null');
-    expect(enabledResponse.headers['access-control-allow-methods']).toContain('GET');
-    expect(enabledResponse.headers['access-control-allow-headers']).toContain('authorization');
+    expect(enabledResponse.headers['access-control-allow-methods']).toContain(
+      'GET',
+    );
+    expect(enabledResponse.headers['access-control-allow-headers']).toContain(
+      'authorization',
+    );
     expect(enabledResponse.headers.vary).toBe('Origin');
 
     await enabled.close();
@@ -492,7 +524,9 @@ describe('relay server', () => {
       range: 'bytes=0-99',
     });
 
-    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toEqual({
+    expect(
+      relayRequestBody({ absPath: '/repo', label: 'Android E2E' }),
+    ).toEqual({
       body: '{"absPath":"/repo","label":"Android E2E"}',
     });
     expect(relayRequestBody(Buffer.from([0, 1, 255]))).toEqual({
@@ -998,7 +1032,9 @@ describe('relay server', () => {
   it('starts with an existing relay_shares database from before access grants', async () => {
     const config = testConfig();
     await fs.mkdir(config.dataDir, { recursive: true });
-    const sqlite = new Database(path.join(config.dataDir, 'relay-store.sqlite'));
+    const sqlite = new Database(
+      path.join(config.dataDir, 'relay-store.sqlite'),
+    );
     sqlite.exec(`
       CREATE TABLE relay_settings (
         key TEXT PRIMARY KEY,
@@ -1063,22 +1099,34 @@ describe('relay server', () => {
     const app = buildRelayServer(config);
     await app.ready();
 
-    const migrated = new Database(path.join(config.dataDir, 'relay-store.sqlite'));
-    const shareColumns = (migrated.prepare('PRAGMA table_info(relay_shares)').all() as Array<{ name: string }>)
-      .map((column) => column.name);
-    const grantColumns = (migrated.prepare('PRAGMA table_info(relay_access_grants)').all() as Array<{ name: string }>)
-      .map((column) => column.name);
+    const migrated = new Database(
+      path.join(config.dataDir, 'relay-store.sqlite'),
+    );
+    const shareColumns = (
+      migrated.prepare('PRAGMA table_info(relay_shares)').all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name);
+    const grantColumns = (
+      migrated
+        .prepare('PRAGMA table_info(relay_access_grants)')
+        .all() as Array<{ name: string }>
+    ).map((column) => column.name);
     migrated.close();
 
-    expect(shareColumns).toEqual(expect.arrayContaining([
-      'thread_title',
-      'workspace_id',
-      'workspace_label',
-      'thread_access',
-      'workspace_access',
-      'expires_at',
-    ]));
-    expect(grantColumns).toEqual(expect.arrayContaining(['scope', 'workspace_ids', 'can_create_threads']));
+    expect(shareColumns).toEqual(
+      expect.arrayContaining([
+        'thread_title',
+        'workspace_id',
+        'workspace_label',
+        'thread_access',
+        'workspace_access',
+        'expires_at',
+      ]),
+    );
+    expect(grantColumns).toEqual(
+      expect.arrayContaining(['scope', 'workspace_ids', 'can_create_threads']),
+    );
 
     await app.close();
   });
@@ -1288,7 +1336,9 @@ describe('relay server', () => {
         ],
       }),
     ]);
-    expect(ownerPortalAfterAccessResponse.json().sharedByMe[0].lastAccessedAt).toEqual(expect.any(String));
+    expect(
+      ownerPortalAfterAccessResponse.json().sharedByMe[0].lastAccessedAt,
+    ).toEqual(expect.any(String));
 
     const accessResponse = await app.inject({
       method: 'GET',
@@ -1527,12 +1577,13 @@ describe('relay server', () => {
   });
 
   it('runs the local relay two-account device-share E2E permission flow', async () => {
-    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-      canCreateThreads: false,
-      label: 'Office server access',
-    });
+    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+        canCreateThreads: false,
+        label: 'Office server access',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -1633,7 +1684,8 @@ describe('relay server', () => {
       });
       await answerNextRelayRequestWith(
         supervisorSocket,
-        (message) => message.payload?.path === `/api/threads/${SHARED_THREAD_ID}`,
+        (message) =>
+          message.payload?.path === `/api/threads/${SHARED_THREAD_ID}`,
         {
           body: {
             thread: {
@@ -1731,7 +1783,8 @@ describe('relay server', () => {
       });
       const promptRequest = await answerNextRelayRequestWith(
         supervisorSocket,
-        (message) => message.payload?.path === `/api/threads/${SHARED_THREAD_ID}/prompt`,
+        (message) =>
+          message.payload?.path === `/api/threads/${SHARED_THREAD_ID}/prompt`,
         {
           body: {
             id: SHARED_THREAD_ID,
@@ -1770,19 +1823,21 @@ describe('relay server', () => {
       const ownerUpdatePromise = waitForSocketMessage(ownerClientSocket);
       const friendUpdatePromise = waitForSocketMessage(friendClientSocket);
       for (const clientId of [ownerClientId, friendClientId]) {
-        supervisorSocket.send(JSON.stringify({
-          type: 'relay.server.message',
-          timestamp: '2026-07-01T00:00:05.000Z',
-          clientId,
-          payload: {
-            type: 'thread.turn.started',
-            threadId: SHARED_THREAD_ID,
+        supervisorSocket.send(
+          JSON.stringify({
+            type: 'relay.server.message',
             timestamp: '2026-07-01T00:00:05.000Z',
+            clientId,
             payload: {
-              turnId: 'turn-streaming',
+              type: 'thread.turn.started',
+              threadId: SHARED_THREAD_ID,
+              timestamp: '2026-07-01T00:00:05.000Z',
+              payload: {
+                turnId: 'turn-streaming',
+              },
             },
-          },
-        }));
+          }),
+        );
       }
       await expect(ownerUpdatePromise).resolves.toMatchObject({
         type: 'thread.turn.started',
@@ -1837,7 +1892,9 @@ describe('relay server', () => {
       });
       const operatorWriteRequest = await answerNextRelayRequestWith(
         supervisorSocket,
-        (message) => message.payload?.path === `/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
+        (message) =>
+          message.payload?.path ===
+          `/api/workspaces/${SHARED_WORKSPACE_ID}/files/upload`,
         {
           body: {
             ok: true,
@@ -1895,11 +1952,12 @@ describe('relay server', () => {
   });
 
   it('uses the highest capability when multiple active grants match', async () => {
-    const { app, ownerToken, friendToken, deviceId, grantId } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'write',
-      canCreateThreads: true,
-    });
+    const { app, ownerToken, friendToken, deviceId, grantId } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'write',
+        canCreateThreads: true,
+      });
 
     const threadGrantResponse = await app.inject({
       method: 'POST',
@@ -2043,7 +2101,9 @@ describe('relay server', () => {
     });
     expect(portalResponse.statusCode).toBe(200);
     expect(portalResponse.json().devices).toEqual([]);
-    expect(portalResponse.json().sharedDevicesWithMe[0]).not.toHaveProperty('token');
+    expect(portalResponse.json().sharedDevicesWithMe[0]).not.toHaveProperty(
+      'token',
+    );
 
     const deleteDeviceResponse = await app.inject({
       method: 'DELETE',
@@ -2156,11 +2216,12 @@ describe('relay server', () => {
   });
 
   it('forwards shared device operator workspace writes to the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
-      threadAccess: 'control',
-      workspaceAccess: 'write',
-      canCreateThreads: true,
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+        canCreateThreads: true,
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -2197,18 +2258,20 @@ describe('relay server', () => {
         content: 'allowed',
       });
 
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.response',
-        timestamp: '2026-07-01T00:00:04.000Z',
-        requestId: requestMessage.requestId,
-        payload: {
-          statusCode: 200,
-          headers: {
-            'content-type': 'application/json',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.response',
+          timestamp: '2026-07-01T00:00:04.000Z',
+          requestId: requestMessage.requestId,
+          payload: {
+            statusCode: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ ok: true }),
           },
-          body: JSON.stringify({ ok: true }),
-        },
-      }));
+        }),
+      );
 
       const uploadResponse = await uploadResponsePromise;
       expect(uploadResponse.statusCode).toBe(200);
@@ -2510,11 +2573,12 @@ describe('relay server', () => {
   });
 
   it('returns only shared thread records for shared room list refreshes', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'none',
-      workspaceId: null,
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'none',
+        workspaceId: null,
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -2672,11 +2736,13 @@ describe('relay server', () => {
   });
 
   it('does not return stale label-contaminated shared thread titles', async () => {
-    const { app, ownerToken, dataDir, shareId } = await setupSharedRelaySession({
-      label: 'feiji',
-      threadAccess: 'control',
-      workspaceAccess: 'write',
-    });
+    const { app, ownerToken, dataDir, shareId } = await setupSharedRelaySession(
+      {
+        label: 'feiji',
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+      },
+    );
     const sqlite = new Database(path.join(dataDir, 'relay-store.sqlite'));
     sqlite
       .prepare('UPDATE relay_shares SET thread_title = ? WHERE id = ?')
@@ -2900,10 +2966,11 @@ describe('relay server', () => {
   });
 
   it('forwards collaborator prompt HTTP requests to the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'control',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -2938,18 +3005,20 @@ describe('relay server', () => {
         prompt: 'hello from collaborator',
       });
 
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.response',
-        timestamp: '2026-07-01T00:00:04.000Z',
-        requestId: requestMessage.requestId,
-        payload: {
-          statusCode: 200,
-          headers: {
-            'content-type': 'application/json',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.response',
+          timestamp: '2026-07-01T00:00:04.000Z',
+          requestId: requestMessage.requestId,
+          payload: {
+            statusCode: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ ok: true }),
           },
-          body: JSON.stringify({ ok: true }),
-        },
-      }));
+        }),
+      );
 
       const promptResponse = await promptResponsePromise;
       expect(promptResponse.statusCode).toBe(200);
@@ -3030,10 +3099,11 @@ describe('relay server', () => {
   });
 
   it('revokes shared HTTP access immediately', async () => {
-    const { app, ownerToken, friendToken, deviceId, shareId } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, ownerToken, friendToken, deviceId, shareId } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
 
     const allowedBeforeRevokeResponse = await app.inject({
       method: 'GET',
@@ -3077,10 +3147,11 @@ describe('relay server', () => {
   });
 
   it('lets share owners update shared thread permissions', async () => {
-    const { app, ownerToken, friendToken, shareId } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, ownerToken, friendToken, shareId } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
 
     const friendUpdateResponse = await app.inject({
       method: 'PATCH',
@@ -3146,11 +3217,12 @@ describe('relay server', () => {
   });
 
   it('keeps expired shares out of portal summaries and shared HTTP access', async () => {
-    const { app, friendToken, deviceId, shareId } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-      expiresAt: '2000-01-01T00:00:00.000Z',
-    });
+    const { app, friendToken, deviceId, shareId } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+        expiresAt: '2000-01-01T00:00:00.000Z',
+      });
 
     const friendPortalResponse = await app.inject({
       method: 'GET',
@@ -3195,10 +3267,11 @@ describe('relay server', () => {
   });
 
   it('forwards read-only shared thread and workspace HTTP reads to the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3214,11 +3287,11 @@ describe('relay server', () => {
       await connectedMessagePromise;
 
       const threadRelayRequestPromise = answerNextRelayRequest(
-          supervisorSocket,
-          (message) =>
-            message.payload.method === 'GET' &&
-            message.payload.path === `/api/threads/${SHARED_THREAD_ID}`,
-          { threadId: SHARED_THREAD_ID },
+        supervisorSocket,
+        (message) =>
+          message.payload.method === 'GET' &&
+          message.payload.path === `/api/threads/${SHARED_THREAD_ID}`,
+        { threadId: SHARED_THREAD_ID },
       );
       const threadResponsePromise = app.inject({
         method: 'GET',
@@ -3238,11 +3311,12 @@ describe('relay server', () => {
       expect(threadResponse.json()).toEqual({ threadId: SHARED_THREAD_ID });
 
       const workspaceRelayRequestPromise = answerNextRelayRequest(
-          supervisorSocket,
-          (message) =>
-            message.payload.method === 'GET' &&
-            message.payload.path === `/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,
-          { workspaceId: SHARED_WORKSPACE_ID },
+        supervisorSocket,
+        (message) =>
+          message.payload.method === 'GET' &&
+          message.payload.path ===
+            `/api/workspaces/${SHARED_WORKSPACE_ID}/files/tree`,
+        { workspaceId: SHARED_WORKSPACE_ID },
       );
       const workspaceResponsePromise = app.inject({
         method: 'GET',
@@ -3259,7 +3333,9 @@ describe('relay server', () => {
       });
       const workspaceResponse = await workspaceResponsePromise;
       expect(workspaceResponse.statusCode).toBe(200);
-      expect(workspaceResponse.json()).toEqual({ workspaceId: SHARED_WORKSPACE_ID });
+      expect(workspaceResponse.json()).toEqual({
+        workspaceId: SHARED_WORKSPACE_ID,
+      });
     } finally {
       supervisorSocket.close();
       await app.close();
@@ -3267,10 +3343,11 @@ describe('relay server', () => {
   });
 
   it('blocks sensitive relayed response headers from the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3291,24 +3368,26 @@ describe('relay server', () => {
         supervisorSocket,
         (message) => message.type === 'relay.request',
       );
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.response',
-        timestamp: '2026-07-01T00:00:04.000Z',
-        requestId: requestMessage.requestId,
-        payload: {
-          statusCode: 200,
-          headers: {
-            'content-type': 'application/json',
-            'cache-control': 'no-store',
-            'set-cookie': 'remote_codex_relay_session=attacker',
-            location: 'https://evil.example.test',
-            refresh: '0; url=https://evil.example.test',
-            'access-control-allow-origin': '*',
-            'transfer-encoding': 'chunked',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.response',
+          timestamp: '2026-07-01T00:00:04.000Z',
+          requestId: requestMessage.requestId,
+          payload: {
+            statusCode: 200,
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'no-store',
+              'set-cookie': 'remote_codex_relay_session=attacker',
+              location: 'https://evil.example.test',
+              refresh: '0; url=https://evil.example.test',
+              'access-control-allow-origin': '*',
+              'transfer-encoding': 'chunked',
+            },
+            body: JSON.stringify({ ok: true }),
           },
-          body: JSON.stringify({ ok: true }),
-        },
-      }));
+        }),
+      );
 
       const response = await responsePromise;
       expect(response.statusCode).toBe(200);
@@ -3326,10 +3405,11 @@ describe('relay server', () => {
   });
 
   it('forwards matching thread updates to read-only shared websocket clients', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3351,19 +3431,21 @@ describe('relay server', () => {
       const clientId = connectedMessage.clientId as string;
 
       const matchingThreadUpdatePromise = waitForSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:01.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: SHARED_THREAD_ID,
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:01.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-1',
+            type: 'thread.turn.started',
+            threadId: SHARED_THREAD_ID,
+            timestamp: '2026-07-01T00:00:01.000Z',
+            payload: {
+              turnId: 'turn-1',
+            },
           },
-        },
-      }));
+        }),
+      );
 
       await expect(matchingThreadUpdatePromise).resolves.toMatchObject({
         type: 'thread.turn.started',
@@ -3374,19 +3456,21 @@ describe('relay server', () => {
       });
 
       const otherThreadUpdatePromise = expectNoSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:02.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: '22222222-2222-4222-8222-222222222222',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:02.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-other',
+            type: 'thread.turn.started',
+            threadId: '22222222-2222-4222-8222-222222222222',
+            timestamp: '2026-07-01T00:00:02.000Z',
+            payload: {
+              turnId: 'turn-other',
+            },
           },
-        },
-      }));
+        }),
+      );
 
       await expect(otherThreadUpdatePromise).resolves.toBeUndefined();
     } finally {
@@ -3397,10 +3481,11 @@ describe('relay server', () => {
   });
 
   it('forwards collaborator websocket client messages to the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'control',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3425,10 +3510,12 @@ describe('relay server', () => {
         (message) => message.type === 'relay.client.message',
       );
 
-      clientSocket.send(JSON.stringify({
-        type: 'supervisor.ping',
-        timestamp: '2026-07-01T00:00:03.000Z',
-      }));
+      clientSocket.send(
+        JSON.stringify({
+          type: 'supervisor.ping',
+          timestamp: '2026-07-01T00:00:03.000Z',
+        }),
+      );
 
       await expect(clientMessagePromise).resolves.toMatchObject({
         type: 'relay.client.message',
@@ -3445,10 +3532,11 @@ describe('relay server', () => {
   });
 
   it('closes read-only shared websocket clients that send control messages', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupSharedRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3469,7 +3557,9 @@ describe('relay server', () => {
       await connectedMessagePromise;
 
       const closeEventPromise = waitForSocketClose(clientSocket);
-      clientSocket.send(JSON.stringify({ type: 'thread.prompt', prompt: 'not allowed' }));
+      clientSocket.send(
+        JSON.stringify({ type: 'thread.prompt', prompt: 'not allowed' }),
+      );
       const closeEvent = await closeEventPromise;
 
       expect(closeEvent.code).toBe(1008);
@@ -3482,10 +3572,11 @@ describe('relay server', () => {
   });
 
   it('forwards device-wide updates to shared device websocket clients without a thread filter', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3507,38 +3598,42 @@ describe('relay server', () => {
       const clientId = connectedMessage.clientId as string;
 
       const firstUpdatePromise = waitForSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:01.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: SHARED_THREAD_ID,
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:01.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-1',
+            type: 'thread.turn.started',
+            threadId: SHARED_THREAD_ID,
+            timestamp: '2026-07-01T00:00:01.000Z',
+            payload: {
+              turnId: 'turn-1',
+            },
           },
-        },
-      }));
+        }),
+      );
       await expect(firstUpdatePromise).resolves.toMatchObject({
         type: 'thread.turn.started',
         threadId: SHARED_THREAD_ID,
       });
 
       const secondUpdatePromise = waitForSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:02.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.completed',
-          threadId: '22222222-2222-4222-8222-222222222222',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:02.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-other',
+            type: 'thread.turn.completed',
+            threadId: '22222222-2222-4222-8222-222222222222',
+            timestamp: '2026-07-01T00:00:02.000Z',
+            payload: {
+              turnId: 'turn-other',
+            },
           },
-        },
-      }));
+        }),
+      );
       await expect(secondUpdatePromise).resolves.toMatchObject({
         type: 'thread.turn.completed',
         threadId: '22222222-2222-4222-8222-222222222222',
@@ -3551,10 +3646,11 @@ describe('relay server', () => {
   });
 
   it('keeps shared device websocket thread filters when a thread id is requested', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3576,38 +3672,42 @@ describe('relay server', () => {
       const clientId = connectedMessage.clientId as string;
 
       const matchingThreadUpdatePromise = waitForSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:01.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: SHARED_THREAD_ID,
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:01.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-1',
+            type: 'thread.turn.started',
+            threadId: SHARED_THREAD_ID,
+            timestamp: '2026-07-01T00:00:01.000Z',
+            payload: {
+              turnId: 'turn-1',
+            },
           },
-        },
-      }));
+        }),
+      );
       await expect(matchingThreadUpdatePromise).resolves.toMatchObject({
         type: 'thread.turn.started',
         threadId: SHARED_THREAD_ID,
       });
 
       const otherThreadUpdatePromise = expectNoSocketMessage(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:02.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: '22222222-2222-4222-8222-222222222222',
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:02.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-other',
+            type: 'thread.turn.started',
+            threadId: '22222222-2222-4222-8222-222222222222',
+            timestamp: '2026-07-01T00:00:02.000Z',
+            payload: {
+              turnId: 'turn-other',
+            },
           },
-        },
-      }));
+        }),
+      );
       await expect(otherThreadUpdatePromise).resolves.toBeUndefined();
     } finally {
       clientSocket?.close();
@@ -3617,10 +3717,11 @@ describe('relay server', () => {
   });
 
   it('closes shared device websocket clients after grant revocation on the next event', async () => {
-    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, ownerToken, friendToken, deviceId, deviceToken, grantId } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3651,19 +3752,21 @@ describe('relay server', () => {
       expect(revokeResponse.statusCode).toBe(200);
 
       const closeEventPromise = waitForSocketClose(clientSocket);
-      supervisorSocket.send(JSON.stringify({
-        type: 'relay.server.message',
-        timestamp: '2026-07-01T00:00:01.000Z',
-        clientId,
-        payload: {
-          type: 'thread.turn.started',
-          threadId: SHARED_THREAD_ID,
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
           timestamp: '2026-07-01T00:00:01.000Z',
+          clientId,
           payload: {
-            turnId: 'turn-1',
+            type: 'thread.turn.started',
+            threadId: SHARED_THREAD_ID,
+            timestamp: '2026-07-01T00:00:01.000Z',
+            payload: {
+              turnId: 'turn-1',
+            },
           },
-        },
-      }));
+        }),
+      );
 
       const closeEvent = await closeEventPromise;
       expect(closeEvent.code).toBe(1008);
@@ -3676,11 +3779,12 @@ describe('relay server', () => {
   });
 
   it('forwards shared device collaborator websocket client messages to the supervisor', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
-      threadAccess: 'control',
-      workspaceAccess: 'read',
-      canCreateThreads: true,
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+        canCreateThreads: true,
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3704,11 +3808,13 @@ describe('relay server', () => {
         supervisorSocket,
         (message) => message.type === 'relay.client.message',
       );
-      clientSocket.send(JSON.stringify({
-        type: 'thread.prompt',
-        threadId: SHARED_THREAD_ID,
-        prompt: 'hello from shared device collaborator',
-      }));
+      clientSocket.send(
+        JSON.stringify({
+          type: 'thread.prompt',
+          threadId: SHARED_THREAD_ID,
+          prompt: 'hello from shared device collaborator',
+        }),
+      );
 
       await expect(clientMessagePromise).resolves.toMatchObject({
         type: 'relay.client.message',
@@ -3726,10 +3832,11 @@ describe('relay server', () => {
   });
 
   it('closes read-only shared device websocket clients that send control messages', async () => {
-    const { app, friendToken, deviceId, deviceToken } = await setupDeviceGrantRelaySession({
-      threadAccess: 'read',
-      workspaceAccess: 'read',
-    });
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupDeviceGrantRelaySession({
+        threadAccess: 'read',
+        workspaceAccess: 'read',
+      });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const baseUrl = websocketBaseUrl(app);
     const supervisorSocket = new WebSocket(
@@ -3750,7 +3857,9 @@ describe('relay server', () => {
       await connectedMessagePromise;
 
       const closeEventPromise = waitForSocketClose(clientSocket);
-      clientSocket.send(JSON.stringify({ type: 'thread.prompt', prompt: 'not allowed' }));
+      clientSocket.send(
+        JSON.stringify({ type: 'thread.prompt', prompt: 'not allowed' }),
+      );
       const closeEvent = await closeEventPromise;
 
       expect(closeEvent.code).toBe(1008);
@@ -3814,7 +3923,11 @@ describe('relay server', () => {
       '<!doctype html><html><head><title>Remote Codex</title></head><body><div id="root"></div></body></html>',
       'utf8',
     );
-    await fs.writeFile(path.join(distDir, 'assets', 'app.js'), 'console.log("ok");', 'utf8');
+    await fs.writeFile(
+      path.join(distDir, 'assets', 'app.js'),
+      'console.log("ok");',
+      'utf8',
+    );
     const app = buildRelayServer(testConfig({ webDistDir: distDir }));
     await app.ready();
 

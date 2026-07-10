@@ -1,0 +1,24 @@
+[Unit]
+Description=Remote Codex restricted Incus host agent
+After=network-online.target incus.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remote-codex-incus
+Group=remote-codex-incus
+SupplementaryGroups=incus-admin
+EnvironmentFile=/etc/remote-codex/incus-host-agent.env
+ExecStart=/usr/bin/node /opt/remote-codex-incus-host-agent/index.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/remote-codex-incus-host-agent /var/log/remote-codex-incus-host-agent
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

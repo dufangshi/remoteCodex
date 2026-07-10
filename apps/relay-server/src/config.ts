@@ -17,6 +17,12 @@ export interface RelayServerConfig {
   registrationEnabledConfigured: boolean;
   registrationPassword: string | null;
   webDistDir: string | null;
+  hostedSandbox: {
+    provider: 'disabled' | 'incus';
+    agentUrl: string | null;
+    agentToken: string | null;
+    requestTimeoutMs: number;
+  };
 }
 
 const envSchema = z.object({
@@ -34,6 +40,17 @@ const envSchema = z.object({
   REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: z.string().optional(),
   REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: z.string().min(8).optional(),
   REMOTE_CODEX_RELAY_WEB_DIST_DIR: z.string().min(1).optional(),
+  REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER: z
+    .enum(['disabled', 'incus'])
+    .optional(),
+  REMOTE_CODEX_INCUS_HOST_AGENT_URL: z.string().url().optional(),
+  REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN: z.string().min(16).optional(),
+  REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(30_000)
+    .optional(),
 });
 
 function optionalNonEmpty(value: string | undefined) {
@@ -55,7 +72,9 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
       env.REMOTE_CODEX_RELAY_CLIENT_TOKEN,
     ),
     REMOTE_CODEX_ADMIN_EMAIL: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_EMAIL),
-    REMOTE_CODEX_RELAY_DATA_DIR: optionalNonEmpty(env.REMOTE_CODEX_RELAY_DATA_DIR),
+    REMOTE_CODEX_RELAY_DATA_DIR: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_DATA_DIR,
+    ),
     REMOTE_CODEX_RELAY_SESSION_SECRET: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_SESSION_SECRET,
     ),
@@ -67,6 +86,18 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ),
     REMOTE_CODEX_RELAY_WEB_DIST_DIR: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_WEB_DIST_DIR,
+    ),
+    REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER: optionalNonEmpty(
+      env.REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER,
+    ),
+    REMOTE_CODEX_INCUS_HOST_AGENT_URL: optionalNonEmpty(
+      env.REMOTE_CODEX_INCUS_HOST_AGENT_URL,
+    ),
+    REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN: optionalNonEmpty(
+      env.REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN,
+    ),
+    REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS: optionalNonEmpty(
+      env.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS,
     ),
   };
 }
@@ -97,8 +128,17 @@ export function loadRelayServerConfig(
           ),
     registrationEnabledConfigured:
       parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED !== undefined,
-    registrationPassword: parsed.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD ?? null,
-    webDistDir: parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? defaultRelayWebDistDir(),
+    registrationPassword:
+      parsed.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD ?? null,
+    webDistDir:
+      parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? defaultRelayWebDistDir(),
+    hostedSandbox: {
+      provider: parsed.REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER ?? 'disabled',
+      agentUrl: parsed.REMOTE_CODEX_INCUS_HOST_AGENT_URL ?? null,
+      agentToken: parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN ?? null,
+      requestTimeoutMs:
+        parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS ?? 1_500,
+    },
   };
 }
 
