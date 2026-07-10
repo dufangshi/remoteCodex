@@ -33,6 +33,7 @@ import {
   HostedSandboxCapabilityService,
   type HostedSandboxProvider,
 } from './hosted-sandbox-provider';
+import { HostedSandboxService } from './hosted-sandbox-service';
 import {
   DeviceConnectionStatus,
   RelayStore,
@@ -90,6 +91,25 @@ const registerSchema = z.object({
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(120),
 });
+const createHostedSandboxSchema = z
+  .object({
+    assignedUserId: z.string().uuid(),
+    deviceName: z.string().trim().min(1).max(120),
+    imageVersion: z.literal('ubuntu-24.04-v1'),
+    resources: z.object({
+      cpuCount: z.number().int().min(1).max(2),
+      memoryMiB: z.number().int().min(1024).max(2048),
+      diskGiB: z.number().int().min(10).max(12),
+    }),
+    openaiApiKey: z.string().min(20).max(512),
+  })
+  .strict();
+const hostedSnapshotSchema = z.object({
+  name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/),
+});
+const rotateHostedCredentialSchema = z
+  .object({ openaiApiKey: z.string().min(20).max(512) })
+  .strict();
 const createShareSchema = z
   .object({
     targetIdentifier: z.string().trim().min(1).optional(),
@@ -285,14 +305,25 @@ export function buildRelayServer(
   const state: RelayState = {
     supervisors: new Map(),
   };
-  const hostedSandboxCapability = new HostedSandboxCapabilityService(
+  const hostedSandboxProvider =
     options.hostedSandboxProvider ??
-      createHostedSandboxProvider(config.hostedSandbox),
+    createHostedSandboxProvider(config.hostedSandbox);
+  const hostedSandboxCapability = new HostedSandboxCapabilityService(
+    hostedSandboxProvider,
     { timeoutMs: config.hostedSandbox.requestTimeoutMs },
+  );
+  const hostedSandboxService = new HostedSandboxService(
+    store,
+    hostedSandboxProvider,
+    config.hostedSandbox,
   );
   const allowedWebViewCorsOrigins = webViewCorsOrigins(
     options.env ?? process.env,
   );
+
+  app.addHook('onReady', () => {
+    queueMicrotask(() => hostedSandboxService.reconcilePending());
+  });
 
   app.addHook('onRequest', async (request, reply) => {
     if (!allowedWebViewCorsOrigins) {
@@ -551,6 +582,135 @@ export function buildRelayServer(
     },
   );
 
+  app.get('/relay/admin/hosted-sandboxes', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    return { sandboxes: hostedSandboxService.list() };
+  });
+
+  app.get(
+    '/relay/admin/hosted-sandboxes/:sandboxId',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) {
+        return;
+      }
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return hostedSandboxService.detail(sandboxId);
+    },
+  );
+
+  app.post('/relay/admin/hosted-sandboxes', async (request, reply) => {
+    const user = requireRelayUser(request, reply, store, { admin: true });
+    if (!user) {
+      return;
+    }
+    const body = createHostedSandboxSchema.parse(request.body ?? {});
+    const result = await hostedSandboxService.create({
+      createdByAdminUserId: user.id,
+      ...body,
+    });
+    return reply.code(202).send(result);
+  });
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/:sandboxId/retry',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) {
+        return;
+      }
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return reply.code(202).send({
+        sandbox: hostedSandboxService.detail(sandboxId),
+        operation: hostedSandboxService.retry(sandboxId),
+      });
+    },
+  );
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/:sandboxId/start',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return reply.code(202).send({
+        operation: hostedSandboxService.start(sandboxId),
+      });
+    },
+  );
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/:sandboxId/stop',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return reply.code(202).send({
+        operation: hostedSandboxService.stop(sandboxId),
+      });
+    },
+  );
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/:sandboxId/snapshots',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { name } = hostedSnapshotSchema.parse(request.body ?? {});
+      return reply.code(202).send({
+        operation: hostedSandboxService.snapshot(sandboxId, name),
+      });
+    },
+  );
+
+  app.delete(
+    '/relay/admin/hosted-sandboxes/:sandboxId',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return reply.code(202).send({
+        operation: hostedSandboxService.delete(sandboxId),
+      });
+    },
+  );
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/:sandboxId/rotate-credential',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { openaiApiKey } = rotateHostedCredentialSchema.parse(
+        request.body ?? {},
+      );
+      return reply.code(202).send({
+        operation: await hostedSandboxService.rotateCredential(
+          sandboxId,
+          openaiApiKey,
+        ),
+      });
+    },
+  );
+
   app.patch('/relay/admin/settings/registration', async (request, reply) => {
     const user = requireRelayUser(request, reply, store, { admin: true });
     if (!user) {
@@ -654,6 +814,7 @@ export function buildRelayServer(
       reply,
       state,
       store,
+      hostedSandboxService,
       user,
       deviceId,
       targetPath,
@@ -673,6 +834,7 @@ export function buildRelayServer(
       reply,
       state,
       store,
+      hostedSandboxService,
       user,
       deviceId,
       targetPath: '/healthz',
@@ -698,6 +860,7 @@ export function buildRelayServer(
       reply,
       state,
       store,
+      hostedSandboxService,
       user,
       deviceId,
       targetPath,
@@ -757,6 +920,7 @@ export function buildRelayServer(
           ipAddress: relayClientIp(request),
         };
         state.supervisors.set(deviceId, connection);
+        hostedSandboxService.markOnline(deviceId);
 
         socket.send(
           JSON.stringify({
@@ -778,6 +942,16 @@ export function buildRelayServer(
 
           if (parsed.type === 'relay.heartbeat') {
             connection.lastHeartbeatAt = parsed.timestamp;
+            return;
+          }
+
+          if (parsed.type === 'relay.activity') {
+            hostedSandboxService.recordTurnActivity({
+              deviceId,
+              threadId: parsed.payload.threadId,
+              turnId: parsed.payload.turnId,
+              kind: parsed.payload.kind,
+            });
             return;
           }
 
@@ -952,6 +1126,10 @@ export function buildRelayServer(
     registerRelayWebApp(app, config.webDistDir);
   }
 
+  app.addHook('onClose', () => {
+    hostedSandboxService.close();
+  });
+
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof RelayStoreError) {
       reply.status(error.statusCode).send({
@@ -1004,6 +1182,7 @@ async function forwardRelayHttp(input: {
   reply: FastifyReply;
   state: RelayState;
   store: RelayStore;
+  hostedSandboxService: HostedSandboxService;
   user: RelayUserDto;
   deviceId: string;
   targetPath: string;
@@ -1092,6 +1271,20 @@ async function forwardRelayHttp(input: {
       threadId: conversationEvent.threadId,
       workspaceId: conversationEvent.workspaceId,
     });
+  }
+  const lifecycle = isHostedUserActivityRequest(
+    input.request.method,
+    input.targetPath,
+  )
+    ? input.hostedSandboxService.recordUserActivity(input.deviceId)
+    : input.hostedSandboxService.wakeIfStopped(input.deviceId);
+  if (lifecycle.waking) {
+    input.reply.status(503).send({
+      code: 'service_unavailable',
+      message: 'Hosted supervisor VM is starting. Retry shortly.',
+      details: { reason: 'hosted_sandbox_starting' },
+    } satisfies ApiErrorShape);
+    return;
   }
 
   const supervisor = input.state.supervisors.get(input.deviceId);
@@ -1833,6 +2026,14 @@ function conversationEventFromRequest(
     };
   }
   return null;
+}
+
+function isHostedUserActivityRequest(method: string, pathValue: string) {
+  const methodName = method.toUpperCase();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(methodName)) {
+    return false;
+  }
+  return new URL(pathValue, 'http://relay.local').pathname.startsWith('/api/');
 }
 
 function relayAccessEventKindFromRequest(

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,10 +13,7 @@ import type {
   RelayPortalSummaryDto,
   RelaySessionShareDto,
 } from '@remote-codex/shared';
-import {
-  RelayDevicesPage,
-  mergeRelayPortalSummary,
-} from './RelayDevicesPage';
+import { RelayDevicesPage, mergeRelayPortalSummary } from './RelayDevicesPage';
 
 const baseUser = {
   id: 'user-1',
@@ -21,7 +24,13 @@ const baseUser = {
   createdAt: '2026-06-18T00:00:00.000Z',
 };
 
-function device(input: { id: string; name: string; connected?: boolean; token?: string | null }) {
+function device(input: {
+  id: string;
+  name: string;
+  connected?: boolean;
+  token?: string | null;
+  hostedStatus?: 'stopped' | 'starting' | 'online' | 'error';
+}) {
   return {
     id: input.id,
     ownerUserId: 'user-1',
@@ -32,6 +41,7 @@ function device(input: { id: string; name: string; connected?: boolean; token?: 
     connectedAt: input.connected ? '2026-06-18T00:00:00.000Z' : null,
     lastHeartbeatAt: input.connected ? '2026-06-18T00:00:00.000Z' : null,
     createdAt: '2026-06-18T00:00:00.000Z',
+    hostedStatus: input.hostedStatus ?? null,
   };
 }
 
@@ -144,7 +154,10 @@ function renderPage(
       if (url === '/relay/grants/grant-device-1' && init?.method === 'DELETE') {
         return Promise.resolve({
           ok: true,
-          json: async () => ({ ...sharedDeviceGrant, revokedAt: '2026-06-18T00:05:00.000Z' }),
+          json: async () => ({
+            ...sharedDeviceGrant,
+            revokedAt: '2026-06-18T00:05:00.000Z',
+          }),
         });
       }
       if (url === '/relay/shares/share-1' && init?.method === 'PATCH') {
@@ -161,7 +174,10 @@ function renderPage(
       if (url === '/relay/shares/share-1' && init?.method === 'DELETE') {
         return Promise.resolve({
           ok: true,
-          json: async () => ({ ...sharedSession, revokedAt: '2026-06-18T00:05:00.000Z' }),
+          json: async () => ({
+            ...sharedSession,
+            revokedAt: '2026-06-18T00:05:00.000Z',
+          }),
         });
       }
 
@@ -206,7 +222,13 @@ describe('RelayDevicesPage', () => {
   });
 
   it('copies a real supervisor command when the relay returns the device token', async () => {
-    renderPage([device({ id: 'device-1', name: 'MacBook Pro', token: 'rcd_real_device_token' })]);
+    renderPage([
+      device({
+        id: 'device-1',
+        name: 'MacBook Pro',
+        token: 'rcd_real_device_token',
+      }),
+    ]);
 
     await screen.findByText('MacBook Pro');
 
@@ -214,7 +236,9 @@ describe('RelayDevicesPage', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_real_device_token'),
+        expect.stringContaining(
+          'REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_real_device_token',
+        ),
       );
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -223,6 +247,29 @@ describe('RelayDevicesPage', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(
       expect.stringContaining('<device-token>'),
     );
+  });
+
+  it('labels a stopped hosted VM and allows connect to trigger wake navigation', async () => {
+    renderPage([
+      device({
+        id: 'hosted-device-1',
+        name: 'Hosted Codex',
+        hostedStatus: 'stopped',
+      }),
+    ]);
+    await screen.findByText('Hosted Codex');
+    expect(screen.getByText('Hosted · Stopped')).toBeInTheDocument();
+    expect(
+      screen.getByText('Stopped. Connect to wake this VM.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy setup' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Delete Hosted Codex' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start & connect' }));
+    expect(
+      await screen.findByText('Shared device workspaces'),
+    ).toBeInTheDocument();
   });
 
   it('uses the newly created relay-stored device token for later setup copies', async () => {
@@ -282,14 +329,18 @@ describe('RelayDevicesPage', () => {
     fireEvent.change(screen.getByLabelText('Device name'), {
       target: { value: 'Studio Mac' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create device token' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create device token' }),
+    );
 
     await screen.findByText('Token created for Studio Mac');
     fireEvent.click(screen.getByRole('button', { name: 'Copy setup' }));
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_created_device_token'),
+        expect.stringContaining(
+          'REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_created_device_token',
+        ),
       );
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -304,7 +355,9 @@ describe('RelayDevicesPage', () => {
 
     expect(screen.getByRole('button', { name: 'Copy setup' })).toBeDisabled();
     expect(
-      screen.getByText('Token not available for this device. Create a new device token to copy a ready-to-run setup command.'),
+      screen.getByText(
+        'Token not available for this device. Create a new device token to copy a ready-to-run setup command.',
+      ),
     ).toBeInTheDocument();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
@@ -312,15 +365,21 @@ describe('RelayDevicesPage', () => {
   it('opens a session shared with the current relay account', async () => {
     renderPage([], [sharedSession]);
 
-    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
+    expect(
+      await screen.findAllByText('Investigate relay setup'),
+    ).not.toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => {
       expect(screen.getByText('Shared thread')).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
-    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe(
+      'device-shared',
+    );
+    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe(
+      'thread-shared',
+    );
   });
 
   it('opens a device shared with the current relay account', async () => {
@@ -330,15 +389,28 @@ describe('RelayDevicesPage', () => {
     const deviceCard = deviceTitle.closest('article');
     expect(deviceCard).not.toBeNull();
 
-    fireEvent.click(within(deviceCard as HTMLElement).getByRole('button', { name: 'Open' }));
+    fireEvent.click(
+      within(deviceCard as HTMLElement).getByRole('button', { name: 'Open' }),
+    );
 
     await screen.findByText('Shared device workspaces');
-    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
-    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBeNull();
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe(
+      'device-shared',
+    );
+    expect(
+      window.localStorage.getItem('remote-codex-relay-thread-id'),
+    ).toBeNull();
   });
 
   it('creates device-level grants from an owned relay device', async () => {
-    renderPage([device({ id: 'device-1', name: 'MacBook Pro', connected: true, token: 'rcd_real_device_token' })]);
+    renderPage([
+      device({
+        id: 'device-1',
+        name: 'MacBook Pro',
+        connected: true,
+        token: 'rcd_real_device_token',
+      }),
+    ]);
 
     await screen.findByText('MacBook Pro');
     fireEvent.click(screen.getByRole('button', { name: 'Share' }));
@@ -388,25 +460,33 @@ describe('RelayDevicesPage', () => {
     );
 
     expect(await screen.findByText('Share MacBook Pro')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Share device' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Share device' }),
+    ).toBeInTheDocument();
   });
 
   it('manages sessions shared by the current relay account', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    renderPage([], [], [
-      {
-        ...sharedSession,
-        ownerUserId: 'user-1',
-        ownerUsername: 'user',
-        targetUserId: 'friend-1',
-        targetUsername: 'friend',
-        workspaceId: 'workspace-1',
-        workspaceLabel: 'remoteCodex',
-        workspaceAccess: 'read',
-      },
-    ]);
+    renderPage(
+      [],
+      [],
+      [
+        {
+          ...sharedSession,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          workspaceId: 'workspace-1',
+          workspaceLabel: 'remoteCodex',
+          workspaceAccess: 'read',
+        },
+      ],
+    );
 
-    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
+    expect(
+      await screen.findAllByText('Investigate relay setup'),
+    ).not.toHaveLength(0);
     expect(screen.getByText('Workspace:')).toBeInTheDocument();
     expect(screen.getByText('remoteCodex')).toBeInTheDocument();
     expect(screen.getByText('Thread:')).toBeInTheDocument();
@@ -492,58 +572,76 @@ describe('RelayDevicesPage', () => {
   });
 
   it('does not expose raw thread ids when shared thread metadata is unavailable', async () => {
-    renderPage([], [], [
-      {
-        ...sharedSession,
-        ownerUserId: 'user-1',
-        ownerUsername: 'user',
-        targetUserId: 'friend-1',
-        targetUsername: 'friend',
-        threadId: 'thread-raw-id-only',
-        threadTitle: null,
-        workspaceId: 'workspace-1',
-        workspaceLabel: null,
-        label: null,
-      },
-    ]);
+    renderPage(
+      [],
+      [],
+      [
+        {
+          ...sharedSession,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          threadId: 'thread-raw-id-only',
+          threadTitle: null,
+          workspaceId: 'workspace-1',
+          workspaceLabel: null,
+          label: null,
+        },
+      ],
+    );
 
-    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(
+      0,
+    );
     expect(screen.getByText('Workspace unavailable')).toBeInTheDocument();
     expect(screen.queryByText('thread-raw-id-only')).not.toBeInTheDocument();
   });
 
   it('does not use the custom share label as the thread title', async () => {
-    renderPage([], [], [
-      {
-        ...sharedSession,
-        ownerUserId: 'user-1',
-        ownerUsername: 'user',
-        targetUserId: 'friend-1',
-        targetUsername: 'friend',
-        threadTitle: null,
-        label: 'Pairing note',
-      },
-    ]);
+    renderPage(
+      [],
+      [],
+      [
+        {
+          ...sharedSession,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          threadTitle: null,
+          label: 'Pairing note',
+        },
+      ],
+    );
 
-    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(
+      0,
+    );
     expect(screen.getByText('Label:')).toBeInTheDocument();
     expect(screen.getByText('Pairing note')).toBeInTheDocument();
   });
 
   it('does not use a stale custom share label stored as the thread title', async () => {
-    renderPage([], [], [
-      {
-        ...sharedSession,
-        ownerUserId: 'user-1',
-        ownerUsername: 'user',
-        targetUserId: 'friend-1',
-        targetUsername: 'friend',
-        threadTitle: 'feiji',
-        label: 'feiji',
-      },
-    ]);
+    renderPage(
+      [],
+      [],
+      [
+        {
+          ...sharedSession,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          threadTitle: 'feiji',
+          label: 'feiji',
+        },
+      ],
+    );
 
-    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Thread unavailable')).not.toHaveLength(
+      0,
+    );
     expect(screen.getByText('Label:')).toBeInTheDocument();
     expect(screen.getByText('feiji')).toBeInTheDocument();
   });
@@ -574,33 +672,45 @@ describe('RelayDevicesPage', () => {
       ],
     };
 
-    expect(mergeRelayPortalSummary(previous, next).sharedByMe[0]).toMatchObject({
-      threadTitle: 'solido',
-      workspaceLabel: 'el-agente-cloud-infrastructure',
-      label: 'feiji',
-      lastAccessedAt: '2026-07-06T16:00:00.000Z',
-    });
+    expect(mergeRelayPortalSummary(previous, next).sharedByMe[0]).toMatchObject(
+      {
+        threadTitle: 'solido',
+        workspaceLabel: 'el-agente-cloud-infrastructure',
+        label: 'feiji',
+        lastAccessedAt: '2026-07-06T16:00:00.000Z',
+      },
+    );
   });
 
   it('opens a session shared by the current relay account', async () => {
-    renderPage([], [], [
-      {
-        ...sharedSession,
-        ownerUserId: 'user-1',
-        ownerUsername: 'user',
-        targetUserId: 'friend-1',
-        targetUsername: 'friend',
-        workspaceId: 'workspace-1',
-        workspaceLabel: 'remoteCodex',
-        workspaceAccess: 'read',
-      },
-    ]);
+    renderPage(
+      [],
+      [],
+      [
+        {
+          ...sharedSession,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          workspaceId: 'workspace-1',
+          workspaceLabel: 'remoteCodex',
+          workspaceAccess: 'read',
+        },
+      ],
+    );
 
-    expect(await screen.findAllByText('Investigate relay setup')).not.toHaveLength(0);
+    expect(
+      await screen.findAllByText('Investigate relay setup'),
+    ).not.toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     await screen.findByText('Shared thread');
-    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe('device-shared');
-    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe('thread-shared');
+    expect(window.localStorage.getItem('remote-codex-relay-device-id')).toBe(
+      'device-shared',
+    );
+    expect(window.localStorage.getItem('remote-codex-relay-thread-id')).toBe(
+      'thread-shared',
+    );
   });
 });

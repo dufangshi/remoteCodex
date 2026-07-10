@@ -21,7 +21,9 @@ export interface RelayServerConfig {
     provider: 'disabled' | 'incus';
     agentUrl: string | null;
     agentToken: string | null;
+    relayServerUrl: string | null;
     requestTimeoutMs: number;
+    idleTimeoutMs: number;
   };
 }
 
@@ -45,11 +47,22 @@ const envSchema = z.object({
     .optional(),
   REMOTE_CODEX_INCUS_HOST_AGENT_URL: z.string().url().optional(),
   REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN: z.string().min(16).optional(),
+  REMOTE_CODEX_HOSTED_RELAY_SERVER_URL: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith('ws://') || value.startsWith('wss://'))
+    .optional(),
   REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .positive()
     .max(30_000)
+    .optional(),
+  REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(24 * 60 * 60_000)
     .optional(),
 });
 
@@ -96,8 +109,14 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN: optionalNonEmpty(
       env.REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN,
     ),
+    REMOTE_CODEX_HOSTED_RELAY_SERVER_URL: optionalNonEmpty(
+      env.REMOTE_CODEX_HOSTED_RELAY_SERVER_URL,
+    ),
     REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS: optionalNonEmpty(
       env.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS,
+    ),
+    REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS: optionalNonEmpty(
+      env.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS,
     ),
   };
 }
@@ -136,8 +155,10 @@ export function loadRelayServerConfig(
       provider: parsed.REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER ?? 'disabled',
       agentUrl: parsed.REMOTE_CODEX_INCUS_HOST_AGENT_URL ?? null,
       agentToken: parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN ?? null,
+      relayServerUrl: parsed.REMOTE_CODEX_HOSTED_RELAY_SERVER_URL ?? null,
       requestTimeoutMs:
         parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS ?? 1_500,
+      idleTimeoutMs: parsed.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS ?? 10 * 60_000,
     },
   };
 }

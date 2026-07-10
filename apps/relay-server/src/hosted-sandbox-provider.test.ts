@@ -35,7 +35,9 @@ function testConfig(): RelayServerConfig {
       provider: 'disabled',
       agentUrl: null,
       agentToken: null,
+      relayServerUrl: null,
       requestTimeoutMs: 20,
+      idleTimeoutMs: 600_000,
     },
   };
 }
@@ -204,7 +206,9 @@ describe('hosted sandbox capability', () => {
       provider: 'incus',
       agentUrl: 'http://127.0.0.1:8801/',
       agentToken: 'host-agent-secret-token',
+      relayServerUrl: 'wss://relay.example.test',
       requestTimeoutMs: 25,
+      idleTimeoutMs: 600_000,
     });
 
     await expect(provider.capability()).resolves.toMatchObject({

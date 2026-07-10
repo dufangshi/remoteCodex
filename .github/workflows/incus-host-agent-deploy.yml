@@ -1,0 +1,133 @@
+name: Incus Host Agent Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/incus-host-agent/**'
+      - '.github/workflows/incus-host-agent-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incus-host-agent-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-deploy:
+    name: Build, test, and deploy host agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate host agent
+        run: |
+          set -euo pipefail
+          pnpm --filter @remote-codex/incus-host-agent typecheck
+          pnpm --filter @remote-codex/incus-host-agent test
+          pnpm --filter @remote-codex/incus-host-agent build
+          bash -n packages/incus-host-agent/deploy/*.sh
+          bash -n packages/incus-host-agent/guest/*.sh packages/incus-host-agent/guest/remote-codex-provision
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          tar -czf packages/incus-host-agent/remote-codex-incus-host-agent.tgz \
+            -C packages/incus-host-agent dist/index.cjs deploy guest
+
+      - name: Upload artifact to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          source: packages/incus-host-agent/remote-codex-incus-host-agent.tgz
+          target: /tmp
+          overwrite: true
+          strip_components: 2
+
+      - name: Install with rollback
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          timeout: 60m
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            release="/opt/remote-codex-incus-host-agent/releases/${{ github.sha }}"
+            previous="/opt/remote-codex-incus-host-agent/index.cjs.previous"
+            archive="/tmp/remote-codex-incus-host-agent.tgz"
+
+            sudo install -d -o root -g root -m 0755 "${release}"
+            sudo tar -xzf "${archive}" -C "${release}"
+            if [ -f /opt/remote-codex-incus-host-agent/index.cjs ]; then
+              sudo cp /opt/remote-codex-incus-host-agent/index.cjs "${previous}"
+            fi
+
+            docker network inspect remote-codex-relay-net >/dev/null 2>&1 || \
+              docker network create \
+                --driver bridge \
+                --subnet 172.30.0.0/24 \
+                --gateway 172.30.0.1 \
+                remote-codex-relay-net >/dev/null
+
+            cd "${release}"
+            if ! sudo bash deploy/install.sh dist/index.cjs; then
+              if [ -f "${previous}" ]; then
+                sudo cp "${previous}" /opt/remote-codex-incus-host-agent/index.cjs
+                sudo systemctl restart remote-codex-incus-host-agent.service || true
+              fi
+              exit 1
+            fi
+            sudo install -d -o root -g root -m 0755 /opt/remote-codex-incus-host-agent/guest
+            sudo cp -a guest/. /opt/remote-codex-incus-host-agent/guest/
+
+            sudo sed -i \
+              's/^REMOTE_CODEX_INCUS_HOST_AGENT_HOST=.*/REMOTE_CODEX_INCUS_HOST_AGENT_HOST=172.30.0.1/' \
+              /etc/remote-codex/incus-host-agent.env
+            sudo systemctl restart remote-codex-incus-host-agent.service
+
+            token="$(sudo sed -n 's/^REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN=//p' /etc/remote-codex/incus-host-agent.env)"
+            ready=false
+            for attempt in $(seq 1 30); do
+              if curl -fsS -H "authorization: Bearer ${token}" \
+                http://172.30.0.1:8801/readyz >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "${ready}" != true ]; then
+              if [ -f "${previous}" ]; then
+                sudo cp "${previous}" /opt/remote-codex-incus-host-agent/index.cjs
+                sudo systemctl restart remote-codex-incus-host-agent.service || true
+              fi
+              exit 1
+            fi
+
+            docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+              remote-codex-relay 2>/dev/null || true

@@ -1,4 +1,13 @@
-import { ChevronDown, Copy, MonitorSmartphone, Plug, Plus, Share2, Trash2, X } from 'lucide-react';
+import {
+  ChevronDown,
+  Copy,
+  MonitorSmartphone,
+  Plug,
+  Plus,
+  Share2,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -50,19 +59,34 @@ export function mergeRelayPortalSummary(
     ...next,
     sharedWithMe: mergeShareMetadata(previous.sharedWithMe, next.sharedWithMe),
     sharedByMe: mergeShareMetadata(previous.sharedByMe, next.sharedByMe),
-    sharedDevicesWithMe: mergeGrantMetadata(previous.sharedDevicesWithMe ?? [], next.sharedDevicesWithMe ?? []),
-    sharedThreadsWithMe: mergeGrantMetadata(previous.sharedThreadsWithMe ?? [], next.sharedThreadsWithMe ?? []),
-    grantsByMe: mergeGrantMetadata(previous.grantsByMe ?? [], next.grantsByMe ?? []),
+    sharedDevicesWithMe: mergeGrantMetadata(
+      previous.sharedDevicesWithMe ?? [],
+      next.sharedDevicesWithMe ?? [],
+    ),
+    sharedThreadsWithMe: mergeGrantMetadata(
+      previous.sharedThreadsWithMe ?? [],
+      next.sharedThreadsWithMe ?? [],
+    ),
+    grantsByMe: mergeGrantMetadata(
+      previous.grantsByMe ?? [],
+      next.grantsByMe ?? [],
+    ),
   };
 }
 
-function sanitizeRelayPortalSummary(summary: RelayPortalSummaryDto): RelayPortalSummaryDto {
+function sanitizeRelayPortalSummary(
+  summary: RelayPortalSummaryDto,
+): RelayPortalSummaryDto {
   return {
     ...summary,
     sharedWithMe: summary.sharedWithMe.map(sanitizeShareMetadata),
     sharedByMe: summary.sharedByMe.map(sanitizeShareMetadata),
-    sharedDevicesWithMe: (summary.sharedDevicesWithMe ?? []).map(sanitizeGrantMetadata),
-    sharedThreadsWithMe: (summary.sharedThreadsWithMe ?? []).map(sanitizeGrantMetadata),
+    sharedDevicesWithMe: (summary.sharedDevicesWithMe ?? []).map(
+      sanitizeGrantMetadata,
+    ),
+    sharedThreadsWithMe: (summary.sharedThreadsWithMe ?? []).map(
+      sanitizeGrantMetadata,
+    ),
     grantsByMe: (summary.grantsByMe ?? []).map(sanitizeGrantMetadata),
   };
 }
@@ -71,7 +95,9 @@ function mergeShareMetadata(
   previousShares: RelaySessionShareDto[],
   nextShares: RelaySessionShareDto[],
 ) {
-  const previousById = new Map(previousShares.map((share) => [share.id, share]));
+  const previousById = new Map(
+    previousShares.map((share) => [share.id, share]),
+  );
   return nextShares.map((share) => {
     const previous = previousById.get(share.id);
     if (!previous) {
@@ -87,7 +113,9 @@ function mergeShareMetadata(
   });
 }
 
-function sanitizeShareMetadata(share: RelaySessionShareDto): RelaySessionShareDto {
+function sanitizeShareMetadata(
+  share: RelaySessionShareDto,
+): RelaySessionShareDto {
   return {
     ...share,
     threadTitle: stableShareThreadTitle(share),
@@ -98,7 +126,9 @@ function mergeGrantMetadata(
   previousGrants: RelayAccessGrantDto[],
   nextGrants: RelayAccessGrantDto[],
 ) {
-  const previousById = new Map(previousGrants.map((grant) => [grant.id, grant]));
+  const previousById = new Map(
+    previousGrants.map((grant) => [grant.id, grant]),
+  );
   return nextGrants.map((grant) => {
     const previous = previousById.get(grant.id);
     if (!previous) {
@@ -115,7 +145,9 @@ function mergeGrantMetadata(
   });
 }
 
-function sanitizeGrantMetadata(grant: RelayAccessGrantDto): RelayAccessGrantDto {
+function sanitizeGrantMetadata(
+  grant: RelayAccessGrantDto,
+): RelayAccessGrantDto {
   return {
     ...grant,
     threadTitle: stableGrantThreadTitle(grant),
@@ -127,48 +159,55 @@ export function RelayDevicesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
   const [deviceName, setDeviceName] = useState('');
-  const [createdDevice, setCreatedDevice] = useState<RelayCreateDeviceResultDto | null>(null);
+  const [createdDevice, setCreatedDevice] =
+    useState<RelayCreateDeviceResultDto | null>(null);
   const [copiedDeviceId, setCopiedDeviceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
   const [expandedGrantId, setExpandedGrantId] = useState<string | null>(null);
-  const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(null);
-  const [editingGrant, setEditingGrant] = useState<RelayAccessGrantDto | null>(null);
-  const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(null);
+  const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(
+    null,
+  );
+  const [editingGrant, setEditingGrant] = useState<RelayAccessGrantDto | null>(
+    null,
+  );
+  const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(
+    null,
+  );
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const hasLoadedPortalRef = useRef(false);
   const handledShareDeviceRequestRef = useRef<string | null>(null);
 
-  const load = useCallback(async (options?: {
-    showLoading?: boolean;
-    clearError?: boolean;
-  }) => {
-    const showLoading = options?.showLoading ?? true;
-    const clearError = options?.clearError ?? true;
+  const load = useCallback(
+    async (options?: { showLoading?: boolean; clearError?: boolean }) => {
+      const showLoading = options?.showLoading ?? true;
+      const clearError = options?.clearError ?? true;
 
-    if (showLoading) {
-      setLoading(true);
-    }
-    if (clearError) {
-      setError(null);
-    }
-    try {
-      enableRelayMode();
-      const nextPortal = await fetchRelayPortal();
-      hasLoadedPortalRef.current = true;
-      setPortal((current) => mergeRelayPortalSummary(current, nextPortal));
-    } catch (caught) {
-      if (showLoading || !hasLoadedPortalRef.current) {
-        setError(errorMessage(caught, 'Unable to load devices.'));
-      }
-    } finally {
       if (showLoading) {
-        setLoading(false);
+        setLoading(true);
       }
-    }
-  }, []);
+      if (clearError) {
+        setError(null);
+      }
+      try {
+        enableRelayMode();
+        const nextPortal = await fetchRelayPortal();
+        hasLoadedPortalRef.current = true;
+        setPortal((current) => mergeRelayPortalSummary(current, nextPortal));
+      } catch (caught) {
+        if (showLoading || !hasLoadedPortalRef.current) {
+          setError(errorMessage(caught, 'Unable to load devices.'));
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     void load();
@@ -183,11 +222,17 @@ export function RelayDevicesPage() {
 
   useEffect(() => {
     const requestedDeviceId = searchParams.get('shareDevice');
-    if (!requestedDeviceId || !portal || handledShareDeviceRequestRef.current === requestedDeviceId) {
+    if (
+      !requestedDeviceId ||
+      !portal ||
+      handledShareDeviceRequestRef.current === requestedDeviceId
+    ) {
       return;
     }
 
-    const device = portal.devices.find((entry) => entry.id === requestedDeviceId);
+    const device = portal.devices.find(
+      (entry) => entry.id === requestedDeviceId,
+    );
     if (!device) {
       return;
     }
@@ -257,13 +302,16 @@ export function RelayDevicesPage() {
     navigate(workspacesHref(grant.deviceId));
   }
 
-  async function createDeviceGrant(device: RelayDeviceDto, input: {
-    targetIdentifier: string;
-    label: string | null;
-    threadAccess: RelayThreadAccessDto;
-    workspaceAccess: RelayWorkspaceAccessDto;
-    canCreateThreads: boolean;
-  }) {
+  async function createDeviceGrant(
+    device: RelayDeviceDto,
+    input: {
+      targetIdentifier: string;
+      label: string | null;
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      canCreateThreads: boolean;
+    },
+  ) {
     setBusy(`grant:create:${device.id}`);
     setError(null);
     try {
@@ -283,13 +331,16 @@ export function RelayDevicesPage() {
     }
   }
 
-  async function updateAccessGrant(grant: RelayAccessGrantDto, input: {
-    label: string | null;
-    threadAccess: RelayThreadAccessDto;
-    workspaceAccess: RelayWorkspaceAccessDto;
-    canCreateThreads: boolean;
-    expiresAt: string | null;
-  }) {
+  async function updateAccessGrant(
+    grant: RelayAccessGrantDto,
+    input: {
+      label: string | null;
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      canCreateThreads: boolean;
+      expiresAt: string | null;
+    },
+  ) {
     setBusy(`grant:${grant.id}`);
     setError(null);
     try {
@@ -309,7 +360,9 @@ export function RelayDevicesPage() {
   }
 
   async function revokeAccessGrant(grant: RelayAccessGrantDto) {
-    if (!window.confirm(`Remove sharing access for "${grantTitleText(grant)}"?`)) {
+    if (
+      !window.confirm(`Remove sharing access for "${grantTitleText(grant)}"?`)
+    ) {
       return;
     }
     setBusy(`grant:${grant.id}`);
@@ -325,12 +378,15 @@ export function RelayDevicesPage() {
     }
   }
 
-  async function updateSharedSession(share: RelaySessionShareDto, input: {
-    label: string | null;
-    threadAccess: RelayThreadAccessDto;
-    workspaceAccess: RelayWorkspaceAccessDto;
-    expiresAt: string | null;
-  }) {
+  async function updateSharedSession(
+    share: RelaySessionShareDto,
+    input: {
+      label: string | null;
+      threadAccess: RelayThreadAccessDto;
+      workspaceAccess: RelayWorkspaceAccessDto;
+      expiresAt: string | null;
+    },
+  ) {
     setBusy(`share:${share.id}`);
     setError(null);
     try {
@@ -348,7 +404,9 @@ export function RelayDevicesPage() {
   }
 
   async function revokeSharedSession(share: RelaySessionShareDto) {
-    if (!window.confirm(`Remove sharing access for "${shareTitleText(share)}"?`)) {
+    if (
+      !window.confirm(`Remove sharing access for "${shareTitleText(share)}"?`)
+    ) {
       return;
     }
     setBusy(`share:${share.id}`);
@@ -367,7 +425,9 @@ export function RelayDevicesPage() {
   async function copySupervisorSetup(device: RelayDeviceDto) {
     const token = device.token;
     if (!token) {
-      setError('This device token is not available. Create a new device token for devices created before token storage was enabled.');
+      setError(
+        'This device token is not available. Create a new device token for devices created before token storage was enabled.',
+      );
       return;
     }
 
@@ -375,7 +435,9 @@ export function RelayDevicesPage() {
       await navigator.clipboard?.writeText(relaySupervisorCommand(token));
       setCopiedDeviceId(device.id);
       window.setTimeout(() => {
-        setCopiedDeviceId((current) => (current === device.id ? null : current));
+        setCopiedDeviceId((current) =>
+          current === device.id ? null : current,
+        );
       }, 1600);
     } catch {
       // Clipboard access can be unavailable in non-secure contexts.
@@ -421,7 +483,9 @@ export function RelayDevicesPage() {
           <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-[var(--theme-fg)]">Devices</h2>
+                <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+                  Devices
+                </h2>
                 <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
                   Connect to an online device before opening workspaces.
                 </p>
@@ -457,7 +521,8 @@ export function RelayDevicesPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
-                No devices yet. Create a token, then start `remote-codex relay-supervisor` on your private machine.
+                No devices yet. Create a token, then start `remote-codex
+                relay-supervisor` on your private machine.
               </div>
             )}
           </section>
@@ -518,7 +583,9 @@ export function RelayDevicesPage() {
                   onEdit={() => setEditingGrant(grant)}
                   onRevoke={() => void revokeAccessGrant(grant)}
                   onToggleAccess={() => {
-                    setExpandedGrantId((current) => (current === grant.id ? null : grant.id));
+                    setExpandedGrantId((current) =>
+                      current === grant.id ? null : grant.id,
+                    );
                   }}
                 />
               )}
@@ -543,7 +610,9 @@ export function RelayDevicesPage() {
                   onEdit={() => setEditingShare(share)}
                   onRevoke={() => void revokeSharedSession(share)}
                   onToggleAccess={() => {
-                    setExpandedShareId((current) => (current === share.id ? null : share.id));
+                    setExpandedShareId((current) =>
+                      current === share.id ? null : share.id,
+                    );
                   }}
                 />
               )}
@@ -612,7 +681,9 @@ function AddDeviceDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
               Relay device
             </p>
-            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">Add device</h2>
+            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">
+              Add device
+            </h2>
             <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
               Create a token for one private supervisor.
             </p>
@@ -637,7 +708,12 @@ function AddDeviceDialog({
           />
         </label>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+          <button
+            className="relay-button-secondary"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
             Cancel
           </button>
           <button
@@ -677,8 +753,12 @@ function ShareSection({
     <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{title}</h2>
-          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">{subtitle}</p>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            {title}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+            {subtitle}
+          </p>
         </div>
         <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
           {count}
@@ -724,8 +804,12 @@ function GrantSection({
     <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{title}</h2>
-          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">{subtitle}</p>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            {title}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+            {subtitle}
+          </p>
         </div>
         <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
           {count}
@@ -770,7 +854,8 @@ function SharedSessionRow({
   const shareTitle = shareTitleText(share);
   const threadLabel = shareTitle;
   const shareLabel = share.label?.trim() || null;
-  const workspaceLabel = share.workspaceLabel?.trim() || 'Workspace unavailable';
+  const workspaceLabel =
+    share.workspaceLabel?.trim() || 'Workspace unavailable';
   const lastAccessLabel = share.lastAccessedAt
     ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
     : 'Not accessed yet';
@@ -784,18 +869,27 @@ function SharedSessionRow({
           </p>
           <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
             <p className="truncate">
-              Workspace: <span className="text-[var(--theme-fg-soft)]">{workspaceLabel}</span>
+              Workspace:{' '}
+              <span className="text-[var(--theme-fg-soft)]">
+                {workspaceLabel}
+              </span>
             </p>
             <p className="truncate">
-              Thread: <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
+              Thread:{' '}
+              <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
             </p>
             {shareLabel ? (
               <p className="truncate">
-                Label: <span className="text-[var(--theme-fg-soft)]">{shareLabel}</span>
+                Label:{' '}
+                <span className="text-[var(--theme-fg-soft)]">
+                  {shareLabel}
+                </span>
               </p>
             ) : null}
             <p className="truncate">
-              {mode === 'incoming' ? `From ${share.ownerUsername}` : `To ${share.targetUsername}`}
+              {mode === 'incoming'
+                ? `From ${share.ownerUsername}`
+                : `To ${share.targetUsername}`}
             </p>
             <p className="truncate">Device: {share.deviceName}</p>
           </div>
@@ -844,7 +938,9 @@ function SharedSessionRow({
               type="button"
             >
               Access
-              <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              />
             </button>
             <button
               className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
@@ -862,7 +958,10 @@ function SharedSessionRow({
           {share.accessEvents.length ? (
             <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
               {share.accessEvents.map((event) => (
-                <li className="flex items-center justify-between gap-3" key={event.id}>
+                <li
+                  className="flex items-center justify-between gap-3"
+                  key={event.id}
+                >
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-[var(--theme-fg)]">
                       {accessEventKindLabel(event.kind)}
@@ -905,12 +1004,15 @@ function GrantRow({
 }) {
   const title = grantTitleText(grant);
   const scopeLabel = grantScopeLabel(grant);
-  const workspaceLabel = grant.workspaceLabel?.trim() || (grant.scope === 'device' ? 'All workspaces' : 'Workspace unavailable');
-  const threadLabel = grant.scope === 'thread'
-    ? (stableGrantThreadTitle(grant) ?? 'Thread unavailable')
-    : grant.scope === 'workspace'
-      ? 'Workspace access'
-      : 'Whole device';
+  const workspaceLabel =
+    grant.workspaceLabel?.trim() ||
+    (grant.scope === 'device' ? 'All workspaces' : 'Workspace unavailable');
+  const threadLabel =
+    grant.scope === 'thread'
+      ? (stableGrantThreadTitle(grant) ?? 'Thread unavailable')
+      : grant.scope === 'workspace'
+        ? 'Workspace access'
+        : 'Whole device';
   const label = grant.label?.trim() || null;
   const lastAccessLabel = grant.lastAccessedAt
     ? `${grant.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(grant.lastAccessedAt)}`
@@ -921,25 +1023,34 @@ function GrantRow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{title}</p>
+            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+              {title}
+            </p>
             <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--theme-fg-muted)]">
               {scopeLabel}
             </span>
           </div>
           <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
             <p className="truncate">
-              Workspace: <span className="text-[var(--theme-fg-soft)]">{workspaceLabel}</span>
+              Workspace:{' '}
+              <span className="text-[var(--theme-fg-soft)]">
+                {workspaceLabel}
+              </span>
             </p>
             <p className="truncate">
-              {grant.scope === 'thread' ? 'Thread' : 'Access'}: <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
+              {grant.scope === 'thread' ? 'Thread' : 'Access'}:{' '}
+              <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
             </p>
             {label ? (
               <p className="truncate">
-                Label: <span className="text-[var(--theme-fg-soft)]">{label}</span>
+                Label:{' '}
+                <span className="text-[var(--theme-fg-soft)]">{label}</span>
               </p>
             ) : null}
             <p className="truncate">
-              {mode === 'incoming' ? `From ${grant.ownerUsername}` : `To ${grant.targetUsername}`}
+              {mode === 'incoming'
+                ? `From ${grant.ownerUsername}`
+                : `To ${grant.targetUsername}`}
             </p>
             <p className="truncate">Device: {grant.deviceName}</p>
           </div>
@@ -993,7 +1104,9 @@ function GrantRow({
               type="button"
             >
               Access
-              <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              />
             </button>
             <button
               className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
@@ -1011,7 +1124,10 @@ function GrantRow({
           {grant.accessEvents.length ? (
             <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
               {grant.accessEvents.map((event) => (
-                <li className="flex items-center justify-between gap-3" key={event.id}>
+                <li
+                  className="flex items-center justify-between gap-3"
+                  key={event.id}
+                >
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-[var(--theme-fg)]">
                       {accessEventKindLabel(event.kind)}
@@ -1050,9 +1166,14 @@ function SharePermissionsDialog({
   share: RelaySessionShareDto;
 }) {
   const [label, setLabel] = useState(share.label ?? '');
-  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(share.threadAccess);
-  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(share.workspaceAccess);
-  const [expiresAt, setExpiresAt] = useState(toDatetimeLocalValue(share.expiresAt));
+  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(
+    share.threadAccess,
+  );
+  const [workspaceAccess, setWorkspaceAccess] =
+    useState<RelayWorkspaceAccessDto>(share.workspaceAccess);
+  const [expiresAt, setExpiresAt] = useState(
+    toDatetimeLocalValue(share.expiresAt),
+  );
   const workspaceAccessLocked = !share.workspaceId;
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1072,7 +1193,9 @@ function SharePermissionsDialog({
         onSubmit={submit}
       >
         <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared thread permissions</h2>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            Shared thread permissions
+          </h2>
           <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
             {share.targetUsername} can access {shareTitleText(share)}.
           </p>
@@ -1091,7 +1214,9 @@ function SharePermissionsDialog({
             Thread access
             <select
               className="relay-input mt-2 w-full"
-              onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+              onChange={(event) =>
+                setThreadAccess(event.target.value as RelayThreadAccessDto)
+              }
               value={threadAccess}
             >
               <option value="read">View only</option>
@@ -1103,7 +1228,11 @@ function SharePermissionsDialog({
             <select
               className="relay-input mt-2 w-full"
               disabled={workspaceAccessLocked}
-              onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+              onChange={(event) =>
+                setWorkspaceAccess(
+                  event.target.value as RelayWorkspaceAccessDto,
+                )
+              }
               value={workspaceAccessLocked ? 'none' : workspaceAccess}
             >
               <option value="none">No workspace</option>
@@ -1113,7 +1242,8 @@ function SharePermissionsDialog({
           </label>
           {workspaceAccessLocked ? (
             <p className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
-              This share was created without a workspace scope, so only thread access can be changed.
+              This share was created without a workspace scope, so only thread
+              access can be changed.
             </p>
           ) : null}
           <label className="block text-sm text-[var(--theme-fg-soft)]">
@@ -1131,10 +1261,19 @@ function SharePermissionsDialog({
           </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+          <button
+            className="relay-button-secondary"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
             Cancel
           </button>
-          <button className="relay-button-primary" disabled={busy} type="submit">
+          <button
+            className="relay-button-primary"
+            disabled={busy}
+            type="submit"
+          >
             Save permissions
           </button>
         </div>
@@ -1162,8 +1301,10 @@ function ShareDeviceDialog({
 }) {
   const [targetIdentifier, setTargetIdentifier] = useState('');
   const [label, setLabel] = useState('');
-  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>('read');
-  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>('read');
+  const [threadAccess, setThreadAccess] =
+    useState<RelayThreadAccessDto>('read');
+  const [workspaceAccess, setWorkspaceAccess] =
+    useState<RelayWorkspaceAccessDto>('read');
   const [canCreateThreads, setCanCreateThreads] = useState(false);
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1188,9 +1329,12 @@ function ShareDeviceDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
               Relay device
             </p>
-            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">Share {device.name}</h2>
+            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">
+              Share {device.name}
+            </h2>
             <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-              Give another relay account access to this device and its workspaces.
+              Give another relay account access to this device and its
+              workspaces.
             </p>
           </div>
           <button
@@ -1227,7 +1371,9 @@ function ShareDeviceDialog({
               Thread access
               <select
                 className="relay-input mt-2 w-full"
-                onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+                onChange={(event) =>
+                  setThreadAccess(event.target.value as RelayThreadAccessDto)
+                }
                 value={threadAccess}
               >
                 <option value="read">View only</option>
@@ -1238,7 +1384,11 @@ function ShareDeviceDialog({
               Workspace access
               <select
                 className="relay-input mt-2 w-full"
-                onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+                onChange={(event) =>
+                  setWorkspaceAccess(
+                    event.target.value as RelayWorkspaceAccessDto,
+                  )
+                }
                 value={workspaceAccess}
               >
                 <option value="none">No workspace</option>
@@ -1258,7 +1408,12 @@ function ShareDeviceDialog({
           </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+          <button
+            className="relay-button-secondary"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
             Cancel
           </button>
           <button
@@ -1293,10 +1448,17 @@ function GrantPermissionsDialog({
   }) => void;
 }) {
   const [label, setLabel] = useState(grant.label ?? '');
-  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(grant.threadAccess);
-  const [workspaceAccess, setWorkspaceAccess] = useState<RelayWorkspaceAccessDto>(grant.workspaceAccess);
-  const [canCreateThreads, setCanCreateThreads] = useState(grant.canCreateThreads);
-  const [expiresAt, setExpiresAt] = useState(toDatetimeLocalValue(grant.expiresAt));
+  const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(
+    grant.threadAccess,
+  );
+  const [workspaceAccess, setWorkspaceAccess] =
+    useState<RelayWorkspaceAccessDto>(grant.workspaceAccess);
+  const [canCreateThreads, setCanCreateThreads] = useState(
+    grant.canCreateThreads,
+  );
+  const [expiresAt, setExpiresAt] = useState(
+    toDatetimeLocalValue(grant.expiresAt),
+  );
   const canCreateThreadsAvailable = grant.scope !== 'thread';
   const workspaceAccessLocked = grant.scope === 'thread' && !grant.workspaceId;
 
@@ -1318,7 +1480,9 @@ function GrantPermissionsDialog({
         onSubmit={submit}
       >
         <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Shared access permissions</h2>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            Shared access permissions
+          </h2>
           <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
             {grant.targetUsername} can access {grantTitleText(grant)}.
           </p>
@@ -1338,7 +1502,9 @@ function GrantPermissionsDialog({
               Thread access
               <select
                 className="relay-input mt-2 w-full"
-                onChange={(event) => setThreadAccess(event.target.value as RelayThreadAccessDto)}
+                onChange={(event) =>
+                  setThreadAccess(event.target.value as RelayThreadAccessDto)
+                }
                 value={threadAccess}
               >
                 <option value="read">View only</option>
@@ -1350,7 +1516,11 @@ function GrantPermissionsDialog({
               <select
                 className="relay-input mt-2 w-full"
                 disabled={workspaceAccessLocked}
-                onChange={(event) => setWorkspaceAccess(event.target.value as RelayWorkspaceAccessDto)}
+                onChange={(event) =>
+                  setWorkspaceAccess(
+                    event.target.value as RelayWorkspaceAccessDto,
+                  )
+                }
                 value={workspaceAccessLocked ? 'none' : workspaceAccess}
               >
                 <option value="none">No workspace</option>
@@ -1385,10 +1555,19 @@ function GrantPermissionsDialog({
           </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="relay-button-secondary" disabled={busy} onClick={onClose} type="button">
+          <button
+            className="relay-button-secondary"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
             Cancel
           </button>
-          <button className="relay-button-primary" disabled={busy} type="submit">
+          <button
+            className="relay-button-primary"
+            disabled={busy}
+            type="submit"
+          >
             Save permissions
           </button>
         </div>
@@ -1416,6 +1595,13 @@ function DeviceRow({
   onShare: () => void;
   setupTokenAvailable: boolean;
 }) {
+  const hostedStatus = device.hostedStatus ?? null;
+  const canConnect = device.connected || hostedStatus === 'stopped';
+  const statusText = hostedStatus
+    ? hostedStatusLabel(hostedStatus)
+    : device.connected
+      ? 'Online'
+      : 'Offline';
   return (
     <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1423,18 +1609,31 @@ function DeviceRow({
           <div className="flex min-w-0 items-center gap-2">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                device.connected ? 'bg-[var(--status-success-fg)]' : 'bg-[var(--theme-fg-muted)]'
+                device.connected
+                  ? 'bg-[var(--status-success-fg)]'
+                  : 'bg-[var(--theme-fg-muted)]'
               }`}
             />
-            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{device.name}</p>
+            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+              {device.name}
+            </p>
+            {hostedStatus ? (
+              <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
+                Hosted · {statusText}
+              </span>
+            ) : null}
           </div>
           <p className="mt-1 font-mono text-xs text-[var(--theme-fg-muted)]">
             {device.tokenPreview}
           </p>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {device.connected
-              ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
-              : `Offline. Last heartbeat: ${formatRelayTimestamp(device.lastHeartbeatAt)}`}
+            {hostedStatus === 'stopped'
+              ? 'Stopped. Connect to wake this VM.'
+              : hostedStatus && hostedStatus !== 'online'
+                ? `${statusText}. The hosted supervisor is not ready yet.`
+                : device.connected
+                  ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
+                  : `Offline. Last heartbeat: ${formatRelayTimestamp(device.lastHeartbeatAt)}`}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
@@ -1446,7 +1645,7 @@ function DeviceRow({
                 ? 'Copy relay supervisor setup command'
                 : 'Device token is not available. Create a new device token for devices created before token storage was enabled.'
             }
-            disabled={!setupTokenAvailable}
+            disabled={!setupTokenAvailable || Boolean(hostedStatus)}
             type="button"
           >
             <Copy className="h-4 w-4" />
@@ -1454,12 +1653,12 @@ function DeviceRow({
           </button>
           <button
             className="relay-button-primary inline-flex h-10 items-center gap-2 whitespace-nowrap"
-            disabled={!device.connected}
+            disabled={!canConnect}
             onClick={onConnect}
             type="button"
           >
             <Plug className="h-4 w-4" />
-            Connect
+            {hostedStatus === 'stopped' ? 'Start & connect' : 'Connect'}
           </button>
           <button
             className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
@@ -1472,9 +1671,13 @@ function DeviceRow({
           <button
             aria-label={`Delete ${device.name}`}
             className="relay-button-secondary inline-flex h-10 w-10 items-center justify-center px-0"
-            disabled={busy}
+            disabled={busy || Boolean(hostedStatus)}
             onClick={onDelete}
-            title={`Delete ${device.name}`}
+            title={
+              hostedStatus
+                ? 'Hosted VMs are managed by a relay admin.'
+                : `Delete ${device.name}`
+            }
             type="button"
           >
             <Trash2 className="h-4 w-4" />
@@ -1483,7 +1686,8 @@ function DeviceRow({
       </div>
       {!setupTokenAvailable ? (
         <p className="mt-3 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
-          Token not available for this device. Create a new device token to copy a ready-to-run setup command.
+          Token not available for this device. Create a new device token to copy
+          a ready-to-run setup command.
         </p>
       ) : null}
     </article>
@@ -1583,6 +1787,12 @@ function formatRelayTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
 }
 
+function hostedStatusLabel(
+  status: NonNullable<RelayDeviceDto['hostedStatus']>,
+) {
+  return status.replace('_', ' ').replace(/^./, (value) => value.toUpperCase());
+}
+
 function toDatetimeLocalValue(value: string | null | undefined) {
   if (!value) {
     return '';
@@ -1632,7 +1842,11 @@ function grantTitleText(grant: RelayAccessGrantDto) {
     return grant.deviceName?.trim() || 'Shared device';
   }
   if (grant.scope === 'workspace') {
-    return grant.workspaceLabel?.trim() || grant.deviceName?.trim() || 'Shared workspace';
+    return (
+      grant.workspaceLabel?.trim() ||
+      grant.deviceName?.trim() ||
+      'Shared workspace'
+    );
   }
   return stableGrantThreadTitle(grant) ?? 'Thread unavailable';
 }

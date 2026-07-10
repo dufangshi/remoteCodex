@@ -10,6 +10,10 @@ import type {
   RelayAccessGrantDto,
   RelayCreateDeviceResultDto,
   RelayLoginResultDto,
+  RelayHostedSandboxCapabilityDto,
+  RelayHostedSandboxDetailDto,
+  RelayHostedSandboxDto,
+  RelayHostedSandboxOperationDto,
   RelayPortalSummaryDto,
   RelayRegisterResultDto,
   RelayRegistrationSettingsDto,
@@ -86,7 +90,7 @@ import {
 export class ApiError extends Error {
   constructor(
     public readonly statusCode: number,
-    public readonly payload: ApiErrorShape
+    public readonly payload: ApiErrorShape,
   ) {
     super(payload.message);
   }
@@ -176,14 +180,16 @@ function relayModeEnabled() {
   if (typeof window === 'undefined') {
     return false;
   }
-  return window.__REMOTE_CODEX_BOOTSTRAP__?.mode === 'relay' ||
+  return (
+    window.__REMOTE_CODEX_BOOTSTRAP__?.mode === 'relay' ||
     window.location.pathname.startsWith('/relay-portal') ||
     window.location.pathname.startsWith('/relay-admin') ||
     window.location.pathname.startsWith('/relay-account') ||
     window.location.pathname.startsWith('/relay-devices') ||
     window.location.pathname.startsWith('/relay-guide') ||
     window.location.search.includes('relay=1') ||
-    window.localStorage.getItem(RELAY_MODE_STORAGE_KEY) === 'true';
+    window.localStorage.getItem(RELAY_MODE_STORAGE_KEY) === 'true'
+  );
 }
 
 export function enableRelayMode() {
@@ -327,7 +333,10 @@ function normalizedApiErrorPayload(
 }
 
 async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
-  const fallbackMessage = fallbackErrorMessage(response.status, response.statusText);
+  const fallbackMessage = fallbackErrorMessage(
+    response.status,
+    response.statusText,
+  );
   const contentType = response.headers?.get?.('content-type') ?? '';
   const readJsonPayload = async () =>
     normalizedApiErrorPayload(
@@ -386,16 +395,23 @@ async function request<T>(
   options: { auth?: RequestAuthMode } = {},
 ): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+  if (
+    init?.body !== undefined &&
+    !(init.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json');
   }
 
   const response = await fetch(
     apiPath(String(input)),
-    withAuthInit({
-      ...init,
-      headers,
-    }, options.auth),
+    withAuthInit(
+      {
+        ...init,
+        headers,
+      },
+      options.auth,
+    ),
   );
 
   if (!response.ok) {
@@ -440,7 +456,10 @@ function parseContentDispositionFilename(value: string | null) {
   return plainMatch?.[1]?.trim() ?? null;
 }
 
-async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promise<FileDownloadResult> {
+async function downloadFile(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<FileDownloadResult> {
   const response = await fetch(apiPath(String(input)), withAuthInit(init));
 
   if (!response.ok) {
@@ -449,8 +468,9 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   }
 
   const filename =
-    parseContentDispositionFilename(response.headers.get('content-disposition')) ??
-    fallbackDownloadFilename(input);
+    parseContentDispositionFilename(
+      response.headers.get('content-disposition'),
+    ) ?? fallbackDownloadFilename(input);
 
   return {
     blob: await response.blob(),
@@ -458,7 +478,10 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   };
 }
 
-function withAuthInit(init: RequestInit = {}, authMode: RequestAuthMode = 'default'): RequestInit {
+function withAuthInit(
+  init: RequestInit = {},
+  authMode: RequestAuthMode = 'default',
+): RequestInit {
   const headers = new Headers(init.headers);
   const relayMode = relayModeEnabled();
   if (authMode !== 'none' && !headers.has('Authorization')) {
@@ -489,7 +512,10 @@ export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
   attachments?: PromptAttachmentUpload[];
 }
 
-function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
+function normalizedUploadFileName(
+  attachment: PromptAttachmentUpload,
+  index: number,
+) {
   const explicitName = attachment.originalName.trim();
   if (explicitName) {
     return explicitName;
@@ -500,7 +526,9 @@ function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: num
     return fileName;
   }
 
-  return attachment.kind === 'photo' ? `photo-${index + 1}.jpg` : `file-${index + 1}`;
+  return attachment.kind === 'photo'
+    ? `photo-${index + 1}.jpg`
+    : `file-${index + 1}`;
 }
 
 export function fetchRuntimeConfig() {
@@ -536,32 +564,50 @@ export function fetchRelaySession() {
   });
 }
 
-export async function relayLogin(input: { identifier: string; password: string }) {
+export async function relayLogin(input: {
+  identifier: string;
+  password: string;
+}) {
   enableRelayMode();
-  const result = await request<RelayLoginResultDto>('/relay/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  }, { auth: 'none' });
+  const result = await request<RelayLoginResultDto>(
+    '/relay/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    { auth: 'none' },
+  );
   setStoredRelayToken(result.token);
   return result;
 }
 
 export function fetchRelayAdminSession() {
   enableRelayMode();
-  return request<RelaySessionDto>('/relay/auth/session', {
-    cache: 'no-store',
-  }, { auth: 'relay-admin' });
+  return request<RelaySessionDto>(
+    '/relay/auth/session',
+    {
+      cache: 'no-store',
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
-export async function relayAdminLogin(input: { username: string; password: string }) {
+export async function relayAdminLogin(input: {
+  username: string;
+  password: string;
+}) {
   enableRelayMode();
-  const result = await request<RelayLoginResultDto>('/relay/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({
-      identifier: input.username,
-      password: input.password,
-    }),
-  }, { auth: 'none' });
+  const result = await request<RelayLoginResultDto>(
+    '/relay/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        identifier: input.username,
+        password: input.password,
+      }),
+    },
+    { auth: 'none' },
+  );
   setStoredRelayAdminToken(result.token);
   return result;
 }
@@ -578,10 +624,14 @@ export async function relayRegister(input: {
   registrationPassword?: string;
 }) {
   enableRelayMode();
-  const result = await request<RelayRegisterResultDto>('/relay/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  }, { auth: 'none' });
+  const result = await request<RelayRegisterResultDto>(
+    '/relay/auth/register',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    { auth: 'none' },
+  );
   setStoredRelayToken(result.token ?? null);
   return result;
 }
@@ -625,9 +675,12 @@ export function createRelayDevice(input: { name: string }) {
 }
 
 export function deleteRelayDevice(deviceId: string) {
-  return request<{ id: string }>(`/relay/devices/${encodeURIComponent(deviceId)}`, {
-    method: 'DELETE',
-  });
+  return request<{ id: string }>(
+    `/relay/devices/${encodeURIComponent(deviceId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export function updateRelayAccount(input: { username?: string }) {
@@ -654,17 +707,26 @@ export function createRelayShare(input: CreateRelaySessionShareInput) {
   });
 }
 
-export function updateRelayShare(shareId: string, input: UpdateRelaySessionShareInput) {
-  return request<RelaySessionShareDto>(`/relay/shares/${encodeURIComponent(shareId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  });
+export function updateRelayShare(
+  shareId: string,
+  input: UpdateRelaySessionShareInput,
+) {
+  return request<RelaySessionShareDto>(
+    `/relay/shares/${encodeURIComponent(shareId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export function revokeRelayShare(shareId: string) {
-  return request<RelaySessionShareDto>(`/relay/shares/${encodeURIComponent(shareId)}`, {
-    method: 'DELETE',
-  });
+  return request<RelaySessionShareDto>(
+    `/relay/shares/${encodeURIComponent(shareId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export function createRelayGrant(input: CreateRelayAccessGrantInput) {
@@ -674,65 +736,184 @@ export function createRelayGrant(input: CreateRelayAccessGrantInput) {
   });
 }
 
-export function updateRelayGrant(grantId: string, input: UpdateRelayAccessGrantInput) {
-  return request<RelayAccessGrantDto>(`/relay/grants/${encodeURIComponent(grantId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  });
+export function updateRelayGrant(
+  grantId: string,
+  input: UpdateRelayAccessGrantInput,
+) {
+  return request<RelayAccessGrantDto>(
+    `/relay/grants/${encodeURIComponent(grantId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export function revokeRelayGrant(grantId: string) {
-  return request<RelayAccessGrantDto>(`/relay/grants/${encodeURIComponent(grantId)}`, {
-    method: 'DELETE',
-  });
+  return request<RelayAccessGrantDto>(
+    `/relay/grants/${encodeURIComponent(grantId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export function fetchRelayAdmin(days?: number) {
   const query = days ? `?days=${encodeURIComponent(String(days))}` : '';
-  return request<RelayAdminSummaryDto>(`/relay/admin${query}`, undefined, { auth: 'relay-admin' });
+  return request<RelayAdminSummaryDto>(`/relay/admin${query}`, undefined, {
+    auth: 'relay-admin',
+  });
+}
+
+export function fetchHostedSandboxCapability() {
+  return request<RelayHostedSandboxCapabilityDto>(
+    '/relay/admin/hosted-sandboxes/capability',
+    undefined,
+    { auth: 'relay-admin' },
+  );
+}
+
+export function fetchHostedSandboxes() {
+  return request<{ sandboxes: RelayHostedSandboxDto[] }>(
+    '/relay/admin/hosted-sandboxes',
+    undefined,
+    { auth: 'relay-admin' },
+  );
+}
+
+export function fetchHostedSandbox(id: string) {
+  return request<RelayHostedSandboxDetailDto>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}`,
+    undefined,
+    { auth: 'relay-admin' },
+  );
+}
+
+export function createHostedSandbox(input: {
+  assignedUserId: string;
+  deviceName: string;
+  imageVersion: 'ubuntu-24.04-v1';
+  resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
+  openaiApiKey: string;
+}) {
+  return request<{
+    sandbox: RelayHostedSandboxDetailDto;
+    operation: RelayHostedSandboxOperationDto;
+  }>(
+    '/relay/admin/hosted-sandboxes',
+    { method: 'POST', body: JSON.stringify(input) },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function runHostedSandboxAction(
+  id: string,
+  action: 'start' | 'stop' | 'retry',
+) {
+  return request<{ operation: RelayHostedSandboxOperationDto }>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/${action}`,
+    { method: 'POST' },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function snapshotHostedSandbox(id: string, name: string) {
+  return request<{ operation: RelayHostedSandboxOperationDto }>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/snapshots`,
+    { method: 'POST', body: JSON.stringify({ name }) },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function rotateHostedSandboxCredential(
+  id: string,
+  openaiApiKey: string,
+) {
+  return request<{ operation: RelayHostedSandboxOperationDto }>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/rotate-credential`,
+    { method: 'POST', body: JSON.stringify({ openaiApiKey }) },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function deleteHostedSandbox(id: string) {
+  return request<{ operation: RelayHostedSandboxOperationDto }>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function setRelayRegistrationEnabled(enabled: boolean) {
   return updateRelayRegistrationSettings({ enabled });
 }
 
-export function updateRelayRegistrationSettings(input: Partial<RelayRegistrationSettingsDto>) {
-  return request<{ registrationEnabled: boolean; settings: RelayRegistrationSettingsDto }>('/relay/admin/settings/registration', {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  }, { auth: 'relay-admin' });
+export function updateRelayRegistrationSettings(
+  input: Partial<RelayRegistrationSettingsDto>,
+) {
+  return request<{
+    registrationEnabled: boolean;
+    settings: RelayRegistrationSettingsDto;
+  }>(
+    '/relay/admin/settings/registration',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function setRelayUserEnabled(userId: string, enabled: boolean) {
-  return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ enabled }),
-  }, { auth: 'relay-admin' });
+  return request<RelayUserDto>(
+    `/relay/admin/users/${encodeURIComponent(userId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function deleteRelayAdminUser(userId: string) {
-  return request<{ id: string }>(`/relay/admin/users/${encodeURIComponent(userId)}`, {
-    method: 'DELETE',
-  }, { auth: 'relay-admin' });
+  return request<{ id: string }>(
+    `/relay/admin/users/${encodeURIComponent(userId)}`,
+    {
+      method: 'DELETE',
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function resetRelayAdminUserPassword(userId: string, password: string) {
-  return request<RelayUserDto>(`/relay/admin/users/${encodeURIComponent(userId)}/reset-password`, {
-    method: 'POST',
-    body: JSON.stringify({ password }),
-  }, { auth: 'relay-admin' });
+  return request<RelayUserDto>(
+    `/relay/admin/users/${encodeURIComponent(userId)}/reset-password`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function approveRelayRegistration(requestId: string) {
-  return request<RelayUserDto>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/approve`, {
-    method: 'POST',
-  }, { auth: 'relay-admin' });
+  return request<RelayUserDto>(
+    `/relay/admin/registrations/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: 'POST',
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function rejectRelayRegistration(requestId: string) {
-  return request<{ id: string }>(`/relay/admin/registrations/${encodeURIComponent(requestId)}/reject`, {
-    method: 'POST',
-  }, { auth: 'relay-admin' });
+  return request<{ id: string }>(
+    `/relay/admin/registrations/${encodeURIComponent(requestId)}/reject`,
+    {
+      method: 'POST',
+    },
+    { auth: 'relay-admin' },
+  );
 }
 
 export function fetchWorkspaceSettings() {
@@ -794,7 +975,10 @@ export function fetchAgentBackendModels(provider: AgentBackendIdDto) {
   );
 }
 
-export function fetchProviderHostFile(provider: AgentBackendIdDto, name: string) {
+export function fetchProviderHostFile(
+  provider: AgentBackendIdDto,
+  name: string,
+) {
   return request<ProviderHostFileDto>(
     `/api/config/providers/${encodeURIComponent(provider)}/files/${encodeURIComponent(name)}`,
     {
@@ -853,7 +1037,10 @@ export function renameProviderHostConfigArchive(
   );
 }
 
-export function applyProviderHostConfigArchive(provider: AgentBackendIdDto, id: string) {
+export function applyProviderHostConfigArchive(
+  provider: AgentBackendIdDto,
+  id: string,
+) {
   return request<ApplyProviderHostConfigArchiveResultDto>(
     `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}/apply`,
     {
@@ -873,7 +1060,7 @@ export function buildAndRestartService() {
 
 export function fetchSupervisorHealth() {
   return request<HealthDto>('/healthz', {
-    cache: 'no-store'
+    cache: 'no-store',
   });
 }
 
@@ -938,7 +1125,10 @@ export function buildThreadImageAssetUrl(
   );
 }
 
-export function downloadWorkspaceFile(workspaceId: string, input: { path: string }) {
+export function downloadWorkspaceFile(
+  workspaceId: string,
+  input: { path: string },
+) {
   const params = new URLSearchParams({ path: input.path });
   return downloadFile(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`,
@@ -948,7 +1138,10 @@ export function downloadWorkspaceFile(workspaceId: string, input: { path: string
   );
 }
 
-export function uploadWorkspaceFile(workspaceId: string, input: { file: File }) {
+export function uploadWorkspaceFile(
+  workspaceId: string,
+  input: { file: File },
+) {
   const formData = new FormData();
   formData.append('file', input.file, input.file.name);
   return request<ThreadWorkspaceUploadResultDto>(
@@ -1027,12 +1220,18 @@ export function deletePlugin(pluginId: string) {
 }
 
 export function fetchThreadExportTurns(id: string) {
-  return request<ThreadExportTurnOptionsDto>(`/api/threads/${id}/export-turns`, {
-    cache: 'no-store',
-  });
+  return request<ThreadExportTurnOptionsDto>(
+    `/api/threads/${id}/export-turns`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
-export function buildThreadPdfExportUrl(id: string, input: ExportThreadPdfInput) {
+export function buildThreadPdfExportUrl(
+  id: string,
+  input: ExportThreadPdfInput,
+) {
   const params = new URLSearchParams();
   if (input.format !== undefined) {
     params.set('format', input.format);
@@ -1048,19 +1247,31 @@ export function buildThreadPdfExportUrl(id: string, input: ExportThreadPdfInput)
     params.set('profile', input.profile);
   }
   if (input.options?.includeTokenAndPrice !== undefined) {
-    params.set('includeTokenAndPrice', String(input.options.includeTokenAndPrice));
+    params.set(
+      'includeTokenAndPrice',
+      String(input.options.includeTokenAndPrice),
+    );
   }
   if (input.options?.includeCommandOutput !== undefined) {
-    params.set('includeCommandOutput', String(input.options.includeCommandOutput));
+    params.set(
+      'includeCommandOutput',
+      String(input.options.includeCommandOutput),
+    );
   }
   if (input.options?.includeAbsolutePaths !== undefined) {
-    params.set('includeAbsolutePaths', String(input.options.includeAbsolutePaths));
+    params.set(
+      'includeAbsolutePaths',
+      String(input.options.includeAbsolutePaths),
+    );
   }
 
   return `/api/threads/${encodeURIComponent(id)}/exports/pdf?${params.toString()}`;
 }
 
-export function downloadThreadPdfExport(id: string, input: ExportThreadPdfInput) {
+export function downloadThreadPdfExport(
+  id: string,
+  input: ExportThreadPdfInput,
+) {
   return downloadFile(buildThreadPdfExportUrl(id, input), {
     cache: 'no-store',
   });
@@ -1082,60 +1293,66 @@ export function fetchThreadShellState(id: string) {
 export function createThread(input: CreateThreadInput) {
   return request<ThreadDto>('/api/threads/start', {
     method: 'POST',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
-export function importThread(input: ImportThreadInput | ImportThreadInput['sessionId']) {
-  const body = typeof input === 'string'
-    ? { sessionId: input }
-    : input;
+export function importThread(
+  input: ImportThreadInput | ImportThreadInput['sessionId'],
+) {
+  const body = typeof input === 'string' ? { sessionId: input } : input;
   return request<ThreadDetailDto>('/api/threads/import', {
     method: 'POST',
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
 }
 
-export function createThreadShell(id: string, input: { cols?: number; rows?: number; label?: string } = {}) {
+export function createThreadShell(
+  id: string,
+  input: { cols?: number; rows?: number; label?: string } = {},
+) {
   return request<ThreadShellStateDto>(`/api/threads/${id}/shell`, {
     method: 'POST',
-    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {})
+    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
   });
 }
 
 export function terminateShell(id: string) {
   return request<ShellSessionDto>(`/api/shells/${id}/terminate`, {
-    method: 'POST'
+    method: 'POST',
   });
 }
 
 export function updateShell(id: string, input: UpdateShellInput) {
   return request<ShellSessionDto>(`/api/shells/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
 export function resumeThread(id: string, input: ResumeThreadInput = {}) {
   return request<ThreadDetailDto>(`/api/threads/${id}/resume`, {
     method: 'POST',
-    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {})
+    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
   });
 }
 
 export function disconnectThread(id: string) {
   return request<ThreadDetailDto>(`/api/threads/${id}/disconnect`, {
-    method: 'POST'
+    method: 'POST',
   });
 }
 
-export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput) {
+export function sendThreadPrompt(
+  id: string,
+  input: SendThreadPromptRequestInput,
+) {
   const attachments = input.attachments ?? [];
 
   if (attachments.length === 0) {
     return request<ThreadDto>(`/api/threads/${id}/prompt`, {
       method: 'POST',
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   }
 
@@ -1159,14 +1376,12 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
       PromptAttachmentUpload,
       'clientId' | 'kind' | 'originalName' | 'placeholder'
     >
-  > = attachments.map(
-    (attachment, index) => ({
-      clientId: attachment.clientId,
-      kind: attachment.kind,
-      originalName: normalizedUploadFileName(attachment, index),
-      placeholder: attachment.placeholder,
-    }),
-  );
+  > = attachments.map((attachment, index) => ({
+    clientId: attachment.clientId,
+    kind: attachment.kind,
+    originalName: normalizedUploadFileName(attachment, index),
+    placeholder: attachment.placeholder,
+  }));
   formData.append('attachmentManifest', JSON.stringify(manifest));
   for (const [index, attachment] of attachments.entries()) {
     formData.append(
@@ -1178,27 +1393,27 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
 
   return request<ThreadDto>(`/api/threads/${id}/prompt`, {
     method: 'POST',
-    body: formData
+    body: formData,
   });
 }
 
 export function interruptThread(id: string, input: InterruptTurnInput = {}) {
   return request<ThreadDto>(`/api/threads/${id}/interrupt`, {
     method: 'POST',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
 export function updateThread(id: string, input: UpdateThreadInput) {
   return request<ThreadDto>(`/api/threads/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
 export function deleteThread(id: string) {
   return request<{ id: string }>(`/api/threads/${id}`, {
-    method: 'DELETE'
+    method: 'DELETE',
   });
 }
 
@@ -1211,10 +1426,13 @@ export function cancelPendingSteer(id: string, pendingSteerId: string) {
   );
 }
 
-export function updateThreadSettings(id: string, input: UpdateThreadSettingsInput) {
+export function updateThreadSettings(
+  id: string,
+  input: UpdateThreadSettingsInput,
+) {
   return request<ThreadDto>(`/api/threads/${id}/settings`, {
     method: 'PATCH',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
@@ -1238,9 +1456,12 @@ export function updateThreadGoal(id: string, input: UpdateThreadGoalInput) {
 }
 
 export function clearThreadGoal(id: string) {
-  return request<{ cleared: boolean; goalHistory?: ThreadGoalDto[] }>(`/api/threads/${id}/goal`, {
-    method: 'DELETE',
-  });
+  return request<{ cleared: boolean; goalHistory?: ThreadGoalDto[] }>(
+    `/api/threads/${id}/goal`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export function fetchThreadForkTurns(id: string) {
@@ -1281,10 +1502,7 @@ export function createThreadHook(id: string, input: CreateThreadHookInput) {
   });
 }
 
-export function updateThreadHook(
-  id: string,
-  input: UpdateThreadHookInput,
-) {
+export function updateThreadHook(id: string, input: UpdateThreadHookInput) {
   return request<ThreadHooksDto>(`/api/threads/${id}/hooks`, {
     method: 'PUT',
     body: JSON.stringify(input),
@@ -1308,25 +1526,28 @@ export function untrustThreadHook(id: string, input: UntrustThreadHookInput) {
 export function respondToThreadRequest(
   id: string,
   requestId: string,
-  input: RespondThreadActionRequestInput
+  input: RespondThreadActionRequestInput,
 ) {
-  return request<ThreadDetailDto>(`/api/threads/${id}/requests/${encodeURIComponent(requestId)}/respond`, {
-    method: 'POST',
-    body: JSON.stringify(input)
-  });
+  return request<ThreadDetailDto>(
+    `/api/threads/${id}/requests/${encodeURIComponent(requestId)}/respond`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export function createWorkspace(input: CreateWorkspaceInput) {
   return request<WorkspaceDto>('/api/workspaces', {
     method: 'POST',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
 export function updateWorkspace(id: string, input: UpdateWorkspaceInput) {
   return request<WorkspaceDto>(`/api/workspaces/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
@@ -1335,27 +1556,37 @@ export type DeleteWorkspaceConfirmationInput = {
   confirmLabel: string;
 };
 
-export function deleteWorkspace(id: string, input: DeleteWorkspaceConfirmationInput) {
+export function deleteWorkspace(
+  id: string,
+  input: DeleteWorkspaceConfirmationInput,
+) {
   return request<{ id: string }>(`/api/workspaces/${id}`, {
     method: 'DELETE',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
-export function updateWorkspaceFavorite(id: string, input: UpdateWorkspaceFavoriteInput) {
+export function updateWorkspaceFavorite(
+  id: string,
+  input: UpdateWorkspaceFavoriteInput,
+) {
   return request<WorkspaceDto>(`/api/workspaces/${id}/favorite`, {
     method: 'POST',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
-export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) => void) {
+export function connectSupervisorEvents(
+  onEvent: (event: ThreadEventEnvelope) => void,
+) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
-      const parsed = JSON.parse(message.data as string) as SupervisorSocketServerEnvelope;
+      const parsed = JSON.parse(
+        message.data as string,
+      ) as SupervisorSocketServerEnvelope;
       if (isThreadEventEnvelope(parsed)) {
         onEvent(parsed);
       }
@@ -1371,14 +1602,16 @@ export function connectShellSocket(
   handlers: {
     onConnected?: (event: SupervisorConnectedEnvelope) => void;
     onShellEvent?: (event: ShellEventEnvelope) => void;
-  } = {}
+  } = {},
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
-      const parsed = JSON.parse(message.data as string) as SupervisorSocketServerEnvelope;
+      const parsed = JSON.parse(
+        message.data as string,
+      ) as SupervisorSocketServerEnvelope;
       if (parsed.type === 'supervisor.connected') {
         handlers.onConnected?.(parsed);
         return;
@@ -1395,7 +1628,7 @@ export function connectShellSocket(
     socket,
     send(message: SupervisorSocketClientEnvelope) {
       socket.send(JSON.stringify(message));
-    }
+    },
   };
 }
 

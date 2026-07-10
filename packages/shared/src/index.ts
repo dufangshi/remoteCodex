@@ -108,6 +108,9 @@ export interface RelayDeviceDto {
   connectedAt: string | null;
   lastHeartbeatAt: string | null;
   createdAt: string;
+  hostedStatus?: RelayHostedSandboxStatusDto | null;
+  hostedActiveTurnCount?: number;
+  hostedIdleDeadlineAt?: string | null;
 }
 
 export interface RelayAdminUserDto extends RelayUserDto {
@@ -347,6 +350,73 @@ export interface RelayHostedSandboxCapabilityDto {
   checkedAt: string;
 }
 
+export type RelayHostedSandboxStatusDto =
+  | 'requested'
+  | 'creating'
+  | 'starting'
+  | 'provisioning'
+  | 'stopped'
+  | 'online'
+  | 'stopping'
+  | 'error'
+  | 'deleting';
+
+export type RelayHostedSandboxOperationActionDto =
+  | 'create'
+  | 'start'
+  | 'stop'
+  | 'snapshot'
+  | 'delete'
+  | 'rotate_credential';
+
+export type RelayHostedSandboxOperationStatusDto =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed';
+
+export interface RelayHostedSandboxResourcesDto {
+  cpuCount: number;
+  memoryMiB: number;
+  diskGiB: number;
+}
+
+export interface RelayHostedSandboxDto {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  assignedUserId: string;
+  assignedUsername: string;
+  createdByAdminUserId: string;
+  provider: 'incus';
+  providerInstanceId: string | null;
+  imageVersion: string;
+  resources: RelayHostedSandboxResourcesDto;
+  status: RelayHostedSandboxStatusDto;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  activeTurnCount: number;
+  lastUserActivityAt: string | null;
+  idleDeadlineAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RelayHostedSandboxOperationDto {
+  id: string;
+  sandboxId: string;
+  action: RelayHostedSandboxOperationActionDto;
+  status: RelayHostedSandboxOperationStatusDto;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RelayHostedSandboxDetailDto extends RelayHostedSandboxDto {
+  operations: RelayHostedSandboxOperationDto[];
+}
+
 export type RelaySupervisorEnvelope =
   | {
       type: 'relay.connected';
@@ -357,6 +427,16 @@ export type RelaySupervisorEnvelope =
       type: 'relay.heartbeat';
       timestamp: string;
       deviceId?: string;
+    }
+  | {
+      type: 'relay.activity';
+      timestamp: string;
+      deviceId?: string;
+      payload: {
+        kind: 'turn_started' | 'turn_terminal';
+        threadId: string;
+        turnId: string;
+      };
     }
   | {
       type: 'relay.request';

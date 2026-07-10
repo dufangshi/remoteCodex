@@ -32,7 +32,9 @@ function testConfig(
       provider: 'disabled',
       agentUrl: null,
       agentToken: null,
+      relayServerUrl: null,
       requestTimeoutMs: 25,
+      idleTimeoutMs: 600_000,
     },
     ...overrides,
   };

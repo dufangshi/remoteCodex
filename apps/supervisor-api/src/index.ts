@@ -8,6 +8,23 @@ if (fs.existsSync('.env')) {
 
 const app = buildApp();
 const { host, port } = app.services.config;
+let closing = false;
+
+async function shutdown(signal: string) {
+  if (closing) return;
+  closing = true;
+  app.log.info(`Supervisor API received ${signal}; closing cleanly.`);
+  try {
+    await app.close();
+    process.exit(0);
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
+}
+
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 app
   .listen({ host, port })

@@ -60,31 +60,43 @@ export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
     };
   }
 
-  createCredential(): Promise<string> {
+  createCredential(
+    _openaiApiKey: string,
+    _idempotencyKey: string,
+  ): Promise<string> {
     return this.disabled();
   }
-  deleteCredential(): Promise<void> {
+  deleteCredential(
+    _credentialRef: string,
+    _idempotencyKey: string,
+  ): Promise<void> {
     return this.disabled();
   }
-  create(): Promise<HostedSandboxInstance> {
+  create(
+    _input: HostedSandboxCreateInput,
+    _idempotencyKey: string,
+  ): Promise<HostedSandboxInstance> {
     return this.disabled();
   }
-  status(): Promise<HostedSandboxInstance> {
+  status(_id: string): Promise<HostedSandboxInstance> {
     return this.disabled();
   }
-  start(): Promise<HostedSandboxInstance> {
+  start(_id: string, _idempotencyKey: string): Promise<HostedSandboxInstance> {
     return this.disabled();
   }
-  stop(): Promise<HostedSandboxInstance> {
+  stop(_id: string, _idempotencyKey: string): Promise<HostedSandboxInstance> {
     return this.disabled();
   }
-  snapshot(): Promise<void> {
+  snapshot(_id: string, _name: string, _idempotencyKey: string): Promise<void> {
     return this.disabled();
   }
-  delete(): Promise<void> {
+  delete(_id: string, _idempotencyKey: string): Promise<void> {
     return this.disabled();
   }
-  provision(): Promise<void> {
+  provision(
+    _input: HostedSandboxProvisionInput,
+    _idempotencyKey: string,
+  ): Promise<void> {
     return this.disabled();
   }
 

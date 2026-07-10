@@ -88,6 +88,7 @@ jobs:
             container="${{ env.RELAY_CONTAINER_NAME }}"
             host_port="${{ env.RELAY_HOST_PORT }}"
             data_volume="${{ env.RELAY_CONTAINER_NAME }}-data"
+            hosted_relay_url="${{ secrets.REMOTE_CODEX_HOSTED_RELAY_SERVER_URL }}"
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
             docker pull "${image}"
@@ -115,11 +116,41 @@ jobs:
             fi
 
             docker volume create "${data_volume}" >/dev/null
+            docker network inspect remote-codex-relay-net >/dev/null 2>&1 || \
+              docker network create \
+                --driver bridge \
+                --subnet 172.30.0.0/24 \
+                --gateway 172.30.0.1 \
+                remote-codex-relay-net >/dev/null
+
+            hosted_args=(--network remote-codex-relay-net)
+            if [ -n "${hosted_relay_url}" ] \
+              && sudo test -r /etc/remote-codex/incus-host-agent.env \
+              && sudo systemctl is-active --quiet remote-codex-incus-host-agent.service; then
+              host_agent_token="$(sudo sed -n 's/^REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN=//p' /etc/remote-codex/incus-host-agent.env)"
+              if [ -n "${host_agent_token}" ] \
+                && curl -fsS -H "authorization: Bearer ${host_agent_token}" \
+                  http://172.30.0.1:8801/readyz >/dev/null; then
+                hosted_args+=(
+                  -e REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER=incus
+                  -e REMOTE_CODEX_INCUS_HOST_AGENT_URL=http://172.30.0.1:8801
+                  -e "REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN=${host_agent_token}"
+                  -e "REMOTE_CODEX_HOSTED_RELAY_SERVER_URL=${hosted_relay_url}"
+                  -e REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS=600000
+                )
+                echo "Hosted supervisor provider enabled."
+              else
+                echo "Hosted supervisor provider unavailable; deploying relay with it disabled."
+              fi
+            else
+              echo "Hosted supervisor provider not configured; deploying relay with it disabled."
+            fi
 
             docker run -d \
               --name "${container}" \
               --label app=remote-codex-relay \
               --restart unless-stopped \
+              "${hosted_args[@]}" \
               -p "0.0.0.0:${host_port}:8788" \
               -v "${data_volume}:/var/lib/remote-codex-relay" \
               -e REMOTE_CODEX_RELAY_HOST=0.0.0.0 \

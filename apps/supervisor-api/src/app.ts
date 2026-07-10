@@ -12,7 +12,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ZodError } from 'zod';
 
-import { loadRuntimeConfig, RuntimeConfig } from '../../../packages/config/src/index';
+import {
+  loadRuntimeConfig,
+  RuntimeConfig,
+} from '../../../packages/config/src/index';
 import {
   AgentRuntimeManagementError,
   AgentRuntimeError,
@@ -23,7 +26,7 @@ import {
   createDatabase,
   DatabaseContext,
   runMigrations,
-  seedDefaults
+  seedDefaults,
 } from '../../../packages/db/src/index';
 import {
   ApiErrorShape,
@@ -46,7 +49,10 @@ import { registerWorkspaceRoutes } from './routes/workspaces';
 import { registerPluginRoutes } from './routes/plugins';
 import { registerAuthRoutes } from './routes/auth';
 import { ProviderHostConfigService } from './provider-host-config-service';
-import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
+import {
+  ShellServiceError,
+  ShellSessionService,
+} from './shell/shell-session-service';
 import type { ShellBackend } from './shell/shell-backend';
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
@@ -63,12 +69,18 @@ type WebsocketLike = {
   readyState: number;
   send: (message: string) => void;
   close: (code?: number, reason?: string) => void;
-  on(event: 'message', handler: (message: Buffer | ArrayBuffer | string) => void): void;
+  on(
+    event: 'message',
+    handler: (message: Buffer | ArrayBuffer | string) => void,
+  ): void;
   on(event: 'close', handler: () => void): void;
 };
 
 type WebsocketRouteOptions = RouteOptions & {
-  wsHandler: (socket: WebsocketLike, request: FastifyRequest) => void | Promise<void>;
+  wsHandler: (
+    socket: WebsocketLike,
+    request: FastifyRequest,
+  ) => void | Promise<void>;
 };
 
 const MAX_PROMPT_ATTACHMENTS = 10;
@@ -81,10 +93,7 @@ const DEFAULT_WEBVIEW_CORS_ORIGINS = new Set([
   'https://localhost',
   'https://appassets.androidplatform.net',
 ]);
-const WEBVIEW_CORS_ALLOW_HEADERS = [
-  'authorization',
-  'content-type',
-].join(', ');
+const WEBVIEW_CORS_ALLOW_HEADERS = ['authorization', 'content-type'].join(', ');
 const WEBVIEW_CORS_ALLOW_METHODS = [
   'GET',
   'POST',
@@ -98,17 +107,15 @@ function webViewCorsOrigins(env: NodeJS.ProcessEnv) {
   if (env.REMOTE_CODEX_ENABLE_WEBVIEW_CORS !== 'true') {
     return null;
   }
-  const configured = env.REMOTE_CODEX_WEBVIEW_CORS_ORIGINS
-    ?.split(',')
+  const configured = env.REMOTE_CODEX_WEBVIEW_CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  return new Set(configured?.length ? configured : DEFAULT_WEBVIEW_CORS_ORIGINS);
+  return new Set(
+    configured?.length ? configured : DEFAULT_WEBVIEW_CORS_ORIGINS,
+  );
 }
 
-function applyWebViewCorsHeaders(
-  reply: FastifyReply,
-  origin: string,
-) {
+function applyWebViewCorsHeaders(reply: FastifyReply, origin: string) {
   reply.header('access-control-allow-origin', origin);
   reply.header('access-control-allow-methods', WEBVIEW_CORS_ALLOW_METHODS);
   reply.header('access-control-allow-headers', WEBVIEW_CORS_ALLOW_HEADERS);
@@ -128,7 +135,7 @@ export const SUPERVISOR_LOG_REDACTION_PATHS = [
 class HttpError extends Error {
   constructor(
     public readonly statusCode: number,
-    public readonly payload: ApiErrorShape
+    public readonly payload: ApiErrorShape,
   ) {
     super(payload.message);
   }
@@ -185,8 +192,15 @@ function createServiceLifecycle() {
       }
 
       const repoRoot = findRepoRoot();
-      const restartScript = path.join(repoRoot, 'scripts', 'service-restart.mjs');
-      if (!fs.existsSync(restartScript) || !fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
+      const restartScript = path.join(
+        repoRoot,
+        'scripts',
+        'service-restart.mjs',
+      );
+      if (
+        !fs.existsSync(restartScript) ||
+        !fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))
+      ) {
         throw new HttpError(503, {
           code: 'service_unavailable',
           message:
@@ -222,7 +236,7 @@ export function buildApp(
     shellBackend?: ShellBackend;
     serviceLifecycle?: AppServices['serviceLifecycle'];
     relayTunnelClient?: RelayTunnelClient;
-  } = {}
+  } = {},
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
   runMigrations(config.databaseUrl);
@@ -234,7 +248,8 @@ export function buildApp(
   const pluginSettingsStore = new PluginSettingsStore(database.db);
   const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
   const authService = new AuthService(config);
-  const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
+  const runtimeBootstrap =
+    options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
   const repoRoot = findRepoRoot();
   const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
   const threadService = new ThreadService(
@@ -270,9 +285,11 @@ export function buildApp(
               censor: '[redacted]',
             },
           },
-    disableRequestLogging: config.disableRequestLogging
+    disableRequestLogging: config.disableRequestLogging,
   });
-  const allowedWebViewCorsOrigins = webViewCorsOrigins(options.env ?? process.env);
+  const allowedWebViewCorsOrigins = webViewCorsOrigins(
+    options.env ?? process.env,
+  );
 
   app.addHook('onRequest', async (request, reply) => {
     if (!allowedWebViewCorsOrigins) {
@@ -288,28 +305,64 @@ export function buildApp(
     }
   });
 
-  app.register(multipart as unknown as FastifyPluginCallback<Record<string, unknown>>, {
-    limits: {
-      files: MAX_PROMPT_ATTACHMENTS,
-      fileSize: MAX_PROMPT_ATTACHMENT_BYTES,
-    },
-  } as Record<string, unknown>);
+  app.register(
+    multipart as unknown as FastifyPluginCallback<Record<string, unknown>>,
+    {
+      limits: {
+        files: MAX_PROMPT_ATTACHMENTS,
+        fileSize: MAX_PROMPT_ATTACHMENT_BYTES,
+      },
+    } as Record<string, unknown>,
+  );
 
   const backendPluginHost = new BackendPluginHost(app);
   backendPluginHost.register(createTerminalPluginBackendContribution());
-  const relaySocketBridge = createRelaySocketBridge(app, eventBus, backendPluginHost);
+  const relaySocketBridge = createRelaySocketBridge(
+    app,
+    eventBus,
+    backendPluginHost,
+  );
   const relayTunnelClient =
     config.mode === 'relay'
       ? (options.relayTunnelClient ??
-          new RelayTunnelClient(
-            config.relay,
-            createRelayRequestHandler(app),
-            relaySocketBridge.handleConnected,
-            relaySocketBridge.handleMessage,
-          )
-        )
+        new RelayTunnelClient(
+          config.relay,
+          createRelayRequestHandler(app),
+          relaySocketBridge.handleConnected,
+          relaySocketBridge.handleMessage,
+        ))
       : null;
   relayTunnelClient?.validateConfig();
+  const cleanupRelayActivity = relayTunnelClient
+    ? eventBus.onThreadEvent((event) => {
+        if (event.type === 'thread.turn.started') {
+          relayTunnelClient.sendActivity({
+            kind: 'turn_started',
+            threadId: event.threadId,
+            turnId: event.payload.turnId,
+          });
+          return;
+        }
+        if (event.type === 'thread.turn.completed') {
+          relayTunnelClient.sendActivity({
+            kind: 'turn_terminal',
+            threadId: event.threadId,
+            turnId: event.payload.turnId,
+          });
+          return;
+        }
+        if (
+          event.type === 'thread.turn.failed' &&
+          event.payload.willRetry !== true
+        ) {
+          relayTunnelClient.sendActivity({
+            kind: 'turn_terminal',
+            threadId: event.threadId,
+            turnId: event.payload.turnId,
+          });
+        }
+      })
+    : null;
 
   app.decorate('services', {
     config,
@@ -324,7 +377,7 @@ export function buildApp(
     pluginService,
     authService,
     relayTunnelClient,
-    repoRoot
+    repoRoot,
   });
 
   app.addHook('onRequest', async (request, reply) => {
@@ -346,7 +399,10 @@ export function buildApp(
       return;
     }
 
-    if (config.mode === 'relay' && request.headers[RELAY_FORWARD_HEADER] === '1') {
+    if (
+      config.mode === 'relay' &&
+      request.headers[RELAY_FORWARD_HEADER] === '1'
+    ) {
       return;
     }
 
@@ -365,7 +421,7 @@ export function buildApp(
       handler: (_request, reply) => {
         reply.status(426).send({
           code: 'bad_request',
-          message: 'Upgrade to websocket is required.'
+          message: 'Upgrade to websocket is required.',
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket, request) => {
@@ -410,7 +466,7 @@ export function buildApp(
   app.setNotFoundHandler((_request, reply) => {
     reply.status(404).send({
       code: 'not_found',
-      message: 'The requested endpoint was not found.'
+      message: 'The requested endpoint was not found.',
     } satisfies ApiErrorShape);
   });
 
@@ -430,8 +486,8 @@ export function buildApp(
         code: 'bad_request',
         message: 'The request payload is invalid.',
         details: {
-          issues: error.issues
-        }
+          issues: error.issues,
+        },
       } satisfies ApiErrorShape);
       return;
     }
@@ -450,7 +506,7 @@ export function buildApp(
             : statusCode === 404
               ? 'not_found'
               : 'bad_request',
-        message: error.message
+        message: error.message,
       };
 
       if (error.details) {
@@ -493,7 +549,7 @@ export function buildApp(
     if (error instanceof AgentRuntimeError) {
       const payload: ApiErrorShape = {
         code: 'service_unavailable',
-        message: error.message
+        message: error.message,
       };
 
       if (error.details) {
@@ -542,7 +598,11 @@ export function buildApp(
         code: 'bad_request',
         message: error.message || 'Request could not be processed.',
       };
-      if ('details' in error && error.details && typeof error.details === 'object') {
+      if (
+        'details' in error &&
+        error.details &&
+        typeof error.details === 'object'
+      ) {
         payload.details = error.details as Record<string, unknown>;
       }
       reply.status(error.statusCode).send(payload);
@@ -552,11 +612,12 @@ export function buildApp(
     requestLog(app, error);
     reply.status(500).send({
       code: 'internal_error',
-      message: 'An unexpected server error occurred.'
+      message: 'An unexpected server error occurred.',
     } satisfies ApiErrorShape);
   });
 
   app.addHook('onClose', async () => {
+    cleanupRelayActivity?.();
     await shellService.stop();
     relayTunnelClient?.stop();
     await Promise.all(agentRuntimes.all().map((runtime) => runtime.stop()));
@@ -614,7 +675,9 @@ export function createRelayRequestHandler(app: FastifyInstance) {
       statusCode: response.statusCode,
       headers: relayResponseHeaders(response.headers),
       body: responseBody.body,
-      ...(responseBody.bodyEncoding ? { bodyEncoding: responseBody.bodyEncoding } : {}),
+      ...(responseBody.bodyEncoding
+        ? { bodyEncoding: responseBody.bodyEncoding }
+        : {}),
     };
   };
 }
@@ -662,7 +725,9 @@ function isTextRelayResponse(contentType: string) {
   );
 }
 
-export function createRelayClientConnectedHandler(eventBus: SupervisorEventBus) {
+export function createRelayClientConnectedHandler(
+  eventBus: SupervisorEventBus,
+) {
   return function handleRelayClientConnected(
     _clientId: string,
     send: (message: SupervisorSocketServerEnvelope) => void,
@@ -758,7 +823,10 @@ export function createRelaySocketBridge(
   eventBus: SupervisorEventBus,
   backendPluginHost: BackendPluginHost,
 ) {
-  const sessions = new Map<string, ReturnType<typeof createSupervisorSocketSession>>();
+  const sessions = new Map<
+    string,
+    ReturnType<typeof createSupervisorSocketSession>
+  >();
 
   return {
     handleConnected(
@@ -803,7 +871,8 @@ export function handleRelayClientMessage(
     type: 'supervisor.pong',
     timestamp: new Date().toISOString(),
     payload: {
-      requestTimestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
+      requestTimestamp:
+        typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
     },
   });
 }
