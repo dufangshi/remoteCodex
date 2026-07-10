@@ -3,6 +3,48 @@ import type { RelayServerConfig } from './config';
 
 export interface HostedSandboxProvider {
   capability(signal?: AbortSignal): Promise<RelayHostedSandboxCapabilityDto>;
+  createCredential(
+    openaiApiKey: string,
+    idempotencyKey: string,
+  ): Promise<string>;
+  deleteCredential(
+    credentialRef: string,
+    idempotencyKey: string,
+  ): Promise<void>;
+  create(
+    input: HostedSandboxCreateInput,
+    idempotencyKey: string,
+  ): Promise<HostedSandboxInstance>;
+  status(id: string): Promise<HostedSandboxInstance>;
+  start(id: string, idempotencyKey: string): Promise<HostedSandboxInstance>;
+  stop(id: string, idempotencyKey: string): Promise<HostedSandboxInstance>;
+  snapshot(id: string, name: string, idempotencyKey: string): Promise<void>;
+  delete(id: string, idempotencyKey: string): Promise<void>;
+  provision(
+    input: HostedSandboxProvisionInput,
+    idempotencyKey: string,
+  ): Promise<void>;
+}
+
+export interface HostedSandboxCreateInput {
+  id: string;
+  imageVersion: string;
+  resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
+}
+
+export interface HostedSandboxProvisionInput {
+  id: string;
+  relayServerUrl: string;
+  relayAgentToken: string;
+  credentialRef: string;
+  localAdminUsername?: string;
+}
+
+export interface HostedSandboxInstance {
+  id: string;
+  name: string;
+  status: string;
+  statusCode: number | null;
 }
 
 export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
@@ -17,26 +59,182 @@ export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
       checkedAt: new Date().toISOString(),
     };
   }
+
+  createCredential(): Promise<string> {
+    return this.disabled();
+  }
+  deleteCredential(): Promise<void> {
+    return this.disabled();
+  }
+  create(): Promise<HostedSandboxInstance> {
+    return this.disabled();
+  }
+  status(): Promise<HostedSandboxInstance> {
+    return this.disabled();
+  }
+  start(): Promise<HostedSandboxInstance> {
+    return this.disabled();
+  }
+  stop(): Promise<HostedSandboxInstance> {
+    return this.disabled();
+  }
+  snapshot(): Promise<void> {
+    return this.disabled();
+  }
+  delete(): Promise<void> {
+    return this.disabled();
+  }
+  provision(): Promise<void> {
+    return this.disabled();
+  }
+
+  private disabled<T>(): Promise<T> {
+    return Promise.reject(new Error('Hosted sandbox provider is disabled.'));
+  }
 }
 
-class PendingIncusHostedSandboxProvider implements HostedSandboxProvider {
+export class IncusHostedSandboxProvider implements HostedSandboxProvider {
   constructor(private readonly config: RelayServerConfig['hostedSandbox']) {}
 
-  async capability(): Promise<RelayHostedSandboxCapabilityDto> {
-    const configured = Boolean(this.config.agentUrl && this.config.agentToken);
+  async capability(
+    signal?: AbortSignal,
+  ): Promise<RelayHostedSandboxCapabilityDto> {
+    const result = await this.request<{
+      available: boolean;
+      credentialStoreReady?: boolean;
+    }>('/v1/capability', signal ? { signal } : {});
+    const available = result.available && result.credentialStoreReady === true;
     return {
       provider: 'incus',
-      configured,
-      reachable: false,
-      available: false,
-      reasonCode: configured
-        ? 'incus_host_agent_not_connected'
-        : 'incus_host_agent_not_configured',
-      reason: configured
-        ? 'The Incus host-agent client is not enabled in this relay build yet.'
-        : 'The Incus provider requires a host-agent URL and token.',
+      configured: true,
+      reachable: true,
+      available,
+      reasonCode: available ? null : 'incus_host_agent_not_ready',
+      reason: available
+        ? null
+        : 'Incus or encrypted credential storage is not ready.',
       checkedAt: new Date().toISOString(),
     };
+  }
+
+  async createCredential(openaiApiKey: string, idempotencyKey: string) {
+    const result = await this.request<{ credentialRef: string }>(
+      '/v1/credentials',
+      { method: 'POST', idempotencyKey, body: { openaiApiKey } },
+    );
+    return result.credentialRef;
+  }
+
+  async deleteCredential(credentialRef: string, idempotencyKey: string) {
+    await this.request(`/v1/credentials/${encodeURIComponent(credentialRef)}`, {
+      method: 'DELETE',
+      idempotencyKey,
+    });
+  }
+
+  create(input: HostedSandboxCreateInput, idempotencyKey: string) {
+    return this.request<HostedSandboxInstance>('/v1/instances', {
+      method: 'POST',
+      idempotencyKey,
+      body: input,
+    });
+  }
+
+  status(id: string) {
+    return this.request<HostedSandboxInstance>(
+      `/v1/instances/${encodeURIComponent(id)}`,
+    );
+  }
+
+  start(id: string, idempotencyKey: string) {
+    return this.instanceMutation(id, 'start', idempotencyKey);
+  }
+
+  stop(id: string, idempotencyKey: string) {
+    return this.instanceMutation(id, 'stop', idempotencyKey);
+  }
+
+  async snapshot(id: string, name: string, idempotencyKey: string) {
+    await this.request(`/v1/instances/${encodeURIComponent(id)}/snapshots`, {
+      method: 'POST',
+      idempotencyKey,
+      body: { name },
+    });
+  }
+
+  async delete(id: string, idempotencyKey: string) {
+    await this.request(`/v1/instances/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      idempotencyKey,
+    });
+  }
+
+  async provision(input: HostedSandboxProvisionInput, idempotencyKey: string) {
+    await this.request(
+      `/v1/instances/${encodeURIComponent(input.id)}/provision`,
+      {
+        method: 'POST',
+        idempotencyKey,
+        body: {
+          relayServerUrl: input.relayServerUrl,
+          relayAgentToken: input.relayAgentToken,
+          credentialRef: input.credentialRef,
+          localAdminUsername: input.localAdminUsername ?? 'admin',
+        },
+      },
+    );
+  }
+
+  private instanceMutation(
+    id: string,
+    action: 'start' | 'stop',
+    idempotencyKey: string,
+  ) {
+    return this.request<HostedSandboxInstance>(
+      `/v1/instances/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST', idempotencyKey },
+    );
+  }
+
+  private async request<T = unknown>(
+    pathname: string,
+    options: {
+      method?: 'GET' | 'POST' | 'DELETE';
+      idempotencyKey?: string;
+      body?: unknown;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<T> {
+    if (!this.config.agentUrl || !this.config.agentToken) {
+      throw new Error('Incus host-agent is not configured.');
+    }
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.config.agentToken}`,
+    };
+    if (options.idempotencyKey) {
+      headers['idempotency-key'] = options.idempotencyKey;
+    }
+    if (options.body !== undefined) {
+      headers['content-type'] = 'application/json';
+    }
+    const request: RequestInit = {
+      method: options.method ?? 'GET',
+      headers,
+      ...(options.body === undefined
+        ? {}
+        : { body: JSON.stringify(options.body) }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    };
+    const response = await fetch(
+      `${this.config.agentUrl.replace(/\/$/, '')}${pathname}`,
+      request,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Incus host-agent request failed with ${response.status}.`,
+      );
+    }
+    return (await response.json()) as T;
   }
 }
 
@@ -44,7 +242,7 @@ export function createHostedSandboxProvider(
   config: RelayServerConfig['hostedSandbox'],
 ): HostedSandboxProvider {
   return config.provider === 'incus'
-    ? new PendingIncusHostedSandboxProvider(config)
+    ? new IncusHostedSandboxProvider(config)
     : new DisabledHostedSandboxProvider();
 }
 

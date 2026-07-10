@@ -8,6 +8,7 @@ import type { RelayServerConfig } from './config';
 import {
   DisabledHostedSandboxProvider,
   HostedSandboxCapabilityService,
+  IncusHostedSandboxProvider,
   type HostedSandboxProvider,
 } from './hosted-sandbox-provider';
 
@@ -51,8 +52,17 @@ function availableCapability(): RelayHostedSandboxCapabilityDto {
   };
 }
 
+function providerWithCapability(
+  capability: HostedSandboxProvider['capability'],
+): HostedSandboxProvider {
+  const provider = new DisabledHostedSandboxProvider();
+  provider.capability = capability;
+  return provider;
+}
+
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await Promise.all(
     dataDirs
       .splice(0)
@@ -92,11 +102,9 @@ describe('hosted sandbox capability', () => {
   });
 
   it('contains provider failure to the hosted capability route', async () => {
-    const provider: HostedSandboxProvider = {
-      capability: vi
-        .fn()
-        .mockRejectedValue(new Error('secret upstream details')),
-    };
+    const provider = providerWithCapability(
+      vi.fn().mockRejectedValue(new Error('secret upstream details')),
+    );
     const app = buildRelayServer(testConfig(), {
       hostedSandboxProvider: provider,
     });
@@ -141,9 +149,9 @@ describe('hosted sandbox capability', () => {
   });
 
   it('returns provider capability when the provider is healthy', async () => {
-    const provider: HostedSandboxProvider = {
-      capability: vi.fn().mockResolvedValue(availableCapability()),
-    };
+    const provider = providerWithCapability(
+      vi.fn().mockResolvedValue(availableCapability()),
+    );
     const service = new HostedSandboxCapabilityService(provider, {
       timeoutMs: 20,
     });
@@ -156,7 +164,7 @@ describe('hosted sandbox capability', () => {
       () => new Promise<RelayHostedSandboxCapabilityDto>(() => undefined),
     );
     const service = new HostedSandboxCapabilityService(
-      { capability },
+      providerWithCapability(capability),
       { timeoutMs: 5, failureThreshold: 2, circuitResetMs: 60_000 },
     );
 
@@ -173,6 +181,49 @@ describe('hosted sandbox capability', () => {
       reasonCode: 'hosted_provider_circuit_open',
     });
     expect(capability).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses authenticated typed requests without leaking credentials into URLs', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            available: true,
+            credentialStoreReady: true,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ credentialRef: 'rcc_reference' }), {
+          status: 200,
+        }),
+      );
+    const provider = new IncusHostedSandboxProvider({
+      provider: 'incus',
+      agentUrl: 'http://127.0.0.1:8801/',
+      agentToken: 'host-agent-secret-token',
+      requestTimeoutMs: 25,
+    });
+
+    await expect(provider.capability()).resolves.toMatchObject({
+      available: true,
+      reachable: true,
+    });
+    await expect(
+      provider.createCredential(
+        'sk-test-not-a-real-secret-123456789',
+        'credential-idempotency-key',
+      ),
+    ).resolves.toBe('rcc_reference');
+    const [url, request] = fetchMock.mock.calls[1]!;
+    expect(String(url)).toBe('http://127.0.0.1:8801/v1/credentials');
+    expect(String(url)).not.toContain('sk-test');
+    expect(request?.headers).toMatchObject({
+      authorization: 'Bearer host-agent-secret-token',
+      'idempotency-key': 'credential-idempotency-key',
+    });
   });
 
   it('does not expose the capability route to ordinary relay users', async () => {
