@@ -5,6 +5,7 @@ import { loadIncusHostAgentConfig } from './config';
 import { IncusClient } from './incus-client';
 import { FileOperationStore } from './operation-store';
 import { buildIncusHostAgent } from './server';
+import { EncryptedFileSecretStore } from './secret-store';
 
 let config;
 try {
@@ -28,6 +29,9 @@ const app = buildIncusHostAgent({
   client,
   operations: new FileOperationStore(config.operationDir),
   audit: new JsonFileAuditLogger(config.auditLog),
+  secrets: config.secretMasterKey
+    ? new EncryptedFileSecretStore(config.secretDir, config.secretMasterKey)
+    : null,
 });
 
 app.listen({ host: config.host, port: config.port }).catch((error) => {

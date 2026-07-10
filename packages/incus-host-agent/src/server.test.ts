@@ -10,10 +10,14 @@ import type { IncusHostAgentConfig } from './config';
 import type { IncusClient } from './incus-client';
 import { FileOperationStore } from './operation-store';
 import { buildIncusHostAgent } from './server';
+import type { CredentialSecretStore } from './secret-store';
 
 const tempDirs: string[] = [];
 
-async function setup(clientOverrides: Partial<IncusClient> = {}) {
+async function setup(
+  clientOverrides: Partial<IncusClient> = {},
+  secretOverrides: Partial<CredentialSecretStore> = {},
+) {
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'incus-host-agent-test-'),
   );
@@ -34,6 +38,8 @@ async function setup(clientOverrides: Partial<IncusClient> = {}) {
     commandTimeoutMs: 100,
     operationDir: path.join(tempDir, 'operations'),
     auditLog: path.join(tempDir, 'audit.jsonl'),
+    secretDir: path.join(tempDir, 'credentials'),
+    secretMasterKey: Buffer.alloc(32, 1),
   };
   const events: AuditEvent[] = [];
   const audit: AuditLogger = {
@@ -49,14 +55,22 @@ async function setup(clientOverrides: Partial<IncusClient> = {}) {
     stop: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     snapshot: vi.fn().mockResolvedValue({ name: 'checkpoint' }),
     restoreSnapshot: vi.fn().mockResolvedValue({ status: 'Stopped' }),
+    provision: vi.fn().mockResolvedValue({ provisioned: true }),
     delete: vi.fn().mockResolvedValue({ deleted: true }),
     ...clientOverrides,
   } as unknown as IncusClient;
+  const secrets: CredentialSecretStore = {
+    create: vi.fn().mockResolvedValue('rcc_'.padEnd(36, 'x')),
+    read: vi.fn().mockResolvedValue('sk-test-not-a-real-secret-123456789'),
+    delete: vi.fn().mockResolvedValue(true),
+    ...secretOverrides,
+  };
   const app = buildIncusHostAgent({
     config,
     client,
     operations: new FileOperationStore(config.operationDir),
     audit,
+    secrets,
   });
   await app.ready();
   return { app, client, config, token, events };
@@ -214,6 +228,52 @@ describe('Incus host-agent API', () => {
       headers: { ...request.headers, 'idempotency-key': `${key}-invalid` },
     });
     expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('validates secret provisioning without returning or auditing credentials', async () => {
+    const { app, client, token, events } = await setup();
+    const sandboxId = crypto.randomUUID();
+    const secret = 'sk-test-not-a-real-secret-123456789';
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/instances/${sandboxId}/provision`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'idempotency-key': `provision-${crypto.randomUUID()}`,
+      },
+      payload: {
+        relayServerUrl: 'wss://relay.example.test',
+        relayAgentToken: 'rcd_test_device_token',
+        credentialRef: 'rcc_'.padEnd(36, 'x'),
+        localAdminUsername: 'admin',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain(secret);
+    expect(JSON.stringify(events)).not.toContain(secret);
+    expect(client.provision).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it('encrypts credential input behind an opaque reference API contract', async () => {
+    const create = vi.fn().mockResolvedValue('rcc_'.padEnd(36, 'y'));
+    const { app, token, events } = await setup({}, { create });
+    const secret = 'sk-test-not-a-real-secret-987654321';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/credentials',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'idempotency-key': `credential-${crypto.randomUUID()}`,
+      },
+      payload: { openaiApiKey: secret },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ credentialRef: 'rcc_'.padEnd(36, 'y') });
+    expect(response.body).not.toContain(secret);
+    expect(JSON.stringify(events)).not.toContain(secret);
+    expect(create).toHaveBeenCalledWith(secret);
     await app.close();
   });
 });

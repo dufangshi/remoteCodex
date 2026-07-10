@@ -20,6 +20,8 @@ function config(): IncusHostAgentConfig {
     commandTimeoutMs: 120_000,
     operationDir: '/tmp/operations',
     auditLog: '/tmp/audit.jsonl',
+    secretDir: '/tmp/credentials',
+    secretMasterKey: Buffer.alloc(32, 1),
   };
 }
 
@@ -125,5 +127,29 @@ describe('IncusClient policy', () => {
       `rcd-${sandboxId}`,
       'phase3-checkpoint',
     ]);
+  });
+
+  it('passes provision secrets only through stdin to the fixed guest helper', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const secret = 'sk-test-not-a-real-secret-123456789';
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result('{"status":"provisioned"}'));
+    const client = new IncusClient(config(), { run });
+
+    await client.provision(sandboxId, {
+      relayServerUrl: 'wss://relay.example.test',
+      relayAgentToken: 'rcd_test_device_token',
+      openaiApiKey: secret,
+      localAdminUsername: 'admin',
+    });
+
+    const args = run.mock.calls[1]?.[1] ?? [];
+    expect(args).toContain('/usr/local/sbin/remote-codex-provision');
+    expect(JSON.stringify(args)).not.toContain(secret);
+    expect(run.mock.calls[1]?.[3]).toContain(secret);
   });
 });

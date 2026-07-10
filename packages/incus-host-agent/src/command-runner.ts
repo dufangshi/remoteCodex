@@ -11,6 +11,7 @@ export interface CommandRunner {
     binary: string,
     args: readonly string[],
     timeoutMs: number,
+    stdin?: string,
   ): Promise<CommandResult>;
 }
 
@@ -19,11 +20,12 @@ export class SpawnCommandRunner implements CommandRunner {
     binary: string,
     args: readonly string[],
     timeoutMs: number,
+    stdin?: string,
   ): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
       const child = spawn(binary, [...args], {
         shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         env: { ...process.env, LC_ALL: 'C' },
       });
       let stdout = '';
@@ -32,14 +34,17 @@ export class SpawnCommandRunner implements CommandRunner {
         child.kill('SIGKILL');
         reject(new Error(`Command timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk: string) => {
+      child.stdout!.setEncoding('utf8');
+      child.stderr!.setEncoding('utf8');
+      child.stdout!.on('data', (chunk: string) => {
         stdout += chunk;
       });
-      child.stderr.on('data', (chunk: string) => {
+      child.stderr!.on('data', (chunk: string) => {
         stderr += chunk;
       });
+      if (stdin !== undefined && child.stdin) {
+        child.stdin.end(stdin);
+      }
       child.on('error', (error) => {
         clearTimeout(timer);
         reject(error);

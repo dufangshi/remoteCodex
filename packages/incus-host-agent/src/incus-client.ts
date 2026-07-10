@@ -14,6 +14,13 @@ export interface IncusInstanceStatus {
   statusCode: number | null;
 }
 
+export interface GuestProvisionInput {
+  relayServerUrl: string;
+  relayAgentToken: string;
+  openaiApiKey: string;
+  localAdminUsername: string;
+}
+
 export class IncusCommandError extends Error {
   constructor(
     message: string,
@@ -133,6 +140,21 @@ export class IncusClient {
     return this.status(id);
   }
 
+  async provision(
+    id: string,
+    provision: GuestProvisionInput,
+  ): Promise<{ id: string; provisioned: true }> {
+    const current = await this.status(id);
+    if (current.status.toLowerCase() !== 'running') {
+      throw new Error('The instance must be running before provisioning.');
+    }
+    await this.run(
+      ['exec', current.name, '--', '/usr/local/sbin/remote-codex-provision'],
+      `${JSON.stringify(provision)}\n`,
+    );
+    return { id, provisioned: true };
+  }
+
   async delete(id: string): Promise<{ id: string; deleted: boolean }> {
     const current = await this.statusOrNull(id);
     if (!current) {
@@ -153,11 +175,12 @@ export class IncusClient {
     }
   }
 
-  private async run(args: readonly string[]) {
+  private async run(args: readonly string[], stdin?: string) {
     const result = await this.runner.run(
       this.config.incusBinary,
       ['--force-local', '--project', this.config.project, ...args],
       this.config.commandTimeoutMs,
+      stdin,
     );
     if (result.exitCode !== 0) {
       throw new IncusCommandError('Incus operation failed.', result.exitCode);

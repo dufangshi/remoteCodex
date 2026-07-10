@@ -11,6 +11,10 @@ import type { IncusHostAgentConfig } from './config';
 import { IncusClient } from './incus-client';
 import { hostedSandboxIdSchema, snapshotNameSchema } from './instance-policy';
 import { FileOperationStore, type StoredOperation } from './operation-store';
+import {
+  credentialReferencePattern,
+  type CredentialSecretStore,
+} from './secret-store';
 
 const createSchema = z.object({
   id: hostedSandboxIdSchema,
@@ -22,11 +26,28 @@ const createSchema = z.object({
   }),
 });
 
+const provisionSchema = z
+  .object({
+    relayServerUrl: z
+      .url()
+      .refine(
+        (value) => value.startsWith('ws://') || value.startsWith('wss://'),
+      ),
+    relayAgentToken: z.string().regex(/^rcd_[A-Za-z0-9_-]+$/),
+    credentialRef: z.string().regex(credentialReferencePattern),
+    localAdminUsername: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}$/)
+      .default('admin'),
+  })
+  .strict();
+
 export function buildIncusHostAgent(input: {
   config: IncusHostAgentConfig;
   client: IncusClient;
   operations: FileOperationStore;
   audit: AuditLogger;
+  secrets: CredentialSecretStore | null;
 }): FastifyInstance {
   const app = Fastify({ logger: false });
   const inFlight = new Map<
@@ -50,7 +71,10 @@ export function buildIncusHostAgent(input: {
 
   app.get('/v1/capability', async (_request, reply) => {
     try {
-      return await input.client.capability();
+      return {
+        ...(await input.client.capability()),
+        credentialStoreReady: input.secrets !== null,
+      };
     } catch {
       return reply.code(503).send({
         available: false,
@@ -62,7 +86,10 @@ export function buildIncusHostAgent(input: {
 
   app.get('/readyz', async (_request, reply) => {
     try {
-      const capability = await input.client.capability();
+      const capability = {
+        ...(await input.client.capability()),
+        credentialStoreReady: input.secrets !== null,
+      };
       return { status: 'ready', capability };
     } catch {
       return reply.code(503).send({
@@ -81,6 +108,52 @@ export function buildIncusHostAgent(input: {
       'create',
       body.id,
       () => input.client.create(body.id, body.imageVersion, body.resources),
+    );
+  });
+
+  app.post('/v1/credentials', async (request, reply) => {
+    const body = z
+      .object({ openaiApiKey: z.string().min(20).max(512) })
+      .strict()
+      .parse(request.body ?? {});
+    if (!input.secrets) {
+      return reply.code(503).send({
+        code: 'credential_store_unavailable',
+        message: 'Credential storage is not configured.',
+      });
+    }
+    return executeIdempotently(
+      request,
+      reply,
+      { ...input, inFlight },
+      'create_credential',
+      'credential',
+      async () => ({
+        credentialRef: await input.secrets!.create(body.openaiApiKey),
+      }),
+    );
+  });
+
+  app.delete('/v1/credentials/:credentialRef', async (request, reply) => {
+    const { credentialRef } = z
+      .object({ credentialRef: z.string().regex(credentialReferencePattern) })
+      .parse(request.params);
+    if (!input.secrets) {
+      return reply.code(503).send({
+        code: 'credential_store_unavailable',
+        message: 'Credential storage is not configured.',
+      });
+    }
+    return executeIdempotently(
+      request,
+      reply,
+      { ...input, inFlight },
+      'delete_credential',
+      'credential',
+      async () => ({
+        credentialRef,
+        deleted: await input.secrets!.delete(credentialRef),
+      }),
     );
   });
 
@@ -116,6 +189,33 @@ export function buildIncusHostAgent(input: {
       'stop',
       id,
       () => input.client.stop(id),
+    );
+  });
+
+  app.post('/v1/instances/:id/provision', async (request, reply) => {
+    const { id } = z
+      .object({ id: hostedSandboxIdSchema })
+      .parse(request.params);
+    const body = provisionSchema.parse(request.body ?? {});
+    if (!input.secrets) {
+      return reply.code(503).send({
+        code: 'credential_store_unavailable',
+        message: 'Credential storage is not configured.',
+      });
+    }
+    return executeIdempotently(
+      request,
+      reply,
+      { ...input, inFlight },
+      'provision',
+      id,
+      async () =>
+        input.client.provision(id, {
+          relayServerUrl: body.relayServerUrl,
+          relayAgentToken: body.relayAgentToken,
+          openaiApiKey: await input.secrets!.read(body.credentialRef),
+          localAdminUsername: body.localAdminUsername,
+        }),
     );
   });
 
