@@ -17,6 +17,8 @@ function config(): IncusHostAgentConfig {
     maxCpu: 2,
     maxMemoryMiB: 2048,
     maxDiskGiB: 12,
+    maxInstances: 4,
+    maxRunningInstances: 1,
     commandTimeoutMs: 120_000,
     operationDir: '/tmp/operations',
     auditLog: '/tmp/audit.jsonl',
@@ -35,6 +37,7 @@ describe('IncusClient policy', () => {
     const run = vi
       .fn<CommandRunner['run']>()
       .mockResolvedValueOnce(result('', 1))
+      .mockResolvedValueOnce(result('[]'))
       .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(
         result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
@@ -52,8 +55,8 @@ describe('IncusClient policy', () => {
       status: 'Stopped',
     });
 
-    expect(run.mock.calls[1]?.[0]).toBe('incus');
-    expect(run.mock.calls[1]?.[1]).toEqual([
+    expect(run.mock.calls[2]?.[0]).toBe('incus');
+    expect(run.mock.calls[2]?.[1]).toEqual([
       '--force-local',
       '--project',
       'remote-codex-hosted',
@@ -68,6 +71,50 @@ describe('IncusClient policy', () => {
       '--device',
       'root,size=10GiB',
     ]);
+  });
+
+  it('enforces total and running capacity before mutating Incus', async () => {
+    const existingId = '22222222-2222-4222-8222-222222222222';
+    const createId = '11111111-1111-4111-8111-111111111111';
+    const createRun = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(result('', 1))
+      .mockResolvedValueOnce(
+        result(
+          JSON.stringify([
+            { name: `rcd-${existingId}`, status: 'Stopped' },
+            { name: 'unmanaged-instance', status: 'Running' },
+          ]),
+        ),
+      );
+    const createClient = new IncusClient(
+      { ...config(), maxInstances: 1 },
+      { run: createRun },
+    );
+    await expect(
+      createClient.create(createId, 'ubuntu-24.04-v1', {
+        cpuCount: 1,
+        memoryMiB: 1536,
+        diskGiB: 10,
+      }),
+    ).rejects.toThrow('capacity limit');
+    expect(createRun).toHaveBeenCalledTimes(2);
+
+    const startRun = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
+      )
+      .mockResolvedValueOnce(
+        result(
+          JSON.stringify([{ name: `rcd-${existingId}`, status: 'Running' }]),
+        ),
+      );
+    const startClient = new IncusClient(config(), { run: startRun });
+    await expect(startClient.start(createId)).rejects.toThrow(
+      'running instance limit',
+    );
+    expect(startRun).toHaveBeenCalledTimes(2);
   });
 
   it('rejects resource and image values outside the allowlist before running Incus', async () => {
@@ -100,6 +147,83 @@ describe('IncusClient policy', () => {
       client.snapshot('11111111-1111-4111-8111-111111111111', '../escape'),
     ).rejects.toThrow();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('powers off through guest systemd before waiting for Incus stop', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const instance = `rcd-${sandboxId}`;
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
+      );
+    const client = new IncusClient(config(), { run });
+
+    await expect(client.stop(sandboxId)).resolves.toMatchObject({
+      status: 'Stopped',
+    });
+    expect(run.mock.calls[1]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'exec',
+      instance,
+      '--',
+      'systemctl',
+      'poweroff',
+    ]);
+    expect(run.mock.calls[3]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'stop',
+      instance,
+      '--timeout',
+      '120',
+    ]);
+  });
+
+  it('force-stops only after graceful shutdown fails and the VM is still running', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const instance = `rcd-${sandboxId}`;
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result('', 1))
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+      )
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ status: 'Stopped', status_code: 102 }])),
+      );
+    const client = new IncusClient(config(), { run });
+
+    await expect(client.stop(sandboxId)).resolves.toMatchObject({
+      status: 'Stopped',
+    });
+    expect(run.mock.calls[5]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'stop',
+      instance,
+      '--force',
+    ]);
   });
 
   it('restores only a validated snapshot of a stopped managed instance', async () => {
@@ -137,6 +261,7 @@ describe('IncusClient policy', () => {
       .mockResolvedValueOnce(
         result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
       )
+      .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(result('{"status":"provisioned"}'));
     const client = new IncusClient(config(), { run });
 
@@ -147,9 +272,52 @@ describe('IncusClient policy', () => {
       localAdminUsername: 'admin',
     });
 
-    const args = run.mock.calls[1]?.[1] ?? [];
+    expect(run.mock.calls[1]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'exec',
+      `rcd-${sandboxId}`,
+      '--',
+      'true',
+    ]);
+    const args = run.mock.calls[2]?.[1] ?? [];
     expect(args).toContain('/usr/local/sbin/remote-codex-provision');
     expect(JSON.stringify(args)).not.toContain(secret);
-    expect(run.mock.calls[1]?.[3]).toContain(secret);
+    expect(run.mock.calls[2]?.[3]).toContain(secret);
+  });
+
+  it('waits for the guest agent before invoking the provision helper', async () => {
+    vi.useFakeTimers();
+    try {
+      const sandboxId = '11111111-1111-4111-8111-111111111111';
+      const run = vi
+        .fn<CommandRunner['run']>()
+        .mockResolvedValueOnce(
+          result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
+        )
+        .mockResolvedValueOnce(result('', 1))
+        .mockResolvedValueOnce(result())
+        .mockResolvedValueOnce(result('{"status":"provisioned"}'));
+      const client = new IncusClient(config(), { run });
+      const provision = client.provision(sandboxId, {
+        relayServerUrl: 'wss://relay.example.test',
+        relayAgentToken: 'rcd_test_device_token',
+        openaiApiKey: 'sk-test-not-a-real-secret-123456789',
+        localAdminUsername: 'admin',
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(provision).resolves.toEqual({
+        id: sandboxId,
+        provisioned: true,
+      });
+      expect(run).toHaveBeenCalledTimes(4);
+      expect(run.mock.calls[3]?.[1]).toContain(
+        '/usr/local/sbin/remote-codex-provision',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

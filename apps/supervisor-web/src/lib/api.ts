@@ -792,7 +792,7 @@ export function fetchHostedSandbox(id: string) {
 export function createHostedSandbox(input: {
   assignedUserId: string;
   deviceName: string;
-  imageVersion: 'ubuntu-24.04-v1';
+  imageVersion: 'ubuntu-24.04-v1' | 'ubuntu-24.04-v2';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
   openaiApiKey: string;
 }) {

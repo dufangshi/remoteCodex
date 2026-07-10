@@ -95,7 +95,7 @@ const createHostedSandboxSchema = z
   .object({
     assignedUserId: z.string().uuid(),
     deviceName: z.string().trim().min(1).max(120),
-    imageVersion: z.literal('ubuntu-24.04-v1'),
+    imageVersion: z.enum(['ubuntu-24.04-v1', 'ubuntu-24.04-v2']),
     resources: z.object({
       cpuCount: z.number().int().min(1).max(2),
       memoryMiB: z.number().int().min(1024).max(2048),

@@ -237,7 +237,7 @@ describe('RelayAdminPage', () => {
       createdByAdminUserId: 'admin-user',
       provider: 'incus' as const,
       providerInstanceId: 'rcd-11111111-1111-4111-8111-111111111111',
-      imageVersion: 'ubuntu-24.04-v1',
+      imageVersion: 'ubuntu-24.04-v2',
       resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
       status: 'online' as const,
       lastErrorCode: null,
@@ -266,6 +266,8 @@ describe('RelayAdminPage', () => {
               reasonCode: null,
               reason: null,
               checkedAt: '2026-06-18T00:15:00.000Z',
+              limits: { maxInstances: 4, maxRunningInstances: 1 },
+              capacity: { totalInstances: 2, runningInstances: 1 },
             }),
           });
         }
@@ -302,6 +304,7 @@ describe('RelayAdminPage', () => {
     await screen.findByText('Operations panel');
     fireEvent.click(screen.getByRole('button', { name: 'Hosted VMs' }));
     expect(await screen.findByText('Available')).toBeInTheDocument();
+    expect(screen.getByText(/1\/1 running.*2\/4 total/)).toBeInTheDocument();
     expect(screen.getByText('1 active turn')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 

@@ -193,6 +193,8 @@ describe('hosted sandbox capability', () => {
           JSON.stringify({
             available: true,
             credentialStoreReady: true,
+            limits: { maxInstances: 4, maxRunningInstances: 1 },
+            capacity: { totalInstances: 2, runningInstances: 1 },
           }),
           { status: 200 },
         ),
@@ -214,6 +216,8 @@ describe('hosted sandbox capability', () => {
     await expect(provider.capability()).resolves.toMatchObject({
       available: true,
       reachable: true,
+      limits: { maxInstances: 4, maxRunningInstances: 1 },
+      capacity: { totalInstances: 2, runningInstances: 1 },
     });
     await expect(
       provider.createCredential(

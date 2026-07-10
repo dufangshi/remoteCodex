@@ -42,6 +42,18 @@ const schema = z.object({
     .positive()
     .max(4_096)
     .optional(),
+  REMOTE_CODEX_INCUS_MAX_INSTANCES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(1_000)
+    .optional(),
+  REMOTE_CODEX_INCUS_MAX_RUNNING_INSTANCES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(1_000)
+    .optional(),
   REMOTE_CODEX_INCUS_COMMAND_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -69,6 +81,8 @@ export interface IncusHostAgentConfig {
   maxCpu: number;
   maxMemoryMiB: number;
   maxDiskGiB: number;
+  maxInstances: number;
+  maxRunningInstances: number;
   commandTimeoutMs: number;
   operationDir: string;
   auditLog: string;
@@ -87,12 +101,14 @@ export function loadIncusHostAgentConfig(
     incusBinary: parsed.REMOTE_CODEX_INCUS_BINARY ?? 'incus',
     project: parsed.REMOTE_CODEX_INCUS_PROJECT ?? 'remote-codex-hosted',
     instancePrefix: parsed.REMOTE_CODEX_INCUS_INSTANCE_PREFIX ?? 'rcd-',
-    imageVersion: parsed.REMOTE_CODEX_INCUS_IMAGE_VERSION ?? 'ubuntu-24.04-v1',
+    imageVersion: parsed.REMOTE_CODEX_INCUS_IMAGE_VERSION ?? 'ubuntu-24.04-v2',
     imageSource:
       parsed.REMOTE_CODEX_INCUS_IMAGE_SOURCE ?? 'images:ubuntu/24.04/cloud',
     maxCpu: parsed.REMOTE_CODEX_INCUS_MAX_CPU ?? 2,
     maxMemoryMiB: parsed.REMOTE_CODEX_INCUS_MAX_MEMORY_MIB ?? 2_048,
     maxDiskGiB: parsed.REMOTE_CODEX_INCUS_MAX_DISK_GIB ?? 12,
+    maxInstances: parsed.REMOTE_CODEX_INCUS_MAX_INSTANCES ?? 4,
+    maxRunningInstances: parsed.REMOTE_CODEX_INCUS_MAX_RUNNING_INSTANCES ?? 1,
     commandTimeoutMs: parsed.REMOTE_CODEX_INCUS_COMMAND_TIMEOUT_MS ?? 120_000,
     operationDir: path.resolve(
       parsed.REMOTE_CODEX_INCUS_OPERATION_DIR ??

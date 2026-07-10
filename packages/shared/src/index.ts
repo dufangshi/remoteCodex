@@ -348,6 +348,14 @@ export interface RelayHostedSandboxCapabilityDto {
   reasonCode: string | null;
   reason: string | null;
   checkedAt: string;
+  limits?: {
+    maxInstances: number;
+    maxRunningInstances: number;
+  };
+  capacity?: {
+    totalInstances: number;
+    runningInstances: number;
+  };
 }
 
 export type RelayHostedSandboxStatusDto =

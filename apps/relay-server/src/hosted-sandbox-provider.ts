@@ -114,6 +114,14 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
     const result = await this.request<{
       available: boolean;
       credentialStoreReady?: boolean;
+      limits?: {
+        maxInstances: number;
+        maxRunningInstances: number;
+      };
+      capacity?: {
+        totalInstances: number;
+        runningInstances: number;
+      };
     }>('/v1/capability', signal ? { signal } : {});
     const available = result.available && result.credentialStoreReady === true;
     return {
@@ -126,6 +134,8 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
         ? null
         : 'Incus or encrypted credential storage is not ready.',
       checkedAt: new Date().toISOString(),
+      ...(result.limits ? { limits: result.limits } : {}),
+      ...(result.capacity ? { capacity: result.capacity } : {}),
     };
   }
 

@@ -35,6 +35,8 @@ async function setup(
     maxCpu: 2,
     maxMemoryMiB: 2048,
     maxDiskGiB: 12,
+    maxInstances: 4,
+    maxRunningInstances: 1,
     commandTimeoutMs: 100,
     operationDir: path.join(tempDir, 'operations'),
     auditLog: path.join(tempDir, 'audit.jsonl'),

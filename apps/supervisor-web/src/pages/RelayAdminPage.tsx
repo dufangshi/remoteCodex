@@ -508,7 +508,7 @@ function HostedSandboxesPanel({
       createHostedSandbox({
         assignedUserId,
         deviceName,
-        imageVersion: 'ubuntu-24.04-v1',
+        imageVersion: 'ubuntu-24.04-v2',
         resources,
         openaiApiKey,
       }),
@@ -547,6 +547,14 @@ function HostedSandboxesPanel({
                 {capability?.reason ??
                   'Incus VMs run one isolated relay supervisor per assigned user.'}
               </p>
+              {capability?.capacity && capability.limits ? (
+                <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+                  {capability.capacity.runningInstances}/
+                  {capability.limits.maxRunningInstances} running ·{' '}
+                  {capability.capacity.totalInstances}/
+                  {capability.limits.maxInstances} total
+                </p>
+              ) : null}
             </div>
           </div>
           <button
