@@ -36,6 +36,44 @@ function result(stdout = '', exitCode = 0, stderr = ''): CommandResult {
 }
 
 describe('IncusClient policy', () => {
+  it('reads and writes only the two fixed Codex paths through guest-agent stdin', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const instance = `rcd-${sandboxId}`;
+    const running = result(
+      JSON.stringify([{ status: 'Running', status_code: 103 }]),
+    );
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result('model = "gpt-test"\n'))
+      .mockResolvedValueOnce(result('{"OPENAI_API_KEY":"sk-test"}\n'))
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result());
+    const client = new IncusClient(config(), { run });
+
+    await expect(client.readCodexFiles(sandboxId)).resolves.toEqual({
+      configToml: 'model = "gpt-test"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-test"}\n',
+    });
+    await client.writeCodexFiles(sandboxId, {
+      configToml: 'model = "gpt-updated"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-updated"}\n',
+    });
+
+    expect(run.mock.calls[2]?.[1]).toContain(instance);
+    expect(run.mock.calls[2]?.[1]).toContain(
+      '/home/remote-codex/.codex/config.toml',
+    );
+    expect(run.mock.calls[6]?.[3]).toBe(
+      JSON.stringify({
+        configToml: 'model = "gpt-updated"\n',
+        authJson: '{"OPENAI_API_KEY":"sk-updated"}\n',
+      }),
+    );
+    expect(run.mock.calls[6]?.[1]).toEqual(expect.arrayContaining(['sh', '-c']));
+  });
   it('uses argv without a shell and only the configured project/image/resources', async () => {
     const sandboxId = '11111111-1111-4111-8111-111111111111';
     const run = vi

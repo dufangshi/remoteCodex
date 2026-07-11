@@ -1762,6 +1762,26 @@ describe('supervisor api', () => {
     });
   });
 
+  it('creates a workspace from a simple directory name under dev home', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: { devHome: path.join(tempDir, 'dev') },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { absPath: 'test' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      label: 'test',
+      absPath: await fs.realpath(path.join(tempDir, 'dev', 'test')),
+    });
+  });
+
   it('rejects an existing git clone target without overwrite', async () => {
     await app.inject({
       method: 'PATCH',

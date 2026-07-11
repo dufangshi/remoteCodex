@@ -75,6 +75,11 @@ function provider(options: { provisionFails?: boolean } = {}) {
   result.provision = options.provisionFails
     ? vi.fn().mockRejectedValue(new Error('private provider failure'))
     : vi.fn().mockResolvedValue(undefined);
+  result.readCodexFiles = vi.fn().mockResolvedValue({
+    configToml: 'model = "gpt-test"\n',
+    authJson: '{"OPENAI_API_KEY":"sk-test"}\n',
+  });
+  result.writeCodexFiles = vi.fn().mockResolvedValue(undefined);
   return result as HostedSandboxProvider;
 }
 
@@ -179,6 +184,30 @@ describe('hosted sandbox create saga', () => {
         }),
       }),
       `relay-sandbox-provision-${sandboxId}`,
+    );
+
+    const codexFiles = await app.inject({
+      method: 'GET',
+      url: `/relay/admin/hosted-sandboxes/${sandboxId}/backends/codex/files`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(codexFiles.statusCode).toBe(200);
+    expect(codexFiles.json().configToml).toContain('gpt-test');
+    const updatedFiles = {
+      configToml: 'model = "gpt-updated"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-updated"}\n',
+    };
+    const updateCodexFiles = await app.inject({
+      method: 'PUT',
+      url: `/relay/admin/hosted-sandboxes/${sandboxId}/backends/codex/files`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: updatedFiles,
+    });
+    expect(updateCodexFiles.statusCode).toBe(200);
+    expect(fake.writeCodexFiles).toHaveBeenCalledWith(
+      sandboxId,
+      updatedFiles,
+      expect.stringMatching(/^relay-codex-files-/),
     );
 
     const secondRegistration = await app.inject({

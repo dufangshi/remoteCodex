@@ -423,6 +423,11 @@ export interface RelayHostedSandboxMemberDto {
   email: string;
 }
 
+export interface RelayHostedCodexFilesDto {
+  configToml: string;
+  authJson: string;
+}
+
 export interface RelayHostedSandboxDto {
   id: string;
   deviceId: string;

@@ -33,7 +33,7 @@ export function WorkspaceNewPage() {
     <FloatingRoutePanel
       eyebrow="Add Workspace"
       title="Create a workspace"
-      description="Register a local directory, create one missing child directory under dev home, or clone a Git repository into dev home."
+      description="Enter a folder name to create it under the workspace directory, register an absolute path, or clone a Git repository."
     >
       <WorkspaceForm
         busy={busy}

@@ -74,6 +74,29 @@ const provisionSchema = z
   })
   .strict();
 
+const codexFilesSchema = z
+  .object({
+    configToml: z
+      .string()
+      .min(1)
+      .max(128 * 1024),
+    authJson: z
+      .string()
+      .min(2)
+      .max(128 * 1024)
+      .refine((value) => {
+        try {
+          const parsed = JSON.parse(value);
+          return Boolean(
+            parsed && typeof parsed === 'object' && !Array.isArray(parsed),
+          );
+        } catch {
+          return false;
+        }
+      }, 'auth.json must contain a JSON object.'),
+  })
+  .strict();
+
 export function buildIncusHostAgent(input: {
   config: IncusHostAgentConfig;
   client: IncusClient;
@@ -266,6 +289,28 @@ export function buildIncusHostAgent(input: {
           localAdminUsername: body.localAdminUsername,
           codexConfig: body.codexConfig,
         }),
+    );
+  });
+
+  app.get('/v1/instances/:id/backends/codex/files', async (request) => {
+    const { id } = z
+      .object({ id: hostedSandboxIdSchema })
+      .parse(request.params);
+    return input.client.readCodexFiles(id);
+  });
+
+  app.put('/v1/instances/:id/backends/codex/files', async (request, reply) => {
+    const { id } = z
+      .object({ id: hostedSandboxIdSchema })
+      .parse(request.params);
+    const body = codexFilesSchema.parse(request.body ?? {});
+    return executeIdempotently(
+      request,
+      reply,
+      { ...input, inFlight },
+      'update_codex_files',
+      id,
+      () => input.client.writeCodexFiles(id, body),
     );
   });
 

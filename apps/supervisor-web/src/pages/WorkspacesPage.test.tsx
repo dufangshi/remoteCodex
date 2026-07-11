@@ -196,6 +196,53 @@ describe('WorkspacesPage', () => {
     expect(screen.getByRole('link', { name: /^Create$/i })).toBeInTheDocument();
   });
 
+  it('shows VM startup progress and reconnects automatically', async () => {
+    let startingResponses = 2;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (startingResponses > 0) {
+          startingResponses -= 1;
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: { get: () => 'application/json' },
+            json: async () => ({
+              code: 'service_unavailable',
+              message: 'Hosted supervisor VM is starting. Retry shortly.',
+              details: { reason: 'hosted_sandbox_starting' }
+            })
+          });
+        }
+        if (url.endsWith('/api/workspaces')) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            appName: 'Remote Codex Supervisor',
+            appVersion: '0.1.0',
+            mode: 'relay',
+            host: '127.0.0.1',
+            port: 8787,
+            workspaceRoot: '/home/remote-codex/workspaces',
+            environment: 'production'
+          })
+        });
+      })
+    );
+
+    renderPage();
+    expect(await screen.findByText('Starting hosted VM')).toBeInTheDocument();
+    expect(screen.queryByText(/Retry shortly/i)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText('No workspaces yet', {}, { timeout: 3_000 })
+    ).toBeInTheDocument();
+    expect(screen.getByText('/home/remote-codex/workspaces')).toBeInTheDocument();
+  });
+
   it('renames a workspace only after save is clicked', async () => {
     renderPage();
 

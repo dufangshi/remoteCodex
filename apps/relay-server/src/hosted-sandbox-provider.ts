@@ -1,4 +1,5 @@
 import type {
+  RelayHostedCodexFilesDto,
   RelayHostedCodexConfigDto,
   RelayHostedSandboxCapabilityDto,
 } from '../../../packages/shared/src/index';
@@ -26,6 +27,12 @@ export interface HostedSandboxProvider {
   delete(id: string, idempotencyKey: string): Promise<void>;
   provision(
     input: HostedSandboxProvisionInput,
+    idempotencyKey: string,
+  ): Promise<void>;
+  readCodexFiles(id: string): Promise<RelayHostedCodexFilesDto>;
+  writeCodexFiles(
+    id: string,
+    files: RelayHostedCodexFilesDto,
     idempotencyKey: string,
   ): Promise<void>;
 }
@@ -110,6 +117,16 @@ export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
   }
   provision(
     _input: HostedSandboxProvisionInput,
+    _idempotencyKey: string,
+  ): Promise<void> {
+    return this.disabled();
+  }
+  readCodexFiles(_id: string): Promise<RelayHostedCodexFilesDto> {
+    return this.disabled();
+  }
+  writeCodexFiles(
+    _id: string,
+    _files: RelayHostedCodexFilesDto,
     _idempotencyKey: string,
   ): Promise<void> {
     return this.disabled();
@@ -231,6 +248,23 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
     );
   }
 
+  readCodexFiles(id: string) {
+    return this.request<RelayHostedCodexFilesDto>(
+      `/v1/instances/${encodeURIComponent(id)}/backends/codex/files`,
+    );
+  }
+
+  async writeCodexFiles(
+    id: string,
+    files: RelayHostedCodexFilesDto,
+    idempotencyKey: string,
+  ) {
+    await this.request(
+      `/v1/instances/${encodeURIComponent(id)}/backends/codex/files`,
+      { method: 'PUT', idempotencyKey, body: files },
+    );
+  }
+
   private instanceMutation(
     id: string,
     action: 'start' | 'stop',
@@ -245,7 +279,7 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
   private async request<T = unknown>(
     pathname: string,
     options: {
-      method?: 'GET' | 'POST' | 'DELETE';
+      method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
       idempotencyKey?: string;
       body?: unknown;
       signal?: AbortSignal;

@@ -378,6 +378,29 @@ describe('RelayAdminPage', () => {
             }),
           });
         }
+        if (
+          url ===
+            '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/backends/codex/files' &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              configToml: 'model = "gpt-test"\n',
+              authJson: '{"OPENAI_API_KEY":"sk-test"}\n',
+            }),
+          });
+        }
+        if (
+          url ===
+            '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/backends/codex/files' &&
+          init?.method === 'PUT'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ updated: true }),
+          });
+        }
         if (url === '/relay/admin/hosted-sandboxes') {
           return Promise.resolve({
             ok: true,
@@ -463,15 +486,38 @@ describe('RelayAdminPage', () => {
 
     fireEvent.click(screen.getByText('Access · 1 user'));
     fireEvent.click(
-      screen.getByLabelText('Grant member (member@example.test) access'),
+      screen.getByRole('button', { name: 'Add authorized user' }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save access' }));
+    fireEvent.change(screen.getByLabelText('Find an account'), {
+      target: { value: 'user-3' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: /member.*member@example\.test/i }),
+    );
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
         '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/members',
         expect.objectContaining({
           method: 'PUT',
           body: '{"assignedUserIds":["user-1","user-3"]}',
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByText('Backend credentials'));
+    expect(
+      await screen.findByDisplayValue('model = "gpt-test"'),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('~/.codex/config.toml'), {
+      target: { value: 'model = "gpt-updated"\n' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save to VM' }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/backends/codex/files',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.stringContaining('gpt-updated'),
         }),
       ),
     );

@@ -7,6 +7,7 @@ import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
 import { RelayUserMenu } from '../components/RelayUserMenu';
 import {
+  ApiError,
   deleteWorkspace,
   fetchRuntimeConfig,
   fetchWorkspaces,
@@ -83,32 +84,65 @@ export function WorkspacesPage() {
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceDto | null>(null);
   const [deletingWorkspaceBusy, setDeletingWorkspaceBusy] = useState(false);
-
-  async function loadWorkspaces() {
-    setLoading(true);
-    setError(null);
-
-    try {
-      setWorkspaces(await fetchWorkspaces());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load workspaces.');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [vmStarting, setVmStarting] = useState(false);
+  const [wakeAttempt, setWakeAttempt] = useState(0);
 
   useEffect(() => {
-    void loadWorkspaces();
-    fetchRuntimeConfig()
-      .then((config) => {
-        setRuntimeConfig(config);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const isVmStarting = (result: PromiseRejectedResult) =>
+      result.reason instanceof ApiError &&
+      result.reason.payload.details?.reason === 'hosted_sandbox_starting';
+
+    const loadUntilConnected = async () => {
+      const [workspaceResult, runtimeResult] = await Promise.allSettled([
+        fetchWorkspaces(),
+        fetchRuntimeConfig()
+      ]);
+      if (cancelled) return;
+
+      if (
+        (workspaceResult.status === 'rejected' && isVmStarting(workspaceResult)) ||
+        (runtimeResult.status === 'rejected' && isVmStarting(runtimeResult))
+      ) {
+        setVmStarting(true);
+        setLoading(true);
+        setError(null);
         setRuntimeError(null);
-      })
-      .catch((caught) => {
-        setRuntimeError(
-          caught instanceof Error ? caught.message : 'Unable to load supervisor config.',
+        setWakeAttempt((current) => current + 1);
+        retryTimer = setTimeout(() => void loadUntilConnected(), 1_500);
+        return;
+      }
+
+      setVmStarting(false);
+      setLoading(false);
+      if (workspaceResult.status === 'fulfilled') {
+        setWorkspaces(workspaceResult.value);
+        setError(null);
+      } else {
+        setError(
+          workspaceResult.reason instanceof Error
+            ? workspaceResult.reason.message
+            : 'Unable to load workspaces.'
         );
-      });
+      }
+      if (runtimeResult.status === 'fulfilled') {
+        setRuntimeConfig(runtimeResult.value);
+        setRuntimeError(null);
+      } else {
+        setRuntimeError(
+          runtimeResult.reason instanceof Error
+            ? runtimeResult.reason.message
+            : 'Unable to load supervisor config.'
+        );
+      }
+    };
+
+    void loadUntilConnected();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, []);
 
   async function handleFavorite(workspace: WorkspaceDto) {
@@ -236,11 +270,30 @@ export function WorkspacesPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <section className="min-w-0 space-y-4">
-          {loading && (
+          {vmStarting ? (
+            <div
+              aria-live="polite"
+              className="overflow-hidden rounded-lg border border-[var(--status-warning-border)] bg-[var(--theme-panel)]"
+              role="status"
+            >
+              <div className="px-5 py-5">
+                <p className="text-sm font-semibold text-[var(--theme-fg)]">Starting hosted VM</p>
+                <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+                  Waiting for the supervisor to connect. This page will resume automatically.
+                </p>
+              </div>
+              <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
+                <div className="h-full w-1/3 animate-pulse bg-[var(--theme-accent-solid)]" />
+              </div>
+              <p className="px-5 py-3 text-xs text-[var(--theme-fg-muted)]">
+                Connection check {wakeAttempt}
+              </p>
+            </div>
+          ) : loading ? (
             <div className="host-empty-state rounded-lg border px-6 py-12 text-center">
               Loading workspace registry...
             </div>
-          )}
+          ) : null}
 
           {error && (
             <div className="host-error rounded-lg border px-4 py-4">
@@ -354,6 +407,7 @@ export function WorkspacesPage() {
         <WorkspaceRuntimeSidebar
           config={runtimeConfig}
           error={runtimeError}
+          vmStarting={vmStarting}
           workspaceCount={workspaces.length}
         />
       </div>
@@ -398,10 +452,12 @@ export function WorkspacesPage() {
 function WorkspaceRuntimeSidebar({
   config,
   error,
+  vmStarting,
   workspaceCount,
 }: {
   config: RuntimeConfigDto | null;
   error: string | null;
+  vmStarting: boolean;
   workspaceCount: number;
 }) {
   return (
@@ -411,13 +467,18 @@ function WorkspaceRuntimeSidebar({
           Supervisor
         </p>
         <dl className="mt-4 space-y-3">
-          <RuntimeFact label="Workspace root" value={config?.workspaceRoot ?? 'Loading...'} />
+          <RuntimeFact
+            label="Workspace root"
+            value={config?.workspaceRoot ?? (vmStarting ? 'VM is starting…' : 'Loading...')}
+          />
           <RuntimeFact
             label="Environment"
             value={
               config
                 ? `${config.environment} · ${config.host}:${config.port}`
-                : error ?? 'Loading...'
+                : vmStarting
+                  ? 'Connecting automatically…'
+                  : error ?? 'Loading...'
             }
           />
           <RuntimeFact
@@ -427,7 +488,7 @@ function WorkspaceRuntimeSidebar({
           <RuntimeFact label="Workspaces" value={String(workspaceCount)} />
         </dl>
       </section>
-      {error ? (
+      {error && !vmStarting ? (
         <section className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
           Runtime metadata is unavailable. Workspace actions may still work if a relay device is connected.
         </section>

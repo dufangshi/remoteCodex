@@ -267,6 +267,46 @@ export class IncusClient {
     return { id, provisioned: true };
   }
 
+  async readCodexFiles(id: string) {
+    const current = await this.requireRunningInstance(id);
+    const [config, auth] = await Promise.all([
+      this.run([
+        'exec',
+        current.name,
+        '--',
+        'cat',
+        '/home/remote-codex/.codex/config.toml',
+      ]),
+      this.run([
+        'exec',
+        current.name,
+        '--',
+        'cat',
+        '/home/remote-codex/.codex/auth.json',
+      ]),
+    ]);
+    return { configToml: config.stdout, authJson: auth.stdout };
+  }
+
+  async writeCodexFiles(
+    id: string,
+    files: { configToml: string; authJson: string },
+  ) {
+    const current = await this.requireRunningInstance(id);
+    await this.run(
+      [
+        'exec',
+        current.name,
+        '--',
+        'sh',
+        '-c',
+        `set -eu; umask 077; payload=$(mktemp); config=$(mktemp /home/remote-codex/.codex/.config.toml.XXXXXX); auth=$(mktemp /home/remote-codex/.codex/.auth.json.XXXXXX); trap 'rm -f "$payload" "$config" "$auth"' EXIT; cat >"$payload"; jq -j .configToml "$payload" >"$config"; jq -j .authJson "$payload" >"$auth"; chown remote-codex:remote-codex "$config" "$auth"; chmod 0600 "$config" "$auth"; mv "$config" /home/remote-codex/.codex/config.toml; mv "$auth" /home/remote-codex/.codex/auth.json`,
+      ],
+      JSON.stringify(files),
+    );
+    return { id, updated: true };
+  }
+
   async delete(id: string): Promise<{ id: string; deleted: boolean }> {
     const current = await this.statusOrNull(id);
     if (!current) {
@@ -274,6 +314,15 @@ export class IncusClient {
     }
     await this.run(['delete', current.name, '--force']);
     return { id, deleted: true };
+  }
+
+  private async requireRunningInstance(id: string) {
+    const current = await this.status(id);
+    if (current.status.toLowerCase() !== 'running') {
+      throw new Error('The instance must be running to manage backend files.');
+    }
+    await this.waitForGuestAgent(current.name);
+    return current;
   }
 
   private async statusOrNull(id: string) {

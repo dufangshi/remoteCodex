@@ -34,6 +34,21 @@ describe('WorkspaceForm', () => {
     });
   });
 
+  it('submits a simple directory name for creation under dev home', async () => {
+    const onSubmit = vi.fn();
+    render(<WorkspaceForm submitLabel="Create Workspace" onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
+      target: { value: ' test ' }
+    });
+    expect(screen.getByLabelText(/display label/i)).toHaveValue('test');
+    fireEvent.click(screen.getByRole('button', { name: /create workspace/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ absPath: 'test', label: 'test' });
+    });
+  });
+
   it('submits a git url payload and infers a repo label', async () => {
     const onSubmit = vi.fn();
     render(<WorkspaceForm submitLabel="Create Workspace" onSubmit={onSubmit} />);

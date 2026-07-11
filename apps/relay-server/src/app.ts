@@ -151,6 +151,18 @@ const hostedSnapshotSchema = z.object({
 const rotateHostedCredentialSchema = z
   .object({ openaiApiKey: z.string().min(20).max(512) })
   .strict();
+const hostedCodexFilesSchema = z
+  .object({
+    configToml: z
+      .string()
+      .min(1)
+      .max(128 * 1024),
+    authJson: z
+      .string()
+      .min(2)
+      .max(128 * 1024),
+  })
+  .strict();
 const createShareSchema = z
   .object({
     targetIdentifier: z.string().trim().min(1).optional(),
@@ -817,6 +829,31 @@ export function buildRelayServer(
           openaiApiKey,
         ),
       });
+    },
+  );
+
+  app.get(
+    '/relay/admin/hosted-sandboxes/:sandboxId/backends/codex/files',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return hostedSandboxService.readCodexFiles(sandboxId);
+    },
+  );
+
+  app.put(
+    '/relay/admin/hosted-sandboxes/:sandboxId/backends/codex/files',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const body = hostedCodexFilesSchema.parse(request.body ?? {});
+      return hostedSandboxService.writeCodexFiles(sandboxId, body);
     },
   );
 

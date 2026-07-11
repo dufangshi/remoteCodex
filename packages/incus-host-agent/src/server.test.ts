@@ -63,6 +63,11 @@ async function setup(
     snapshot: vi.fn().mockResolvedValue({ name: 'checkpoint' }),
     restoreSnapshot: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     provision: vi.fn().mockResolvedValue({ provisioned: true }),
+    readCodexFiles: vi.fn().mockResolvedValue({
+      configToml: 'model = "gpt-test"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-test"}\n',
+    }),
+    writeCodexFiles: vi.fn().mockResolvedValue({ updated: true }),
     delete: vi.fn().mockResolvedValue({ deleted: true }),
     ...clientOverrides,
   } as unknown as IncusClient;
@@ -101,6 +106,39 @@ describe('Incus host-agent API', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/capability' })).statusCode,
     ).toBe(401);
+    await app.close();
+  });
+
+  it('reads and atomically updates only the managed Codex files', async () => {
+    const sandboxId = crypto.randomUUID();
+    const readCodexFiles = vi.fn().mockResolvedValue({
+      configToml: 'model = "gpt-test"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-test"}\n',
+    });
+    const writeCodexFiles = vi.fn().mockResolvedValue({ updated: true });
+    const { app, token } = await setup({ readCodexFiles, writeCodexFiles });
+    const headers = { authorization: `Bearer ${token}` };
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/v1/instances/${sandboxId}/backends/codex/files`,
+      headers,
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().configToml).toContain('gpt-test');
+
+    const files = {
+      configToml: 'model = "gpt-updated"\n',
+      authJson: '{"OPENAI_API_KEY":"sk-updated"}\n',
+    };
+    const update = await app.inject({
+      method: 'PUT',
+      url: `/v1/instances/${sandboxId}/backends/codex/files`,
+      headers: { ...headers, 'idempotency-key': crypto.randomUUID() },
+      payload: files,
+    });
+    expect(update.statusCode).toBe(200);
+    expect(writeCodexFiles).toHaveBeenCalledWith(sandboxId, files);
     await app.close();
   });
 

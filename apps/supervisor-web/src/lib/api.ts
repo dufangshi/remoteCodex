@@ -12,6 +12,7 @@ import type {
   RelayLoginResultDto,
   RelayHostedSandboxCapabilityDto,
   RelayHostedCodexConfigDto,
+  RelayHostedCodexFilesDto,
   RelayHostedSandboxDetailDto,
   RelayHostedSandboxDto,
   RelayHostedSandboxOperationDto,
@@ -885,6 +886,25 @@ export function rotateHostedSandboxCredential(
   return request<{ operation: RelayHostedSandboxOperationDto }>(
     `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/rotate-credential`,
     { method: 'POST', body: JSON.stringify({ openaiApiKey }) },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function fetchHostedCodexFiles(id: string) {
+  return request<RelayHostedCodexFilesDto>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/backends/codex/files`,
+    undefined,
+    { auth: 'relay-admin' },
+  );
+}
+
+export function updateHostedCodexFiles(
+  id: string,
+  files: RelayHostedCodexFilesDto,
+) {
+  return request<{ updated: true }>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/backends/codex/files`,
+    { method: 'PUT', body: JSON.stringify(files) },
     { auth: 'relay-admin' },
   );
 }

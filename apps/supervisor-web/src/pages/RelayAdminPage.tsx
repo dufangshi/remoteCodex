@@ -48,18 +48,19 @@ import {
   fetchRelayAdmin,
   fetchRelayAdminSession,
   fetchHostedSandboxCapability,
+  fetchHostedCodexFiles,
   fetchHostedSandboxes,
   fetchHostedSandboxReconciliation,
   rejectRelayRegistration,
   relayAdminLogout,
   relayAdminLogin,
   resetRelayAdminUserPassword,
-  rotateHostedSandboxCredential,
   runHostedSandboxAction,
   runHostedSandboxReconciliation,
   setRelayUserEnabled,
   snapshotHostedSandbox,
   updateHostedSandboxMembers,
+  updateHostedCodexFiles,
   updateRelayRegistrationSettings,
 } from '../lib/api';
 
@@ -999,20 +1000,22 @@ function HostedSandboxRow({
   sandbox: RelayHostedSandboxDto;
   users: RelayAdminSummaryDto['users'];
 }) {
-  const [credential, setCredential] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [memberIds, setMemberIds] = useState(
-    sandbox.assignedUsers.map((user) => user.userId),
-  );
-  useEffect(() => {
-    setMemberIds(sandbox.assignedUsers.map((user) => user.userId));
-  }, [sandbox.assignedUsers]);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteQuery, setInviteQuery] = useState('');
   const busy = busyKey?.endsWith(sandbox.id) ?? false;
   const tone = hostedStatusTone(sandbox.status);
-  const savedMemberIds = sandbox.assignedUsers.map((user) => user.userId);
-  const membersChanged =
-    memberIds.length !== savedMemberIds.length ||
-    memberIds.some((id) => !savedMemberIds.includes(id));
+  const memberIds = sandbox.assignedUsers.map((user) => user.userId);
+  const normalizedInviteQuery = inviteQuery.trim().toLowerCase();
+  const inviteCandidates = users
+    .filter((user) => !memberIds.includes(user.id))
+    .filter((user) => {
+      if (!normalizedInviteQuery) return false;
+      return [user.id, user.username, user.email].some((value) =>
+        value.toLowerCase().includes(normalizedInviteQuery),
+      );
+    })
+    .slice(0, 6);
   return (
     <article className="px-4 py-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1153,92 +1156,311 @@ function HostedSandboxRow({
           Access · {sandbox.assignedUsers.length} user
           {sandbox.assignedUsers.length === 1 ? '' : 's'}
         </summary>
-        <div className="mt-3 max-w-2xl">
-          <p className="mb-2 text-xs text-[var(--theme-fg-muted)]">
-            Selected users can create workspaces and threads and fully control
-            this VM.
-          </p>
-          <div className="max-h-48 overflow-y-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)]">
-            {users.map((user) => (
+        <div className="mt-3 max-w-2xl overflow-hidden rounded-md border border-[var(--theme-border)]">
+          <div className="flex min-h-11 items-center justify-between gap-3 bg-[var(--theme-surface)] px-3">
+            <div>
+              <p className="text-xs font-semibold text-[var(--theme-fg)]">
+                Authorized users
+              </p>
+              <p className="text-[11px] text-[var(--theme-fg-muted)]">
+                Full workspace, thread, and VM control
+              </p>
+            </div>
+            <button
+              aria-expanded={inviteOpen}
+              aria-label="Add authorized user"
+              className="relay-button-secondary inline-flex h-9 w-9 items-center justify-center p-0"
+              disabled={busy}
+              onClick={() => {
+                setInviteOpen((current) => !current);
+                setInviteQuery('');
+              }}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+          {inviteOpen ? (
+            <div className="border-t border-[var(--theme-border)] p-3">
               <label
-                className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-[var(--theme-border)] px-3 last:border-b-0 hover:bg-[var(--theme-hover)]"
-                key={user.id}
+                className="text-xs font-medium text-[var(--theme-fg-soft)]"
+                htmlFor={`invite-user-${sandbox.id}`}
               >
-                <input
-                  aria-label={`Grant ${user.username} (${user.email}) access`}
-                  checked={memberIds.includes(user.id)}
-                  onChange={(event) =>
-                    setMemberIds((current) =>
-                      event.target.checked
-                        ? [...current, user.id]
-                        : current.filter((id) => id !== user.id),
-                    )
-                  }
-                  type="checkbox"
-                />
+                Find an account
+              </label>
+              <input
+                autoFocus
+                className="relay-input mt-2 min-h-11 w-full"
+                id={`invite-user-${sandbox.id}`}
+                onChange={(event) => setInviteQuery(event.target.value)}
+                placeholder="Account ID, username, or email"
+                value={inviteQuery}
+              />
+              {normalizedInviteQuery ? (
+                <div className="mt-2 overflow-hidden rounded-md border border-[var(--theme-border)]">
+                  {inviteCandidates.length ? (
+                    inviteCandidates.map((user) => (
+                      <button
+                        className="flex min-h-11 w-full items-center justify-between gap-3 border-b border-[var(--theme-border)] px-3 text-left last:border-b-0 hover:bg-[var(--theme-hover)]"
+                        disabled={busy}
+                        key={user.id}
+                        onClick={() =>
+                          void onAction(`members:${sandbox.id}`, async () => {
+                            await updateHostedSandboxMembers(sandbox.id, [
+                              ...memberIds,
+                              user.id,
+                            ]);
+                            setInviteOpen(false);
+                            setInviteQuery('');
+                          })
+                        }
+                        type="button"
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-[var(--theme-fg)]">
+                            {user.username}
+                          </span>
+                          <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
+                            {user.email} · {user.id}
+                          </span>
+                        </span>
+                        <span className="text-xs font-medium text-[var(--theme-accent-strong)]">
+                          Add
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                      No unassigned account matches that search.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <ul className="divide-y divide-[var(--theme-border)] border-t border-[var(--theme-border)]">
+            {sandbox.assignedUsers.map((user) => (
+              <li
+                className="flex min-h-12 items-center justify-between gap-3 px-3"
+                key={user.userId}
+              >
                 <span className="min-w-0">
-                  <span className="block font-medium text-[var(--theme-fg)]">
+                  <span className="block text-sm font-medium text-[var(--theme-fg)]">
                     {user.username}
                   </span>
                   <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
                     {user.email}
                   </span>
                 </span>
-              </label>
+                <button
+                  aria-label={`Remove ${user.username} access`}
+                  className="min-h-9 rounded-md px-3 text-xs font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]"
+                  disabled={busy || memberIds.length === 1}
+                  onClick={() =>
+                    void onAction(`members:${sandbox.id}`, () =>
+                      updateHostedSandboxMembers(
+                        sandbox.id,
+                        memberIds.filter((id) => id !== user.userId),
+                      ),
+                    )
+                  }
+                  title={
+                    memberIds.length === 1
+                      ? 'A hosted VM must keep at least one authorized user.'
+                      : undefined
+                  }
+                  type="button"
+                >
+                  Remove
+                </button>
+              </li>
             ))}
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-xs text-[var(--theme-fg-muted)]">
-              {memberIds.length} selected
-            </span>
-            <button
-              className="relay-button-secondary min-h-11"
-              disabled={busy || memberIds.length === 0 || !membersChanged}
-              onClick={() =>
-                void onAction(`members:${sandbox.id}`, () =>
-                  updateHostedSandboxMembers(sandbox.id, memberIds),
-                )
-              }
-              type="button"
-            >
-              Save access
-            </button>
-          </div>
+          </ul>
         </div>
       </details>
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
-          Rotate credential
-        </summary>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <label className="sr-only" htmlFor={`credential-${sandbox.id}`}>
-            New OpenAI Platform API key for {sandbox.deviceName}
-          </label>
-          <input
-            autoComplete="off"
-            className="relay-input min-h-11 flex-1 font-mono"
-            id={`credential-${sandbox.id}`}
-            onChange={(event) => setCredential(event.target.value)}
-            placeholder="New OpenAI Platform API key"
-            type="password"
-            value={credential}
-          />
-          <button
-            className="relay-button-secondary min-h-11"
-            disabled={busy || credential.length < 20}
-            onClick={() =>
-              void onAction(`rotate:${sandbox.id}`, async () => {
-                await rotateHostedSandboxCredential(sandbox.id, credential);
-                setCredential('');
-              })
-            }
-            type="button"
-          >
-            Rotate
-          </button>
-        </div>
-      </details>
+      <HostedBackendFilesEditor
+        busy={busy}
+        onAction={onAction}
+        sandbox={sandbox}
+      />
     </article>
+  );
+}
+
+function HostedBackendFilesEditor({
+  busy,
+  onAction,
+  sandbox,
+}: {
+  busy: boolean;
+  onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  sandbox: RelayHostedSandboxDto;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [configToml, setConfigToml] = useState('');
+  const [authJson, setAuthJson] = useState('');
+
+  async function loadFiles() {
+    setLoading(true);
+    setError(null);
+    try {
+      const files = await fetchHostedCodexFiles(sandbox.id);
+      setConfigToml(files.configToml);
+      setAuthJson(files.authJson);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <details
+      className="mt-3"
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        if (
+          nextOpen &&
+          !configToml &&
+          !loading &&
+          sandbox.status === 'online'
+        ) {
+          void loadFiles();
+        }
+      }}
+    >
+      <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
+        Backend credentials
+      </summary>
+      {open ? (
+        <div className="mt-3 max-w-3xl overflow-hidden rounded-md border border-[var(--theme-border)]">
+          <div className="grid gap-3 bg-[var(--theme-surface)] p-3 sm:grid-cols-[12rem_1fr] sm:items-end">
+            <label className="text-xs font-medium text-[var(--theme-fg-soft)]">
+              Backend
+              <select
+                className="relay-input mt-2 min-h-11 w-full"
+                onChange={() => undefined}
+                value="codex"
+              >
+                <option value="codex">Codex</option>
+                <option disabled>Claude Code (coming soon)</option>
+                <option disabled>OpenCode (coming soon)</option>
+              </select>
+            </label>
+            <p className="text-xs leading-5 text-[var(--theme-fg-muted)]">
+              Files are read from and written directly to this VM. The VM must
+              be online.
+            </p>
+          </div>
+          {sandbox.status !== 'online' ? (
+            <p className="border-t border-[var(--theme-border)] px-3 py-3 text-sm text-[var(--status-warning-fg)]">
+              Start the VM before editing backend files.
+            </p>
+          ) : loading ? (
+            <p className="border-t border-[var(--theme-border)] px-3 py-4 text-sm text-[var(--theme-fg-muted)]">
+              Loading Codex files from the VM…
+            </p>
+          ) : (
+            <div className="space-y-4 border-t border-[var(--theme-border)] p-3">
+              {error ? (
+                <p className="rounded-md border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+                  {error}
+                </p>
+              ) : null}
+              <BackendFileField
+                filename="~/.codex/config.toml"
+                language="TOML"
+                onChange={setConfigToml}
+                value={configToml}
+              />
+              <BackendFileField
+                filename="~/.codex/auth.json"
+                language="JSON"
+                onChange={setAuthJson}
+                value={authJson}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  className="relay-button-secondary min-h-11"
+                  disabled={busy || loading}
+                  onClick={() => void loadFiles()}
+                  type="button"
+                >
+                  Reload
+                </button>
+                <button
+                  className="relay-button-primary min-h-11"
+                  disabled={busy || !configToml.trim() || !authJson.trim()}
+                  onClick={() =>
+                    void onAction(`backend:${sandbox.id}`, () =>
+                      updateHostedCodexFiles(sandbox.id, {
+                        configToml,
+                        authJson,
+                      }),
+                    )
+                  }
+                  type="button"
+                >
+                  Save to VM
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function BackendFileField({
+  filename,
+  language,
+  onChange,
+  value,
+}: {
+  filename: string;
+  language: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <div>
+      <div className="flex min-h-9 items-center justify-between gap-3">
+        <label
+          className="text-xs font-semibold text-[var(--theme-fg)]"
+          htmlFor={filename}
+        >
+          {filename}
+        </label>
+        <label className="relay-button-secondary inline-flex min-h-9 cursor-pointer items-center px-3 text-xs">
+          Upload {language}
+          <input
+            accept={
+              language === 'JSON'
+                ? '.json,application/json'
+                : '.toml,text/plain'
+            }
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void file.text().then(onChange);
+              event.target.value = '';
+            }}
+            type="file"
+          />
+        </label>
+      </div>
+      <textarea
+        className="relay-input mt-2 min-h-40 w-full resize-y font-mono text-xs leading-5"
+        id={filename}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        value={value}
+      />
+    </div>
   );
 }
 

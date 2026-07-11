@@ -508,7 +508,22 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       await cloneRepository(body.gitUrl.trim(), targetPath);
       validated = await validateWorkspacePath(app.services.config.workspaceRoot, targetPath);
     } else {
-      validated = await validateWorkspacePath(app.services.config.workspaceRoot, body.absPath, {
+      const requestedPath = body.absPath.trim();
+      const isWorkspaceName =
+        !path.isAbsolute(requestedPath) &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestedPath) &&
+        requestedPath !== '.' &&
+        requestedPath !== '..';
+      if (!path.isAbsolute(requestedPath) && !isWorkspaceName) {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message: 'Use a simple directory name, an absolute path, or a Git URL.'
+        });
+      }
+      const targetPath = isWorkspaceName
+        ? path.join(settings.devHome, requestedPath)
+        : requestedPath;
+      validated = await validateWorkspacePath(app.services.config.workspaceRoot, targetPath, {
         devHome: settings.devHome,
         createMissingLeaf: true
       });

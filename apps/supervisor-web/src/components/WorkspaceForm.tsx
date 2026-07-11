@@ -101,11 +101,12 @@ export function WorkspaceForm({
           name="absPath"
           value={absPath}
           onChange={(event) => setAbsPath(event.target.value)}
-          placeholder="/Users/name/project or https://github.com/owner/repo.git"
+          placeholder="test, /Users/name/project, or https://github.com/owner/repo.git"
           className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
         />
         <p className="host-muted mt-2 text-xs">
-          Absolute paths register local directories. Git URLs clone into the configured dev home.
+          A name such as “test” creates a folder under the configured workspace directory. Absolute
+          paths register existing directories; Git URLs clone a repository.
         </p>
       </div>
       <div>

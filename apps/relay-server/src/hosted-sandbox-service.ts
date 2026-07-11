@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import type {
+  RelayHostedCodexFilesDto,
   RelayHostedSandboxDetailDto,
   RelayHostedCodexConfigDto,
   RelayHostedSandboxOperationDto,
@@ -81,6 +82,21 @@ export class HostedSandboxService {
 
   updateMembers(id: string, userIds: string[]) {
     return this.store.setHostedSandboxMembers(id, userIds);
+  }
+
+  readCodexFiles(id: string) {
+    this.detail(id);
+    return this.provider.readCodexFiles(id);
+  }
+
+  async writeCodexFiles(id: string, files: RelayHostedCodexFilesDto) {
+    this.detail(id);
+    await this.provider.writeCodexFiles(
+      id,
+      files,
+      `relay-codex-files-${crypto.randomUUID()}`,
+    );
+    return { updated: true };
   }
 
   retry(id: string) {
