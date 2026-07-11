@@ -3165,6 +3165,46 @@ describe('supervisor api', () => {
     });
   });
 
+  it('recreates an unmaterialized Codex thread when resume follows a process restart', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { absPath: path.join(tempDir, 'workspace') },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Unmaterialized restart thread',
+      },
+    });
+    const created = createResponse.json();
+    fakeCodexManager.loadedThreadIds.delete(created.providerSessionId);
+
+    const resumeResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${created.id}/resume`,
+      payload: {},
+    });
+
+    expect(resumeResponse.statusCode).toBe(200);
+    expect(resumeResponse.json()).toMatchObject({
+      thread: {
+        id: created.id,
+        title: 'Unmaterialized restart thread',
+      },
+    });
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${created.id}/prompt`,
+      payload: { prompt: 'Materialize after restart.' },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+  });
+
   it('returns only the latest turn page by default and can page earlier turns', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

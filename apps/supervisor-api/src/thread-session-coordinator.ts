@@ -58,6 +58,7 @@ type ResumeThreadSessionResult =
     }
   | {
       status: 'bootstrap_unavailable';
+      error: unknown;
     };
 
 interface InterruptedThreadTurnResult {
@@ -305,7 +306,7 @@ export class ThreadSessionCoordinator {
         throw error;
       }
 
-      return { status: 'bootstrap_unavailable' };
+      return { status: 'bootstrap_unavailable', error };
     }
 
     const effectiveModel =

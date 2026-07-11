@@ -1,19 +1,26 @@
 import {
+  getWorkspaceRecordById,
   getThreadRecordById,
+  listThreadTurnMetadataByThreadId,
   updateThreadRecord,
   type DatabaseClient,
 } from '../../../packages/db/src/index';
 import type {
   ApprovalMode,
+  AgentBackendIdDto,
+  ReasoningEffortDto,
   ResumeThreadInput,
 } from '../../../packages/shared/src/index';
+import { AgentRuntimeError } from '../../../packages/agent-runtime/src/index';
 import { HttpError } from './app';
 import { buildThreadPatch } from './dto';
 import { ThreadSessionCoordinator } from './thread-session-coordinator';
 
 interface ThreadSessionLifecycleCallbacks {
   invalidateThreadDetailCache(localThreadId: string): void;
-  requireProviderSessionId(record: { providerSessionId?: string | null }): string;
+  requireProviderSessionId(record: {
+    providerSessionId?: string | null;
+  }): string;
   resetThreadContextUsage(localThreadId: string): void;
 }
 
@@ -45,6 +52,37 @@ export class ThreadSessionLifecycleCoordinator {
       fastMode: record.fastMode,
     });
     if (resumed.status === 'bootstrap_unavailable') {
+      if (!this.canRecreateUnmaterializedThread(record, resumed.error)) {
+        return;
+      }
+      const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+      const model = input.model ?? record.model;
+      if (!workspace || !model) {
+        return;
+      }
+      const recreated = await this.sessionCoordinator.startThreadSession({
+        workspacePath: workspace.absPath,
+        threadInput: {
+          workspaceId: workspace.id,
+          title: record.title,
+          provider: record.provider as AgentBackendIdDto,
+          model,
+          reasoningEffort: record.reasoningEffort as ReasoningEffortDto | null,
+          approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
+        },
+        defaultTitle: record.title,
+      });
+      updateThreadRecord(this.db, record.id, {
+        ...buildThreadPatch(
+          recreated.response.session,
+          model,
+          recreated.response.reasoningEffort ?? recreated.reasoningEffort,
+        ),
+        providerSessionId: recreated.response.providerSessionId,
+        sandboxMode: recreated.sandboxMode,
+        isConnected: true,
+      });
+      this.callbacks.invalidateThreadDetailCache(localThreadId);
       return;
     }
 
@@ -69,6 +107,21 @@ export class ThreadSessionLifecycleCoordinator {
       this.callbacks.resetThreadContextUsage(record.id);
     }
     this.callbacks.invalidateThreadDetailCache(localThreadId);
+  }
+
+  private canRecreateUnmaterializedThread(
+    record: { id: string; provider: string; source: string },
+    error: unknown,
+  ) {
+    return (
+      record.provider === 'codex' &&
+      record.source === 'supervisor' &&
+      listThreadTurnMetadataByThreadId(this.db, record.id).length === 0 &&
+      error instanceof AgentRuntimeError &&
+      error.provider === 'codex' &&
+      error.code === 'remote_error' &&
+      /thread not loaded|no rollout found/i.test(error.message)
+    );
   }
 
   disconnectThread(localThreadId: string) {
