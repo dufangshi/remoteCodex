@@ -513,14 +513,10 @@ function HostedSandboxesPanel({
   const [resourcePreset, setResourcePreset] = useState<'standard' | 'large'>(
     'standard',
   );
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [modelProvider, setModelProvider] = useState('OpenAI');
-  const [model, setModel] = useState('gpt-5.6-sol');
-  const [reviewModel, setReviewModel] = useState('gpt-5.6-sol');
-  const [baseUrl, setBaseUrl] = useState('https://sub.lnz-study.com');
-  const [reasoningEffort, setReasoningEffort] = useState<
-    'low' | 'medium' | 'high' | 'xhigh'
-  >('low');
+  const [createConfigToml, setCreateConfigToml] = useState(
+    'model_provider = "OpenAI"\nmodel = "gpt-5.6-sol"\nreview_model = "gpt-5.6-sol"\nmodel_reasoning_effort = "low"\ndisable_response_storage = true\nnetwork_access = "enabled"\n\n[model_providers.OpenAI]\nname = "OpenAI"\nbase_url = "https://sub.lnz-study.com"\nwire_api = "responses"\nrequires_openai_auth = true\n\n[features]\ngoals = true\n',
+  );
+  const [createAuthJson, setCreateAuthJson] = useState('');
   const canCreate =
     capability?.available === true && assignedUserIds.length > 0;
 
@@ -537,22 +533,14 @@ function HostedSandboxesPanel({
         deviceName,
         imageVersion: 'ubuntu-24.04-v4',
         resources,
-        openaiApiKey,
-        codexConfig: {
-          modelProvider,
-          model,
-          reviewModel,
-          reasoningEffort,
-          baseUrl,
-          wireApi: 'responses',
-          requiresOpenaiAuth: true,
-          disableResponseStorage: true,
-          networkAccess: 'enabled',
-          goals: true,
+        backends: ['codex'],
+        codexFiles: {
+          configToml: createConfigToml,
+          authJson: createAuthJson,
         },
       }),
     );
-    setOpenaiApiKey('');
+    setCreateAuthJson('');
   }
 
   const capabilityTone = capability?.available
@@ -720,82 +708,20 @@ function HostedSandboxesPanel({
               </select>
             </label>
             <label className="text-sm text-[var(--theme-fg-soft)]">
-              OpenAI Platform API key
-              <input
-                autoComplete="off"
-                className="relay-input mt-2 w-full font-mono"
-                minLength={20}
-                onChange={(event) => setOpenaiApiKey(event.target.value)}
-                placeholder="Stored encrypted on the Incus host"
-                required
-                type="password"
-                value={openaiApiKey}
-              />
+              Backends
+              <select className="relay-input mt-2 w-full" value="codex" onChange={() => undefined}>
+                <option value="codex">Codex</option>
+                <option disabled>Claude Code (coming soon)</option>
+                <option disabled>OpenCode (coming soon)</option>
+              </select>
             </label>
-            <details className="rounded-md border border-[var(--theme-border)] lg:col-span-2">
+            <details className="rounded-md border border-[var(--theme-border)] lg:col-span-2" open>
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--theme-fg)]">
-                Codex provider configuration
+                Codex files
               </summary>
-              <div className="grid gap-4 border-t border-[var(--theme-border)] p-3 md:grid-cols-2">
-                <label className="text-sm text-[var(--theme-fg-soft)]">
-                  Provider name
-                  <input
-                    className="relay-input mt-2 w-full"
-                    onChange={(event) => setModelProvider(event.target.value)}
-                    pattern="[A-Za-z][A-Za-z0-9_-]{0,31}"
-                    required
-                    value={modelProvider}
-                  />
-                </label>
-                <label className="text-sm text-[var(--theme-fg-soft)]">
-                  Responses API base URL
-                  <input
-                    className="relay-input mt-2 w-full"
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    required
-                    type="url"
-                    value={baseUrl}
-                  />
-                </label>
-                <label className="text-sm text-[var(--theme-fg-soft)]">
-                  Model
-                  <input
-                    className="relay-input mt-2 w-full"
-                    onChange={(event) => setModel(event.target.value)}
-                    required
-                    value={model}
-                  />
-                </label>
-                <label className="text-sm text-[var(--theme-fg-soft)]">
-                  Review model
-                  <input
-                    className="relay-input mt-2 w-full"
-                    onChange={(event) => setReviewModel(event.target.value)}
-                    required
-                    value={reviewModel}
-                  />
-                </label>
-                <label className="text-sm text-[var(--theme-fg-soft)]">
-                  Reasoning effort
-                  <select
-                    className="relay-input mt-2 w-full"
-                    onChange={(event) =>
-                      setReasoningEffort(
-                        event.target.value as
-                          | 'low'
-                          | 'medium'
-                          | 'high'
-                          | 'xhigh',
-                      )
-                    }
-                    value={reasoningEffort}
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="xhigh">Extra high</option>
-                  </select>
-                </label>
+              <div className="space-y-4 border-t border-[var(--theme-border)] p-3">
+                <BackendFileField filename="config.toml" language="TOML" onChange={setCreateConfigToml} value={createConfigToml} />
+                <BackendFileField filename="auth.json" language="JSON" onChange={setCreateAuthJson} value={createAuthJson} />
               </div>
             </details>
             <div className="flex flex-col gap-2 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
@@ -806,7 +732,7 @@ function HostedSandboxesPanel({
               <button
                 className="relay-button-primary inline-flex min-h-11 items-center justify-center gap-2"
                 disabled={
-                  !canCreate || !openaiApiKey || busyKey === 'hosted:create'
+                  !canCreate || !createConfigToml.trim() || !createAuthJson.trim() || busyKey === 'hosted:create'
                 }
                 type="submit"
               >

@@ -17,7 +17,8 @@ export interface IncusInstanceStatus {
 export interface GuestProvisionInput {
   relayServerUrl: string;
   relayAgentToken: string;
-  openaiApiKey: string;
+  openaiApiKey?: string;
+  codexFiles?: { configToml: string; authJson: string };
   localAdminUsername: string;
   codexConfig?: {
     modelProvider: string;

@@ -136,8 +136,11 @@ const createHostedSandboxSchema = z
       memoryMiB: z.number().int().min(1024).max(2048),
       diskGiB: z.number().int().min(10).max(12),
     }),
-    openaiApiKey: z.string().min(20).max(512),
-    codexConfig: hostedCodexConfigSchema,
+    backends: z.array(z.literal('codex')).length(1),
+    codexFiles: z.object({
+      configToml: z.string().min(1).max(128 * 1024),
+      authJson: z.string().min(2).max(128 * 1024),
+    }),
   })
   .strict();
 const updateHostedSandboxMembersSchema = z

@@ -29,8 +29,9 @@ describe('hosted supervisor golden image assets', () => {
     );
     expect(provision).toContain('codex login --with-api-key');
     expect(provision).toContain(
-      'chmod 0600 /home/remote-codex/.codex/auth.json',
+      'chmod 0600 /home/remote-codex/.codex/config.toml /home/remote-codex/.codex/auth.json',
     );
+    expect(provision).toContain("jq -jr '.codexFiles.configToml'");
     expect(provision).toContain('install -o root -g root -m 0600');
     expect(provision).not.toMatch(/codex login --with-api-key ["$]/);
     expect(provision).not.toContain('echo "${api_key}"');

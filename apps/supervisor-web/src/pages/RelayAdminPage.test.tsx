@@ -451,8 +451,10 @@ describe('RelayAdminPage', () => {
       ),
     );
 
-    fireEvent.change(screen.getByLabelText('OpenAI Platform API key'), {
-      target: { value: 'sk-test-not-a-real-secret-123456789' },
+    fireEvent.change(screen.getByLabelText('auth.json'), {
+      target: {
+        value: '{"OPENAI_API_KEY":"sk-test-not-a-real-secret-123456789"}',
+      },
     });
     fireEvent.click(screen.getByLabelText('Assign owner (owner@example.test)'));
     fireEvent.click(
@@ -464,7 +466,7 @@ describe('RelayAdminPage', () => {
         '/relay/admin/hosted-sandboxes',
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('sk-test-not-a-real-secret-123456789'),
+          body: expect.stringContaining('OPENAI_API_KEY'),
         }),
       );
     });
@@ -481,7 +483,7 @@ describe('RelayAdminPage', () => {
       }),
     );
     expect(
-      screen.queryByDisplayValue('sk-test-not-a-real-secret-123456789'),
+      screen.queryByDisplayValue(/sk-test-not-a-real-secret/),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Access · 1 user'));

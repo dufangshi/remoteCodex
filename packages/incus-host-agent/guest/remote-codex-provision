@@ -23,7 +23,7 @@ required_string() {
 
 relay_server_url="$(required_string relayServerUrl)"
 relay_agent_token="$(required_string relayAgentToken)"
-api_key="$(required_string openaiApiKey)"
+api_key="$(jq -er '.openaiApiKey // empty | select(type == "string")' "${payload_file}" 2>/dev/null || true)"
 local_admin_username="$(jq -er '.localAdminUsername // "admin" | select(type == "string" and length > 0)' "${payload_file}")"
 model_provider="$(jq -er '.codexConfig.modelProvider | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_-]{0,31}$"))' "${payload_file}")"
 model_provider_toml="$(jq -ec '.codexConfig.modelProvider' "${payload_file}")"
@@ -63,7 +63,16 @@ install -d -o remote-codex -g remote-codex -m 0700 \
   /home/remote-codex/.remote-codex \
   /home/remote-codex/workspaces
 
-cat >/home/remote-codex/.codex/config.toml <<EOF
+if jq -e '.codexFiles.configToml | type == "string" and length > 0' "${payload_file}" >/dev/null 2>&1 &&
+  jq -e '.codexFiles.authJson | type == "string" and length > 0' "${payload_file}" >/dev/null 2>&1; then
+  jq -jr '.codexFiles.configToml' "${payload_file}" >/home/remote-codex/.codex/config.toml
+  jq -jr '.codexFiles.authJson' "${payload_file}" >/home/remote-codex/.codex/auth.json
+else
+  if [ -z "${api_key}" ]; then
+    echo "Missing Codex files or legacy OpenAI API key." >&2
+    exit 2
+  fi
+  cat >/home/remote-codex/.codex/config.toml <<EOF
 cli_auth_credentials_store = "file"
 model_provider = ${model_provider_toml}
 model = ${model_toml}
@@ -82,20 +91,19 @@ requires_openai_auth = ${requires_openai_auth}
 [features]
 goals = ${goals}
 EOF
-chown remote-codex:remote-codex /home/remote-codex/.codex/config.toml
-chmod 0600 /home/remote-codex/.codex/config.toml
-
-if ! printf '%s' "${api_key}" | runuser -u remote-codex -- \
-  env HOME=/home/remote-codex CODEX_HOME=/home/remote-codex/.codex \
-  codex login --with-api-key >/dev/null 2>&1; then
-  echo "Codex API-key login failed." >&2
-  exit 3
+  if ! printf '%s' "${api_key}" | runuser -u remote-codex -- \
+    env HOME=/home/remote-codex CODEX_HOME=/home/remote-codex/.codex \
+    codex login --with-api-key >/dev/null 2>&1; then
+    echo "Codex API-key login failed." >&2
+    exit 3
+  fi
 fi
 unset api_key
 
 test -f /home/remote-codex/.codex/auth.json
-chown remote-codex:remote-codex /home/remote-codex/.codex/auth.json
-chmod 0600 /home/remote-codex/.codex/auth.json
+chown remote-codex:remote-codex \
+  /home/remote-codex/.codex/config.toml /home/remote-codex/.codex/auth.json
+chmod 0600 /home/remote-codex/.codex/config.toml /home/remote-codex/.codex/auth.json
 
 install -d -o root -g root -m 0755 /etc/remote-codex
 env_file="$(mktemp)"

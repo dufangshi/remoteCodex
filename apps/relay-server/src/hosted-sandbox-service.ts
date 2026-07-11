@@ -42,16 +42,15 @@ export class HostedSandboxService {
     deviceName: string;
     imageVersion: string;
     resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
-    openaiApiKey: string;
-    codexConfig: RelayHostedCodexConfigDto;
+    codexFiles: RelayHostedCodexFilesDto;
   }): Promise<{
     sandbox: RelayHostedSandboxDetailDto;
     operation: RelayHostedSandboxOperationDto;
   }> {
     this.requireConfiguredRelayUrl();
     const requestId = crypto.randomUUID();
-    const credentialRef = await this.provider.createCredential(
-      input.openaiApiKey,
+    const credentialRef = await this.provider.createCodexCredential(
+      input.codexFiles,
       `relay-credential-${requestId}`,
     );
     try {
@@ -62,7 +61,6 @@ export class HostedSandboxService {
         imageVersion: input.imageVersion,
         resources: input.resources,
         credentialRef,
-        codexConfig: input.codexConfig,
       });
       this.schedule(created.sandbox.id, created.operation.id);
       return {

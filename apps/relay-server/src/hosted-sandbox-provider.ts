@@ -12,6 +12,10 @@ export interface HostedSandboxProvider {
     openaiApiKey: string,
     idempotencyKey: string,
   ): Promise<string>;
+  createCodexCredential(
+    files: RelayHostedCodexFilesDto,
+    idempotencyKey: string,
+  ): Promise<string>;
   deleteCredential(
     credentialRef: string,
     idempotencyKey: string,
@@ -84,6 +88,12 @@ export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
 
   createCredential(
     _openaiApiKey: string,
+    _idempotencyKey: string,
+  ): Promise<string> {
+    return this.disabled();
+  }
+  createCodexCredential(
+    _files: RelayHostedCodexFilesDto,
     _idempotencyKey: string,
   ): Promise<string> {
     return this.disabled();
@@ -183,6 +193,17 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
     const result = await this.request<{ credentialRef: string }>(
       '/v1/credentials',
       { method: 'POST', idempotencyKey, body: { openaiApiKey } },
+    );
+    return result.credentialRef;
+  }
+
+  async createCodexCredential(
+    files: RelayHostedCodexFilesDto,
+    idempotencyKey: string,
+  ) {
+    const result = await this.request<{ credentialRef: string }>(
+      '/v1/credentials',
+      { method: 'POST', idempotencyKey, body: { codexFiles: files } },
     );
     return result.credentialRef;
   }

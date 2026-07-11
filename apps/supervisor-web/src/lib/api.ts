@@ -833,8 +833,8 @@ export function createHostedSandbox(input: {
     | 'ubuntu-24.04-v3'
     | 'ubuntu-24.04-v4';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
-  openaiApiKey: string;
-  codexConfig: RelayHostedCodexConfigDto;
+  backends: ['codex'];
+  codexFiles: RelayHostedCodexFilesDto;
 }) {
   return request<{
     sandbox: RelayHostedSandboxDetailDto;

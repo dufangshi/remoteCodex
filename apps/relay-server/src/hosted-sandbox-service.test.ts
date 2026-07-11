@@ -51,6 +51,7 @@ function provider(options: { provisionFails?: boolean } = {}) {
     checkedAt: new Date().toISOString(),
   });
   result.createCredential = vi.fn().mockResolvedValue('rcc_'.padEnd(36, 'x'));
+  result.createCodexCredential = vi.fn().mockResolvedValue('rcc_'.padEnd(36, 'x'));
   result.deleteCredential = vi.fn().mockResolvedValue(undefined);
   result.create = vi.fn(async (input) => ({
     id: input.id,
@@ -149,7 +150,11 @@ describe('hosted sandbox create saga', () => {
         deviceName: 'Hosted Codex',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
-        openaiApiKey: secret,
+        backends: ['codex'],
+        codexFiles: {
+          configToml: 'model = "gpt-test"\n',
+          authJson: JSON.stringify({ OPENAI_API_KEY: secret }),
+        },
       },
     });
     expect(create.statusCode).toBe(202);
@@ -364,7 +369,11 @@ describe('hosted sandbox create saga', () => {
         deviceName: 'Failing hosted VM',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
-        openaiApiKey: 'sk-test-not-a-real-secret-123456789',
+        backends: ['codex'],
+        codexFiles: {
+          configToml: 'model = "gpt-test"\n',
+          authJson: '{"OPENAI_API_KEY":"sk-test-not-a-real-secret-123456789"}',
+        },
       },
     });
     const sandboxId = create.json().sandbox.id as string;
@@ -419,7 +428,11 @@ describe('hosted sandbox create saga', () => {
         deviceName: 'Restart reconcile VM',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
-        openaiApiKey: 'sk-test-not-a-real-secret-123456789',
+        backends: ['codex'],
+        codexFiles: {
+          configToml: 'model = "gpt-test"\n',
+          authJson: '{"OPENAI_API_KEY":"sk-test-not-a-real-secret-123456789"}',
+        },
       },
     });
     const sandboxId = create.json().sandbox.id as string;

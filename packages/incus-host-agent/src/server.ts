@@ -185,8 +185,10 @@ export function buildIncusHostAgent(input: {
 
   app.post('/v1/credentials', async (request, reply) => {
     const body = z
-      .object({ openaiApiKey: z.string().min(20).max(512) })
-      .strict()
+      .union([
+        z.object({ openaiApiKey: z.string().min(20).max(512) }).strict(),
+        z.object({ codexFiles: codexFilesSchema }).strict(),
+      ])
       .parse(request.body ?? {});
     if (!input.secrets) {
       return reply.code(503).send({
@@ -201,7 +203,11 @@ export function buildIncusHostAgent(input: {
       'create_credential',
       'credential',
       async () => ({
-        credentialRef: await input.secrets!.create(body.openaiApiKey),
+        credentialRef: await input.secrets!.create(
+          'codexFiles' in body
+            ? JSON.stringify({ kind: 'codex_files', files: body.codexFiles })
+            : body.openaiApiKey,
+        ),
       }),
     );
   });
@@ -281,14 +287,36 @@ export function buildIncusHostAgent(input: {
       { ...input, inFlight },
       'provision',
       id,
-      async () =>
-        input.client.provision(id, {
+      async () => {
+        const storedCredential = await input.secrets!.read(body.credentialRef);
+        let codexFiles: { configToml: string; authJson: string } | undefined;
+        try {
+          const parsed = JSON.parse(storedCredential) as {
+            kind?: string;
+            files?: { configToml?: string; authJson?: string };
+          };
+          if (
+            parsed.kind === 'codex_files' &&
+            typeof parsed.files?.configToml === 'string' &&
+            typeof parsed.files.authJson === 'string'
+          ) {
+            codexFiles = {
+              configToml: parsed.files.configToml,
+              authJson: parsed.files.authJson,
+            };
+          }
+        } catch {
+          // Legacy credentials contain the raw API key.
+        }
+        return input.client.provision(id, {
           relayServerUrl: body.relayServerUrl,
           relayAgentToken: body.relayAgentToken,
-          openaiApiKey: await input.secrets!.read(body.credentialRef),
+          ...(!codexFiles ? { openaiApiKey: storedCredential } : {}),
+          ...(codexFiles ? { codexFiles } : {}),
           localAdminUsername: body.localAdminUsername,
           codexConfig: body.codexConfig,
-        }),
+        });
+      },
     );
   });
 
