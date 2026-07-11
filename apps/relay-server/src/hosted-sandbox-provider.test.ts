@@ -38,6 +38,7 @@ function testConfig(): RelayServerConfig {
       relayServerUrl: null,
       requestTimeoutMs: 20,
       idleTimeoutMs: 600_000,
+      reconcileIntervalMs: 300_000,
     },
   };
 }
@@ -130,6 +131,18 @@ describe('hosted sandbox capability', () => {
     });
     expect(capability.body).not.toContain('secret upstream details');
 
+    const reconciliation = await app.inject({
+      method: 'POST',
+      url: '/relay/admin/hosted-sandboxes/reconciliation/run',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(reconciliation.statusCode).toBe(200);
+    expect(reconciliation.json()).toMatchObject({
+      status: 'unavailable',
+      errorCode: 'hosted_inventory_unavailable',
+    });
+    expect(reconciliation.body).not.toContain('secret upstream details');
+
     const register = await app.inject({
       method: 'POST',
       url: '/relay/auth/register',
@@ -147,6 +160,12 @@ describe('hosted sandbox capability', () => {
     });
     expect(device.statusCode).toBe(200);
     expect(device.json().device.name).toBe('Ordinary device');
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: '/relay/admin/hosted-sandboxes/reconciliation',
+      headers: { authorization: `Bearer ${register.json().token as string}` },
+    });
+    expect(forbidden.statusCode).toBe(403);
     await app.close();
   });
 
@@ -195,6 +214,17 @@ describe('hosted sandbox capability', () => {
             credentialStoreReady: true,
             limits: { maxInstances: 4, maxRunningInstances: 1 },
             capacity: { totalInstances: 2, runningInstances: 1 },
+            metrics: {
+              cpuCount: 8,
+              load1: 1.2,
+              loadPerCpu: 0.15,
+              memoryTotalMiB: 16384,
+              memoryAvailableMiB: 8192,
+              diskTotalGiB: 100,
+              diskAvailableGiB: 50,
+              monitorPath: '/var/lib/incus',
+            },
+            alerts: [],
           }),
           { status: 200 },
         ),
@@ -211,6 +241,7 @@ describe('hosted sandbox capability', () => {
       relayServerUrl: 'wss://relay.example.test',
       requestTimeoutMs: 25,
       idleTimeoutMs: 600_000,
+      reconcileIntervalMs: 300_000,
     });
 
     await expect(provider.capability()).resolves.toMatchObject({
@@ -218,6 +249,12 @@ describe('hosted sandbox capability', () => {
       reachable: true,
       limits: { maxInstances: 4, maxRunningInstances: 1 },
       capacity: { totalInstances: 2, runningInstances: 1 },
+      metrics: expect.objectContaining({
+        cpuCount: 8,
+        memoryAvailableMiB: 8192,
+        diskAvailableGiB: 50,
+      }),
+      alerts: [],
     });
     await expect(
       provider.createCredential(
@@ -231,6 +268,49 @@ describe('hosted sandbox capability', () => {
     expect(request?.headers).toMatchObject({
       authorization: 'Bearer host-agent-secret-token',
       'idempotency-key': 'credential-idempotency-key',
+    });
+  });
+
+  it('reads restricted provider inventory over the authenticated agent API', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          instances: [
+            {
+              id: '6528329d-b95a-4cb9-91fa-d7ea2ebd7d23',
+              status: 'Running',
+              snapshots: ['idle-stop'],
+            },
+          ],
+          credentials: [
+            {
+              credentialRef: `rcc_${'a'.repeat(32)}`,
+              createdAt: '2026-07-10T00:00:00.000Z',
+            },
+          ],
+          checkedAt: '2026-07-10T00:01:00.000Z',
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = new IncusHostedSandboxProvider({
+      provider: 'incus',
+      agentUrl: 'http://127.0.0.1:8801/',
+      agentToken: 'host-agent-secret-token',
+      relayServerUrl: 'wss://relay.example.test',
+      requestTimeoutMs: 25,
+      idleTimeoutMs: 600_000,
+      reconcileIntervalMs: 300_000,
+    });
+
+    await expect(provider.inventory()).resolves.toMatchObject({
+      instances: [{ status: 'Running', snapshots: ['idle-stop'] }],
+      credentials: [{ credentialRef: `rcc_${'a'.repeat(32)}` }],
+    });
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('http://127.0.0.1:8801/v1/inventory');
+    expect(request?.headers).toMatchObject({
+      authorization: 'Bearer host-agent-secret-token',
     });
   });
 

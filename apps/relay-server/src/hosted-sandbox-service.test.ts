@@ -34,6 +34,7 @@ function config(dataDir = `/tmp/rcd-hosted-saga-${crypto.randomUUID()}`) {
       relayServerUrl: 'wss://relay.example.test',
       requestTimeoutMs: 25,
       idleTimeoutMs: 600_000,
+      reconcileIntervalMs: 300_000,
     },
   } satisfies RelayServerConfig;
 }
@@ -171,6 +172,11 @@ describe('hosted sandbox create saga', () => {
         relayServerUrl: 'wss://relay.example.test',
         relayAgentToken: expect.stringMatching(/^rcd_/),
         credentialRef: 'rcc_'.padEnd(36, 'x'),
+        codexConfig: expect.objectContaining({
+          modelProvider: 'OpenAI',
+          model: 'gpt-5.4',
+          baseUrl: 'https://api.openai.com/v1',
+        }),
       }),
       `relay-sandbox-provision-${sandboxId}`,
     );

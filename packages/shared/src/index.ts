@@ -356,6 +356,21 @@ export interface RelayHostedSandboxCapabilityDto {
     totalInstances: number;
     runningInstances: number;
   };
+  metrics?: {
+    cpuCount: number;
+    load1: number;
+    loadPerCpu: number;
+    memoryTotalMiB: number;
+    memoryAvailableMiB: number;
+    diskTotalGiB: number;
+    diskAvailableGiB: number;
+    monitorPath: string;
+  };
+  alerts?: Array<{
+    code: 'host_memory_low' | 'host_disk_low' | 'host_load_high';
+    severity: 'warning';
+    message: string;
+  }>;
 }
 
 export type RelayHostedSandboxStatusDto =
@@ -387,6 +402,19 @@ export interface RelayHostedSandboxResourcesDto {
   cpuCount: number;
   memoryMiB: number;
   diskGiB: number;
+}
+
+export interface RelayHostedCodexConfigDto {
+  modelProvider: string;
+  model: string;
+  reviewModel: string;
+  reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh';
+  baseUrl: string;
+  wireApi: 'responses';
+  requiresOpenaiAuth: boolean;
+  disableResponseStorage: boolean;
+  networkAccess: 'enabled' | 'disabled';
+  goals: boolean;
 }
 
 export interface RelayHostedSandboxDto {
@@ -423,6 +451,24 @@ export interface RelayHostedSandboxOperationDto {
 
 export interface RelayHostedSandboxDetailDto extends RelayHostedSandboxDto {
   operations: RelayHostedSandboxOperationDto[];
+}
+
+export interface RelayHostedSandboxReconciliationDto {
+  status: 'never_run' | 'healthy' | 'issues' | 'unavailable';
+  checkedAt: string | null;
+  errorCode: string | null;
+  missingInstanceSandboxIds: string[];
+  missingCredentialSandboxIds: string[];
+  orphanInstances: Array<{
+    id: string;
+    status: string;
+    snapshots: string[];
+  }>;
+  orphanCredentials: Array<{
+    credentialRef: string;
+    createdAt: string;
+  }>;
+  orphanSnapshotCount: number;
 }
 
 export type RelaySupervisorEnvelope =

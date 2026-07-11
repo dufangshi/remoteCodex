@@ -25,6 +25,19 @@ relay_server_url="$(required_string relayServerUrl)"
 relay_agent_token="$(required_string relayAgentToken)"
 api_key="$(required_string openaiApiKey)"
 local_admin_username="$(jq -er '.localAdminUsername // "admin" | select(type == "string" and length > 0)' "${payload_file}")"
+model_provider="$(jq -er '.codexConfig.modelProvider | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_-]{0,31}$"))' "${payload_file}")"
+model_provider_toml="$(jq -ec '.codexConfig.modelProvider' "${payload_file}")"
+model_toml="$(jq -ec '.codexConfig.model' "${payload_file}")"
+review_model_toml="$(jq -ec '.codexConfig.reviewModel' "${payload_file}")"
+reasoning_effort_toml="$(jq -ec '.codexConfig.reasoningEffort' "${payload_file}")"
+base_url="$(jq -er '.codexConfig.baseUrl | select(type == "string" and startswith("https://"))' "${payload_file}")"
+base_url_toml="$(jq -ec '.codexConfig.baseUrl' "${payload_file}")"
+wire_api="$(jq -er '.codexConfig.wireApi | select(. == "responses")' "${payload_file}")"
+wire_api_toml="$(jq -ec '.codexConfig.wireApi' "${payload_file}")"
+requires_openai_auth="$(jq -er '.codexConfig.requiresOpenaiAuth | select(type == "boolean")' "${payload_file}")"
+disable_response_storage="$(jq -er '.codexConfig.disableResponseStorage | select(type == "boolean")' "${payload_file}")"
+network_access_toml="$(jq -ec '.codexConfig.networkAccess | select(. == "enabled" or . == "disabled")' "${payload_file}")"
+goals="$(jq -er '.codexConfig.goals | select(type == "boolean")' "${payload_file}")"
 local_admin_password="$(openssl rand -hex 24)"
 session_secret="$(openssl rand -hex 32)"
 
@@ -50,8 +63,24 @@ install -d -o remote-codex -g remote-codex -m 0700 \
   /home/remote-codex/.remote-codex \
   /home/remote-codex/workspaces
 
-cat >/home/remote-codex/.codex/config.toml <<'EOF'
+cat >/home/remote-codex/.codex/config.toml <<EOF
 cli_auth_credentials_store = "file"
+model_provider = ${model_provider_toml}
+model = ${model_toml}
+review_model = ${review_model_toml}
+model_reasoning_effort = ${reasoning_effort_toml}
+disable_response_storage = ${disable_response_storage}
+network_access = ${network_access_toml}
+windows_wsl_setup_acknowledged = true
+
+[model_providers.${model_provider}]
+name = ${model_provider_toml}
+base_url = ${base_url_toml}
+wire_api = ${wire_api_toml}
+requires_openai_auth = ${requires_openai_auth}
+
+[features]
+goals = ${goals}
 EOF
 chown remote-codex:remote-codex /home/remote-codex/.codex/config.toml
 chmod 0600 /home/remote-codex/.codex/config.toml

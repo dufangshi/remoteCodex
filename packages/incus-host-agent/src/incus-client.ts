@@ -19,7 +19,40 @@ export interface GuestProvisionInput {
   relayAgentToken: string;
   openaiApiKey: string;
   localAdminUsername: string;
+  codexConfig?: {
+    modelProvider: string;
+    model: string;
+    reviewModel: string;
+    reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh';
+    baseUrl: string;
+    wireApi: 'responses';
+    requiresOpenaiAuth: boolean;
+    disableResponseStorage: boolean;
+    networkAccess: 'enabled' | 'disabled';
+    goals: boolean;
+  };
 }
+
+export interface IncusManagedInventory {
+  instances: Array<{
+    id: string;
+    status: string;
+    snapshots: string[];
+  }>;
+}
+
+const defaultCodexConfig: NonNullable<GuestProvisionInput['codexConfig']> = {
+  modelProvider: 'OpenAI',
+  model: 'gpt-5.4',
+  reviewModel: 'gpt-5.4',
+  reasoningEffort: 'medium',
+  baseUrl: 'https://api.openai.com/v1',
+  wireApi: 'responses',
+  requiresOpenaiAuth: true,
+  disableResponseStorage: true,
+  networkAccess: 'enabled',
+  goals: true,
+};
 
 export class IncusCommandError extends Error {
   constructor(
@@ -60,6 +93,31 @@ export class IncusClient {
           (instance) => instance.status.toLowerCase() === 'running',
         ).length,
       },
+    };
+  }
+
+  async inventory(): Promise<IncusManagedInventory> {
+    const managed = await this.listManaged();
+    return {
+      instances: await Promise.all(
+        managed.map(async (instance) => {
+          const snapshots = await this.run([
+            'snapshot',
+            'list',
+            instance.name,
+            '--format=json',
+          ]);
+          return {
+            id: instance.name.slice(this.config.instancePrefix.length),
+            status: instance.status,
+            snapshots: (
+              JSON.parse(snapshots.stdout) as Array<{ name?: string }>
+            )
+              .map((snapshot) => snapshot.name)
+              .filter((name): name is string => typeof name === 'string'),
+          };
+        }),
+      ),
     };
   }
 
@@ -201,7 +259,10 @@ export class IncusClient {
     await this.waitForGuestAgent(current.name);
     await this.run(
       ['exec', current.name, '--', '/usr/local/sbin/remote-codex-provision'],
-      `${JSON.stringify(provision)}\n`,
+      `${JSON.stringify({
+        ...provision,
+        codexConfig: provision.codexConfig ?? defaultCodexConfig,
+      })}\n`,
     );
     return { id, provisioned: true };
   }

@@ -31,7 +31,11 @@ describe('EncryptedFileSecretStore', () => {
     expect(reference).toMatch(/^rcc_[A-Za-z0-9_-]{32}$/);
     expect(persisted).not.toContain(secret);
     expect(await store.read(reference)).toBe(secret);
+    expect(await store.list()).toEqual([
+      { credentialRef: reference, createdAt: expect.any(String) },
+    ]);
     expect(await store.delete(reference)).toBe(true);
+    expect(await store.list()).toEqual([]);
     expect(await store.delete(reference)).toBe(false);
   });
 
@@ -42,5 +46,14 @@ describe('EncryptedFileSecretStore', () => {
     await expect(store.read('../secret')).rejects.toThrow(
       'reference is invalid',
     );
+  });
+
+  it('ignores unrelated files when listing opaque references', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rcd-secret-'));
+    tempDirs.push(directory);
+    await fs.writeFile(path.join(directory, 'notes.txt'), 'ignored');
+    await fs.writeFile(path.join(directory, 'rcc_invalid.json'), 'ignored');
+    const store = new EncryptedFileSecretStore(directory, Buffer.alloc(32, 7));
+    expect(await store.list()).toEqual([]);
   });
 });

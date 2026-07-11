@@ -35,6 +35,7 @@ function testConfig(
       relayServerUrl: null,
       requestTimeoutMs: 25,
       idleTimeoutMs: 600_000,
+      reconcileIntervalMs: 300_000,
     },
     ...overrides,
   };

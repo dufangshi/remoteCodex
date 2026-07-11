@@ -33,6 +33,7 @@ import {
   HostedSandboxCapabilityService,
   type HostedSandboxProvider,
 } from './hosted-sandbox-provider';
+import { HostedSandboxReconciler } from './hosted-sandbox-reconciler';
 import { HostedSandboxService } from './hosted-sandbox-service';
 import {
   DeviceConnectionStatus,
@@ -91,6 +92,35 @@ const registerSchema = z.object({
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(120),
 });
+const hostedCodexConfigSchema = z
+  .object({
+    modelProvider: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/),
+    model: z.string().trim().min(1).max(120),
+    reviewModel: z.string().trim().min(1).max(120),
+    reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']),
+    baseUrl: z
+      .string()
+      .url()
+      .refine((value) => value.startsWith('https://'), 'HTTPS is required.'),
+    wireApi: z.literal('responses'),
+    requiresOpenaiAuth: z.boolean(),
+    disableResponseStorage: z.boolean(),
+    networkAccess: z.enum(['enabled', 'disabled']),
+    goals: z.boolean(),
+  })
+  .strict()
+  .default({
+    modelProvider: 'OpenAI',
+    model: 'gpt-5.4',
+    reviewModel: 'gpt-5.4',
+    reasoningEffort: 'medium',
+    baseUrl: 'https://api.openai.com/v1',
+    wireApi: 'responses',
+    requiresOpenaiAuth: true,
+    disableResponseStorage: true,
+    networkAccess: 'enabled',
+    goals: true,
+  });
 const createHostedSandboxSchema = z
   .object({
     assignedUserId: z.string().uuid(),
@@ -102,6 +132,7 @@ const createHostedSandboxSchema = z
       diskGiB: z.number().int().min(10).max(12),
     }),
     openaiApiKey: z.string().min(20).max(512),
+    codexConfig: hostedCodexConfigSchema,
   })
   .strict();
 const hostedSnapshotSchema = z.object({
@@ -317,12 +348,18 @@ export function buildRelayServer(
     hostedSandboxProvider,
     config.hostedSandbox,
   );
+  const hostedSandboxReconciler = new HostedSandboxReconciler(
+    store,
+    hostedSandboxProvider,
+    config.hostedSandbox,
+  );
   const allowedWebViewCorsOrigins = webViewCorsOrigins(
     options.env ?? process.env,
   );
 
   app.addHook('onReady', () => {
     queueMicrotask(() => hostedSandboxService.reconcilePending());
+    queueMicrotask(() => hostedSandboxReconciler.start());
   });
 
   app.addHook('onRequest', async (request, reply) => {
@@ -589,6 +626,50 @@ export function buildRelayServer(
     }
     return { sandboxes: hostedSandboxService.list() };
   });
+
+  app.get(
+    '/relay/admin/hosted-sandboxes/reconciliation',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      return hostedSandboxReconciler.read();
+    },
+  );
+
+  app.post(
+    '/relay/admin/hosted-sandboxes/reconciliation/run',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      return hostedSandboxReconciler.run();
+    },
+  );
+
+  app.delete(
+    '/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/:sandboxId',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      return hostedSandboxReconciler.deleteOrphanInstance(sandboxId);
+    },
+  );
+
+  app.delete(
+    '/relay/admin/hosted-sandboxes/reconciliation/orphan-credentials/:credentialRef',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { credentialRef } = z
+        .object({
+          credentialRef: z.string().regex(/^rcc_[A-Za-z0-9_-]{32}$/),
+        })
+        .parse(request.params);
+      return hostedSandboxReconciler.deleteOrphanCredential(credentialRef);
+    },
+  );
 
   app.get(
     '/relay/admin/hosted-sandboxes/:sandboxId',
@@ -1128,6 +1209,7 @@ export function buildRelayServer(
 
   app.addHook('onClose', () => {
     hostedSandboxService.close();
+    hostedSandboxReconciler.close();
   });
 
   app.setErrorHandler((error, _request, reply) => {

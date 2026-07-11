@@ -8,6 +8,7 @@ export interface CredentialSecretStore {
   create(secret: string): Promise<string>;
   read(reference: string): Promise<string>;
   delete(reference: string): Promise<boolean>;
+  list(): Promise<Array<{ credentialRef: string; createdAt: string }>>;
 }
 
 export class EncryptedFileSecretStore implements CredentialSecretStore {
@@ -76,6 +77,30 @@ export class EncryptedFileSecretStore implements CredentialSecretStore {
       }
       throw error;
     }
+  }
+
+  async list(): Promise<Array<{ credentialRef: string; createdAt: string }>> {
+    let names: string[];
+    try {
+      names = await fs.readdir(this.directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+    const references = names
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => name.slice(0, -'.json'.length))
+      .filter((reference) => referencePattern.test(reference));
+    return Promise.all(
+      references.map(async (reference) => ({
+        credentialRef: reference,
+        createdAt: (
+          await fs.stat(this.file(reference))
+        ).birthtime.toISOString(),
+      })),
+    );
   }
 
   private file(reference: string) {

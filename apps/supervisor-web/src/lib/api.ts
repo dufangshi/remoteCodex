@@ -11,9 +11,11 @@ import type {
   RelayCreateDeviceResultDto,
   RelayLoginResultDto,
   RelayHostedSandboxCapabilityDto,
+  RelayHostedCodexConfigDto,
   RelayHostedSandboxDetailDto,
   RelayHostedSandboxDto,
   RelayHostedSandboxOperationDto,
+  RelayHostedSandboxReconciliationDto,
   RelayPortalSummaryDto,
   RelayRegisterResultDto,
   RelayRegistrationSettingsDto,
@@ -781,6 +783,38 @@ export function fetchHostedSandboxes() {
   );
 }
 
+export function fetchHostedSandboxReconciliation() {
+  return request<RelayHostedSandboxReconciliationDto>(
+    '/relay/admin/hosted-sandboxes/reconciliation',
+    undefined,
+    { auth: 'relay-admin' },
+  );
+}
+
+export function runHostedSandboxReconciliation() {
+  return request<RelayHostedSandboxReconciliationDto>(
+    '/relay/admin/hosted-sandboxes/reconciliation/run',
+    { method: 'POST' },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function deleteHostedOrphanInstance(id: string) {
+  return request<RelayHostedSandboxReconciliationDto>(
+    `/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function deleteHostedOrphanCredential(credentialRef: string) {
+  return request<RelayHostedSandboxReconciliationDto>(
+    `/relay/admin/hosted-sandboxes/reconciliation/orphan-credentials/${encodeURIComponent(credentialRef)}`,
+    { method: 'DELETE' },
+    { auth: 'relay-admin' },
+  );
+}
+
 export function fetchHostedSandbox(id: string) {
   return request<RelayHostedSandboxDetailDto>(
     `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}`,
@@ -795,6 +829,7 @@ export function createHostedSandbox(input: {
   imageVersion: 'ubuntu-24.04-v1' | 'ubuntu-24.04-v2';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
   openaiApiKey: string;
+  codexConfig: RelayHostedCodexConfigDto;
 }) {
   return request<{
     sandbox: RelayHostedSandboxDetailDto;

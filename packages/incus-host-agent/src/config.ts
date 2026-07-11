@@ -54,6 +54,23 @@ const schema = z.object({
     .positive()
     .max(1_000)
     .optional(),
+  REMOTE_CODEX_INCUS_MONITOR_PATH: z.string().min(1).optional(),
+  REMOTE_CODEX_INCUS_MIN_AVAILABLE_MEMORY_MIB: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .max(262_144)
+    .optional(),
+  REMOTE_CODEX_INCUS_MIN_AVAILABLE_DISK_GIB: z.coerce
+    .number()
+    .nonnegative()
+    .max(4_096)
+    .optional(),
+  REMOTE_CODEX_INCUS_MAX_LOAD_PER_CPU: z.coerce
+    .number()
+    .positive()
+    .max(100)
+    .optional(),
   REMOTE_CODEX_INCUS_COMMAND_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -83,6 +100,10 @@ export interface IncusHostAgentConfig {
   maxDiskGiB: number;
   maxInstances: number;
   maxRunningInstances: number;
+  monitorPath: string;
+  minAvailableMemoryMiB: number;
+  minAvailableDiskGiB: number;
+  maxLoadPerCpu: number;
   commandTimeoutMs: number;
   operationDir: string;
   auditLog: string;
@@ -109,6 +130,13 @@ export function loadIncusHostAgentConfig(
     maxDiskGiB: parsed.REMOTE_CODEX_INCUS_MAX_DISK_GIB ?? 12,
     maxInstances: parsed.REMOTE_CODEX_INCUS_MAX_INSTANCES ?? 4,
     maxRunningInstances: parsed.REMOTE_CODEX_INCUS_MAX_RUNNING_INSTANCES ?? 1,
+    monitorPath: path.resolve(
+      parsed.REMOTE_CODEX_INCUS_MONITOR_PATH ?? '/var/lib/incus',
+    ),
+    minAvailableMemoryMiB:
+      parsed.REMOTE_CODEX_INCUS_MIN_AVAILABLE_MEMORY_MIB ?? 2_048,
+    minAvailableDiskGiB: parsed.REMOTE_CODEX_INCUS_MIN_AVAILABLE_DISK_GIB ?? 20,
+    maxLoadPerCpu: parsed.REMOTE_CODEX_INCUS_MAX_LOAD_PER_CPU ?? 1.5,
     commandTimeoutMs: parsed.REMOTE_CODEX_INCUS_COMMAND_TIMEOUT_MS ?? 120_000,
     operationDir: path.resolve(
       parsed.REMOTE_CODEX_INCUS_OPERATION_DIR ??

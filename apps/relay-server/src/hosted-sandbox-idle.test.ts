@@ -20,6 +20,7 @@ function lifecycleConfig(): RelayServerConfig['hostedSandbox'] {
     relayServerUrl: 'wss://relay.example.test',
     requestTimeoutMs: 25,
     idleTimeoutMs: 10 * 60_000,
+    reconcileIntervalMs: 5 * 60_000,
   };
 }
 

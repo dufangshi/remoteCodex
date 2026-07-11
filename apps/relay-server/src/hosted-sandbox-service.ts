@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import type {
   RelayHostedSandboxDetailDto,
+  RelayHostedCodexConfigDto,
   RelayHostedSandboxOperationDto,
 } from '../../../packages/shared/src/index';
 import type { RelayServerConfig } from './config';
@@ -41,6 +42,7 @@ export class HostedSandboxService {
     imageVersion: string;
     resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
     openaiApiKey: string;
+    codexConfig: RelayHostedCodexConfigDto;
   }): Promise<{
     sandbox: RelayHostedSandboxDetailDto;
     operation: RelayHostedSandboxOperationDto;
@@ -59,6 +61,7 @@ export class HostedSandboxService {
         imageVersion: input.imageVersion,
         resources: input.resources,
         credentialRef,
+        codexConfig: input.codexConfig,
       });
       this.schedule(created.sandbox.id, created.operation.id);
       return {
@@ -192,6 +195,7 @@ export class HostedSandboxService {
           relayServerUrl,
           relayAgentToken: context.deviceToken,
           credentialRef,
+          codexConfig: context.codexConfig,
         },
         `relay-sandbox-reprovision-${operation.id}`,
       );
@@ -413,6 +417,7 @@ export class HostedSandboxService {
           relayServerUrl,
           relayAgentToken: context.deviceToken,
           credentialRef: context.credentialRef,
+          codexConfig: context.codexConfig,
         },
         `relay-sandbox-provision-${sandboxId}`,
       );

@@ -24,6 +24,7 @@ export interface RelayServerConfig {
     relayServerUrl: string | null;
     requestTimeoutMs: number;
     idleTimeoutMs: number;
+    reconcileIntervalMs: number;
   };
 }
 
@@ -62,6 +63,12 @@ const envSchema = z.object({
     .number()
     .int()
     .positive()
+    .max(24 * 60 * 60_000)
+    .optional(),
+  REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(10_000)
     .max(24 * 60 * 60_000)
     .optional(),
 });
@@ -118,6 +125,9 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS: optionalNonEmpty(
       env.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS,
     ),
+    REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS: optionalNonEmpty(
+      env.REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS,
+    ),
   };
 }
 
@@ -159,6 +169,8 @@ export function loadRelayServerConfig(
       requestTimeoutMs:
         parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS ?? 1_500,
       idleTimeoutMs: parsed.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS ?? 10 * 60_000,
+      reconcileIntervalMs:
+        parsed.REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS ?? 5 * 60_000,
     },
   };
 }

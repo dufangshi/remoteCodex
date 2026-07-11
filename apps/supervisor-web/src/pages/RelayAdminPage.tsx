@@ -29,6 +29,7 @@ import type {
   RelayAdminSummaryDto,
   RelayHostedSandboxCapabilityDto,
   RelayHostedSandboxDto,
+  RelayHostedSandboxReconciliationDto,
   RelayRegistrationSettingsDto,
   RelaySessionDto,
   RelaySessionShareDto,
@@ -40,18 +41,22 @@ import {
   approveRelayRegistration,
   createHostedSandbox,
   deleteHostedSandbox,
+  deleteHostedOrphanCredential,
+  deleteHostedOrphanInstance,
   deleteRelayAdminUser,
   enableRelayMode,
   fetchRelayAdmin,
   fetchRelayAdminSession,
   fetchHostedSandboxCapability,
   fetchHostedSandboxes,
+  fetchHostedSandboxReconciliation,
   rejectRelayRegistration,
   relayAdminLogout,
   relayAdminLogin,
   resetRelayAdminUserPassword,
   rotateHostedSandboxCredential,
   runHostedSandboxAction,
+  runHostedSandboxReconciliation,
   setRelayUserEnabled,
   snapshotHostedSandbox,
   updateRelayRegistrationSettings,
@@ -104,6 +109,8 @@ export function RelayAdminPage() {
   const [hostedSandboxes, setHostedSandboxes] = useState<
     RelayHostedSandboxDto[]
   >([]);
+  const [hostedReconciliation, setHostedReconciliation] =
+    useState<RelayHostedSandboxReconciliationDto | null>(null);
   const [hostedLoading, setHostedLoading] = useState(false);
   const [hostedError, setHostedError] = useState<string | null>(null);
   const [hostedBusyKey, setHostedBusyKey] = useState<string | null>(null);
@@ -146,9 +153,10 @@ export function RelayAdminPage() {
   async function loadHosted() {
     setHostedLoading(true);
     setHostedError(null);
-    const [capability, sandboxes] = await Promise.allSettled([
+    const [capability, sandboxes, reconciliation] = await Promise.allSettled([
       fetchHostedSandboxCapability(),
       fetchHostedSandboxes(),
+      fetchHostedSandboxReconciliation(),
     ]);
     if (capability.status === 'fulfilled') {
       setHostedCapability(capability.value);
@@ -160,6 +168,14 @@ export function RelayAdminPage() {
       setHostedSandboxes(sandboxes.value.sandboxes);
     } else {
       setHostedError((current) => current ?? errorMessage(sandboxes.reason));
+    }
+    if (reconciliation.status === 'fulfilled') {
+      setHostedReconciliation(reconciliation.value);
+    } else {
+      setHostedReconciliation(null);
+      setHostedError(
+        (current) => current ?? errorMessage(reconciliation.reason),
+      );
     }
     setHostedLoading(false);
   }
@@ -443,6 +459,7 @@ export function RelayAdminPage() {
                 onAction={hostedAction}
                 onRefresh={loadHosted}
                 sandboxes={hostedSandboxes}
+                reconciliation={hostedReconciliation}
                 users={summary.users}
               />
             ) : null}
@@ -472,6 +489,7 @@ function HostedSandboxesPanel({
   loading,
   onAction,
   onRefresh,
+  reconciliation,
   sandboxes,
   users,
 }: {
@@ -481,6 +499,7 @@ function HostedSandboxesPanel({
   loading: boolean;
   onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
   onRefresh: () => Promise<void>;
+  reconciliation: RelayHostedSandboxReconciliationDto | null;
   sandboxes: RelayHostedSandboxDto[];
   users: RelayAdminSummaryDto['users'];
 }) {
@@ -495,6 +514,13 @@ function HostedSandboxesPanel({
     'standard',
   );
   const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [modelProvider, setModelProvider] = useState('OpenAI');
+  const [model, setModel] = useState('gpt-5.6-sol');
+  const [reviewModel, setReviewModel] = useState('gpt-5.6-sol');
+  const [baseUrl, setBaseUrl] = useState('https://sub.lnz-study.com');
+  const [reasoningEffort, setReasoningEffort] = useState<
+    'low' | 'medium' | 'high' | 'xhigh'
+  >('low');
   const canCreate = capability?.available === true && Boolean(assignedUserId);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
@@ -511,6 +537,18 @@ function HostedSandboxesPanel({
         imageVersion: 'ubuntu-24.04-v2',
         resources,
         openaiApiKey,
+        codexConfig: {
+          modelProvider,
+          model,
+          reviewModel,
+          reasoningEffort,
+          baseUrl,
+          wireApi: 'responses',
+          requiresOpenaiAuth: true,
+          disableResponseStorage: true,
+          networkAccess: 'enabled',
+          goals: true,
+        },
       }),
     );
     setOpenaiApiKey('');
@@ -555,6 +593,24 @@ function HostedSandboxesPanel({
                   {capability.limits.maxInstances} total
                 </p>
               ) : null}
+              {capability?.metrics ? (
+                <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+                  {capability.metrics.cpuCount} CPU · load{' '}
+                  {capability.metrics.load1.toFixed(2)} ·{' '}
+                  {Math.round(capability.metrics.memoryAvailableMiB / 1024)} GiB
+                  RAM free · {capability.metrics.diskAvailableGiB.toFixed(1)}{' '}
+                  GiB disk free
+                </p>
+              ) : null}
+              {capability?.alerts?.map((alert) => (
+                <p
+                  className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                  key={alert.code}
+                  role="alert"
+                >
+                  {alert.message}
+                </p>
+              ))}
             </div>
           </div>
           <button
@@ -576,6 +632,12 @@ function HostedSandboxesPanel({
             {error}
           </div>
         ) : null}
+
+        <HostedReconciliationPanel
+          busyKey={busyKey}
+          onAction={onAction}
+          reconciliation={reconciliation}
+        />
 
         <details
           className="border-t border-[var(--theme-border)]"
@@ -644,6 +706,72 @@ function HostedSandboxesPanel({
                 value={openaiApiKey}
               />
             </label>
+            <details className="rounded-md border border-[var(--theme-border)] lg:col-span-2">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--theme-fg)]">
+                Codex provider configuration
+              </summary>
+              <div className="grid gap-4 border-t border-[var(--theme-border)] p-3 md:grid-cols-2">
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Provider name
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setModelProvider(event.target.value)}
+                    pattern="[A-Za-z][A-Za-z0-9_-]{0,31}"
+                    required
+                    value={modelProvider}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Responses API base URL
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    required
+                    type="url"
+                    value={baseUrl}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Model
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setModel(event.target.value)}
+                    required
+                    value={model}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Review model
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setReviewModel(event.target.value)}
+                    required
+                    value={reviewModel}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Reasoning effort
+                  <select
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) =>
+                      setReasoningEffort(
+                        event.target.value as
+                          | 'low'
+                          | 'medium'
+                          | 'high'
+                          | 'xhigh',
+                      )
+                    }
+                    value={reasoningEffort}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="xhigh">Extra high</option>
+                  </select>
+                </label>
+              </div>
+            </details>
             <div className="flex flex-col gap-2 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="flex items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
                 <ShieldCheck className="h-4 w-4" />
@@ -702,6 +830,135 @@ function HostedSandboxesPanel({
         )}
       </div>
     </section>
+  );
+}
+
+function HostedReconciliationPanel({
+  busyKey,
+  onAction,
+  reconciliation,
+}: {
+  busyKey: string | null;
+  onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  reconciliation: RelayHostedSandboxReconciliationDto | null;
+}) {
+  const issueCount = reconciliation
+    ? reconciliation.missingInstanceSandboxIds.length +
+      reconciliation.missingCredentialSandboxIds.length +
+      reconciliation.orphanInstances.length +
+      reconciliation.orphanCredentials.length
+    : 0;
+  const tone =
+    reconciliation?.status === 'healthy'
+      ? 'success'
+      : reconciliation?.status === 'issues' ||
+          reconciliation?.status === 'unavailable'
+        ? 'warning'
+        : 'neutral';
+  const label =
+    reconciliation?.status === 'healthy'
+      ? 'Inventory healthy'
+      : reconciliation?.status === 'issues'
+        ? `${issueCount} inventory issue${issueCount === 1 ? '' : 's'}`
+        : reconciliation?.status === 'unavailable'
+          ? 'Inventory unavailable'
+          : 'Inventory not checked';
+
+  return (
+    <div className="border-t border-[var(--theme-border)] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-[var(--theme-fg)]">
+              Relay ↔ Incus inventory
+            </span>
+            <HostedStatusPill tone={tone}>{label}</HostedStatusPill>
+          </div>
+          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+            Audit only; resources are deleted only after an explicit admin
+            action and a fresh orphan check.
+          </p>
+        </div>
+        <button
+          className="relay-button-secondary inline-flex min-h-10 items-center justify-center gap-2"
+          disabled={busyKey === 'hosted:reconcile'}
+          onClick={() =>
+            void onAction('hosted:reconcile', runHostedSandboxReconciliation)
+          }
+          type="button"
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${busyKey === 'hosted:reconcile' ? 'animate-spin' : ''}`}
+          />
+          Run inventory audit
+        </button>
+      </div>
+
+      {reconciliation?.missingInstanceSandboxIds.map((id) => (
+        <p
+          className="mt-2 text-xs text-amber-700 dark:text-amber-300"
+          key={`missing-instance-${id}`}
+        >
+          Missing Incus instance for relay sandbox {id}
+        </p>
+      ))}
+      {reconciliation?.missingCredentialSandboxIds.map((id) => (
+        <p
+          className="mt-2 text-xs text-amber-700 dark:text-amber-300"
+          key={`missing-credential-${id}`}
+        >
+          Missing credential for relay sandbox {id}
+        </p>
+      ))}
+      {reconciliation?.orphanInstances.map((instance) => (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--theme-surface)] px-3 py-2"
+          key={instance.id}
+        >
+          <span className="text-xs text-[var(--theme-fg-soft)]">
+            Orphan VM {instance.id} · {instance.status} ·{' '}
+            {instance.snapshots.length} snapshots
+          </span>
+          <button
+            className="relay-button-danger min-h-9"
+            disabled={busyKey === `hosted:orphan-instance:${instance.id}`}
+            onClick={() =>
+              void onAction(`hosted:orphan-instance:${instance.id}`, () =>
+                deleteHostedOrphanInstance(instance.id),
+              )
+            }
+            type="button"
+          >
+            Delete orphan VM
+          </button>
+        </div>
+      ))}
+      {reconciliation?.orphanCredentials.map((credential) => (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--theme-surface)] px-3 py-2"
+          key={credential.credentialRef}
+        >
+          <span className="text-xs text-[var(--theme-fg-soft)]">
+            Orphan credential {credential.credentialRef}
+          </span>
+          <button
+            className="relay-button-danger min-h-9"
+            disabled={
+              busyKey === `hosted:orphan-credential:${credential.credentialRef}`
+            }
+            onClick={() =>
+              void onAction(
+                `hosted:orphan-credential:${credential.credentialRef}`,
+                () => deleteHostedOrphanCredential(credential.credentialRef),
+              )
+            }
+            type="button"
+          >
+            Delete orphan credential
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 

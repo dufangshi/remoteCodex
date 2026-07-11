@@ -49,6 +49,7 @@ describe('relay server config', () => {
       relayServerUrl: null,
       requestTimeoutMs: 1500,
       idleTimeoutMs: 600000,
+      reconcileIntervalMs: 300000,
     });
   });
 
@@ -127,6 +128,7 @@ describe('relay server config', () => {
       relayServerUrl: null,
       requestTimeoutMs: 1500,
       idleTimeoutMs: 600000,
+      reconcileIntervalMs: 300000,
     });
   });
 

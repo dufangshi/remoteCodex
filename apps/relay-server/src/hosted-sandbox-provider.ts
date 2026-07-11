@@ -1,8 +1,12 @@
-import type { RelayHostedSandboxCapabilityDto } from '../../../packages/shared/src/index';
+import type {
+  RelayHostedCodexConfigDto,
+  RelayHostedSandboxCapabilityDto,
+} from '../../../packages/shared/src/index';
 import type { RelayServerConfig } from './config';
 
 export interface HostedSandboxProvider {
   capability(signal?: AbortSignal): Promise<RelayHostedSandboxCapabilityDto>;
+  inventory(): Promise<HostedSandboxProviderInventory>;
   createCredential(
     openaiApiKey: string,
     idempotencyKey: string,
@@ -26,6 +30,12 @@ export interface HostedSandboxProvider {
   ): Promise<void>;
 }
 
+export interface HostedSandboxProviderInventory {
+  instances: Array<{ id: string; status: string; snapshots: string[] }>;
+  credentials: Array<{ credentialRef: string; createdAt: string }>;
+  checkedAt: string;
+}
+
 export interface HostedSandboxCreateInput {
   id: string;
   imageVersion: string;
@@ -37,6 +47,7 @@ export interface HostedSandboxProvisionInput {
   relayServerUrl: string;
   relayAgentToken: string;
   credentialRef: string;
+  codexConfig: RelayHostedCodexConfigDto;
   localAdminUsername?: string;
 }
 
@@ -58,6 +69,10 @@ export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
       reason: 'Hosted supervisor VMs are not configured on this relay.',
       checkedAt: new Date().toISOString(),
     };
+  }
+
+  inventory(): Promise<HostedSandboxProviderInventory> {
+    return this.disabled();
   }
 
   createCredential(
@@ -122,6 +137,8 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
         totalInstances: number;
         runningInstances: number;
       };
+      metrics?: RelayHostedSandboxCapabilityDto['metrics'];
+      alerts?: RelayHostedSandboxCapabilityDto['alerts'];
     }>('/v1/capability', signal ? { signal } : {});
     const available = result.available && result.credentialStoreReady === true;
     return {
@@ -136,7 +153,13 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
       checkedAt: new Date().toISOString(),
       ...(result.limits ? { limits: result.limits } : {}),
       ...(result.capacity ? { capacity: result.capacity } : {}),
+      ...(result.metrics ? { metrics: result.metrics } : {}),
+      ...(result.alerts ? { alerts: result.alerts } : {}),
     };
+  }
+
+  inventory() {
+    return this.request<HostedSandboxProviderInventory>('/v1/inventory');
   }
 
   async createCredential(openaiApiKey: string, idempotencyKey: string) {
@@ -201,6 +224,7 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
           relayServerUrl: input.relayServerUrl,
           relayAgentToken: input.relayAgentToken,
           credentialRef: input.credentialRef,
+          codexConfig: input.codexConfig,
           localAdminUsername: input.localAdminUsername ?? 'admin',
         },
       },

@@ -34,6 +34,10 @@ describe('hosted supervisor golden image assets', () => {
     expect(provision).toContain('install -o root -g root -m 0600');
     expect(provision).not.toMatch(/codex login --with-api-key ["$]/);
     expect(provision).not.toContain('echo "${api_key}"');
+    expect(provision).toContain('model_provider = ${model_provider_toml}');
+    expect(provision).toContain('base_url = ${base_url_toml}');
+    expect(provision).toContain('[features]');
+    expect(provision).toContain('goals = ${goals}');
   });
 
   it('ships a disabled-until-provisioned, hardened systemd service', () => {

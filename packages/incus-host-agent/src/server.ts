@@ -11,6 +11,7 @@ import type { IncusHostAgentConfig } from './config';
 import { IncusClient } from './incus-client';
 import { hostedSandboxIdSchema, snapshotNameSchema } from './instance-policy';
 import { FileOperationStore, type StoredOperation } from './operation-store';
+import { readHostMetrics } from './host-metrics';
 import {
   credentialReferencePattern,
   type CredentialSecretStore,
@@ -39,6 +40,37 @@ const provisionSchema = z
       .string()
       .regex(/^[A-Za-z0-9._-]{1,64}$/)
       .default('admin'),
+    codexConfig: z
+      .object({
+        modelProvider: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/),
+        model: z.string().trim().min(1).max(120),
+        reviewModel: z.string().trim().min(1).max(120),
+        reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']),
+        baseUrl: z
+          .url()
+          .refine(
+            (value) => value.startsWith('https://'),
+            'HTTPS is required.',
+          ),
+        wireApi: z.literal('responses'),
+        requiresOpenaiAuth: z.boolean(),
+        disableResponseStorage: z.boolean(),
+        networkAccess: z.enum(['enabled', 'disabled']),
+        goals: z.boolean(),
+      })
+      .strict()
+      .default({
+        modelProvider: 'OpenAI',
+        model: 'gpt-5.4',
+        reviewModel: 'gpt-5.4',
+        reasoningEffort: 'medium',
+        baseUrl: 'https://api.openai.com/v1',
+        wireApi: 'responses',
+        requiresOpenaiAuth: true,
+        disableResponseStorage: true,
+        networkAccess: 'enabled',
+        goals: true,
+      }),
   })
   .strict();
 
@@ -74,6 +106,7 @@ export function buildIncusHostAgent(input: {
       return {
         ...(await input.client.capability()),
         credentialStoreReady: input.secrets !== null,
+        ...(await readHostMetrics(input.config)),
       };
     } catch {
       return reply.code(503).send({
@@ -89,12 +122,28 @@ export function buildIncusHostAgent(input: {
       const capability = {
         ...(await input.client.capability()),
         credentialStoreReady: input.secrets !== null,
+        ...(await readHostMetrics(input.config)),
       };
       return { status: 'ready', capability };
     } catch {
       return reply.code(503).send({
         status: 'not_ready',
         code: 'incus_unavailable',
+      });
+    }
+  });
+
+  app.get('/v1/inventory', async (_request, reply) => {
+    try {
+      return {
+        ...(await input.client.inventory()),
+        credentials: input.secrets ? await input.secrets.list() : [],
+        checkedAt: new Date().toISOString(),
+      };
+    } catch {
+      return reply.code(503).send({
+        code: 'inventory_unavailable',
+        message: 'Hosted inventory is unavailable.',
       });
     }
   });
@@ -215,6 +264,7 @@ export function buildIncusHostAgent(input: {
           relayAgentToken: body.relayAgentToken,
           openaiApiKey: await input.secrets!.read(body.credentialRef),
           localAdminUsername: body.localAdminUsername,
+          codexConfig: body.codexConfig,
         }),
     );
   });

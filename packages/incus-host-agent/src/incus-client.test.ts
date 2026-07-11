@@ -19,6 +19,10 @@ function config(): IncusHostAgentConfig {
     maxDiskGiB: 12,
     maxInstances: 4,
     maxRunningInstances: 1,
+    monitorPath: '/var/lib/incus',
+    minAvailableMemoryMiB: 2048,
+    minAvailableDiskGiB: 20,
+    maxLoadPerCpu: 1.5,
     commandTimeoutMs: 120_000,
     operationDir: '/tmp/operations',
     auditLog: '/tmp/audit.jsonl',
@@ -115,6 +119,43 @@ describe('IncusClient policy', () => {
       'running instance limit',
     );
     expect(startRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('lists only managed UUID instances and their snapshot names', async () => {
+    const sandboxId = '11111111-1111-4111-8111-111111111111';
+    const run = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce(
+        result(
+          JSON.stringify([
+            { name: `rcd-${sandboxId}`, status: 'Stopped' },
+            { name: 'unmanaged-instance', status: 'Running' },
+          ]),
+        ),
+      )
+      .mockResolvedValueOnce(
+        result(JSON.stringify([{ name: 'checkpoint' }, { name: 'daily' }])),
+      );
+    const client = new IncusClient(config(), { run });
+
+    await expect(client.inventory()).resolves.toEqual({
+      instances: [
+        {
+          id: sandboxId,
+          status: 'Stopped',
+          snapshots: ['checkpoint', 'daily'],
+        },
+      ],
+    });
+    expect(run.mock.calls[1]?.[1]).toEqual([
+      '--force-local',
+      '--project',
+      'remote-codex-hosted',
+      'snapshot',
+      'list',
+      `rcd-${sandboxId}`,
+      '--format=json',
+    ]);
   });
 
   it('rejects resource and image values outside the allowlist before running Incus', async () => {

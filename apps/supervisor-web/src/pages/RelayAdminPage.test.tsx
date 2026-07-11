@@ -268,6 +268,63 @@ describe('RelayAdminPage', () => {
               checkedAt: '2026-06-18T00:15:00.000Z',
               limits: { maxInstances: 4, maxRunningInstances: 1 },
               capacity: { totalInstances: 2, runningInstances: 1 },
+              metrics: {
+                cpuCount: 8,
+                load1: 1.2,
+                loadPerCpu: 0.15,
+                memoryTotalMiB: 16384,
+                memoryAvailableMiB: 8192,
+                diskTotalGiB: 100,
+                diskAvailableGiB: 50,
+                monitorPath: '/var/lib/incus',
+              },
+              alerts: [
+                {
+                  code: 'host_disk_low',
+                  severity: 'warning',
+                  message: 'Host available disk is below 60 GiB.',
+                },
+              ],
+            }),
+          });
+        }
+        if (
+          url === '/relay/admin/hosted-sandboxes/reconciliation/run' ||
+          url ===
+            '/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/33333333-3333-4333-8333-333333333333'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'healthy',
+              checkedAt: '2026-06-18T00:16:00.000Z',
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [],
+              orphanCredentials: [],
+              orphanSnapshotCount: 0,
+            }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/reconciliation') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'issues',
+              checkedAt: '2026-06-18T00:15:00.000Z',
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [
+                {
+                  id: '33333333-3333-4333-8333-333333333333',
+                  status: 'Stopped',
+                  snapshots: ['idle-stop'],
+                },
+              ],
+              orphanCredentials: [],
+              orphanSnapshotCount: 1,
             }),
           });
         }
@@ -305,8 +362,33 @@ describe('RelayAdminPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hosted VMs' }));
     expect(await screen.findByText('Available')).toBeInTheDocument();
     expect(screen.getByText(/1\/1 running.*2\/4 total/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '8 CPU · load 1.20 · 8 GiB RAM free · 50.0 GiB disk free',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Host available disk is below 60 GiB.'),
+    ).toBeInTheDocument();
     expect(screen.getByText('1 active turn')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    expect(screen.getByText('1 inventory issue')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Run inventory audit' }),
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/reconciliation/run',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete orphan VM' }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/33333333-3333-4333-8333-333333333333',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
 
     fireEvent.change(screen.getByLabelText('OpenAI Platform API key'), {
       target: { value: 'sk-test-not-a-real-secret-123456789' },
@@ -321,6 +403,12 @@ describe('RelayAdminPage', () => {
         }),
       );
     });
+    expect(fetch).toHaveBeenCalledWith(
+      '/relay/admin/hosted-sandboxes',
+      expect.objectContaining({
+        body: expect.stringContaining('https://sub.lnz-study.com'),
+      }),
+    );
     expect(
       screen.queryByDisplayValue('sk-test-not-a-real-secret-123456789'),
     ).not.toBeInTheDocument();
@@ -352,6 +440,21 @@ describe('RelayAdminPage', () => {
           return Promise.resolve({
             ok: true,
             json: async () => ({ sandboxes: [] }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/reconciliation') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'never_run',
+              checkedAt: null,
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [],
+              orphanCredentials: [],
+              orphanSnapshotCount: 0,
+            }),
           });
         }
         return Promise.resolve({

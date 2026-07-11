@@ -18,6 +18,7 @@ import type {
   RelayCreateDeviceResultDto,
   RelayDeviceDto,
   RelayHostedSandboxDetailDto,
+  RelayHostedCodexConfigDto,
   RelayHostedSandboxDto,
   RelayHostedSandboxOperationActionDto,
   RelayHostedSandboxOperationDto,
@@ -59,6 +60,7 @@ interface HostedSandboxProvisionContext {
   sandbox: RelayHostedSandboxDto;
   deviceToken: string;
   credentialRef: string;
+  codexConfig: RelayHostedCodexConfigDto;
 }
 
 interface RelayStoreData {
@@ -328,6 +330,7 @@ export class RelayStore {
     imageVersion: string;
     resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
     credentialRef: string;
+    codexConfig?: RelayHostedCodexConfigDto;
   }) {
     this.requireUser(input.createdByAdminUserId);
     this.requireUser(input.assignedUserId);
@@ -346,8 +349,9 @@ export class RelayStore {
               id, device_id, assigned_user_id, created_by_admin_user_id,
               provider, provider_instance_id, image_version,
               cpu_count, memory_mib, disk_gib, status, credential_ref,
+              codex_config_json,
               last_error_code, last_error_message, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'incus', NULL, ?, ?, ?, ?, 'requested', ?, NULL, NULL, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'incus', NULL, ?, ?, ?, ?, 'requested', ?, ?, NULL, NULL, ?, ?)
           `,
         )
         .run(
@@ -360,6 +364,7 @@ export class RelayStore {
           input.resources.memoryMiB,
           input.resources.diskGiB,
           input.credentialRef,
+          JSON.stringify(input.codexConfig ?? parseHostedCodexConfig(null)),
           now,
           now,
         );
@@ -396,6 +401,19 @@ export class RelayStore {
     ).map((row) => this.rowToHostedSandbox(row));
   }
 
+  listHostedProviderRecords(): Array<{
+    id: string;
+    credentialRef: string;
+  }> {
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT id, credential_ref FROM relay_hosted_sandboxes ORDER BY id',
+        )
+        .all() as Array<{ id: string; credential_ref: string }>
+    ).map((row) => ({ id: row.id, credentialRef: row.credential_ref }));
+  }
+
   getHostedSandboxDetail(id: string): RelayHostedSandboxDetailDto | null {
     const row = this.sqlite
       .prepare('SELECT * FROM relay_hosted_sandboxes WHERE id = ?')
@@ -429,6 +447,7 @@ export class RelayStore {
       sandbox: this.rowToHostedSandbox(row),
       deviceToken: row.device_token,
       credentialRef: row.credential_ref,
+      codexConfig: parseHostedCodexConfig(row.codex_config_json),
     };
   }
 
@@ -1728,6 +1747,7 @@ export class RelayStore {
           'online', 'stopping', 'error', 'deleting'
         )),
         credential_ref TEXT NOT NULL,
+        codex_config_json TEXT,
         last_error_code TEXT,
         last_error_message TEXT,
         active_turn_count INTEGER NOT NULL DEFAULT 0,
@@ -1884,6 +1904,7 @@ export class RelayStore {
       'lifecycle_generation',
       'INTEGER NOT NULL DEFAULT 0',
     );
+    this.ensureColumn('relay_hosted_sandboxes', 'codex_config_json', 'TEXT');
     this.ensureColumn('relay_shares', 'thread_title', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_label', 'TEXT');
@@ -2960,6 +2981,29 @@ interface DeviceRow {
   created_at: string;
 }
 
+function parseHostedCodexConfig(
+  value: string | null,
+): RelayHostedCodexConfigDto {
+  const fallback: RelayHostedCodexConfigDto = {
+    modelProvider: 'OpenAI',
+    model: 'gpt-5.4',
+    reviewModel: 'gpt-5.4',
+    reasoningEffort: 'medium',
+    baseUrl: 'https://api.openai.com/v1',
+    wireApi: 'responses',
+    requiresOpenaiAuth: true,
+    disableResponseStorage: true,
+    networkAccess: 'enabled',
+    goals: true,
+  };
+  if (!value) return fallback;
+  try {
+    return { ...fallback, ...(JSON.parse(value) as RelayHostedCodexConfigDto) };
+  } catch {
+    return fallback;
+  }
+}
+
 interface HostedSandboxRow {
   id: string;
   device_id: string;
@@ -2973,6 +3017,7 @@ interface HostedSandboxRow {
   disk_gib: number;
   status: RelayHostedSandboxStatusDto;
   credential_ref: string;
+  codex_config_json: string | null;
   last_error_code: string | null;
   last_error_message: string | null;
   active_turn_count: number;

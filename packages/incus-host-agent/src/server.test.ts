@@ -37,6 +37,10 @@ async function setup(
     maxDiskGiB: 12,
     maxInstances: 4,
     maxRunningInstances: 1,
+    monitorPath: '/tmp',
+    minAvailableMemoryMiB: 2048,
+    minAvailableDiskGiB: 20,
+    maxLoadPerCpu: 1.5,
     commandTimeoutMs: 100,
     operationDir: path.join(tempDir, 'operations'),
     auditLog: path.join(tempDir, 'audit.jsonl'),
@@ -51,6 +55,7 @@ async function setup(
   };
   const client = {
     capability: vi.fn().mockResolvedValue({ available: true }),
+    inventory: vi.fn().mockResolvedValue({ instances: [] }),
     create: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     status: vi.fn().mockResolvedValue({ status: 'Stopped' }),
     start: vi.fn().mockResolvedValue({ status: 'Running' }),
@@ -65,6 +70,7 @@ async function setup(
     create: vi.fn().mockResolvedValue('rcc_'.padEnd(36, 'x')),
     read: vi.fn().mockResolvedValue('sk-test-not-a-real-secret-123456789'),
     delete: vi.fn().mockResolvedValue(true),
+    list: vi.fn().mockResolvedValue([]),
     ...secretOverrides,
   };
   const app = buildIncusHostAgent({
@@ -95,6 +101,38 @@ describe('Incus host-agent API', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/capability' })).statusCode,
     ).toBe(401);
+    await app.close();
+  });
+
+  it('returns restricted instance, snapshot, and opaque credential inventory', async () => {
+    const sandboxId = crypto.randomUUID();
+    const credentialRef = 'rcc_'.padEnd(36, 'z');
+    const inventory = vi.fn().mockResolvedValue({
+      instances: [
+        { id: sandboxId, status: 'Stopped', snapshots: ['checkpoint'] },
+      ],
+    });
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        { credentialRef, createdAt: '2026-07-10T00:00:00.000Z' },
+      ]);
+    const { app, token } = await setup({ inventory }, { list });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/inventory',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      instances: [
+        { id: sandboxId, status: 'Stopped', snapshots: ['checkpoint'] },
+      ],
+      credentials: [{ credentialRef, createdAt: '2026-07-10T00:00:00.000Z' }],
+      checkedAt: expect.any(String),
+    });
+    expect(response.body).not.toContain('sk-');
     await app.close();
   });
 
@@ -249,12 +287,33 @@ describe('Incus host-agent API', () => {
         relayAgentToken: 'rcd_test_device_token',
         credentialRef: 'rcc_'.padEnd(36, 'x'),
         localAdminUsername: 'admin',
+        codexConfig: {
+          modelProvider: 'OpenAI',
+          model: 'gpt-5.6-sol',
+          reviewModel: 'gpt-5.6-sol',
+          reasoningEffort: 'low',
+          baseUrl: 'https://example.test/responses',
+          wireApi: 'responses',
+          requiresOpenaiAuth: true,
+          disableResponseStorage: true,
+          networkAccess: 'enabled',
+          goals: true,
+        },
       },
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain(secret);
     expect(JSON.stringify(events)).not.toContain(secret);
     expect(client.provision).toHaveBeenCalledOnce();
+    expect(client.provision).toHaveBeenCalledWith(
+      sandboxId,
+      expect.objectContaining({
+        codexConfig: expect.objectContaining({
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'low',
+        }),
+      }),
+    );
     await app.close();
   });
 
