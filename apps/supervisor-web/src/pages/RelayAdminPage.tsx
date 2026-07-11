@@ -534,7 +534,7 @@ function HostedSandboxesPanel({
       createHostedSandbox({
         assignedUserId,
         deviceName,
-        imageVersion: 'ubuntu-24.04-v2',
+        imageVersion: 'ubuntu-24.04-v3',
         resources,
         openaiApiKey,
         codexConfig: {

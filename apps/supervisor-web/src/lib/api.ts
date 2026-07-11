@@ -826,7 +826,7 @@ export function fetchHostedSandbox(id: string) {
 export function createHostedSandbox(input: {
   assignedUserId: string;
   deviceName: string;
-  imageVersion: 'ubuntu-24.04-v1' | 'ubuntu-24.04-v2';
+  imageVersion: 'ubuntu-24.04-v1' | 'ubuntu-24.04-v2' | 'ubuntu-24.04-v3';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
   openaiApiKey: string;
   codexConfig: RelayHostedCodexConfigDto;

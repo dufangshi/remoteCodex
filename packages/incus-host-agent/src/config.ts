@@ -122,7 +122,7 @@ export function loadIncusHostAgentConfig(
     incusBinary: parsed.REMOTE_CODEX_INCUS_BINARY ?? 'incus',
     project: parsed.REMOTE_CODEX_INCUS_PROJECT ?? 'remote-codex-hosted',
     instancePrefix: parsed.REMOTE_CODEX_INCUS_INSTANCE_PREFIX ?? 'rcd-',
-    imageVersion: parsed.REMOTE_CODEX_INCUS_IMAGE_VERSION ?? 'ubuntu-24.04-v2',
+    imageVersion: parsed.REMOTE_CODEX_INCUS_IMAGE_VERSION ?? 'ubuntu-24.04-v3',
     imageSource:
       parsed.REMOTE_CODEX_INCUS_IMAGE_SOURCE ?? 'images:ubuntu/24.04/cloud',
     maxCpu: parsed.REMOTE_CODEX_INCUS_MAX_CPU ?? 2,
