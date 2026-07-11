@@ -184,4 +184,51 @@ describe('RelayTunnelClient', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it('sends turn lifecycle activity only over an open tunnel', () => {
+    globalThis.WebSocket = FakeWebSocket as any;
+    const client = new RelayTunnelClient(
+      {
+        serverUrl: 'wss://relay.example.test',
+        agentToken: 'agent-token',
+      },
+      vi.fn(),
+      vi.fn(() => vi.fn()),
+      vi.fn(),
+    );
+    client.start();
+    client.sendActivity({
+      kind: 'turn_started',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+    expect(FakeWebSocket.instances[0]!.sent).toHaveLength(0);
+
+    // A terminal update while disconnected supersedes the queued start.
+    client.sendActivity({
+      kind: 'turn_terminal',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+
+    FakeWebSocket.instances[0]!.emit('open');
+    client.sendActivity({
+      kind: 'turn_started',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+    expect(
+      FakeWebSocket.instances[0]!.sent.map((message) => JSON.parse(message)),
+    ).toContainEqual(
+      expect.objectContaining({
+        type: 'relay.activity',
+        payload: {
+          kind: 'turn_terminal',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+        },
+      }),
+    );
+    client.stop();
+  });
 });

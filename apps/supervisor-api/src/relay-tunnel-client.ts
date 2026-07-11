@@ -32,6 +32,14 @@ export class RelayTunnelClient {
   private reconnectDelayMs = RELAY_RECONNECT_INITIAL_DELAY_MS;
   private stopped = false;
   private readonly relayClientCleanup = new Map<string, () => void>();
+  private readonly pendingActivity = new Map<
+    string,
+    {
+      kind: 'turn_started' | 'turn_terminal';
+      threadId: string;
+      turnId: string;
+    }
+  >();
 
   constructor(
     private readonly config: RuntimeConfig['relay'],
@@ -57,7 +65,10 @@ export class RelayTunnelClient {
       return;
     }
 
-    const url = new URL('/supervisor/tunnel', this.config.serverUrl ?? undefined);
+    const url = new URL(
+      '/supervisor/tunnel',
+      this.config.serverUrl ?? undefined,
+    );
     url.searchParams.set('token', this.config.agentToken ?? '');
     url.searchParams.set('deviceToken', this.config.agentToken ?? '');
     const socket = new WebSocket(url);
@@ -72,6 +83,7 @@ export class RelayTunnelClient {
       this.clearConnectTimeout();
       this.reconnectDelayMs = RELAY_RECONNECT_INITIAL_DELAY_MS;
       this.sendHeartbeat();
+      this.flushPendingActivity();
       this.clearHeartbeat();
       this.heartbeatHandle = setInterval(() => {
         this.sendHeartbeat();
@@ -101,6 +113,35 @@ export class RelayTunnelClient {
     this.socket = null;
   }
 
+  sendActivity(payload: {
+    kind: 'turn_started' | 'turn_terminal';
+    threadId: string;
+    turnId: string;
+  }) {
+    const key = `${payload.threadId}\u0000${payload.turnId}`;
+    const socket = this.socket;
+    if (socket?.readyState !== WebSocket.OPEN) {
+      this.pendingActivity.set(key, payload);
+      return;
+    }
+    const sent = this.sendEnvelope(socket, {
+      type: 'relay.activity',
+      timestamp: new Date().toISOString(),
+      payload,
+    } satisfies RelaySupervisorEnvelope);
+    if (sent) {
+      this.pendingActivity.delete(key);
+    } else {
+      this.pendingActivity.set(key, payload);
+    }
+  }
+
+  private flushPendingActivity() {
+    for (const payload of this.pendingActivity.values()) {
+      this.sendActivity(payload);
+    }
+  }
+
   private sendHeartbeat() {
     const socket = this.socket;
     if (socket?.readyState !== WebSocket.OPEN) {
@@ -123,9 +164,12 @@ export class RelayTunnelClient {
 
     if (parsed.type !== 'relay.request') {
       if (parsed.type === 'relay.client.connected') {
-        const cleanup = this.handleClientConnected(parsed.clientId, (message) => {
-          this.sendClientMessage(parsed.clientId, message);
-        });
+        const cleanup = this.handleClientConnected(
+          parsed.clientId,
+          (message) => {
+            this.sendClientMessage(parsed.clientId, message);
+          },
+        );
         this.relayClientCleanup.set(parsed.clientId, cleanup);
         return;
       }
@@ -137,9 +181,13 @@ export class RelayTunnelClient {
       }
 
       if (parsed.type === 'relay.client.message') {
-        await this.handleClientMessage(parsed.clientId, parsed.payload, (message) => {
-          this.sendClientMessage(parsed.clientId, message);
-        });
+        await this.handleClientMessage(
+          parsed.clientId,
+          parsed.payload,
+          (message) => {
+            this.sendClientMessage(parsed.clientId, message);
+          },
+        );
         return;
       }
 
@@ -151,15 +199,12 @@ export class RelayTunnelClient {
     if (socket?.readyState !== WebSocket.OPEN) {
       return;
     }
-    this.sendEnvelope(
-      socket,
-      {
-        type: 'relay.response',
-        timestamp: new Date().toISOString(),
-        requestId: parsed.requestId,
-        payload: response,
-      } satisfies RelaySupervisorEnvelope,
-    );
+    this.sendEnvelope(socket, {
+      type: 'relay.response',
+      timestamp: new Date().toISOString(),
+      requestId: parsed.requestId,
+      payload: response,
+    } satisfies RelaySupervisorEnvelope);
   }
 
   private sendClientMessage(
@@ -182,8 +227,10 @@ export class RelayTunnelClient {
   private sendEnvelope(socket: WebSocket, message: RelaySupervisorEnvelope) {
     try {
       socket.send(JSON.stringify(message));
+      return true;
     } catch {
       this.closeAndReconnect(socket);
+      return false;
     }
   }
 

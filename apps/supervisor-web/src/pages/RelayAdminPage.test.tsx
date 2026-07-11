@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -138,7 +144,10 @@ describe('RelayAdminPage', () => {
             json: async () => adminSummary,
           });
         }
-        if (url === '/relay/admin/settings/registration' && init?.method === 'PATCH') {
+        if (
+          url === '/relay/admin/settings/registration' &&
+          init?.method === 'PATCH'
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -164,7 +173,10 @@ describe('RelayAdminPage', () => {
             }),
           });
         }
-        if (url === '/relay/admin/users/user-1/reset-password' && init?.method === 'POST') {
+        if (
+          url === '/relay/admin/users/user-1/reset-password' &&
+          init?.method === 'POST'
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -186,7 +198,10 @@ describe('RelayAdminPage', () => {
         return Promise.resolve({
           ok: false,
           status: 404,
-          json: async () => ({ code: 'not_found', message: `Unhandled test URL: ${url}` }),
+          json: async () => ({
+            code: 'not_found',
+            message: `Unhandled test URL: ${url}`,
+          }),
         });
       }),
     );
@@ -210,6 +225,254 @@ describe('RelayAdminPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByDisplayValue('invite-password-123')).toBeInTheDocument();
     expect(screen.getByText(/pending@example.test/)).toBeInTheDocument();
+  });
+
+  it('shows hosted capability, lifecycle state, and creates without echoing the API key', async () => {
+    const hostedSandbox = {
+      id: '11111111-1111-4111-8111-111111111111',
+      deviceId: '22222222-2222-4222-8222-222222222222',
+      deviceName: 'Hosted Codex',
+      assignedUserId: 'user-1',
+      assignedUsername: 'owner',
+      createdByAdminUserId: 'admin-user',
+      provider: 'incus' as const,
+      providerInstanceId: 'rcd-11111111-1111-4111-8111-111111111111',
+      imageVersion: 'ubuntu-24.04-v2',
+      resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
+      status: 'online' as const,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      activeTurnCount: 1,
+      lastUserActivityAt: '2026-06-18T00:15:00.000Z',
+      idleDeadlineAt: null,
+      createdAt: '2026-06-18T00:00:00.000Z',
+      updatedAt: '2026-06-18T00:15:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/relay/admin' || url.startsWith('/relay/admin?')) {
+          return Promise.resolve({ ok: true, json: async () => adminSummary });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/capability') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              provider: 'incus',
+              configured: true,
+              reachable: true,
+              available: true,
+              reasonCode: null,
+              reason: null,
+              checkedAt: '2026-06-18T00:15:00.000Z',
+              limits: { maxInstances: 4, maxRunningInstances: 1 },
+              capacity: { totalInstances: 2, runningInstances: 1 },
+              metrics: {
+                cpuCount: 8,
+                load1: 1.2,
+                loadPerCpu: 0.15,
+                memoryTotalMiB: 16384,
+                memoryAvailableMiB: 8192,
+                diskTotalGiB: 100,
+                diskAvailableGiB: 50,
+                monitorPath: '/var/lib/incus',
+              },
+              alerts: [
+                {
+                  code: 'host_disk_low',
+                  severity: 'warning',
+                  message: 'Host available disk is below 60 GiB.',
+                },
+              ],
+            }),
+          });
+        }
+        if (
+          url === '/relay/admin/hosted-sandboxes/reconciliation/run' ||
+          url ===
+            '/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/33333333-3333-4333-8333-333333333333'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'healthy',
+              checkedAt: '2026-06-18T00:16:00.000Z',
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [],
+              orphanCredentials: [],
+              orphanSnapshotCount: 0,
+            }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/reconciliation') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'issues',
+              checkedAt: '2026-06-18T00:15:00.000Z',
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [
+                {
+                  id: '33333333-3333-4333-8333-333333333333',
+                  status: 'Stopped',
+                  snapshots: ['idle-stop'],
+                },
+              ],
+              orphanCredentials: [],
+              orphanSnapshotCount: 1,
+            }),
+          });
+        }
+        if (
+          url === '/relay/admin/hosted-sandboxes' &&
+          init?.method === 'POST'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              sandbox: hostedSandbox,
+              operation: { id: 'operation-1' },
+            }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ sandboxes: [hostedSandbox] }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({
+            code: 'not_found',
+            message: `Unhandled test URL: ${url}`,
+          }),
+        });
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('Operations panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Hosted VMs' }));
+    expect(await screen.findByText('Available')).toBeInTheDocument();
+    expect(screen.getByText(/1\/1 running.*2\/4 total/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '8 CPU · load 1.20 · 8 GiB RAM free · 50.0 GiB disk free',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Host available disk is below 60 GiB.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('1 active turn')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    expect(screen.getByText('1 inventory issue')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Run inventory audit' }),
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/reconciliation/run',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete orphan VM' }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/33333333-3333-4333-8333-333333333333',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText('OpenAI Platform API key'), {
+      target: { value: 'sk-test-not-a-real-secret-123456789' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create hosted VM' }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('sk-test-not-a-real-secret-123456789'),
+        }),
+      );
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      '/relay/admin/hosted-sandboxes',
+      expect.objectContaining({
+        body: expect.stringContaining('https://sub.lnz-study.com'),
+      }),
+    );
+    expect(
+      screen.queryByDisplayValue('sk-test-not-a-real-secret-123456789'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('degrades only the hosted creation surface when Incus is disabled', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/relay/admin' || url.startsWith('/relay/admin?')) {
+          return Promise.resolve({ ok: true, json: async () => adminSummary });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/capability') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              provider: 'disabled',
+              configured: false,
+              reachable: false,
+              available: false,
+              reasonCode: 'hosted_sandbox_disabled',
+              reason: 'Hosted supervisor VMs are not configured on this relay.',
+              checkedAt: '2026-06-18T00:15:00.000Z',
+            }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ sandboxes: [] }),
+          });
+        }
+        if (url === '/relay/admin/hosted-sandboxes/reconciliation') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              status: 'never_run',
+              checkedAt: null,
+              errorCode: null,
+              missingInstanceSandboxIds: [],
+              missingCredentialSandboxIds: [],
+              orphanInstances: [],
+              orphanCredentials: [],
+              orphanSnapshotCount: 0,
+            }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Operations panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Hosted VMs' }));
+    expect(await screen.findByText('Disabled')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create hosted VM' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Users' }));
+    expect(screen.getByText('owner@example.test')).toBeInTheDocument();
   });
 
   it('saves registration settings', async () => {
@@ -293,7 +556,9 @@ describe('RelayAdminPage', () => {
       target: { value: 'user-2' },
     });
     expect(screen.queryByText('Owner Mac')).not.toBeInTheDocument();
-    expect(screen.getByText('No devices match the selected filters.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No devices match the selected filters.'),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Owner'), {
       target: { value: 'all' },
@@ -316,7 +581,10 @@ describe('RelayAdminPage', () => {
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const headers = new Headers(init?.headers);
-        if (url.startsWith('/relay/admin') && headers.get('Authorization') !== 'Bearer admin-token') {
+        if (
+          url.startsWith('/relay/admin') &&
+          headers.get('Authorization') !== 'Bearer admin-token'
+        ) {
           return Promise.resolve({
             ok: false,
             status: 403,
@@ -356,14 +624,21 @@ describe('RelayAdminPage', () => {
         return Promise.resolve({
           ok: false,
           status: 404,
-          json: async () => ({ code: 'not_found', message: `Unhandled test URL: ${url}` }),
+          json: async () => ({
+            code: 'not_found',
+            message: `Unhandled test URL: ${url}`,
+          }),
         });
       }),
     );
 
     renderPage();
 
-    expect(await screen.findByText('Use the relay admin credentials for this server. This does not replace your normal relay account.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Use the relay admin credentials for this server. This does not replace your normal relay account.',
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'admin' },
@@ -374,7 +649,11 @@ describe('RelayAdminPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByText('Operations panel')).toBeInTheDocument();
-    expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('normal-token');
-    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBe('admin-token');
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBe(
+      'normal-token',
+    );
+    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBe(
+      'admin-token',
+    );
   });
 });

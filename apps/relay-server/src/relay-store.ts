@@ -17,6 +17,13 @@ import type {
   RelayAdminWorkspaceDto,
   RelayCreateDeviceResultDto,
   RelayDeviceDto,
+  RelayHostedSandboxDetailDto,
+  RelayHostedCodexConfigDto,
+  RelayHostedSandboxDto,
+  RelayHostedSandboxOperationActionDto,
+  RelayHostedSandboxOperationDto,
+  RelayHostedSandboxOperationStatusDto,
+  RelayHostedSandboxStatusDto,
   RelayPendingRegistrationDto,
   RelayPortalSummaryDto,
   RelayRegistrationSettingsDto,
@@ -47,6 +54,13 @@ interface StoredDevice {
   tokenHash: string;
   tokenPreview: string;
   createdAt: string;
+}
+
+interface HostedSandboxProvisionContext {
+  sandbox: RelayHostedSandboxDto;
+  deviceToken: string;
+  credentialRef: string;
+  codexConfig: RelayHostedCodexConfigDto;
 }
 
 interface RelayStoreData {
@@ -124,7 +138,11 @@ export class RelayStore {
     this.ensureRegistrationSetting(registrationEnabled);
   }
 
-  static fromDataDir(dataDir: string, sessionSecret: string, registrationEnabled: boolean) {
+  static fromDataDir(
+    dataDir: string,
+    sessionSecret: string,
+    registrationEnabled: boolean,
+  ) {
     const resolvedDataDir = path.resolve(dataDir);
     return new RelayStore(
       path.join(resolvedDataDir, 'relay-store.sqlite'),
@@ -152,7 +170,11 @@ export class RelayStore {
 
   register(input: { email: string; username: string; password: string }) {
     if (!this.registrationEnabled()) {
-      throw new RelayStoreError(403, 'forbidden', 'Registration is currently disabled.');
+      throw new RelayStoreError(
+        403,
+        'forbidden',
+        'Registration is currently disabled.',
+      );
     }
 
     const user = this.createStoredUser({
@@ -165,23 +187,47 @@ export class RelayStore {
     return this.createLoginResult(user);
   }
 
-  requestRegistrationApproval(input: { email: string; username: string; password: string }) {
+  requestRegistrationApproval(input: {
+    email: string;
+    username: string;
+    password: string;
+  }) {
     if (!this.registrationEnabled()) {
-      throw new RelayStoreError(403, 'forbidden', 'Registration is currently disabled.');
+      throw new RelayStoreError(
+        403,
+        'forbidden',
+        'Registration is currently disabled.',
+      );
     }
     const email = input.email.trim().toLowerCase();
     const username = normalizeUsername(input.username);
     if (!email.includes('@')) {
-      throw new RelayStoreError(400, 'bad_request', 'A valid email address is required.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'A valid email address is required.',
+      );
     }
     if (username.length < 3) {
-      throw new RelayStoreError(400, 'bad_request', 'Username must be at least 3 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Username must be at least 3 characters.',
+      );
     }
     if (input.password.length < 8) {
-      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Password must be at least 8 characters.',
+      );
     }
     if (this.getUserByIdentifier(email) || this.getUserByUsername(username)) {
-      throw new RelayStoreError(409, 'conflict', 'A user with that email or username already exists.');
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        'A user with that email or username already exists.',
+      );
     }
     const existing = this.rowToPendingRegistration(
       this.sqlite
@@ -219,10 +265,18 @@ export class RelayStore {
     const normalizedIdentifier = input.identifier.trim().toLowerCase();
     const user = this.getUserByIdentifier(normalizedIdentifier);
     if (!user || !user.enabled) {
-      throw new RelayStoreError(401, 'unauthorized', 'Invalid username or password.');
+      throw new RelayStoreError(
+        401,
+        'unauthorized',
+        'Invalid username or password.',
+      );
     }
     if (!verifySecret(input.password, user.passwordSalt, user.passwordHash)) {
-      throw new RelayStoreError(401, 'unauthorized', 'Invalid username or password.');
+      throw new RelayStoreError(
+        401,
+        'unauthorized',
+        'Invalid username or password.',
+      );
     }
 
     return this.createLoginResult(user);
@@ -247,7 +301,10 @@ export class RelayStore {
     };
   }
 
-  createDevice(ownerUserId: string, input: { name: string }): RelayCreateDeviceResultDto {
+  createDevice(
+    ownerUserId: string,
+    input: { name: string },
+  ): RelayCreateDeviceResultDto {
     const user = this.requireUser(ownerUserId);
     const token = `rcd_${crypto.randomBytes(24).toString('base64url')}`;
     const device: StoredDevice = {
@@ -266,7 +323,409 @@ export class RelayStore {
     };
   }
 
+  createHostedSandboxRequested(input: {
+    createdByAdminUserId: string;
+    assignedUserId: string;
+    deviceName: string;
+    imageVersion: string;
+    resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
+    credentialRef: string;
+    codexConfig?: RelayHostedCodexConfigDto;
+  }) {
+    this.requireUser(input.createdByAdminUserId);
+    this.requireUser(input.assignedUserId);
+    const sandboxId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    let deviceResult: RelayCreateDeviceResultDto | null = null;
+    const create = this.sqlite.transaction(() => {
+      deviceResult = this.createDevice(input.assignedUserId, {
+        name: input.deviceName,
+      });
+      this.sqlite
+        .prepare(
+          `
+            INSERT INTO relay_hosted_sandboxes (
+              id, device_id, assigned_user_id, created_by_admin_user_id,
+              provider, provider_instance_id, image_version,
+              cpu_count, memory_mib, disk_gib, status, credential_ref,
+              codex_config_json,
+              last_error_code, last_error_message, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'incus', NULL, ?, ?, ?, ?, 'requested', ?, ?, NULL, NULL, ?, ?)
+          `,
+        )
+        .run(
+          sandboxId,
+          deviceResult.device.id,
+          input.assignedUserId,
+          input.createdByAdminUserId,
+          input.imageVersion,
+          input.resources.cpuCount,
+          input.resources.memoryMiB,
+          input.resources.diskGiB,
+          input.credentialRef,
+          JSON.stringify(input.codexConfig ?? parseHostedCodexConfig(null)),
+          now,
+          now,
+        );
+      this.insertHostedOperation({
+        id: operationId,
+        sandboxId,
+        action: 'create',
+        status: 'pending',
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    create();
+    const context = this.getHostedProvisionContext(sandboxId);
+    if (!context || !deviceResult) {
+      throw new Error('Hosted sandbox transaction did not persist.');
+    }
+    return {
+      sandbox: this.getHostedSandboxDetail(sandboxId)!,
+      operation: this.getHostedOperation(operationId)!,
+      deviceToken: context.deviceToken,
+    };
+  }
+
+  listHostedSandboxes(): RelayHostedSandboxDto[] {
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_hosted_sandboxes ORDER BY created_at DESC',
+        )
+        .all() as HostedSandboxRow[]
+    ).map((row) => this.rowToHostedSandbox(row));
+  }
+
+  listHostedProviderRecords(): Array<{
+    id: string;
+    credentialRef: string;
+  }> {
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT id, credential_ref FROM relay_hosted_sandboxes ORDER BY id',
+        )
+        .all() as Array<{ id: string; credential_ref: string }>
+    ).map((row) => ({ id: row.id, credentialRef: row.credential_ref }));
+  }
+
+  getHostedSandboxDetail(id: string): RelayHostedSandboxDetailDto | null {
+    const row = this.sqlite
+      .prepare('SELECT * FROM relay_hosted_sandboxes WHERE id = ?')
+      .get(id) as HostedSandboxRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      ...this.rowToHostedSandbox(row),
+      operations: this.getHostedOperations(id),
+    };
+  }
+
+  getHostedProvisionContext(id: string): HostedSandboxProvisionContext | null {
+    const row = this.sqlite
+      .prepare(
+        `
+          SELECT hs.*, d.token AS device_token
+          FROM relay_hosted_sandboxes hs
+          JOIN relay_devices d ON d.id = hs.device_id
+          WHERE hs.id = ?
+        `,
+      )
+      .get(id) as
+      | (HostedSandboxRow & { device_token: string | null })
+      | undefined;
+    if (!row || !row.device_token) {
+      return null;
+    }
+    return {
+      sandbox: this.rowToHostedSandbox(row),
+      deviceToken: row.device_token,
+      credentialRef: row.credential_ref,
+      codexConfig: parseHostedCodexConfig(row.codex_config_json),
+    };
+  }
+
+  listHostedSandboxesNeedingReconciliation() {
+    return (
+      this.sqlite
+        .prepare(
+          `
+          SELECT id FROM relay_hosted_sandboxes
+          WHERE status IN ('requested', 'creating', 'starting', 'provisioning')
+          ORDER BY created_at ASC
+        `,
+        )
+        .all() as Array<{ id: string }>
+    ).map((row) => row.id);
+  }
+
+  updateHostedSandboxStatus(
+    id: string,
+    status: RelayHostedSandboxStatusDto,
+    options: {
+      providerInstanceId?: string | null;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+    } = {},
+  ) {
+    const result = this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_sandboxes
+          SET status = ?,
+              provider_instance_id = COALESCE(?, provider_instance_id),
+              last_error_code = ?,
+              last_error_message = ?,
+              updated_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(
+        status,
+        options.providerInstanceId ?? null,
+        options.errorCode ?? null,
+        options.errorMessage ?? null,
+        new Date().toISOString(),
+        id,
+      );
+    if (result.changes < 1) {
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Hosted sandbox was not found.',
+      );
+    }
+  }
+
+  updateHostedOperation(
+    id: string,
+    status: RelayHostedSandboxOperationStatusDto,
+    error?: { code: string; message: string } | null,
+  ) {
+    const result = this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_operations
+          SET status = ?, error_code = ?, error_message = ?, updated_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(
+        status,
+        error?.code ?? null,
+        error?.message ?? null,
+        new Date().toISOString(),
+        id,
+      );
+    if (result.changes < 1) {
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Hosted operation was not found.',
+      );
+    }
+  }
+
+  createHostedOperation(
+    sandboxId: string,
+    action: RelayHostedSandboxOperationActionDto,
+  ) {
+    if (!this.getHostedSandboxDetail(sandboxId)) {
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Hosted sandbox was not found.',
+      );
+    }
+    const now = new Date().toISOString();
+    const operation: RelayHostedSandboxOperationDto = {
+      id: crypto.randomUUID(),
+      sandboxId,
+      action,
+      status: 'pending',
+      errorCode: null,
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.insertHostedOperation(operation);
+    return operation;
+  }
+
+  markHostedDeviceOnline(deviceId: string) {
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_sandboxes
+          SET status = 'online', last_error_code = NULL,
+              last_error_message = NULL, updated_at = ?
+          WHERE device_id = ? AND status != 'deleting'
+        `,
+      )
+      .run(new Date().toISOString(), deviceId);
+  }
+
+  getHostedSandboxByDeviceId(deviceId: string) {
+    const row = this.sqlite
+      .prepare('SELECT * FROM relay_hosted_sandboxes WHERE device_id = ?')
+      .get(deviceId) as HostedSandboxRow | undefined;
+    return row ? this.rowToHostedSandbox(row) : null;
+  }
+
+  recordHostedUserActivity(deviceId: string, idleTimeoutMs: number) {
+    const row = this.sqlite
+      .prepare('SELECT * FROM relay_hosted_sandboxes WHERE device_id = ?')
+      .get(deviceId) as HostedSandboxRow | undefined;
+    if (!row) return null;
+    const now = new Date();
+    const deadline =
+      row.active_turn_count === 0
+        ? new Date(now.getTime() + idleTimeoutMs).toISOString()
+        : null;
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_sandboxes
+          SET last_user_activity_at = ?, idle_deadline_at = ?,
+              lifecycle_generation = lifecycle_generation + 1, updated_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(now.toISOString(), deadline, now.toISOString(), row.id);
+    return this.getHostedSandboxDetail(row.id)!;
+  }
+
+  recordHostedTurnActivity(input: {
+    deviceId: string;
+    threadId: string;
+    turnId: string;
+    kind: 'turn_started' | 'turn_terminal';
+    idleTimeoutMs: number;
+  }) {
+    const row = this.sqlite
+      .prepare('SELECT * FROM relay_hosted_sandboxes WHERE device_id = ?')
+      .get(input.deviceId) as HostedSandboxRow | undefined;
+    if (!row) return null;
+    const update = this.sqlite.transaction(() => {
+      if (input.kind === 'turn_started') {
+        this.sqlite
+          .prepare(
+            `
+              INSERT OR IGNORE INTO relay_hosted_active_turns (
+                sandbox_id, thread_id, turn_id, started_at
+              ) VALUES (?, ?, ?, ?)
+            `,
+          )
+          .run(row.id, input.threadId, input.turnId, new Date().toISOString());
+      } else {
+        this.sqlite
+          .prepare(
+            `
+              DELETE FROM relay_hosted_active_turns
+              WHERE sandbox_id = ? AND thread_id = ? AND turn_id = ?
+            `,
+          )
+          .run(row.id, input.threadId, input.turnId);
+      }
+      const active = this.sqlite
+        .prepare(
+          'SELECT COUNT(*) AS count FROM relay_hosted_active_turns WHERE sandbox_id = ?',
+        )
+        .get(row.id) as { count: number };
+      const now = new Date();
+      const deadline =
+        active.count === 0
+          ? new Date(now.getTime() + input.idleTimeoutMs).toISOString()
+          : null;
+      this.sqlite
+        .prepare(
+          `
+            UPDATE relay_hosted_sandboxes
+            SET active_turn_count = ?, idle_deadline_at = ?,
+                lifecycle_generation = lifecycle_generation + 1, updated_at = ?
+            WHERE id = ?
+          `,
+        )
+        .run(active.count, deadline, now.toISOString(), row.id);
+    });
+    update();
+    return this.getHostedSandboxDetail(row.id)!;
+  }
+
+  armHostedIdleDeadline(id: string, idleTimeoutMs: number) {
+    const now = new Date();
+    this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_sandboxes
+          SET idle_deadline_at = ?, lifecycle_generation = lifecycle_generation + 1,
+              updated_at = ?
+          WHERE id = ? AND active_turn_count = 0
+        `,
+      )
+      .run(
+        new Date(now.getTime() + idleTimeoutMs).toISOString(),
+        now.toISOString(),
+        id,
+      );
+    return this.getHostedSandboxDetail(id);
+  }
+
+  listHostedIdleDeadlines() {
+    return (
+      this.sqlite
+        .prepare(
+          `
+          SELECT id, idle_deadline_at, lifecycle_generation
+          FROM relay_hosted_sandboxes
+          WHERE idle_deadline_at IS NOT NULL AND active_turn_count = 0
+            AND status = 'online'
+        `,
+        )
+        .all() as Array<{
+        id: string;
+        idle_deadline_at: string;
+        lifecycle_generation: number;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      deadlineAt: row.idle_deadline_at,
+      generation: row.lifecycle_generation,
+    }));
+  }
+
+  claimHostedIdleStop(id: string, generation: number, now: Date) {
+    const result = this.sqlite
+      .prepare(
+        `
+          UPDATE relay_hosted_sandboxes
+          SET status = 'stopping', idle_deadline_at = NULL,
+              lifecycle_generation = lifecycle_generation + 1, updated_at = ?
+          WHERE id = ? AND lifecycle_generation = ? AND active_turn_count = 0
+            AND status = 'online' AND idle_deadline_at <= ?
+        `,
+      )
+      .run(now.toISOString(), id, generation, now.toISOString());
+    return result.changes === 1;
+  }
+
   deleteDevice(userId: string, deviceId: string) {
+    const hosted = this.sqlite
+      .prepare('SELECT id FROM relay_hosted_sandboxes WHERE device_id = ?')
+      .get(deviceId) as { id: string } | undefined;
+    if (hosted) {
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        'Hosted devices must be deleted from the Hosted supervisor VM admin panel.',
+      );
+    }
     const result = this.sqlite
       .prepare('DELETE FROM relay_devices WHERE id = ? AND owner_user_id = ?')
       .run(deviceId, userId);
@@ -275,13 +734,57 @@ export class RelayStore {
     }
   }
 
+  deleteHostedSandboxRecord(id: string) {
+    const context = this.getHostedProvisionContext(id);
+    if (!context) {
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Hosted sandbox was not found.',
+      );
+    }
+    const remove = this.sqlite.transaction(() => {
+      this.sqlite
+        .prepare('DELETE FROM relay_hosted_sandboxes WHERE id = ?')
+        .run(id);
+      this.sqlite
+        .prepare('DELETE FROM relay_devices WHERE id = ?')
+        .run(context.sandbox.deviceId);
+    });
+    remove();
+    return {
+      id,
+      deviceId: context.sandbox.deviceId,
+      credentialRef: context.credentialRef,
+    };
+  }
+
+  replaceHostedCredentialRef(id: string, credentialRef: string) {
+    const context = this.getHostedProvisionContext(id);
+    if (!context) {
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Hosted sandbox was not found.',
+      );
+    }
+    this.sqlite
+      .prepare(
+        'UPDATE relay_hosted_sandboxes SET credential_ref = ?, updated_at = ? WHERE id = ?',
+      )
+      .run(credentialRef, new Date().toISOString(), id);
+    return context.credentialRef;
+  }
+
   verifyDeviceToken(token: string | null) {
     if (!token) {
       return null;
     }
     const tokenHash = sha256(token);
     return this.rowToDevice(
-      this.sqlite.prepare('SELECT * FROM relay_devices WHERE token_hash = ?').get(tokenHash) as DeviceRow | undefined,
+      this.sqlite
+        .prepare('SELECT * FROM relay_devices WHERE token_hash = ?')
+        .get(tokenHash) as DeviceRow | undefined,
     );
   }
 
@@ -296,7 +799,11 @@ export class RelayStore {
       throw new RelayStoreError(404, 'not_found', 'Target user was not found.');
     }
     if (target.id === ownerUserId) {
-      throw new RelayStoreError(400, 'bad_request', 'You cannot share a session with yourself.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'You cannot share a session with yourself.',
+      );
     }
 
     const existing = this.rowToShare(
@@ -311,7 +818,9 @@ export class RelayStore {
               AND revoked_at IS NULL
           `,
         )
-        .get(ownerUserId, target.id, input.deviceId, input.threadId) as ShareRow | undefined,
+        .get(ownerUserId, target.id, input.deviceId, input.threadId) as
+        | ShareRow
+        | undefined,
     );
     if (existing) {
       return this.updateShareRecord(existing.id, {
@@ -360,17 +869,30 @@ export class RelayStore {
       throw new RelayStoreError(404, 'not_found', 'Target user was not found.');
     }
     if (target.id === ownerUserId) {
-      throw new RelayStoreError(400, 'bad_request', 'You cannot share access with yourself.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'You cannot share access with yourself.',
+      );
     }
 
     const scope = normalizeShareScope(input.scope);
     const threadId = scope === 'thread' ? input.threadId?.trim() || null : null;
-    const workspaceId = scope === 'workspace' ? input.workspaceId?.trim() || null : null;
+    const workspaceId =
+      scope === 'workspace' ? input.workspaceId?.trim() || null : null;
     if (scope === 'thread' && !threadId) {
-      throw new RelayStoreError(400, 'bad_request', 'threadId is required for thread grants.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'threadId is required for thread grants.',
+      );
     }
     if (scope === 'workspace' && !workspaceId) {
-      throw new RelayStoreError(400, 'bad_request', 'workspaceId is required for workspace grants.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'workspaceId is required for workspace grants.',
+      );
     }
 
     const existing = this.rowToGrant(
@@ -387,7 +909,14 @@ export class RelayStore {
               AND revoked_at IS NULL
           `,
         )
-        .get(ownerUserId, target.id, input.deviceId, scope, threadId, workspaceId) as GrantRow | undefined,
+        .get(
+          ownerUserId,
+          target.id,
+          input.deviceId,
+          scope,
+          threadId,
+          workspaceId,
+        ) as GrantRow | undefined,
     );
     if (existing) {
       return this.updateGrantRecord(existing.id, {
@@ -431,10 +960,16 @@ export class RelayStore {
     return grant;
   }
 
-  updateShare(userId: string, shareId: string, input: UpdateRelaySessionShareInput) {
+  updateShare(
+    userId: string,
+    shareId: string,
+    input: UpdateRelaySessionShareInput,
+  ) {
     const share = this.rowToShare(
       this.sqlite
-        .prepare('SELECT * FROM relay_shares WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL')
+        .prepare(
+          'SELECT * FROM relay_shares WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL',
+        )
         .get(shareId, userId) as ShareRow | undefined,
     );
     if (!share) {
@@ -442,13 +977,24 @@ export class RelayStore {
     }
     return this.publicShare(
       this.updateShareRecord(shareId, {
-        label: input.label !== undefined ? input.label?.trim() || null : share.label,
-        workspaceId: input.workspaceId !== undefined ? input.workspaceId?.trim() || null : share.workspaceId,
-        threadAccess: input.threadAccess !== undefined ? normalizeThreadAccess(input.threadAccess) : share.threadAccess,
-        workspaceAccess: input.workspaceAccess !== undefined
-          ? normalizeWorkspaceAccess(input.workspaceAccess)
-          : share.workspaceAccess,
-        expiresAt: input.expiresAt !== undefined ? normalizeExpiresAt(input.expiresAt) : share.expiresAt,
+        label:
+          input.label !== undefined ? input.label?.trim() || null : share.label,
+        workspaceId:
+          input.workspaceId !== undefined
+            ? input.workspaceId?.trim() || null
+            : share.workspaceId,
+        threadAccess:
+          input.threadAccess !== undefined
+            ? normalizeThreadAccess(input.threadAccess)
+            : share.threadAccess,
+        workspaceAccess:
+          input.workspaceAccess !== undefined
+            ? normalizeWorkspaceAccess(input.workspaceAccess)
+            : share.workspaceAccess,
+        expiresAt:
+          input.expiresAt !== undefined
+            ? normalizeExpiresAt(input.expiresAt)
+            : share.expiresAt,
       }),
     );
   }
@@ -456,7 +1002,9 @@ export class RelayStore {
   revokeShare(userId: string, shareId: string) {
     const share = this.rowToShare(
       this.sqlite
-        .prepare('SELECT * FROM relay_shares WHERE id = ? AND owner_user_id = ?')
+        .prepare(
+          'SELECT * FROM relay_shares WHERE id = ? AND owner_user_id = ?',
+        )
         .get(shareId, userId) as ShareRow | undefined,
     );
     if (!share) {
@@ -469,10 +1017,16 @@ export class RelayStore {
     return { ...share, revokedAt };
   }
 
-  updateGrant(userId: string, grantId: string, input: UpdateRelayAccessGrantInput) {
+  updateGrant(
+    userId: string,
+    grantId: string,
+    input: UpdateRelayAccessGrantInput,
+  ) {
     const grant = this.rowToGrant(
       this.sqlite
-        .prepare('SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL')
+        .prepare(
+          'SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL',
+        )
         .get(grantId, userId) as GrantRow | undefined,
     );
     if (!grant) {
@@ -480,23 +1034,32 @@ export class RelayStore {
     }
     return this.publicGrant(
       this.updateGrantRecord(grantId, {
-        label: input.label !== undefined ? input.label?.trim() || null : grant.label,
-        workspaceScope: input.workspaceScope !== undefined
-          ? normalizeWorkspaceScope(input.workspaceScope)
-          : grant.workspaceScope,
-        workspaceIds: input.workspaceIds !== undefined
-          ? normalizeWorkspaceIds(input.workspaceIds)
-          : grant.workspaceIds,
-        threadAccess: input.threadAccess !== undefined
-          ? normalizeThreadAccess(input.threadAccess)
-          : grant.threadAccess,
-        workspaceAccess: input.workspaceAccess !== undefined
-          ? normalizeWorkspaceAccess(input.workspaceAccess)
-          : grant.workspaceAccess,
-        canCreateThreads: input.canCreateThreads !== undefined
-          ? Boolean(input.canCreateThreads)
-          : grant.canCreateThreads,
-        expiresAt: input.expiresAt !== undefined ? normalizeExpiresAt(input.expiresAt) : grant.expiresAt,
+        label:
+          input.label !== undefined ? input.label?.trim() || null : grant.label,
+        workspaceScope:
+          input.workspaceScope !== undefined
+            ? normalizeWorkspaceScope(input.workspaceScope)
+            : grant.workspaceScope,
+        workspaceIds:
+          input.workspaceIds !== undefined
+            ? normalizeWorkspaceIds(input.workspaceIds)
+            : grant.workspaceIds,
+        threadAccess:
+          input.threadAccess !== undefined
+            ? normalizeThreadAccess(input.threadAccess)
+            : grant.threadAccess,
+        workspaceAccess:
+          input.workspaceAccess !== undefined
+            ? normalizeWorkspaceAccess(input.workspaceAccess)
+            : grant.workspaceAccess,
+        canCreateThreads:
+          input.canCreateThreads !== undefined
+            ? Boolean(input.canCreateThreads)
+            : grant.canCreateThreads,
+        expiresAt:
+          input.expiresAt !== undefined
+            ? normalizeExpiresAt(input.expiresAt)
+            : grant.expiresAt,
       }),
     );
   }
@@ -504,7 +1067,9 @@ export class RelayStore {
   revokeGrant(userId: string, grantId: string) {
     const grant = this.rowToGrant(
       this.sqlite
-        .prepare('SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ?')
+        .prepare(
+          'SELECT * FROM relay_access_grants WHERE id = ? AND owner_user_id = ?',
+        )
         .get(grantId, userId) as GrantRow | undefined,
     );
     if (!grant) {
@@ -517,10 +1082,14 @@ export class RelayStore {
     return { ...grant, revokedAt };
   }
 
-  effectiveAccess(userId: string, deviceId: string, scope: {
-    threadId?: string | null;
-    workspaceId?: string | null;
-  } = {}): EffectiveRelayAccess | null {
+  effectiveAccess(
+    userId: string,
+    deviceId: string,
+    scope: {
+      threadId?: string | null;
+      workspaceId?: string | null;
+    } = {},
+  ): EffectiveRelayAccess | null {
     const owned = this.sqlite
       .prepare('SELECT 1 FROM relay_devices WHERE id = ? AND owner_user_id = ?')
       .get(deviceId, userId);
@@ -559,7 +1128,9 @@ export class RelayStore {
       if (share) {
         if (
           scope.workspaceId &&
-          (!share.workspaceId || share.workspaceId !== scope.workspaceId || share.workspaceAccess === 'none')
+          (!share.workspaceId ||
+            share.workspaceId !== scope.workspaceId ||
+            share.workspaceAccess === 'none')
         ) {
           const grant = this.findBestGrant(userId, deviceId, scope);
           return grant ? this.accessFromGrant(grant) : null;
@@ -598,7 +1169,9 @@ export class RelayStore {
               LIMIT 1
             `,
           )
-          .get(userId, deviceId, scope.workspaceId, now) as ShareRow | undefined,
+          .get(userId, deviceId, scope.workspaceId, now) as
+          | ShareRow
+          | undefined,
       );
       if (share) {
         return {
@@ -629,7 +1202,10 @@ export class RelayStore {
     );
   }
 
-  portalSummary(userId: string, connectedDevices: Map<string, DeviceConnectionStatus>): RelayPortalSummaryDto {
+  portalSummary(
+    userId: string,
+    connectedDevices: Map<string, DeviceConnectionStatus>,
+  ): RelayPortalSummaryDto {
     const user = this.requireUser(userId);
     const devices = this.getDevicesByOwner(userId);
     const sharedWithMe = this.getSharesByTarget(userId);
@@ -638,20 +1214,26 @@ export class RelayStore {
     const grantsByMe = this.getGrantsByOwner(userId);
     return {
       user: this.publicUser(user),
-      devices: devices.map((device) => this.publicDevice(device, connectedDevices.get(device.id) ?? null)),
+      devices: devices.map((device) =>
+        this.publicDevice(device, connectedDevices.get(device.id) ?? null),
+      ),
       sharedWithMe: sharedWithMe.map((share) => this.publicShare(share)),
       sharedByMe: sharedByMe.map((share) => this.publicShare(share)),
       sharedDevicesWithMe: grantsWithMe
         .filter((grant) => grant.scope === 'device')
         .map((grant) => this.publicGrant(grant)),
       sharedThreadsWithMe: [
-        ...sharedWithMe.map((share) => this.publicGrant(this.grantFromShare(share))),
+        ...sharedWithMe.map((share) =>
+          this.publicGrant(this.grantFromShare(share)),
+        ),
         ...grantsWithMe
           .filter((grant) => grant.scope !== 'device')
           .map((grant) => this.publicGrant(grant)),
       ],
       grantsByMe: [
-        ...sharedByMe.map((share) => this.publicGrant(this.grantFromShare(share))),
+        ...sharedByMe.map((share) =>
+          this.publicGrant(this.grantFromShare(share)),
+        ),
         ...grantsByMe.map((grant) => this.publicGrant(grant)),
       ],
     };
@@ -665,19 +1247,33 @@ export class RelayStore {
 
   adminSummary(
     connectedDevices: Map<string, DeviceConnectionStatus>,
-    options: { conversationWindowDays?: number; metadata?: RelayAdminMetadata } = {},
+    options: {
+      conversationWindowDays?: number;
+      metadata?: RelayAdminMetadata;
+    } = {},
   ): RelayAdminSummaryDto {
-    const conversationWindowDays = normalizeConversationWindowDays(options.conversationWindowDays);
+    const conversationWindowDays = normalizeConversationWindowDays(
+      options.conversationWindowDays,
+    );
     const users = this.getUsers();
     const devices = this.getDevices();
     const deviceCounts = new Map<string, number>();
     for (const device of devices) {
-      deviceCounts.set(device.ownerUserId, (deviceCounts.get(device.ownerUserId) ?? 0) + 1);
+      deviceCounts.set(
+        device.ownerUserId,
+        (deviceCounts.get(device.ownerUserId) ?? 0) + 1,
+      );
     }
-    const conversationCounts = this.conversationCountsByUser(conversationWindowDays);
+    const conversationCounts = this.conversationCountsByUser(
+      conversationWindowDays,
+    );
     return {
       users: users.map((user) =>
-        this.publicAdminUser(user, deviceCounts.get(user.id) ?? 0, conversationCounts.get(user.id) ?? 0),
+        this.publicAdminUser(
+          user,
+          deviceCounts.get(user.id) ?? 0,
+          conversationCounts.get(user.id) ?? 0,
+        ),
       ),
       devices: devices.map((device) => {
         const owner = users.find((user) => user.id === device.ownerUserId);
@@ -688,7 +1284,9 @@ export class RelayStore {
           options.metadata,
         );
       }),
-      shares: this.getShares({ includeRevoked: true }).map((share) => this.publicShare(share)),
+      shares: this.getShares({ includeRevoked: true }).map((share) =>
+        this.publicShare(share),
+      ),
       pendingRegistrations: this.pendingRegistrations(),
       settings: this.registrationSettings(),
       conversationWindowDays,
@@ -705,7 +1303,8 @@ export class RelayStore {
     return {
       enabled: this.registrationEnabled(),
       registrationPassword: this.getSetting('registrationPassword'),
-      approvalRequired: this.getSetting('registrationApprovalRequired') === 'true',
+      approvalRequired:
+        this.getSetting('registrationApprovalRequired') === 'true',
     };
   }
 
@@ -716,7 +1315,11 @@ export class RelayStore {
     if (input.registrationPassword !== undefined) {
       const password = input.registrationPassword?.trim() || null;
       if (password !== null && password.length < 8) {
-        throw new RelayStoreError(400, 'bad_request', 'Registration password must be at least 8 characters.');
+        throw new RelayStoreError(
+          400,
+          'bad_request',
+          'Registration password must be at least 8 characters.',
+        );
       }
       if (password === null) {
         this.deleteSetting('registrationPassword');
@@ -725,7 +1328,10 @@ export class RelayStore {
       }
     }
     if (input.approvalRequired !== undefined) {
-      this.setSetting('registrationApprovalRequired', input.approvalRequired ? 'true' : 'false');
+      this.setSetting(
+        'registrationApprovalRequired',
+        input.approvalRequired ? 'true' : 'false',
+      );
     }
     return this.registrationSettings();
   }
@@ -781,7 +1387,9 @@ export class RelayStore {
   }
 
   recordUserSeen(userId: string, at = new Date().toISOString()) {
-    this.sqlite.prepare('UPDATE relay_users SET last_seen_at = ? WHERE id = ?').run(at, userId);
+    this.sqlite
+      .prepare('UPDATE relay_users SET last_seen_at = ? WHERE id = ?')
+      .run(at, userId);
   }
 
   recordConversationEvent(input: {
@@ -811,16 +1419,26 @@ export class RelayStore {
   setUserEnabled(userId: string, enabled: boolean) {
     const user = this.requireUser(userId);
     if (user.role === 'admin' && !enabled) {
-      throw new RelayStoreError(400, 'bad_request', 'The admin user cannot be disabled.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'The admin user cannot be disabled.',
+      );
     }
-    this.sqlite.prepare('UPDATE relay_users SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, userId);
+    this.sqlite
+      .prepare('UPDATE relay_users SET enabled = ? WHERE id = ?')
+      .run(enabled ? 1 : 0, userId);
     return this.publicUser({ ...user, enabled });
   }
 
   deleteUser(userId: string) {
     const user = this.requireUser(userId);
     if (user.role === 'admin') {
-      throw new RelayStoreError(400, 'bad_request', 'The admin user cannot be deleted.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'The admin user cannot be deleted.',
+      );
     }
     this.sqlite.prepare('DELETE FROM relay_users WHERE id = ?').run(userId);
   }
@@ -828,15 +1446,25 @@ export class RelayStore {
   adminResetUserPassword(userId: string, password: string) {
     const user = this.requireUser(userId);
     if (user.role === 'admin') {
-      throw new RelayStoreError(400, 'bad_request', 'The admin user password cannot be reset here.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'The admin user password cannot be reset here.',
+      );
     }
     if (password.length < 8) {
-      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Password must be at least 8 characters.',
+      );
     }
     const passwordSalt = crypto.randomBytes(16).toString('base64url');
     const passwordHash = hashSecret(password, passwordSalt);
     this.sqlite
-      .prepare('UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?')
+      .prepare(
+        'UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?',
+      )
       .run(passwordSalt, passwordHash, user.id);
     return this.publicUser({
       ...user,
@@ -848,13 +1476,23 @@ export class RelayStore {
   updateAccount(userId: string, input: { username?: string }) {
     const user = this.requireUser(userId);
     const username =
-      input.username !== undefined ? normalizeUsername(input.username) : user.username;
+      input.username !== undefined
+        ? normalizeUsername(input.username)
+        : user.username;
     if (username.length < 3) {
-      throw new RelayStoreError(400, 'bad_request', 'Username must be at least 3 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Username must be at least 3 characters.',
+      );
     }
     const existingUsername = this.getUserByUsername(username);
     if (existingUsername && existingUsername.id !== user.id) {
-      throw new RelayStoreError(409, 'conflict', 'A user with that username already exists.');
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        'A user with that username already exists.',
+      );
     }
     this.sqlite
       .prepare('UPDATE relay_users SET username = ? WHERE id = ?')
@@ -867,16 +1505,28 @@ export class RelayStore {
     input: { currentPassword: string; newPassword: string },
   ) {
     const user = this.requireUser(userId);
-    if (!verifySecret(input.currentPassword, user.passwordSalt, user.passwordHash)) {
-      throw new RelayStoreError(403, 'forbidden', 'Current password is incorrect.');
+    if (
+      !verifySecret(input.currentPassword, user.passwordSalt, user.passwordHash)
+    ) {
+      throw new RelayStoreError(
+        403,
+        'forbidden',
+        'Current password is incorrect.',
+      );
     }
     if (input.newPassword.length < 8) {
-      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Password must be at least 8 characters.',
+      );
     }
     const passwordSalt = crypto.randomBytes(16).toString('base64url');
     const passwordHash = hashSecret(input.newPassword, passwordSalt);
     this.sqlite
-      .prepare('UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?')
+      .prepare(
+        'UPDATE relay_users SET password_salt = ?, password_hash = ? WHERE id = ?',
+      )
       .run(passwordSalt, passwordHash, user.id);
     return this.publicUser({
       ...user,
@@ -893,17 +1543,37 @@ export class RelayStore {
     };
   }
 
-  publicDevice(device: StoredDevice, status: DeviceConnectionStatus | null): RelayDeviceDto {
+  publicDevice(
+    device: StoredDevice,
+    status: DeviceConnectionStatus | null,
+  ): RelayDeviceDto {
+    const hosted = this.sqlite
+      .prepare(
+        `
+          SELECT status, active_turn_count, idle_deadline_at
+          FROM relay_hosted_sandboxes WHERE device_id = ?
+        `,
+      )
+      .get(device.id) as
+      | {
+          status: RelayHostedSandboxStatusDto;
+          active_turn_count: number;
+          idle_deadline_at: string | null;
+        }
+      | undefined;
     return {
       id: device.id,
       ownerUserId: device.ownerUserId,
       name: device.name,
-      token: device.token,
+      token: hosted ? null : device.token,
       tokenPreview: device.tokenPreview,
       connected: Boolean(status?.connected),
       connectedAt: status?.connectedAt ?? null,
       lastHeartbeatAt: status?.lastHeartbeatAt ?? null,
       createdAt: device.createdAt,
+      hostedStatus: hosted?.status ?? null,
+      hostedActiveTurnCount: hosted?.active_turn_count ?? 0,
+      hostedIdleDeadlineAt: hosted?.idle_deadline_at ?? null,
     };
   }
 
@@ -941,7 +1611,10 @@ export class RelayStore {
     user: RelayUserDto,
     kind: RelayAccessEventKindDto = 'access',
   ) {
-    if (share.revokedAt || (share.expiresAt && share.expiresAt <= new Date().toISOString())) {
+    if (
+      share.revokedAt ||
+      (share.expiresAt && share.expiresAt <= new Date().toISOString())
+    ) {
       return;
     }
     const accessedAt = new Date().toISOString();
@@ -953,7 +1626,14 @@ export class RelayStore {
           ) VALUES (?, ?, ?, ?, ?, ?)
         `,
       )
-      .run(crypto.randomUUID(), share.id, user.id, user.username, kind, accessedAt);
+      .run(
+        crypto.randomUUID(),
+        share.id,
+        user.id,
+        user.username,
+        kind,
+        accessedAt,
+      );
   }
 
   recordGrantAccess(
@@ -961,7 +1641,10 @@ export class RelayStore {
     user: RelayUserDto,
     kind: RelayAccessEventKindDto = 'access',
   ) {
-    if (grant.revokedAt || (grant.expiresAt && grant.expiresAt <= new Date().toISOString())) {
+    if (
+      grant.revokedAt ||
+      (grant.expiresAt && grant.expiresAt <= new Date().toISOString())
+    ) {
       return;
     }
     const accessedAt = new Date().toISOString();
@@ -973,7 +1656,14 @@ export class RelayStore {
           ) VALUES (?, ?, ?, ?, ?, ?)
         `,
       )
-      .run(crypto.randomUUID(), grant.id, user.id, user.username, kind, accessedAt);
+      .run(
+        crypto.randomUUID(),
+        grant.id,
+        user.id,
+        user.username,
+        kind,
+        accessedAt,
+      );
   }
 
   private publicShare(share: RelaySessionShareDto): RelaySessionShareDto {
@@ -1040,6 +1730,62 @@ export class RelayStore {
       );
 
       CREATE INDEX IF NOT EXISTS relay_devices_owner_idx ON relay_devices(owner_user_id);
+
+      CREATE TABLE IF NOT EXISTS relay_hosted_sandboxes (
+        id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL UNIQUE REFERENCES relay_devices(id) ON DELETE CASCADE,
+        assigned_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE RESTRICT,
+        created_by_admin_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE RESTRICT,
+        provider TEXT NOT NULL CHECK (provider IN ('incus')),
+        provider_instance_id TEXT,
+        image_version TEXT NOT NULL,
+        cpu_count INTEGER NOT NULL,
+        memory_mib INTEGER NOT NULL,
+        disk_gib INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'requested', 'creating', 'starting', 'provisioning', 'stopped',
+          'online', 'stopping', 'error', 'deleting'
+        )),
+        credential_ref TEXT NOT NULL,
+        codex_config_json TEXT,
+        last_error_code TEXT,
+        last_error_message TEXT,
+        active_turn_count INTEGER NOT NULL DEFAULT 0,
+        last_user_activity_at TEXT,
+        idle_deadline_at TEXT,
+        lifecycle_generation INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_hosted_sandboxes_assigned_idx
+        ON relay_hosted_sandboxes(assigned_user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS relay_hosted_sandboxes_status_idx
+        ON relay_hosted_sandboxes(status, updated_at);
+
+      CREATE TABLE IF NOT EXISTS relay_hosted_operations (
+        id TEXT PRIMARY KEY,
+        sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN (
+          'create', 'start', 'stop', 'snapshot', 'delete', 'rotate_credential'
+        )),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_hosted_operations_sandbox_idx
+        ON relay_hosted_operations(sandbox_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS relay_hosted_active_turns (
+        sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+        thread_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        PRIMARY KEY (sandbox_id, thread_id, turn_id)
+      );
 
       CREATE TABLE IF NOT EXISTS relay_shares (
         id TEXT PRIMARY KEY,
@@ -1142,21 +1888,68 @@ export class RelayStore {
     `);
     this.ensureColumn('relay_users', 'last_seen_at', 'TEXT');
     this.ensureColumn('relay_devices', 'token', 'TEXT');
+    this.ensureColumn(
+      'relay_hosted_sandboxes',
+      'active_turn_count',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    this.ensureColumn(
+      'relay_hosted_sandboxes',
+      'last_user_activity_at',
+      'TEXT',
+    );
+    this.ensureColumn('relay_hosted_sandboxes', 'idle_deadline_at', 'TEXT');
+    this.ensureColumn(
+      'relay_hosted_sandboxes',
+      'lifecycle_generation',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    this.ensureColumn('relay_hosted_sandboxes', 'codex_config_json', 'TEXT');
     this.ensureColumn('relay_shares', 'thread_title', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_label', 'TEXT');
-    this.ensureColumn('relay_shares', 'thread_access', "TEXT NOT NULL DEFAULT 'control'");
-    this.ensureColumn('relay_shares', 'workspace_access', "TEXT NOT NULL DEFAULT 'none'");
+    this.ensureColumn(
+      'relay_shares',
+      'thread_access',
+      "TEXT NOT NULL DEFAULT 'control'",
+    );
+    this.ensureColumn(
+      'relay_shares',
+      'workspace_access',
+      "TEXT NOT NULL DEFAULT 'none'",
+    );
     this.ensureColumn('relay_shares', 'expires_at', 'TEXT');
-    this.ensureColumn('relay_access_grants', 'workspace_scope', "TEXT NOT NULL DEFAULT 'all'");
-    this.ensureColumn('relay_access_grants', 'workspace_ids', "TEXT NOT NULL DEFAULT '[]'");
-    this.ensureColumn('relay_access_grants', 'can_create_threads', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumn('relay_share_access_events', 'kind', "TEXT NOT NULL DEFAULT 'access'");
-    this.ensureColumn('relay_access_grant_events', 'kind', "TEXT NOT NULL DEFAULT 'access'");
+    this.ensureColumn(
+      'relay_access_grants',
+      'workspace_scope',
+      "TEXT NOT NULL DEFAULT 'all'",
+    );
+    this.ensureColumn(
+      'relay_access_grants',
+      'workspace_ids',
+      "TEXT NOT NULL DEFAULT '[]'",
+    );
+    this.ensureColumn(
+      'relay_access_grants',
+      'can_create_threads',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    this.ensureColumn(
+      'relay_share_access_events',
+      'kind',
+      "TEXT NOT NULL DEFAULT 'access'",
+    );
+    this.ensureColumn(
+      'relay_access_grant_events',
+      'kind',
+      "TEXT NOT NULL DEFAULT 'access'",
+    );
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
-    const columns = this.sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    const columns = this.sqlite
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as Array<{ name: string }>;
     if (columns.some((existing) => existing.name === column)) {
       return;
     }
@@ -1167,21 +1960,31 @@ export class RelayStore {
     if (!legacyJsonPath || !fs.existsSync(legacyJsonPath)) {
       return;
     }
-    const existingUsers = this.sqlite.prepare('SELECT COUNT(*) AS count FROM relay_users').get() as { count: number };
+    const existingUsers = this.sqlite
+      .prepare('SELECT COUNT(*) AS count FROM relay_users')
+      .get() as { count: number };
     const imported = this.getSetting('legacyJsonImported');
     if (existingUsers.count > 0 || imported === legacyJsonPath) {
       return;
     }
 
-    const parsed = JSON.parse(fs.readFileSync(legacyJsonPath, 'utf8')) as Partial<RelayStoreData>;
+    const parsed = JSON.parse(
+      fs.readFileSync(legacyJsonPath, 'utf8'),
+    ) as Partial<RelayStoreData>;
     const data: RelayStoreData = {
-      registrationEnabled: typeof parsed.registrationEnabled === 'boolean' ? parsed.registrationEnabled : true,
+      registrationEnabled:
+        typeof parsed.registrationEnabled === 'boolean'
+          ? parsed.registrationEnabled
+          : true,
       users: Array.isArray(parsed.users) ? parsed.users : [],
       devices: Array.isArray(parsed.devices) ? parsed.devices : [],
       shares: Array.isArray(parsed.shares) ? parsed.shares : [],
     };
     const importData = this.sqlite.transaction(() => {
-      this.setSetting('registrationEnabled', data.registrationEnabled ? 'true' : 'false');
+      this.setSetting(
+        'registrationEnabled',
+        data.registrationEnabled ? 'true' : 'false',
+      );
       for (const user of data.users) {
         this.insertUser(user);
       }
@@ -1198,7 +2001,10 @@ export class RelayStore {
 
   private ensureRegistrationSetting(registrationEnabled: boolean) {
     if (this.getSetting('registrationEnabled') === null) {
-      this.setSetting('registrationEnabled', registrationEnabled ? 'true' : 'false');
+      this.setSetting(
+        'registrationEnabled',
+        registrationEnabled ? 'true' : 'false',
+      );
     }
   }
 
@@ -1207,15 +2013,17 @@ export class RelayStore {
   }
 
   private getSetting(key: string) {
-    const row = this.sqlite.prepare('SELECT value FROM relay_settings WHERE key = ?').get(key) as
-      | { value: string }
-      | undefined;
+    const row = this.sqlite
+      .prepare('SELECT value FROM relay_settings WHERE key = ?')
+      .get(key) as { value: string } | undefined;
     return row?.value ?? null;
   }
 
   private setSetting(key: string, value: string) {
     this.sqlite
-      .prepare('INSERT INTO relay_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .prepare(
+        'INSERT INTO relay_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      )
       .run(key, value);
   }
 
@@ -1232,16 +2040,32 @@ export class RelayStore {
     const email = input.email.trim().toLowerCase();
     const username = normalizeUsername(input.username);
     if (!email.includes('@')) {
-      throw new RelayStoreError(400, 'bad_request', 'A valid email address is required.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'A valid email address is required.',
+      );
     }
     if (username.length < 3) {
-      throw new RelayStoreError(400, 'bad_request', 'Username must be at least 3 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Username must be at least 3 characters.',
+      );
     }
     if (input.password.length < 8) {
-      throw new RelayStoreError(400, 'bad_request', 'Password must be at least 8 characters.');
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Password must be at least 8 characters.',
+      );
     }
     if (this.getUserByIdentifier(email) || this.getUserByUsername(username)) {
-      throw new RelayStoreError(409, 'conflict', 'A user with that email or username already exists.');
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        'A user with that email or username already exists.',
+      );
     }
     const passwordSalt = crypto.randomBytes(16).toString('base64url');
     return {
@@ -1275,7 +2099,9 @@ export class RelayStore {
       expiresAt: Date.now() + SESSION_TTL_MS,
       nonce: crypto.randomBytes(16).toString('base64url'),
     } satisfies SessionPayload;
-    const payloadText = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const payloadText = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+      'base64url',
+    );
     const signature = crypto
       .createHmac('sha256', this.sessionSecret)
       .update(payloadText)
@@ -1296,7 +2122,9 @@ export class RelayStore {
       return null;
     }
     try {
-      const payload = JSON.parse(Buffer.from(payloadText, 'base64url').toString('utf8'));
+      const payload = JSON.parse(
+        Buffer.from(payloadText, 'base64url').toString('utf8'),
+      );
       if (
         typeof payload?.userId !== 'string' ||
         typeof payload?.expiresAt !== 'number' ||
@@ -1370,6 +2198,45 @@ export class RelayStore {
         device.tokenPreview,
         device.createdAt,
       );
+  }
+
+  private insertHostedOperation(operation: RelayHostedSandboxOperationDto) {
+    this.sqlite
+      .prepare(
+        `
+          INSERT INTO relay_hosted_operations (
+            id, sandbox_id, action, status, error_code, error_message,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        operation.id,
+        operation.sandboxId,
+        operation.action,
+        operation.status,
+        operation.errorCode,
+        operation.errorMessage,
+        operation.createdAt,
+        operation.updatedAt,
+      );
+  }
+
+  private getHostedOperation(id: string) {
+    const row = this.sqlite
+      .prepare('SELECT * FROM relay_hosted_operations WHERE id = ?')
+      .get(id) as HostedOperationRow | undefined;
+    return row ? this.rowToHostedOperation(row) : null;
+  }
+
+  private getHostedOperations(sandboxId: string) {
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_hosted_operations WHERE sandbox_id = ? ORDER BY created_at DESC',
+        )
+        .all(sandboxId) as HostedOperationRow[]
+    ).map((row) => this.rowToHostedOperation(row));
   }
 
   private insertShare(share: RelaySessionShareDto) {
@@ -1452,7 +2319,9 @@ export class RelayStore {
     const workspaceLabel = normalizeOptionalMetadata(input.workspaceLabel);
     if (threadTitle === undefined && workspaceLabel === undefined) {
       return this.rowToShare(
-        this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+        this.sqlite
+          .prepare('SELECT * FROM relay_shares WHERE id = ?')
+          .get(shareId) as ShareRow | undefined,
       );
     }
 
@@ -1468,7 +2337,9 @@ export class RelayStore {
       .run(threadTitle ?? null, workspaceLabel ?? null, shareId);
 
     return this.rowToShare(
-      this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+      this.sqlite
+        .prepare('SELECT * FROM relay_shares WHERE id = ?')
+        .get(shareId) as ShareRow | undefined,
     );
   }
 
@@ -1547,7 +2418,9 @@ export class RelayStore {
         shareId,
       );
     return this.rowToShare(
-      this.sqlite.prepare('SELECT * FROM relay_shares WHERE id = ?').get(shareId) as ShareRow | undefined,
+      this.sqlite
+        .prepare('SELECT * FROM relay_shares WHERE id = ?')
+        .get(shareId) as ShareRow | undefined,
     )!;
   }
 
@@ -1588,19 +2461,27 @@ export class RelayStore {
         grantId,
       );
     return this.rowToGrant(
-      this.sqlite.prepare('SELECT * FROM relay_access_grants WHERE id = ?').get(grantId) as GrantRow | undefined,
+      this.sqlite
+        .prepare('SELECT * FROM relay_access_grants WHERE id = ?')
+        .get(grantId) as GrantRow | undefined,
     )!;
   }
 
   private getUser(id: string) {
-    return this.rowToUser(this.sqlite.prepare('SELECT * FROM relay_users WHERE id = ?').get(id) as UserRow | undefined);
+    return this.rowToUser(
+      this.sqlite.prepare('SELECT * FROM relay_users WHERE id = ?').get(id) as
+        | UserRow
+        | undefined,
+    );
   }
 
   private getUserByIdentifier(identifier: string) {
     return this.rowToUser(
       this.sqlite
         .prepare('SELECT * FROM relay_users WHERE email = ? OR username = ?')
-        .get(identifier.toLowerCase(), identifier.toLowerCase()) as UserRow | undefined,
+        .get(identifier.toLowerCase(), identifier.toLowerCase()) as
+        | UserRow
+        | undefined,
     );
   }
 
@@ -1613,35 +2494,65 @@ export class RelayStore {
   }
 
   private getUsers() {
-    return (this.sqlite.prepare('SELECT * FROM relay_users ORDER BY created_at ASC').all() as UserRow[])
+    return (
+      this.sqlite
+        .prepare('SELECT * FROM relay_users ORDER BY created_at ASC')
+        .all() as UserRow[]
+    )
       .map((row) => this.rowToUser(row))
       .filter((user): user is StoredUser => Boolean(user));
   }
 
   private getDevice(id: string) {
-    return this.rowToDevice(this.sqlite.prepare('SELECT * FROM relay_devices WHERE id = ?').get(id) as DeviceRow | undefined);
+    return this.rowToDevice(
+      this.sqlite
+        .prepare('SELECT * FROM relay_devices WHERE id = ?')
+        .get(id) as DeviceRow | undefined,
+    );
   }
 
   private getDevices() {
-    return (this.sqlite.prepare('SELECT * FROM relay_devices ORDER BY created_at ASC').all() as DeviceRow[])
+    return (
+      this.sqlite
+        .prepare('SELECT * FROM relay_devices ORDER BY created_at ASC')
+        .all() as DeviceRow[]
+    )
       .map((row) => this.rowToDevice(row))
       .filter((device): device is StoredDevice => Boolean(device));
   }
 
   private getDevicesByOwner(ownerUserId: string) {
-    return (this.sqlite.prepare('SELECT * FROM relay_devices WHERE owner_user_id = ? ORDER BY created_at ASC').all(ownerUserId) as DeviceRow[])
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_devices WHERE owner_user_id = ? ORDER BY created_at ASC',
+        )
+        .all(ownerUserId) as DeviceRow[]
+    )
       .map((row) => this.rowToDevice(row))
       .filter((device): device is StoredDevice => Boolean(device));
   }
 
   private getSharesByOwner(ownerUserId: string) {
-    return (this.sqlite.prepare("SELECT * FROM relay_shares WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(ownerUserId, new Date().toISOString()) as ShareRow[])
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_shares WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC',
+        )
+        .all(ownerUserId, new Date().toISOString()) as ShareRow[]
+    )
       .map((row) => this.rowToShare(row))
       .filter((share): share is RelaySessionShareDto => Boolean(share));
   }
 
   private getSharesByTarget(targetUserId: string) {
-    return (this.sqlite.prepare("SELECT * FROM relay_shares WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(targetUserId, new Date().toISOString()) as ShareRow[])
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_shares WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC',
+        )
+        .all(targetUserId, new Date().toISOString()) as ShareRow[]
+    )
       .map((row) => this.rowToShare(row))
       .filter((share): share is RelaySessionShareDto => Boolean(share));
   }
@@ -1649,7 +2560,7 @@ export class RelayStore {
   private getShares(options: { includeRevoked?: boolean } = {}) {
     const sql = options.includeRevoked
       ? 'SELECT * FROM relay_shares ORDER BY created_at DESC'
-      : "SELECT * FROM relay_shares WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC";
+      : 'SELECT * FROM relay_shares WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC';
     const rows = options.includeRevoked
       ? (this.sqlite.prepare(sql).all() as ShareRow[])
       : (this.sqlite.prepare(sql).all(new Date().toISOString()) as ShareRow[]);
@@ -1659,13 +2570,25 @@ export class RelayStore {
   }
 
   private getGrantsByOwner(ownerUserId: string) {
-    return (this.sqlite.prepare("SELECT * FROM relay_access_grants WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(ownerUserId, new Date().toISOString()) as GrantRow[])
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_access_grants WHERE owner_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC',
+        )
+        .all(ownerUserId, new Date().toISOString()) as GrantRow[]
+    )
       .map((row) => this.rowToGrant(row))
       .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
   }
 
   private getGrantsByTarget(targetUserId: string) {
-    return (this.sqlite.prepare("SELECT * FROM relay_access_grants WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC").all(targetUserId, new Date().toISOString()) as GrantRow[])
+    return (
+      this.sqlite
+        .prepare(
+          'SELECT * FROM relay_access_grants WHERE target_user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at ASC',
+        )
+        .all(targetUserId, new Date().toISOString()) as GrantRow[]
+    )
       .map((row) => this.rowToGrant(row))
       .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
   }
@@ -1704,8 +2627,12 @@ export class RelayStore {
     const grants = rows
       .map((row) => this.rowToGrant(row))
       .filter((grant): grant is RelayAccessGrantDto => Boolean(grant));
-    const matchingGrants = grants.filter((grant) => this.grantMatchesScope(grant, scope));
-    return matchingGrants.length > 0 ? mergeMatchingGrants(matchingGrants, scope) : null;
+    const matchingGrants = grants.filter((grant) =>
+      this.grantMatchesScope(grant, scope),
+    );
+    return matchingGrants.length > 0
+      ? mergeMatchingGrants(matchingGrants, scope)
+      : null;
   }
 
   private grantMatchesScope(
@@ -1722,7 +2649,11 @@ export class RelayStore {
       return true;
     }
     if (grant.scope === 'workspace') {
-      if (!scope.workspaceId || grant.workspaceId !== scope.workspaceId || grant.workspaceAccess === 'none') {
+      if (
+        !scope.workspaceId ||
+        grant.workspaceId !== scope.workspaceId ||
+        grant.workspaceAccess === 'none'
+      ) {
         return false;
       }
       return true;
@@ -1787,7 +2718,9 @@ export class RelayStore {
   }
 
   private conversationCountsByUser(days: number) {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const since = new Date(
+      Date.now() - days * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const rows = this.sqlite
       .prepare(
         `
@@ -1802,15 +2735,17 @@ export class RelayStore {
   }
 
   private pendingRegistrations() {
-    return (this.sqlite
-      .prepare(
-        `
+    return (
+      this.sqlite
+        .prepare(
+          `
           SELECT * FROM relay_pending_registrations
           WHERE status = 'pending'
           ORDER BY created_at ASC
         `,
-      )
-      .all() as PendingRegistrationRow[])
+        )
+        .all() as PendingRegistrationRow[]
+    )
       .map((row) => this.rowToPendingRegistration(row))
       .filter((record): record is PendingRegistrationRecord => Boolean(record))
       .map((record) => this.publicPendingRegistration(record));
@@ -1819,19 +2754,34 @@ export class RelayStore {
   private requirePendingRegistration(id: string) {
     const record = this.rowToPendingRegistration(
       this.sqlite
-        .prepare("SELECT * FROM relay_pending_registrations WHERE id = ? AND status = 'pending'")
+        .prepare(
+          "SELECT * FROM relay_pending_registrations WHERE id = ? AND status = 'pending'",
+        )
         .get(id) as PendingRegistrationRow | undefined,
     );
     if (!record) {
-      throw new RelayStoreError(404, 'not_found', 'Pending registration was not found.');
+      throw new RelayStoreError(
+        404,
+        'not_found',
+        'Pending registration was not found.',
+      );
     }
-    if (this.getUserByIdentifier(record.email) || this.getUserByUsername(record.username)) {
-      throw new RelayStoreError(409, 'conflict', 'A user with that email or username already exists.');
+    if (
+      this.getUserByIdentifier(record.email) ||
+      this.getUserByUsername(record.username)
+    ) {
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        'A user with that email or username already exists.',
+      );
     }
     return record;
   }
 
-  private publicPendingRegistration(record: PendingRegistrationRecord): RelayPendingRegistrationDto {
+  private publicPendingRegistration(
+    record: PendingRegistrationRecord,
+  ): RelayPendingRegistrationDto {
     return {
       id: record.id,
       email: record.email,
@@ -1891,6 +2841,50 @@ export class RelayStore {
     };
   }
 
+  private rowToHostedSandbox(row: HostedSandboxRow): RelayHostedSandboxDto {
+    const user = this.getUser(row.assigned_user_id);
+    const device = this.getDevice(row.device_id);
+    return {
+      id: row.id,
+      deviceId: row.device_id,
+      deviceName: device?.name ?? 'Hosted supervisor VM',
+      assignedUserId: row.assigned_user_id,
+      assignedUsername: user?.username ?? 'unknown',
+      createdByAdminUserId: row.created_by_admin_user_id,
+      provider: 'incus',
+      providerInstanceId: row.provider_instance_id,
+      imageVersion: row.image_version,
+      resources: {
+        cpuCount: row.cpu_count,
+        memoryMiB: row.memory_mib,
+        diskGiB: row.disk_gib,
+      },
+      status: row.status,
+      lastErrorCode: row.last_error_code,
+      lastErrorMessage: row.last_error_message,
+      activeTurnCount: row.active_turn_count,
+      lastUserActivityAt: row.last_user_activity_at,
+      idleDeadlineAt: row.idle_deadline_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private rowToHostedOperation(
+    row: HostedOperationRow,
+  ): RelayHostedSandboxOperationDto {
+    return {
+      id: row.id,
+      sandboxId: row.sandbox_id,
+      action: row.action,
+      status: row.status,
+      errorCode: row.error_code,
+      errorMessage: row.error_message,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   private rowToShare(row?: ShareRow): RelaySessionShareDto | null {
     if (!row) return null;
     return {
@@ -1947,7 +2941,9 @@ export class RelayStore {
     };
   }
 
-  private rowToPendingRegistration(row?: PendingRegistrationRow): PendingRegistrationRecord | null {
+  private rowToPendingRegistration(
+    row?: PendingRegistrationRow,
+  ): PendingRegistrationRecord | null {
     if (!row) return null;
     return {
       id: row.id,
@@ -1983,6 +2979,64 @@ interface DeviceRow {
   token_hash: string;
   token_preview: string;
   created_at: string;
+}
+
+function parseHostedCodexConfig(
+  value: string | null,
+): RelayHostedCodexConfigDto {
+  const fallback: RelayHostedCodexConfigDto = {
+    modelProvider: 'OpenAI',
+    model: 'gpt-5.4',
+    reviewModel: 'gpt-5.4',
+    reasoningEffort: 'medium',
+    baseUrl: 'https://api.openai.com/v1',
+    wireApi: 'responses',
+    requiresOpenaiAuth: true,
+    disableResponseStorage: true,
+    networkAccess: 'enabled',
+    goals: true,
+  };
+  if (!value) return fallback;
+  try {
+    return { ...fallback, ...(JSON.parse(value) as RelayHostedCodexConfigDto) };
+  } catch {
+    return fallback;
+  }
+}
+
+interface HostedSandboxRow {
+  id: string;
+  device_id: string;
+  assigned_user_id: string;
+  created_by_admin_user_id: string;
+  provider: 'incus';
+  provider_instance_id: string | null;
+  image_version: string;
+  cpu_count: number;
+  memory_mib: number;
+  disk_gib: number;
+  status: RelayHostedSandboxStatusDto;
+  credential_ref: string;
+  codex_config_json: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  active_turn_count: number;
+  last_user_activity_at: string | null;
+  idle_deadline_at: string | null;
+  lifecycle_generation: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface HostedOperationRow {
+  id: string;
+  sandbox_id: string;
+  action: RelayHostedSandboxOperationActionDto;
+  status: RelayHostedSandboxOperationStatusDto;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ShareRow {
@@ -2069,7 +3123,13 @@ interface PendingRegistrationRow {
 export class RelayStoreError extends Error {
   constructor(
     readonly statusCode: number,
-    readonly code: 'bad_request' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict',
+    readonly code:
+      | 'bad_request'
+      | 'unauthorized'
+      | 'forbidden'
+      | 'not_found'
+      | 'conflict'
+      | 'service_unavailable',
     message: string,
   ) {
     super(message);
@@ -2077,28 +3137,39 @@ export class RelayStoreError extends Error {
 }
 
 function normalizeUsername(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '');
 }
 
-function normalizeThreadAccess(value: string | null | undefined): RelayThreadAccessDto {
+function normalizeThreadAccess(
+  value: string | null | undefined,
+): RelayThreadAccessDto {
   return value === 'read' ? 'read' : 'control';
 }
 
-function normalizeWorkspaceAccess(value: string | null | undefined): RelayWorkspaceAccessDto {
+function normalizeWorkspaceAccess(
+  value: string | null | undefined,
+): RelayWorkspaceAccessDto {
   if (value === 'read' || value === 'write') {
     return value;
   }
   return 'none';
 }
 
-function normalizeShareScope(value: string | null | undefined): RelayShareScopeDto {
+function normalizeShareScope(
+  value: string | null | undefined,
+): RelayShareScopeDto {
   if (value === 'workspace' || value === 'device') {
     return value;
   }
   return 'thread';
 }
 
-function normalizeWorkspaceScope(value: string | null | undefined): RelayWorkspaceScopeDto {
+function normalizeWorkspaceScope(
+  value: string | null | undefined,
+): RelayWorkspaceScopeDto {
   return value === 'selected' ? 'selected' : 'all';
 }
 
@@ -2106,7 +3177,9 @@ function normalizeWorkspaceIds(values: string[] | null | undefined) {
   if (!Array.isArray(values)) {
     return [];
   }
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  ).sort();
 }
 
 function mergeMatchingGrants(
@@ -2118,7 +3191,8 @@ function mergeMatchingGrants(
 ) {
   const sorted = [...grants].sort(compareGrantCapability);
   const grantScope = mergedGrantScope(sorted);
-  const representative = sorted.find((grant) => grant.scope === grantScope) ?? sorted[0]!;
+  const representative =
+    sorted.find((grant) => grant.scope === grantScope) ?? sorted[0]!;
   const threadAccess = sorted.reduce(
     (best, grant) => maxThreadAccess(best, grant.threadAccess),
     'read' as RelayThreadAccessDto,
@@ -2130,8 +3204,14 @@ function mergeMatchingGrants(
   return {
     ...representative,
     scope: grantScope,
-    threadId: grantScope === 'thread' ? scope.threadId ?? representative.threadId : null,
-    workspaceId: grantScope === 'workspace' ? scope.workspaceId ?? representative.workspaceId : null,
+    threadId:
+      grantScope === 'thread'
+        ? (scope.threadId ?? representative.threadId)
+        : null,
+    workspaceId:
+      grantScope === 'workspace'
+        ? (scope.workspaceId ?? representative.workspaceId)
+        : null,
     threadAccess,
     workspaceAccess,
     canCreateThreads: sorted.some((grant) => grant.canCreateThreads),
@@ -2148,7 +3228,10 @@ function mergedGrantScope(grants: RelayAccessGrantDto[]): RelayShareScopeDto {
   return 'thread';
 }
 
-function maxThreadAccess(left: RelayThreadAccessDto, right: RelayThreadAccessDto): RelayThreadAccessDto {
+function maxThreadAccess(
+  left: RelayThreadAccessDto,
+  right: RelayThreadAccessDto,
+): RelayThreadAccessDto {
   return threadAccessScore(right) > threadAccessScore(left) ? right : left;
 }
 
@@ -2156,13 +3239,20 @@ function maxWorkspaceAccess(
   left: RelayWorkspaceAccessDto,
   right: RelayWorkspaceAccessDto,
 ): RelayWorkspaceAccessDto {
-  return workspaceAccessScore(right) > workspaceAccessScore(left) ? right : left;
+  return workspaceAccessScore(right) > workspaceAccessScore(left)
+    ? right
+    : left;
 }
 
-function compareGrantCapability(left: RelayAccessGrantDto, right: RelayAccessGrantDto) {
+function compareGrantCapability(
+  left: RelayAccessGrantDto,
+  right: RelayAccessGrantDto,
+) {
   return (
-    threadAccessScore(right.threadAccess) - threadAccessScore(left.threadAccess) ||
-    workspaceAccessScore(right.workspaceAccess) - workspaceAccessScore(left.workspaceAccess) ||
+    threadAccessScore(right.threadAccess) -
+      threadAccessScore(left.threadAccess) ||
+    workspaceAccessScore(right.workspaceAccess) -
+      workspaceAccessScore(left.workspaceAccess) ||
     Number(right.canCreateThreads) - Number(left.canCreateThreads) ||
     grantScopeScore(right.scope) - grantScopeScore(left.scope) ||
     right.createdAt.localeCompare(left.createdAt)
@@ -2187,7 +3277,9 @@ function grantScopeScore(value: RelayShareScopeDto) {
   return 1;
 }
 
-function normalizeAccessEventKind(value: string | null | undefined): RelayAccessEventKindDto {
+function normalizeAccessEventKind(
+  value: string | null | undefined,
+): RelayAccessEventKindDto {
   switch (value) {
     case 'open_device':
     case 'open_thread':
@@ -2207,7 +3299,11 @@ function parseWorkspaceIds(value: string | null | undefined) {
   }
   try {
     const parsed = JSON.parse(value) as unknown;
-    return normalizeWorkspaceIds(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+    return normalizeWorkspaceIds(
+      Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === 'string')
+        : [],
+    );
   } catch {
     return [];
   }

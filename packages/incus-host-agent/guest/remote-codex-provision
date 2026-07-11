@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${EUID}" -ne 0 ]; then
+  echo "Provisioning must run as root." >&2
+  exit 1
+fi
+
+payload_file="$(mktemp)"
+trap 'rm -f "${payload_file}"; unset api_key relay_agent_token local_admin_password session_secret' EXIT
+chmod 0600 "${payload_file}"
+cat >"${payload_file}"
+
+required_string() {
+  local field="$1"
+  local value
+  value="$(jq -er --arg field "${field}" '.[$field] | select(type == "string" and length > 0)' "${payload_file}")" || {
+    echo "Missing required provision field: ${field}" >&2
+    exit 2
+  }
+  printf '%s' "${value}"
+}
+
+relay_server_url="$(required_string relayServerUrl)"
+relay_agent_token="$(required_string relayAgentToken)"
+api_key="$(required_string openaiApiKey)"
+local_admin_username="$(jq -er '.localAdminUsername // "admin" | select(type == "string" and length > 0)' "${payload_file}")"
+model_provider="$(jq -er '.codexConfig.modelProvider | select(type == "string" and test("^[A-Za-z][A-Za-z0-9_-]{0,31}$"))' "${payload_file}")"
+model_provider_toml="$(jq -ec '.codexConfig.modelProvider' "${payload_file}")"
+model_toml="$(jq -ec '.codexConfig.model' "${payload_file}")"
+review_model_toml="$(jq -ec '.codexConfig.reviewModel' "${payload_file}")"
+reasoning_effort_toml="$(jq -ec '.codexConfig.reasoningEffort' "${payload_file}")"
+base_url="$(jq -er '.codexConfig.baseUrl | select(type == "string" and startswith("https://"))' "${payload_file}")"
+base_url_toml="$(jq -ec '.codexConfig.baseUrl' "${payload_file}")"
+wire_api="$(jq -er '.codexConfig.wireApi | select(. == "responses")' "${payload_file}")"
+wire_api_toml="$(jq -ec '.codexConfig.wireApi' "${payload_file}")"
+requires_openai_auth="$(jq -er '.codexConfig.requiresOpenaiAuth | select(type == "boolean")' "${payload_file}")"
+disable_response_storage="$(jq -er '.codexConfig.disableResponseStorage | select(type == "boolean")' "${payload_file}")"
+network_access_toml="$(jq -ec '.codexConfig.networkAccess | select(. == "enabled" or . == "disabled")' "${payload_file}")"
+goals="$(jq -er '.codexConfig.goals | select(type == "boolean")' "${payload_file}")"
+local_admin_password="$(openssl rand -hex 24)"
+session_secret="$(openssl rand -hex 32)"
+
+case "${relay_server_url}" in
+  wss://*|ws://*) ;;
+  *) echo "relayServerUrl must use ws:// or wss://." >&2; exit 2 ;;
+esac
+if [[ "${relay_server_url}" == *$'\n'* || "${relay_server_url}" == *$'\r'* ]]; then
+  echo "relayServerUrl is invalid." >&2
+  exit 2
+fi
+if [[ ! "${relay_agent_token}" =~ ^rcd_[A-Za-z0-9_-]+$ ]]; then
+  echo "relayAgentToken is invalid." >&2
+  exit 2
+fi
+if [[ ! "${local_admin_username}" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+  echo "localAdminUsername is invalid." >&2
+  exit 2
+fi
+
+install -d -o remote-codex -g remote-codex -m 0700 \
+  /home/remote-codex/.codex \
+  /home/remote-codex/.remote-codex \
+  /home/remote-codex/workspaces
+
+cat >/home/remote-codex/.codex/config.toml <<EOF
+cli_auth_credentials_store = "file"
+model_provider = ${model_provider_toml}
+model = ${model_toml}
+review_model = ${review_model_toml}
+model_reasoning_effort = ${reasoning_effort_toml}
+disable_response_storage = ${disable_response_storage}
+network_access = ${network_access_toml}
+windows_wsl_setup_acknowledged = true
+
+[model_providers.${model_provider}]
+name = ${model_provider_toml}
+base_url = ${base_url_toml}
+wire_api = ${wire_api_toml}
+requires_openai_auth = ${requires_openai_auth}
+
+[features]
+goals = ${goals}
+EOF
+chown remote-codex:remote-codex /home/remote-codex/.codex/config.toml
+chmod 0600 /home/remote-codex/.codex/config.toml
+
+if ! printf '%s' "${api_key}" | runuser -u remote-codex -- \
+  env HOME=/home/remote-codex CODEX_HOME=/home/remote-codex/.codex \
+  codex login --with-api-key >/dev/null 2>&1; then
+  echo "Codex API-key login failed." >&2
+  exit 3
+fi
+unset api_key
+
+test -f /home/remote-codex/.codex/auth.json
+chown remote-codex:remote-codex /home/remote-codex/.codex/auth.json
+chmod 0600 /home/remote-codex/.codex/auth.json
+
+install -d -o root -g root -m 0755 /etc/remote-codex
+env_file="$(mktemp)"
+chmod 0600 "${env_file}"
+cat >"${env_file}" <<EOF
+REMOTE_CODEX_MODE=relay
+REMOTE_CODEX_RELAY_SERVER_URL=${relay_server_url}
+REMOTE_CODEX_RELAY_AGENT_TOKEN=${relay_agent_token}
+REMOTE_CODEX_ADMIN_USERNAME=${local_admin_username}
+REMOTE_CODEX_ADMIN_PASSWORD=${local_admin_password}
+REMOTE_CODEX_SESSION_SECRET=${session_secret}
+REMOTE_CODEX_RELAY_SUPERVISOR_HOST=127.0.0.1
+REMOTE_CODEX_RELAY_SUPERVISOR_PORT=8787
+WORKSPACE_ROOT=/home/remote-codex/workspaces
+DATABASE_URL=/home/remote-codex/.remote-codex/supervisor.sqlite
+CODEX_HOME=/home/remote-codex/.codex
+LOG_LEVEL=info
+EOF
+install -o root -g root -m 0600 "${env_file}" /etc/remote-codex/supervisor.env
+rm -f "${env_file}"
+unset relay_agent_token local_admin_password session_secret
+
+systemctl enable remote-codex-relay-supervisor.service >/dev/null
+systemctl restart remote-codex-relay-supervisor.service
+
+runuser -u remote-codex -- env HOME=/home/remote-codex CODEX_HOME=/home/remote-codex/.codex \
+  codex login status >/dev/null 2>&1
+echo '{"status":"provisioned"}'

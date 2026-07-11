@@ -10,7 +10,14 @@ import {
   KeyRound,
   LogOut,
   RefreshCw,
+  RotateCcw,
   Search,
+  Server,
+  Play,
+  Square,
+  Plus,
+  Camera,
+  ShieldCheck,
   Settings,
   Share2,
   Trash2,
@@ -20,6 +27,9 @@ import {
 import type {
   RelayAdminDeviceDto,
   RelayAdminSummaryDto,
+  RelayHostedSandboxCapabilityDto,
+  RelayHostedSandboxDto,
+  RelayHostedSandboxReconciliationDto,
   RelayRegistrationSettingsDto,
   RelaySessionDto,
   RelaySessionShareDto,
@@ -29,19 +39,36 @@ import { LoginPage } from './LoginPage';
 import {
   ApiError,
   approveRelayRegistration,
+  createHostedSandbox,
+  deleteHostedSandbox,
+  deleteHostedOrphanCredential,
+  deleteHostedOrphanInstance,
   deleteRelayAdminUser,
   enableRelayMode,
   fetchRelayAdmin,
   fetchRelayAdminSession,
+  fetchHostedSandboxCapability,
+  fetchHostedSandboxes,
+  fetchHostedSandboxReconciliation,
   rejectRelayRegistration,
   relayAdminLogout,
   relayAdminLogin,
   resetRelayAdminUserPassword,
+  rotateHostedSandboxCredential,
+  runHostedSandboxAction,
+  runHostedSandboxReconciliation,
   setRelayUserEnabled,
+  snapshotHostedSandbox,
   updateRelayRegistrationSettings,
 } from '../lib/api';
 
-type AdminTab = 'overview' | 'users' | 'devices' | 'shares' | 'settings';
+type AdminTab =
+  | 'overview'
+  | 'users'
+  | 'devices'
+  | 'hosted'
+  | 'shares'
+  | 'settings';
 type SortDirection = 'asc' | 'desc';
 type UserSortKey =
   | 'username'
@@ -75,9 +102,23 @@ export function RelayAdminPage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [days, setDays] = useState(7);
-  const [settingsDraft, setSettingsDraft] = useState<RelayRegistrationSettingsDto | null>(null);
+  const [settingsDraft, setSettingsDraft] =
+    useState<RelayRegistrationSettingsDto | null>(null);
+  const [hostedCapability, setHostedCapability] =
+    useState<RelayHostedSandboxCapabilityDto | null>(null);
+  const [hostedSandboxes, setHostedSandboxes] = useState<
+    RelayHostedSandboxDto[]
+  >([]);
+  const [hostedReconciliation, setHostedReconciliation] =
+    useState<RelayHostedSandboxReconciliationDto | null>(null);
+  const [hostedLoading, setHostedLoading] = useState(false);
+  const [hostedError, setHostedError] = useState<string | null>(null);
+  const [hostedBusyKey, setHostedBusyKey] = useState<string | null>(null);
 
-  async function load(nextDays = days, options: { showLoading?: boolean } = {}) {
+  async function load(
+    nextDays = days,
+    options: { showLoading?: boolean } = {},
+  ) {
     if (options.showLoading !== false) {
       setLoading(true);
     }
@@ -109,6 +150,59 @@ export function RelayAdminPage() {
     void load();
   }, []);
 
+  async function loadHosted() {
+    setHostedLoading(true);
+    setHostedError(null);
+    const [capability, sandboxes, reconciliation] = await Promise.allSettled([
+      fetchHostedSandboxCapability(),
+      fetchHostedSandboxes(),
+      fetchHostedSandboxReconciliation(),
+    ]);
+    if (capability.status === 'fulfilled') {
+      setHostedCapability(capability.value);
+    } else {
+      setHostedCapability(null);
+      setHostedError(errorMessage(capability.reason));
+    }
+    if (sandboxes.status === 'fulfilled') {
+      setHostedSandboxes(sandboxes.value.sandboxes);
+    } else {
+      setHostedError((current) => current ?? errorMessage(sandboxes.reason));
+    }
+    if (reconciliation.status === 'fulfilled') {
+      setHostedReconciliation(reconciliation.value);
+    } else {
+      setHostedReconciliation(null);
+      setHostedError(
+        (current) => current ?? errorMessage(reconciliation.reason),
+      );
+    }
+    setHostedLoading(false);
+  }
+
+  useEffect(() => {
+    if (tab === 'hosted') {
+      void loadHosted();
+    }
+  }, [tab]);
+
+  async function hostedAction(
+    busyKeyValue: string,
+    action: () => Promise<unknown>,
+  ) {
+    setHostedBusyKey(busyKeyValue);
+    setHostedError(null);
+    try {
+      await action();
+      await loadHosted();
+      window.setTimeout(() => void loadHosted(), 750);
+    } catch (caught) {
+      setHostedError(errorMessage(caught));
+    } finally {
+      setHostedBusyKey(null);
+    }
+  }
+
   const totals = useMemo(() => {
     const users = summary?.users ?? [];
     const devices = summary?.devices ?? [];
@@ -117,7 +211,10 @@ export function RelayAdminPage() {
       enabledUsers: users.filter((user) => user.enabled).length,
       devices: devices.length,
       onlineDevices: devices.filter((device) => device.connected).length,
-      conversations: users.reduce((sum, user) => sum + user.conversationCount, 0),
+      conversations: users.reduce(
+        (sum, user) => sum + user.conversationCount,
+        0,
+      ),
       shares: summary?.shares.filter((share) => !share.revokedAt).length ?? 0,
     };
   }, [summary]);
@@ -187,7 +284,10 @@ export function RelayAdminPage() {
     }
   }
 
-  async function reviewRegistration(requestId: string, action: 'approve' | 'reject') {
+  async function reviewRegistration(
+    requestId: string,
+    action: 'approve' | 'reject',
+  ) {
     setBusyKey(`${action}:${requestId}`);
     setError(null);
     try {
@@ -204,7 +304,10 @@ export function RelayAdminPage() {
     }
   }
 
-  async function handleAdminLogin(input: { username: string; password: string }) {
+  async function handleAdminLogin(input: {
+    username: string;
+    password: string;
+  }) {
     await relayAdminLogin(input);
     await load(days);
   }
@@ -221,10 +324,12 @@ export function RelayAdminPage() {
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
-      <RelayAdminUserMenu onLogout={() => {
-        setSummary(null);
-        setLoginRequired(true);
-      }} />
+      <RelayAdminUserMenu
+        onLogout={() => {
+          setSummary(null);
+          setLoginRequired(true);
+        }}
+      />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <header className="flex flex-col gap-4 border-b border-[var(--theme-border)] pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -235,7 +340,8 @@ export function RelayAdminPage() {
               Operations panel
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-[var(--theme-fg-muted)]">
-              Accounts, devices, usage, registration policy, and shared thread access.
+              Accounts, devices, usage, registration policy, and shared thread
+              access.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -255,7 +361,11 @@ export function RelayAdminPage() {
             <Link className="relay-button-secondary" to="/">
               Relay home
             </Link>
-            <button className="relay-button-secondary inline-flex items-center gap-2" onClick={() => void load(days)} type="button">
+            <button
+              className="relay-button-secondary inline-flex items-center gap-2"
+              onClick={() => void load(days)}
+              type="button"
+            >
               <RefreshCw className="h-4 w-4" />
               Refresh
             </button>
@@ -275,14 +385,43 @@ export function RelayAdminPage() {
         ) : summary ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard icon={<Users className="h-5 w-5" />} label="Users" value={totals.users} detail={`${totals.enabledUsers} enabled`} />
-              <MetricCard icon={<Database className="h-5 w-5" />} label="Devices" value={totals.devices} detail={`${totals.onlineDevices} online`} />
-              <MetricCard icon={<Clock3 className="h-5 w-5" />} label={`Conversations, ${summary.conversationWindowDays}d`} value={totals.conversations} detail="Relay prompt/start events" />
-              <MetricCard icon={<Share2 className="h-5 w-5" />} label="Active shares" value={totals.shares} detail={`${summary.pendingRegistrations.length} pending registrations`} />
+              <MetricCard
+                icon={<Users className="h-5 w-5" />}
+                label="Users"
+                value={totals.users}
+                detail={`${totals.enabledUsers} enabled`}
+              />
+              <MetricCard
+                icon={<Database className="h-5 w-5" />}
+                label="Devices"
+                value={totals.devices}
+                detail={`${totals.onlineDevices} online`}
+              />
+              <MetricCard
+                icon={<Clock3 className="h-5 w-5" />}
+                label={`Conversations, ${summary.conversationWindowDays}d`}
+                value={totals.conversations}
+                detail="Relay prompt/start events"
+              />
+              <MetricCard
+                icon={<Share2 className="h-5 w-5" />}
+                label="Active shares"
+                value={totals.shares}
+                detail={`${summary.pendingRegistrations.length} pending registrations`}
+              />
             </section>
 
             <nav className="flex gap-2 overflow-x-auto border-b border-[var(--theme-border)] pb-2">
-              {(['overview', 'users', 'devices', 'shares', 'settings'] as AdminTab[]).map((item) => (
+              {(
+                [
+                  'overview',
+                  'users',
+                  'devices',
+                  'hosted',
+                  'shares',
+                  'settings',
+                ] as AdminTab[]
+              ).map((item) => (
                 <button
                   className={`rounded-md px-3 py-2 text-sm font-medium ${
                     tab === item
@@ -308,7 +447,22 @@ export function RelayAdminPage() {
                 users={summary.users}
               />
             ) : null}
-            {tab === 'devices' ? <DevicesPanel devices={summary.devices} users={summary.users} /> : null}
+            {tab === 'devices' ? (
+              <DevicesPanel devices={summary.devices} users={summary.users} />
+            ) : null}
+            {tab === 'hosted' ? (
+              <HostedSandboxesPanel
+                busyKey={hostedBusyKey}
+                capability={hostedCapability}
+                error={hostedError}
+                loading={hostedLoading}
+                onAction={hostedAction}
+                onRefresh={loadHosted}
+                sandboxes={hostedSandboxes}
+                reconciliation={hostedReconciliation}
+                users={summary.users}
+              />
+            ) : null}
             {tab === 'shares' ? <SharesTable shares={summary.shares} /> : null}
             {tab === 'settings' && settingsDraft ? (
               <SettingsPanel
@@ -326,6 +480,719 @@ export function RelayAdminPage() {
       </div>
     </main>
   );
+}
+
+function HostedSandboxesPanel({
+  busyKey,
+  capability,
+  error,
+  loading,
+  onAction,
+  onRefresh,
+  reconciliation,
+  sandboxes,
+  users,
+}: {
+  busyKey: string | null;
+  capability: RelayHostedSandboxCapabilityDto | null;
+  error: string | null;
+  loading: boolean;
+  onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  onRefresh: () => Promise<void>;
+  reconciliation: RelayHostedSandboxReconciliationDto | null;
+  sandboxes: RelayHostedSandboxDto[];
+  users: RelayAdminSummaryDto['users'];
+}) {
+  const eligibleUsers = users.filter(
+    (user) => user.role === 'user' && user.enabled,
+  );
+  const [assignedUserId, setAssignedUserId] = useState(
+    eligibleUsers[0]?.id ?? '',
+  );
+  const [deviceName, setDeviceName] = useState('Hosted Codex');
+  const [resourcePreset, setResourcePreset] = useState<'standard' | 'large'>(
+    'standard',
+  );
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [modelProvider, setModelProvider] = useState('OpenAI');
+  const [model, setModel] = useState('gpt-5.6-sol');
+  const [reviewModel, setReviewModel] = useState('gpt-5.6-sol');
+  const [baseUrl, setBaseUrl] = useState('https://sub.lnz-study.com');
+  const [reasoningEffort, setReasoningEffort] = useState<
+    'low' | 'medium' | 'high' | 'xhigh'
+  >('low');
+  const canCreate = capability?.available === true && Boolean(assignedUserId);
+
+  async function submitCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canCreate) return;
+    const resources =
+      resourcePreset === 'large'
+        ? { cpuCount: 2, memoryMiB: 2048, diskGiB: 12 }
+        : { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 };
+    await onAction('hosted:create', () =>
+      createHostedSandbox({
+        assignedUserId,
+        deviceName,
+        imageVersion: 'ubuntu-24.04-v3',
+        resources,
+        openaiApiKey,
+        codexConfig: {
+          modelProvider,
+          model,
+          reviewModel,
+          reasoningEffort,
+          baseUrl,
+          wireApi: 'responses',
+          requiresOpenaiAuth: true,
+          disableResponseStorage: true,
+          networkAccess: 'enabled',
+          goals: true,
+        },
+      }),
+    );
+    setOpenaiApiKey('');
+  }
+
+  const capabilityTone = capability?.available
+    ? 'success'
+    : capability?.configured
+      ? 'warning'
+      : 'neutral';
+
+  return (
+    <section className="space-y-4" aria-label="Hosted supervisor VMs">
+      <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)]">
+        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="rounded-lg bg-[var(--theme-surface)] p-2 text-[var(--theme-fg-soft)]">
+              <Server className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+                  Hosted supervisor VMs
+                </h2>
+                <HostedStatusPill tone={capabilityTone}>
+                  {capability?.available
+                    ? 'Available'
+                    : capability?.configured
+                      ? 'Unavailable'
+                      : 'Disabled'}
+                </HostedStatusPill>
+              </div>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--theme-fg-muted)]">
+                {capability?.reason ??
+                  'Incus VMs run one isolated relay supervisor per assigned user.'}
+              </p>
+              {capability?.capacity && capability.limits ? (
+                <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+                  {capability.capacity.runningInstances}/
+                  {capability.limits.maxRunningInstances} running ·{' '}
+                  {capability.capacity.totalInstances}/
+                  {capability.limits.maxInstances} total
+                </p>
+              ) : null}
+              {capability?.metrics ? (
+                <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
+                  {capability.metrics.cpuCount} CPU · load{' '}
+                  {capability.metrics.load1.toFixed(2)} ·{' '}
+                  {Math.round(capability.metrics.memoryAvailableMiB / 1024)} GiB
+                  RAM free · {capability.metrics.diskAvailableGiB.toFixed(1)}{' '}
+                  GiB disk free
+                </p>
+              ) : null}
+              {capability?.alerts?.map((alert) => (
+                <p
+                  className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                  key={alert.code}
+                  role="alert"
+                >
+                  {alert.message}
+                </p>
+              ))}
+            </div>
+          </div>
+          <button
+            className="relay-button-secondary inline-flex min-h-11 items-center justify-center gap-2"
+            disabled={loading}
+            onClick={() => void onRefresh()}
+            type="button"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Check host
+          </button>
+        </div>
+
+        {error ? (
+          <div
+            className="border-t border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]"
+            role="alert"
+          >
+            {error}
+          </div>
+        ) : null}
+
+        <HostedReconciliationPanel
+          busyKey={busyKey}
+          onAction={onAction}
+          reconciliation={reconciliation}
+        />
+
+        <details
+          className="border-t border-[var(--theme-border)]"
+          open={sandboxes.length === 0}
+        >
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]">
+            <Plus className="h-4 w-4" />
+            Create hosted VM
+          </summary>
+          <form
+            className="grid gap-4 border-t border-[var(--theme-border)] p-4 lg:grid-cols-2"
+            onSubmit={submitCreate}
+          >
+            <label className="text-sm text-[var(--theme-fg-soft)]">
+              Assigned user
+              <select
+                className="relay-input mt-2 w-full"
+                disabled={!canCreate && !capability?.available}
+                onChange={(event) => setAssignedUserId(event.target.value)}
+                required
+                value={assignedUserId}
+              >
+                <option value="">Select a user</option>
+                {eligibleUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.username} ({user.email})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-[var(--theme-fg-soft)]">
+              Device name
+              <input
+                className="relay-input mt-2 w-full"
+                maxLength={120}
+                onChange={(event) => setDeviceName(event.target.value)}
+                required
+                value={deviceName}
+              />
+            </label>
+            <label className="text-sm text-[var(--theme-fg-soft)]">
+              Resources
+              <select
+                className="relay-input mt-2 w-full"
+                onChange={(event) =>
+                  setResourcePreset(event.target.value as 'standard' | 'large')
+                }
+                value={resourcePreset}
+              >
+                <option value="standard">
+                  Standard, 1 CPU · 1.5 GiB · 10 GiB
+                </option>
+                <option value="large">Large, 2 CPU · 2 GiB · 12 GiB</option>
+              </select>
+            </label>
+            <label className="text-sm text-[var(--theme-fg-soft)]">
+              OpenAI Platform API key
+              <input
+                autoComplete="off"
+                className="relay-input mt-2 w-full font-mono"
+                minLength={20}
+                onChange={(event) => setOpenaiApiKey(event.target.value)}
+                placeholder="Stored encrypted on the Incus host"
+                required
+                type="password"
+                value={openaiApiKey}
+              />
+            </label>
+            <details className="rounded-md border border-[var(--theme-border)] lg:col-span-2">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--theme-fg)]">
+                Codex provider configuration
+              </summary>
+              <div className="grid gap-4 border-t border-[var(--theme-border)] p-3 md:grid-cols-2">
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Provider name
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setModelProvider(event.target.value)}
+                    pattern="[A-Za-z][A-Za-z0-9_-]{0,31}"
+                    required
+                    value={modelProvider}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Responses API base URL
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    required
+                    type="url"
+                    value={baseUrl}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Model
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setModel(event.target.value)}
+                    required
+                    value={model}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Review model
+                  <input
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) => setReviewModel(event.target.value)}
+                    required
+                    value={reviewModel}
+                  />
+                </label>
+                <label className="text-sm text-[var(--theme-fg-soft)]">
+                  Reasoning effort
+                  <select
+                    className="relay-input mt-2 w-full"
+                    onChange={(event) =>
+                      setReasoningEffort(
+                        event.target.value as
+                          | 'low'
+                          | 'medium'
+                          | 'high'
+                          | 'xhigh',
+                      )
+                    }
+                    value={reasoningEffort}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="xhigh">Extra high</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+            <div className="flex flex-col gap-2 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="flex items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
+                <ShieldCheck className="h-4 w-4" />
+                The relay stores only an opaque credential reference.
+              </p>
+              <button
+                className="relay-button-primary inline-flex min-h-11 items-center justify-center gap-2"
+                disabled={
+                  !canCreate || !openaiApiKey || busyKey === 'hosted:create'
+                }
+                type="submit"
+              >
+                <Plus className="h-4 w-4" />
+                {busyKey === 'hosted:create' ? 'Creating…' : 'Create hosted VM'}
+              </button>
+            </div>
+          </form>
+        </details>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)]">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
+              Managed VMs
+            </h3>
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              Turn-aware idle stop is 10 minutes after the last terminal
+              activity.
+            </p>
+          </div>
+          <span className="text-sm tabular-nums text-[var(--theme-fg-muted)]">
+            {sandboxes.length}
+          </span>
+        </div>
+        {loading && sandboxes.length === 0 ? (
+          <div className="space-y-3 p-4" aria-label="Loading hosted VMs">
+            <div className="h-14 animate-pulse rounded-md bg-[var(--theme-muted)]" />
+            <div className="h-14 animate-pulse rounded-md bg-[var(--theme-muted)]" />
+          </div>
+        ) : sandboxes.length ? (
+          <div className="divide-y divide-[var(--theme-border)]">
+            {sandboxes.map((sandbox) => (
+              <HostedSandboxRow
+                busyKey={busyKey}
+                key={sandbox.id}
+                onAction={onAction}
+                sandbox={sandbox}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 text-center text-sm text-[var(--theme-fg-muted)]">
+            No hosted VMs yet. Open “Create hosted VM” to assign the first one.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function HostedReconciliationPanel({
+  busyKey,
+  onAction,
+  reconciliation,
+}: {
+  busyKey: string | null;
+  onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  reconciliation: RelayHostedSandboxReconciliationDto | null;
+}) {
+  const issueCount = reconciliation
+    ? reconciliation.missingInstanceSandboxIds.length +
+      reconciliation.missingCredentialSandboxIds.length +
+      reconciliation.orphanInstances.length +
+      reconciliation.orphanCredentials.length
+    : 0;
+  const tone =
+    reconciliation?.status === 'healthy'
+      ? 'success'
+      : reconciliation?.status === 'issues' ||
+          reconciliation?.status === 'unavailable'
+        ? 'warning'
+        : 'neutral';
+  const label =
+    reconciliation?.status === 'healthy'
+      ? 'Inventory healthy'
+      : reconciliation?.status === 'issues'
+        ? `${issueCount} inventory issue${issueCount === 1 ? '' : 's'}`
+        : reconciliation?.status === 'unavailable'
+          ? 'Inventory unavailable'
+          : 'Inventory not checked';
+
+  return (
+    <div className="border-t border-[var(--theme-border)] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-[var(--theme-fg)]">
+              Relay ↔ Incus inventory
+            </span>
+            <HostedStatusPill tone={tone}>{label}</HostedStatusPill>
+          </div>
+          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+            Audit only; resources are deleted only after an explicit admin
+            action and a fresh orphan check.
+          </p>
+        </div>
+        <button
+          className="relay-button-secondary inline-flex min-h-10 items-center justify-center gap-2"
+          disabled={busyKey === 'hosted:reconcile'}
+          onClick={() =>
+            void onAction('hosted:reconcile', runHostedSandboxReconciliation)
+          }
+          type="button"
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${busyKey === 'hosted:reconcile' ? 'animate-spin' : ''}`}
+          />
+          Run inventory audit
+        </button>
+      </div>
+
+      {reconciliation?.missingInstanceSandboxIds.map((id) => (
+        <p
+          className="mt-2 text-xs text-amber-700 dark:text-amber-300"
+          key={`missing-instance-${id}`}
+        >
+          Missing Incus instance for relay sandbox {id}
+        </p>
+      ))}
+      {reconciliation?.missingCredentialSandboxIds.map((id) => (
+        <p
+          className="mt-2 text-xs text-amber-700 dark:text-amber-300"
+          key={`missing-credential-${id}`}
+        >
+          Missing credential for relay sandbox {id}
+        </p>
+      ))}
+      {reconciliation?.orphanInstances.map((instance) => (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--theme-surface)] px-3 py-2"
+          key={instance.id}
+        >
+          <span className="text-xs text-[var(--theme-fg-soft)]">
+            Orphan VM {instance.id} · {instance.status} ·{' '}
+            {instance.snapshots.length} snapshots
+          </span>
+          <button
+            className="relay-button-danger min-h-9"
+            disabled={busyKey === `hosted:orphan-instance:${instance.id}`}
+            onClick={() =>
+              void onAction(`hosted:orphan-instance:${instance.id}`, () =>
+                deleteHostedOrphanInstance(instance.id),
+              )
+            }
+            type="button"
+          >
+            Delete orphan VM
+          </button>
+        </div>
+      ))}
+      {reconciliation?.orphanCredentials.map((credential) => (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--theme-surface)] px-3 py-2"
+          key={credential.credentialRef}
+        >
+          <span className="text-xs text-[var(--theme-fg-soft)]">
+            Orphan credential {credential.credentialRef}
+          </span>
+          <button
+            className="relay-button-danger min-h-9"
+            disabled={
+              busyKey === `hosted:orphan-credential:${credential.credentialRef}`
+            }
+            onClick={() =>
+              void onAction(
+                `hosted:orphan-credential:${credential.credentialRef}`,
+                () => deleteHostedOrphanCredential(credential.credentialRef),
+              )
+            }
+            type="button"
+          >
+            Delete orphan credential
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HostedSandboxRow({
+  busyKey,
+  onAction,
+  sandbox,
+}: {
+  busyKey: string | null;
+  onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  sandbox: RelayHostedSandboxDto;
+}) {
+  const [credential, setCredential] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const busy = busyKey?.endsWith(sandbox.id) ?? false;
+  const tone = hostedStatusTone(sandbox.status);
+  return (
+    <article className="px-4 py-4">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="truncate text-sm font-semibold text-[var(--theme-fg)]">
+              {sandbox.deviceName}
+            </h4>
+            <HostedStatusPill tone={tone}>
+              {hostedStatusLabel(sandbox.status)}
+            </HostedStatusPill>
+            {sandbox.activeTurnCount > 0 ? (
+              <HostedStatusPill tone="warning">
+                {sandbox.activeTurnCount} active turn
+                {sandbox.activeTurnCount === 1 ? '' : 's'}
+              </HostedStatusPill>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm text-[var(--theme-fg-soft)]">
+            {sandbox.assignedUsername}
+            <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
+            {sandbox.resources.cpuCount} CPU ·{' '}
+            {formatMemory(sandbox.resources.memoryMiB)} ·{' '}
+            {sandbox.resources.diskGiB} GiB
+          </p>
+          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+            Updated {formatTimestamp(sandbox.updatedAt)}
+            {sandbox.idleDeadlineAt
+              ? ` · idle stop ${formatTimestamp(sandbox.idleDeadlineAt)}`
+              : ''}
+          </p>
+          {sandbox.lastErrorMessage ? (
+            <p
+              className="mt-2 text-sm text-[var(--status-danger-fg)]"
+              role="status"
+            >
+              {sandbox.lastErrorMessage}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {sandbox.status === 'stopped' || sandbox.status === 'error' ? (
+            <button
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
+              disabled={busy}
+              onClick={() =>
+                void onAction(`start:${sandbox.id}`, () =>
+                  runHostedSandboxAction(
+                    sandbox.id,
+                    sandbox.status === 'error' ? 'retry' : 'start',
+                  ),
+                )
+              }
+              type="button"
+            >
+              {sandbox.status === 'error' ? (
+                <RotateCcw className="h-4 w-4" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              {sandbox.status === 'error' ? 'Retry' : 'Start'}
+            </button>
+          ) : (
+            <button
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
+              disabled={
+                busy ||
+                sandbox.activeTurnCount > 0 ||
+                sandbox.status !== 'online'
+              }
+              onClick={() =>
+                void onAction(`stop:${sandbox.id}`, () =>
+                  runHostedSandboxAction(sandbox.id, 'stop'),
+                )
+              }
+              title={
+                sandbox.activeTurnCount > 0
+                  ? 'An active turn prevents stopping.'
+                  : undefined
+              }
+              type="button"
+            >
+              <Square className="h-4 w-4" />
+              Stop
+            </button>
+          )}
+          <button
+            className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
+            disabled={
+              busy || sandbox.status !== 'online' || sandbox.activeTurnCount > 0
+            }
+            onClick={() =>
+              void onAction(`snapshot:${sandbox.id}`, () =>
+                snapshotHostedSandbox(sandbox.id, `manual-${Date.now()}`),
+              )
+            }
+            type="button"
+          >
+            <Camera className="h-4 w-4" />
+            Snapshot
+          </button>
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-2 rounded-md bg-[var(--status-danger-bg)] p-1">
+              <button
+                className="min-h-9 rounded-md px-3 text-sm font-medium text-[var(--status-danger-fg)] hover:bg-[var(--theme-hover)]"
+                disabled={busy}
+                onClick={() =>
+                  void onAction(`delete:${sandbox.id}`, () =>
+                    deleteHostedSandbox(sandbox.id),
+                  )
+                }
+                type="button"
+              >
+                Confirm delete
+              </button>
+              <button
+                className="min-h-9 rounded-md px-2 text-sm text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)]"
+                onClick={() => setConfirmDelete(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              className="relay-button-secondary min-h-11 text-[var(--status-danger-fg)]"
+              disabled={busy || sandbox.activeTurnCount > 0}
+              onClick={() => setConfirmDelete(true)}
+              type="button"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
+          Rotate credential
+        </summary>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <label className="sr-only" htmlFor={`credential-${sandbox.id}`}>
+            New OpenAI Platform API key for {sandbox.deviceName}
+          </label>
+          <input
+            autoComplete="off"
+            className="relay-input min-h-11 flex-1 font-mono"
+            id={`credential-${sandbox.id}`}
+            onChange={(event) => setCredential(event.target.value)}
+            placeholder="New OpenAI Platform API key"
+            type="password"
+            value={credential}
+          />
+          <button
+            className="relay-button-secondary min-h-11"
+            disabled={busy || credential.length < 20}
+            onClick={() =>
+              void onAction(`rotate:${sandbox.id}`, async () => {
+                await rotateHostedSandboxCredential(sandbox.id, credential);
+                setCredential('');
+              })
+            }
+            type="button"
+          >
+            Rotate
+          </button>
+        </div>
+      </details>
+    </article>
+  );
+}
+
+function HostedStatusPill({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+}) {
+  const classes = {
+    success:
+      'border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-fg)]',
+    warning:
+      'border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]',
+    danger:
+      'border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]',
+    neutral:
+      'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)]',
+  }[tone];
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${classes}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function hostedStatusTone(status: RelayHostedSandboxDto['status']) {
+  if (status === 'online') return 'success' as const;
+  if (status === 'error') return 'danger' as const;
+  if (
+    ['creating', 'starting', 'provisioning', 'stopping', 'deleting'].includes(
+      status,
+    )
+  ) {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
+}
+
+function hostedStatusLabel(status: RelayHostedSandboxDto['status']) {
+  return status.replace('_', ' ').replace(/^./, (value) => value.toUpperCase());
+}
+
+function formatMemory(memoryMiB: number) {
+  return memoryMiB % 1024 === 0
+    ? `${memoryMiB / 1024} GiB`
+    : `${(memoryMiB / 1024).toFixed(1)} GiB`;
 }
 
 function MetricCard({
@@ -349,7 +1216,9 @@ function MetricCard({
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
             {label}
           </p>
-          <p className="mt-1 text-2xl font-semibold text-[var(--theme-fg)]">{value.toLocaleString()}</p>
+          <p className="mt-1 text-2xl font-semibold text-[var(--theme-fg)]">
+            {value.toLocaleString()}
+          </p>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">{detail}</p>
         </div>
       </div>
@@ -409,8 +1278,12 @@ function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
           role="menu"
         >
           <div className="border-b border-[var(--theme-border)] px-3 py-2">
-            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{user.username}</p>
-            <p className="truncate text-xs text-[var(--theme-fg-muted)]">{user.email}</p>
+            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+              {user.username}
+            </p>
+            <p className="truncate text-xs text-[var(--theme-fg-muted)]">
+              {user.email}
+            </p>
             <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
               Admin session
             </p>
@@ -431,17 +1304,26 @@ function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
 }
 
 function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
-  const recentUsers = [...summary.users].sort(compareNullableDate('lastSeenAt')).slice(0, 6);
+  const recentUsers = [...summary.users]
+    .sort(compareNullableDate('lastSeenAt'))
+    .slice(0, 6);
   const activeDevices = summary.devices.filter((device) => device.connected);
   return (
     <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.7fr)]">
       <Panel title="Recent users" detail="Last authenticated relay activity.">
         <div className="divide-y divide-[var(--theme-border)]">
           {recentUsers.map((user) => (
-            <div className="flex items-center justify-between gap-3 py-3" key={user.id}>
+            <div
+              className="flex items-center justify-between gap-3 py-3"
+              key={user.id}
+            >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{user.username}</p>
-                <p className="truncate text-xs text-[var(--theme-fg-muted)]">{user.email}</p>
+                <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                  {user.username}
+                </p>
+                <p className="truncate text-xs text-[var(--theme-fg-muted)]">
+                  {user.email}
+                </p>
               </div>
               <div className="text-right text-xs text-[var(--theme-fg-muted)]">
                 <p>{formatTimestamp(user.lastSeenAt)}</p>
@@ -451,7 +1333,10 @@ function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
           ))}
         </div>
       </Panel>
-      <Panel title="Online devices" detail="Devices with an active supervisor tunnel.">
+      <Panel
+        title="Online devices"
+        detail="Devices with an active supervisor tunnel."
+      >
         {activeDevices.length ? (
           <div className="space-y-3">
             {activeDevices.map((device) => (
@@ -480,12 +1365,19 @@ function UsersTable({
   users: RelayAdminSummaryDto['users'];
 }) {
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<{ key: UserSortKey; direction: SortDirection }>({
+  const [sort, setSort] = useState<{
+    key: UserSortKey;
+    direction: SortDirection;
+  }>({
     key: 'lastSeenAt',
     direction: 'desc',
   });
-  const [resetTarget, setResetTarget] = useState<RelayAdminSummaryDto['users'][number] | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<RelayAdminSummaryDto['users'][number] | null>(null);
+  const [resetTarget, setResetTarget] = useState<
+    RelayAdminSummaryDto['users'][number] | null
+  >(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    RelayAdminSummaryDto['users'][number] | null
+  >(null);
   const filteredUsers = useMemo(() => {
     const normalized = normalizeSearch(query);
     return users
@@ -493,7 +1385,9 @@ function UsersTable({
         if (!normalized) {
           return true;
         }
-        return normalizeSearch(`${user.username} ${user.email}`).includes(normalized);
+        return normalizeSearch(`${user.username} ${user.email}`).includes(
+          normalized,
+        );
       })
       .sort((left, right) => compareUsers(left, right, sort));
   }, [query, sort, users]);
@@ -501,13 +1395,17 @@ function UsersTable({
   function updateSort(key: UserSortKey) {
     setSort((current) => ({
       key,
-      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc',
+      direction:
+        current.key === key && current.direction === 'desc' ? 'asc' : 'desc',
     }));
   }
 
   return (
     <>
-      <Panel title="Users" detail="Registered relay accounts. Admin accounts are excluded from workspace and device operations.">
+      <Panel
+        title="Users"
+        detail="Registered relay accounts. Admin accounts are excluded from workspace and device operations."
+      >
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <label className="relative block min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--theme-fg-muted)]" />
@@ -519,17 +1417,48 @@ function UsersTable({
             />
           </label>
           <p className="text-sm text-[var(--theme-fg-muted)]">
-            {filteredUsers.length.toLocaleString()} of {users.length.toLocaleString()} users
+            {filteredUsers.length.toLocaleString()} of{' '}
+            {users.length.toLocaleString()} users
           </p>
         </div>
         <ResponsiveTable minWidth="68rem">
           <thead>
             <tr>
-              <SortableTh active={sort.key === 'username'} direction={sort.direction} onClick={() => updateSort('username')}>User</SortableTh>
-              <SortableTh active={sort.key === 'enabled'} direction={sort.direction} onClick={() => updateSort('enabled')}>Status</SortableTh>
-              <SortableTh active={sort.key === 'lastSeenAt'} direction={sort.direction} onClick={() => updateSort('lastSeenAt')}>Last used</SortableTh>
-              <SortableTh active={sort.key === 'conversationCount'} direction={sort.direction} onClick={() => updateSort('conversationCount')}>Conversations</SortableTh>
-              <SortableTh active={sort.key === 'deviceCount'} direction={sort.direction} onClick={() => updateSort('deviceCount')}>Devices</SortableTh>
+              <SortableTh
+                active={sort.key === 'username'}
+                direction={sort.direction}
+                onClick={() => updateSort('username')}
+              >
+                User
+              </SortableTh>
+              <SortableTh
+                active={sort.key === 'enabled'}
+                direction={sort.direction}
+                onClick={() => updateSort('enabled')}
+              >
+                Status
+              </SortableTh>
+              <SortableTh
+                active={sort.key === 'lastSeenAt'}
+                direction={sort.direction}
+                onClick={() => updateSort('lastSeenAt')}
+              >
+                Last used
+              </SortableTh>
+              <SortableTh
+                active={sort.key === 'conversationCount'}
+                direction={sort.direction}
+                onClick={() => updateSort('conversationCount')}
+              >
+                Conversations
+              </SortableTh>
+              <SortableTh
+                active={sort.key === 'deviceCount'}
+                direction={sort.direction}
+                onClick={() => updateSort('deviceCount')}
+              >
+                Devices
+              </SortableTh>
               <Th>Role</Th>
               <Th>Actions</Th>
             </tr>
@@ -537,8 +1466,17 @@ function UsersTable({
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.id}>
-                <Td strong>{user.username}<div className="text-xs font-normal text-[var(--theme-fg-muted)]">{user.email}</div></Td>
-                <Td><StatusPill active={user.enabled}>{user.enabled ? 'Enabled' : 'Disabled'}</StatusPill></Td>
+                <Td strong>
+                  {user.username}
+                  <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
+                    {user.email}
+                  </div>
+                </Td>
+                <Td>
+                  <StatusPill active={user.enabled}>
+                    {user.enabled ? 'Enabled' : 'Disabled'}
+                  </StatusPill>
+                </Td>
                 <Td>{formatTimestamp(user.lastSeenAt)}</Td>
                 <Td>{user.conversationCount.toLocaleString()}</Td>
                 <Td>{user.deviceCount.toLocaleString()}</Td>
@@ -555,7 +1493,9 @@ function UsersTable({
                     </button>
                     <button
                       className="relay-button-secondary inline-flex items-center gap-2"
-                      disabled={busyKey === `reset:${user.id}` || user.role === 'admin'}
+                      disabled={
+                        busyKey === `reset:${user.id}` || user.role === 'admin'
+                      }
                       onClick={() => setResetTarget(user)}
                       type="button"
                     >
@@ -564,7 +1504,9 @@ function UsersTable({
                     </button>
                     <button
                       className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
-                      disabled={busyKey === `delete:${user.id}` || user.role === 'admin'}
+                      disabled={
+                        busyKey === `delete:${user.id}` || user.role === 'admin'
+                      }
                       onClick={() => setDeleteTarget(user)}
                       type="button"
                     >
@@ -577,7 +1519,9 @@ function UsersTable({
             ))}
           </tbody>
         </ResponsiveTable>
-        {!filteredUsers.length ? <EmptyState>No users match the current search.</EmptyState> : null}
+        {!filteredUsers.length ? (
+          <EmptyState>No users match the current search.</EmptyState>
+        ) : null}
       </Panel>
       {resetTarget ? (
         <PasswordResetDialog
@@ -620,34 +1564,58 @@ function DevicesPanel({
   const [sortKey, setSortKey] = useState<DeviceSortKey>('lastActivity');
   const [direction, setDirection] = useState<SortDirection>('desc');
   const ownerUsers = useMemo(
-    () => users.filter((user) => devices.some((device) => device.ownerUserId === user.id)),
+    () =>
+      users.filter((user) =>
+        devices.some((device) => device.ownerUserId === user.id),
+      ),
     [devices, users],
   );
   const filteredDevices = useMemo(
     () =>
       devices
         .filter((device) => ownerId === 'all' || device.ownerUserId === ownerId)
-        .filter((device) => status === 'all' || (status === 'online' ? device.connected : !device.connected))
-        .filter((device) => activity === 'all' || isAfterActivityWindow(deviceLastActivity(device), activity))
+        .filter(
+          (device) =>
+            status === 'all' ||
+            (status === 'online' ? device.connected : !device.connected),
+        )
+        .filter(
+          (device) =>
+            activity === 'all' ||
+            isAfterActivityWindow(deviceLastActivity(device), activity),
+        )
         .sort((left, right) => compareDevices(left, right, sortKey, direction)),
     [activity, devices, direction, ownerId, sortKey, status],
   );
 
   return (
-    <Panel title="Devices" detail="Supervisor devices grouped by owner, connection state, activity, and loaded workspace metadata.">
+    <Panel
+      title="Devices"
+      detail="Supervisor devices grouped by owner, connection state, activity, and loaded workspace metadata."
+    >
       <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <label className="block text-sm text-[var(--theme-fg-soft)]">
           Owner
-          <select className="relay-input mt-2 w-full" onChange={(event) => setOwnerId(event.target.value)} value={ownerId}>
+          <select
+            className="relay-input mt-2 w-full"
+            onChange={(event) => setOwnerId(event.target.value)}
+            value={ownerId}
+          >
             <option value="all">All users</option>
             {ownerUsers.map((user) => (
-              <option key={user.id} value={user.id}>{user.username}</option>
+              <option key={user.id} value={user.id}>
+                {user.username}
+              </option>
             ))}
           </select>
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
           Status
-          <select className="relay-input mt-2 w-full" onChange={(event) => setStatus(event.target.value as typeof status)} value={status}>
+          <select
+            className="relay-input mt-2 w-full"
+            onChange={(event) => setStatus(event.target.value as typeof status)}
+            value={status}
+          >
             <option value="all">All devices</option>
             <option value="online">Online</option>
             <option value="offline">Offline</option>
@@ -655,7 +1623,13 @@ function DevicesPanel({
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
           Last activity
-          <select className="relay-input mt-2 w-full" onChange={(event) => setActivity(event.target.value as typeof activity)} value={activity}>
+          <select
+            className="relay-input mt-2 w-full"
+            onChange={(event) =>
+              setActivity(event.target.value as typeof activity)
+            }
+            value={activity}
+          >
             <option value="all">Any time</option>
             <option value="24h">Last 24 hours</option>
             <option value="7d">Last 7 days</option>
@@ -664,7 +1638,13 @@ function DevicesPanel({
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
           Sort by
-          <select className="relay-input mt-2 w-full" onChange={(event) => setSortKey(event.target.value as DeviceSortKey)} value={sortKey}>
+          <select
+            className="relay-input mt-2 w-full"
+            onChange={(event) =>
+              setSortKey(event.target.value as DeviceSortKey)
+            }
+            value={sortKey}
+          >
             <option value="lastActivity">Last activity</option>
             <option value="name">Device name</option>
             <option value="ownerUsername">Owner</option>
@@ -676,7 +1656,13 @@ function DevicesPanel({
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
           Direction
-          <select className="relay-input mt-2 w-full" onChange={(event) => setDirection(event.target.value as SortDirection)} value={direction}>
+          <select
+            className="relay-input mt-2 w-full"
+            onChange={(event) =>
+              setDirection(event.target.value as SortDirection)
+            }
+            value={direction}
+          >
             <option value="desc">Descending</option>
             <option value="asc">Ascending</option>
           </select>
@@ -698,19 +1684,33 @@ function DevicesPanel({
             <tr key={device.id}>
               <Td strong>
                 {device.name}
-                <div className="text-xs font-normal text-[var(--theme-fg-muted)]">{device.tokenPreview}</div>
+                <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
+                  {device.tokenPreview}
+                </div>
               </Td>
               <Td>
-                <span className="font-medium text-[var(--theme-fg-soft)]">{device.ownerUsername}</span>
-                <div className="text-xs text-[var(--theme-fg-muted)]">{device.ownerEmail}</div>
+                <span className="font-medium text-[var(--theme-fg-soft)]">
+                  {device.ownerUsername}
+                </span>
+                <div className="text-xs text-[var(--theme-fg-muted)]">
+                  {device.ownerEmail}
+                </div>
               </Td>
-              <Td><StatusPill active={device.connected}>{device.connected ? 'Online' : 'Offline'}</StatusPill></Td>
+              <Td>
+                <StatusPill active={device.connected}>
+                  {device.connected ? 'Online' : 'Offline'}
+                </StatusPill>
+              </Td>
               <Td>
                 {formatTimestamp(deviceLastActivity(device))}
-                <div className="text-xs text-[var(--theme-fg-muted)]">created {formatTimestamp(device.createdAt)}</div>
+                <div className="text-xs text-[var(--theme-fg-muted)]">
+                  created {formatTimestamp(device.createdAt)}
+                </div>
               </Td>
               <Td>
-                <span>{device.workspaces.length.toLocaleString()} workspaces</span>
+                <span>
+                  {device.workspaces.length.toLocaleString()} workspaces
+                </span>
                 <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
                 <span>{device.threads.length.toLocaleString()} threads</span>
                 <div className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
@@ -722,20 +1722,27 @@ function DevicesPanel({
               </Td>
               <Td>
                 {device.ipAddress ?? 'IP unavailable'}
-                <div className="text-xs text-[var(--theme-fg-muted)]">heartbeat {formatTimestamp(device.lastHeartbeatAt)}</div>
+                <div className="text-xs text-[var(--theme-fg-muted)]">
+                  heartbeat {formatTimestamp(device.lastHeartbeatAt)}
+                </div>
               </Td>
             </tr>
           ))}
         </tbody>
       </ResponsiveTable>
-      {!filteredDevices.length ? <EmptyState>No devices match the selected filters.</EmptyState> : null}
+      {!filteredDevices.length ? (
+        <EmptyState>No devices match the selected filters.</EmptyState>
+      ) : null}
     </Panel>
   );
 }
 
 function SharesTable({ shares }: { shares: RelaySessionShareDto[] }) {
   return (
-    <Panel title="Share relationships" detail="Thread grants between relay users. Revoked grants remain visible for audit.">
+    <Panel
+      title="Share relationships"
+      detail="Thread grants between relay users. Revoked grants remain visible for audit."
+    >
       <ResponsiveTable minWidth="62rem">
         <thead>
           <tr>
@@ -754,13 +1761,27 @@ function SharesTable({ shares }: { shares: RelaySessionShareDto[] }) {
               <Td strong>{share.ownerUsername}</Td>
               <Td>{share.targetUsername}</Td>
               <Td>
-                <span className="font-medium text-[var(--theme-fg)]">{share.threadTitle ?? share.label ?? 'Thread unavailable'}</span>
-                <div className="text-xs text-[var(--theme-fg-muted)]">{share.workspaceLabel ?? 'Workspace unavailable'}</div>
+                <span className="font-medium text-[var(--theme-fg)]">
+                  {share.threadTitle ?? share.label ?? 'Thread unavailable'}
+                </span>
+                <div className="text-xs text-[var(--theme-fg-muted)]">
+                  {share.workspaceLabel ?? 'Workspace unavailable'}
+                </div>
               </Td>
               <Td>{share.deviceName}</Td>
-              <Td>{share.threadAccess} / {workspaceAccessLabel(share.workspaceAccess)}</Td>
+              <Td>
+                {share.threadAccess} /{' '}
+                {workspaceAccessLabel(share.workspaceAccess)}
+              </Td>
               <Td>{formatTimestamp(share.lastAccessedAt)}</Td>
-              <Td>{share.revokedAt ? 'Revoked' : share.expiresAt && share.expiresAt <= new Date().toISOString() ? 'Expired' : 'Active'}</Td>
+              <Td>
+                {share.revokedAt
+                  ? 'Revoked'
+                  : share.expiresAt &&
+                      share.expiresAt <= new Date().toISOString()
+                    ? 'Expired'
+                    : 'Active'}
+              </Td>
             </tr>
           ))}
         </tbody>
@@ -781,14 +1802,20 @@ function SettingsPanel({
   busy: boolean;
   draft: RelayRegistrationSettingsDto;
   onChange: (settings: RelayRegistrationSettingsDto) => void;
-  onReviewRegistration: (requestId: string, action: 'approve' | 'reject') => void;
+  onReviewRegistration: (
+    requestId: string,
+    action: 'approve' | 'reject',
+  ) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   pending: RelayAdminSummaryDto['pendingRegistrations'];
   reviewBusyKey: string | null;
 }) {
   return (
     <section className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <Panel title="Registration settings" detail="Stored in the relay database. Environment password seeds this once if empty.">
+      <Panel
+        title="Registration settings"
+        detail="Stored in the relay database. Environment password seeds this once if empty."
+      >
         <form className="space-y-4" onSubmit={onSave}>
           <Checkbox
             checked={draft.enabled}
@@ -799,7 +1826,9 @@ function SettingsPanel({
             Registration password
             <input
               className="relay-input mt-2 w-full"
-              onChange={(event) => onChange({ ...draft, registrationPassword: event.target.value })}
+              onChange={(event) =>
+                onChange({ ...draft, registrationPassword: event.target.value })
+              }
               placeholder="Leave empty for no invite password"
               value={draft.registrationPassword ?? ''}
             />
@@ -807,23 +1836,39 @@ function SettingsPanel({
           <Checkbox
             checked={draft.approvalRequired}
             label="Require admin approval"
-            onChange={(approvalRequired) => onChange({ ...draft, approvalRequired })}
+            onChange={(approvalRequired) =>
+              onChange({ ...draft, approvalRequired })
+            }
           />
-          <button className="relay-button-primary inline-flex items-center gap-2" disabled={busy} type="submit">
+          <button
+            className="relay-button-primary inline-flex items-center gap-2"
+            disabled={busy}
+            type="submit"
+          >
             <Settings className="h-4 w-4" />
             Save settings
           </button>
         </form>
       </Panel>
 
-      <Panel title="Pending registrations" detail="Approve creates the user. Reject keeps an audit trail.">
+      <Panel
+        title="Pending registrations"
+        detail="Approve creates the user. Reject keeps an audit trail."
+      >
         {pending.length ? (
           <div className="divide-y divide-[var(--theme-border)]">
             {pending.map((request) => (
-              <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between" key={request.id}>
+              <div
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                key={request.id}
+              >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[var(--theme-fg)]">{request.username}</p>
-                  <p className="truncate text-xs text-[var(--theme-fg-muted)]">{request.email} · {formatTimestamp(request.createdAt)}</p>
+                  <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                    {request.username}
+                  </p>
+                  <p className="truncate text-xs text-[var(--theme-fg-muted)]">
+                    {request.email} · {formatTimestamp(request.createdAt)}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -858,10 +1903,28 @@ function SettingsPanel({
 function DeviceSummary({ device }: { device: RelayAdminDeviceDto }) {
   return (
     <div className="grid gap-2 text-xs text-[var(--theme-fg-muted)] sm:grid-cols-2">
-      <p>Owner: <span className="text-[var(--theme-fg-soft)]">{device.ownerEmail}</span></p>
-      <p>IP: <span className="text-[var(--theme-fg-soft)]">{device.ipAddress ?? 'unavailable'}</span></p>
-      <p>Connected: <span className="text-[var(--theme-fg-soft)]">{formatTimestamp(device.connectedAt)}</span></p>
-      <p>Heartbeat: <span className="text-[var(--theme-fg-soft)]">{formatTimestamp(device.lastHeartbeatAt)}</span></p>
+      <p>
+        Owner:{' '}
+        <span className="text-[var(--theme-fg-soft)]">{device.ownerEmail}</span>
+      </p>
+      <p>
+        IP:{' '}
+        <span className="text-[var(--theme-fg-soft)]">
+          {device.ipAddress ?? 'unavailable'}
+        </span>
+      </p>
+      <p>
+        Connected:{' '}
+        <span className="text-[var(--theme-fg-soft)]">
+          {formatTimestamp(device.connectedAt)}
+        </span>
+      </p>
+      <p>
+        Heartbeat:{' '}
+        <span className="text-[var(--theme-fg-soft)]">
+          {formatTimestamp(device.lastHeartbeatAt)}
+        </span>
+      </p>
     </div>
   );
 }
@@ -881,7 +1944,9 @@ function Panel({
     <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{title}</h2>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            {title}
+          </h2>
           <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">{detail}</p>
         </div>
         {aside}
@@ -891,10 +1956,19 @@ function Panel({
   );
 }
 
-function ResponsiveTable({ children, minWidth }: { children: React.ReactNode; minWidth: string }) {
+function ResponsiveTable({
+  children,
+  minWidth,
+}: {
+  children: React.ReactNode;
+  minWidth: string;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
+      <table
+        className="w-full border-collapse text-left text-sm"
+        style={{ minWidth }}
+      >
         {children}
       </table>
     </div>
@@ -920,7 +1994,11 @@ function SortableTh({
   direction: SortDirection;
   onClick: () => void;
 }) {
-  const Icon = !active ? ArrowUpDown : direction === 'asc' ? ArrowUp : ArrowDown;
+  const Icon = !active
+    ? ArrowUpDown
+    : direction === 'asc'
+      ? ArrowUp
+      : ArrowDown;
   return (
     <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
       <button
@@ -937,9 +2015,17 @@ function SortableTh({
   );
 }
 
-function Td({ children, strong = false }: { children: React.ReactNode; strong?: boolean }) {
+function Td({
+  children,
+  strong = false,
+}: {
+  children: React.ReactNode;
+  strong?: boolean;
+}) {
   return (
-    <td className={`border-b border-[var(--theme-border)] py-3 pr-3 ${strong ? 'font-medium text-[var(--theme-fg)]' : 'text-[var(--theme-fg-muted)]'}`}>
+    <td
+      className={`border-b border-[var(--theme-border)] py-3 pr-3 ${strong ? 'font-medium text-[var(--theme-fg)]' : 'text-[var(--theme-fg-muted)]'}`}
+    >
       {children}
     </td>
   );
@@ -967,13 +2053,21 @@ function Checkbox({
   );
 }
 
-function StatusPill({ active, children }: { active: boolean; children: React.ReactNode }) {
+function StatusPill({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <span className={`rounded-full border px-2 py-0.5 text-xs ${
-      active
-        ? 'border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-fg)]'
-        : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)]'
-    }`}>
+    <span
+      className={`rounded-full border px-2 py-0.5 text-xs ${
+        active
+          ? 'border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-fg)]'
+          : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)]'
+      }`}
+    >
       {children}
     </span>
   );
@@ -1014,7 +2108,9 @@ function PasswordResetDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
       <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
-        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">Reset password</h2>
+        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">
+          Reset password
+        </h2>
         <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
           Set a new relay password for {user.username}.
         </p>
@@ -1035,10 +2131,18 @@ function PasswordResetDialog({
             </p>
           ) : null}
           <div className="flex justify-end gap-2">
-            <button className="relay-button-secondary" onClick={onClose} type="button">
+            <button
+              className="relay-button-secondary"
+              onClick={onClose}
+              type="button"
+            >
               Cancel
             </button>
-            <button className="relay-button-primary inline-flex items-center gap-2" disabled={busy} type="submit">
+            <button
+              className="relay-button-primary inline-flex items-center gap-2"
+              disabled={busy}
+              type="submit"
+            >
               <KeyRound className="h-4 w-4" />
               Save password
             </button>
@@ -1067,10 +2171,18 @@ function DangerConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
       <section className="w-full max-w-md rounded-lg border border-[var(--status-danger-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
-        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">{title}</h2>
-        <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">{description}</p>
+        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">
+          {title}
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
+          {description}
+        </p>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="relay-button-secondary" onClick={onClose} type="button">
+          <button
+            className="relay-button-secondary"
+            onClick={onClose}
+            type="button"
+          >
             Cancel
           </button>
           <button
@@ -1130,7 +2242,10 @@ function compareDevices(
   } else if (key === 'connected') {
     value = Number(left.connected) - Number(right.connected);
   } else if (key === 'lastActivity') {
-    value = compareDateValues(deviceLastActivity(left), deviceLastActivity(right));
+    value = compareDateValues(
+      deviceLastActivity(left),
+      deviceLastActivity(right),
+    );
   } else if (key === 'createdAt') {
     value = compareDateValues(left.createdAt, right.createdAt);
   } else if (key === 'workspaceCount') {
@@ -1141,7 +2256,10 @@ function compareDevices(
   return value * multiplier || left.name.localeCompare(right.name);
 }
 
-function compareDateValues(left: string | null | undefined, right: string | null | undefined) {
+function compareDateValues(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
   const leftTime = Date.parse(left ?? '');
   const rightTime = Date.parse(right ?? '');
   const normalizedLeft = Number.isFinite(leftTime) ? leftTime : -Infinity;
@@ -1153,7 +2271,10 @@ function deviceLastActivity(device: RelayAdminDeviceDto) {
   return device.lastHeartbeatAt ?? device.connectedAt ?? device.createdAt;
 }
 
-function isAfterActivityWindow(value: string | null | undefined, window: '24h' | '7d' | '30d') {
+function isAfterActivityWindow(
+  value: string | null | undefined,
+  window: '24h' | '7d' | '30d',
+) {
   const timestamp = Date.parse(value ?? '');
   if (!Number.isFinite(timestamp)) {
     return false;
@@ -1162,7 +2283,10 @@ function isAfterActivityWindow(value: string | null | undefined, window: '24h' |
   return timestamp >= Date.now() - hours * 60 * 60 * 1000;
 }
 
-function replaceAdminUser(summary: RelayAdminSummaryDto | null, updated: RelayUserDto) {
+function replaceAdminUser(
+  summary: RelayAdminSummaryDto | null,
+  updated: RelayUserDto,
+) {
   if (!summary) {
     return summary;
   }
@@ -1187,6 +2311,8 @@ function tabLabel(tab: AdminTab) {
       return 'Users';
     case 'devices':
       return 'Devices';
+    case 'hosted':
+      return 'Hosted VMs';
     case 'shares':
       return 'Shares';
     case 'settings':
@@ -1207,8 +2333,10 @@ function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {
 }
 
 function compareNullableDate(field: 'lastSeenAt') {
-  return (left: { [key in typeof field]: string | null }, right: { [key in typeof field]: string | null }) =>
-    Date.parse(right[field] ?? '') - Date.parse(left[field] ?? '');
+  return (
+    left: { [key in typeof field]: string | null },
+    right: { [key in typeof field]: string | null },
+  ) => Date.parse(right[field] ?? '') - Date.parse(left[field] ?? '');
 }
 
 function formatTimestamp(value: string | null | undefined) {
