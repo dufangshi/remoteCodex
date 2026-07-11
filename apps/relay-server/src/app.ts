@@ -129,6 +129,7 @@ const createHostedSandboxSchema = z
       'ubuntu-24.04-v1',
       'ubuntu-24.04-v2',
       'ubuntu-24.04-v3',
+      'ubuntu-24.04-v4',
     ]),
     resources: z.object({
       cpuCount: z.number().int().min(1).max(2),

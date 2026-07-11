@@ -10,7 +10,7 @@ describe('hosted supervisor golden image assets', () => {
       fs.readFileSync(path.join(guestDir, 'image-manifest.json'), 'utf8'),
     ) as Record<string, unknown>;
     expect(manifest).toMatchObject({
-      imageVersion: 'ubuntu-24.04-v3',
+      imageVersion: 'ubuntu-24.04-v4',
       architecture: 'x86_64',
       baseImageFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       node: {

@@ -27,7 +27,7 @@ free -h
 认证后的 `/v1/capability` 应检查：
 
 - `available=true`
-- `imageVersion=ubuntu-24.04-v3`
+- `imageVersion=ubuntu-24.04-v4`
 - `capacity.runningInstances <= limits.maxRunningInstances`
 - `capacity.totalInstances <= limits.maxInstances`
 - `metrics.memoryAvailableMiB`、`metrics.diskAvailableGiB`、`metrics.loadPerCpu` 未触发 `alerts`
