@@ -11,6 +11,17 @@ describe('WorkspaceNewPage', () => {
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
+        if (url.endsWith('/api/config/workspace-settings')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              workspaceRoot: '/home/remote-codex/workspaces',
+              devHome: '/home/remote-codex/workspaces',
+              defaultBackend: 'codex',
+            }),
+          });
+        }
+
         if (url.endsWith('/api/workspaces') && init?.method === 'POST') {
           return Promise.resolve({
             ok: true,
@@ -76,6 +87,38 @@ describe('WorkspaceNewPage', () => {
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
       gitUrl: 'https://github.com/example/demo-workspace.git',
       label: 'demo-workspace',
+    });
+  });
+
+  it('resolves a short directory name under the configured dev home', async () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/new']}>
+        <Routes>
+          <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+          <Route path="/threads" element={<div>Workspace Threads Target</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/config/workspace-settings'),
+        expect.anything(),
+      ),
+    );
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
+      target: { value: 'test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
+
+    await waitFor(() => {
+      const postCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) => String(url).endsWith('/api/workspaces') && init?.method === 'POST',
+      );
+      expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+        absPath: '/home/remote-codex/workspaces/test',
+        label: 'test',
+      });
     });
   });
 });
