@@ -135,6 +135,7 @@ export class RelayStore {
     this.sqlite.pragma('foreign_keys = ON');
     this.migrate();
     this.importLegacyJson(legacyJsonPath);
+    this.migrateHostedSandboxMembers();
     this.ensureRegistrationSetting(registrationEnabled);
   }
 
@@ -325,21 +326,23 @@ export class RelayStore {
 
   createHostedSandboxRequested(input: {
     createdByAdminUserId: string;
-    assignedUserId: string;
+    assignedUserIds: string[];
     deviceName: string;
     imageVersion: string;
     resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
     credentialRef: string;
     codexConfig?: RelayHostedCodexConfigDto;
   }) {
-    this.requireUser(input.createdByAdminUserId);
-    this.requireUser(input.assignedUserId);
+    const admin = this.requireUser(input.createdByAdminUserId);
+    const assignedUsers = this.requireHostedSandboxMembers(
+      input.assignedUserIds,
+    );
     const sandboxId = crypto.randomUUID();
     const operationId = crypto.randomUUID();
     const now = new Date().toISOString();
     let deviceResult: RelayCreateDeviceResultDto | null = null;
     const create = this.sqlite.transaction(() => {
-      deviceResult = this.createDevice(input.assignedUserId, {
+      deviceResult = this.createDevice(admin.id, {
         name: input.deviceName,
       });
       this.sqlite
@@ -357,7 +360,7 @@ export class RelayStore {
         .run(
           sandboxId,
           deviceResult.device.id,
-          input.assignedUserId,
+          admin.id,
           input.createdByAdminUserId,
           input.imageVersion,
           input.resources.cpuCount,
@@ -368,6 +371,13 @@ export class RelayStore {
           now,
           now,
         );
+      const insertMember = this.sqlite.prepare(
+        `INSERT INTO relay_hosted_sandbox_members
+          (sandbox_id, user_id, position, created_at) VALUES (?, ?, ?, ?)`,
+      );
+      assignedUsers.forEach((user, position) =>
+        insertMember.run(sandboxId, user.id, position, now),
+      );
       this.insertHostedOperation({
         id: operationId,
         sandboxId,
@@ -399,6 +409,32 @@ export class RelayStore {
         )
         .all() as HostedSandboxRow[]
     ).map((row) => this.rowToHostedSandbox(row));
+  }
+
+  setHostedSandboxMembers(id: string, userIds: string[]) {
+    if (!this.getHostedSandboxDetail(id)) {
+      throw new RelayStoreError(404, 'not_found', 'Hosted VM was not found.');
+    }
+    const users = this.requireHostedSandboxMembers(userIds);
+    const now = new Date().toISOString();
+    this.sqlite.transaction(() => {
+      this.sqlite
+        .prepare(
+          'DELETE FROM relay_hosted_sandbox_members WHERE sandbox_id = ?',
+        )
+        .run(id);
+      const insert = this.sqlite.prepare(
+        `INSERT INTO relay_hosted_sandbox_members
+          (sandbox_id, user_id, position, created_at) VALUES (?, ?, ?, ?)`,
+      );
+      users.forEach((user, position) => insert.run(id, user.id, position, now));
+      this.sqlite
+        .prepare(
+          'UPDATE relay_hosted_sandboxes SET updated_at = ? WHERE id = ?',
+        )
+        .run(now, id);
+    })();
+    return this.getHostedSandboxDetail(id)!;
   }
 
   listHostedProviderRecords(): Array<{
@@ -1107,6 +1143,28 @@ export class RelayStore {
       };
     }
 
+    const hostedMember = this.sqlite
+      .prepare(
+        `SELECT 1
+         FROM relay_hosted_sandbox_members m
+         JOIN relay_hosted_sandboxes hs ON hs.id = m.sandbox_id
+         WHERE m.user_id = ? AND hs.device_id = ?`,
+      )
+      .get(userId, deviceId);
+    if (hostedMember) {
+      return {
+        kind: 'owner',
+        share: null,
+        grant: null,
+        scope: 'owner',
+        threadAccess: 'control',
+        workspaceAccess: 'write',
+        workspaceId: null,
+        workspaceScope: null,
+        canCreateThreads: true,
+      };
+    }
+
     const now = new Date().toISOString();
     if (scope.threadId) {
       const share = this.rowToShare(
@@ -1207,7 +1265,13 @@ export class RelayStore {
     connectedDevices: Map<string, DeviceConnectionStatus>,
   ): RelayPortalSummaryDto {
     const user = this.requireUser(userId);
-    const devices = this.getDevicesByOwner(userId);
+    const devices = [
+      ...this.getDevicesByOwner(userId),
+      ...this.getHostedDevicesByMember(userId),
+    ].filter(
+      (device, index, all) =>
+        all.findIndex((item) => item.id === device.id) === index,
+    );
     const sharedWithMe = this.getSharesByTarget(userId);
     const sharedByMe = this.getSharesByOwner(userId);
     const grantsWithMe = this.getGrantsByTarget(userId);
@@ -1258,10 +1322,27 @@ export class RelayStore {
     const users = this.getUsers();
     const devices = this.getDevices();
     const deviceCounts = new Map<string, number>();
+    const hostedDeviceIds = new Set(
+      (
+        this.sqlite
+          .prepare('SELECT device_id FROM relay_hosted_sandboxes')
+          .all() as Array<{ device_id: string }>
+      ).map((row) => row.device_id),
+    );
     for (const device of devices) {
+      if (hostedDeviceIds.has(device.id)) continue;
       deviceCounts.set(
         device.ownerUserId,
         (deviceCounts.get(device.ownerUserId) ?? 0) + 1,
+      );
+    }
+    const hostedMemberships = this.sqlite
+      .prepare('SELECT user_id FROM relay_hosted_sandbox_members')
+      .all() as Array<{ user_id: string }>;
+    for (const membership of hostedMemberships) {
+      deviceCounts.set(
+        membership.user_id,
+        (deviceCounts.get(membership.user_id) ?? 0) + 1,
       );
     }
     const conversationCounts = this.conversationCountsByUser(
@@ -1438,6 +1519,24 @@ export class RelayStore {
         400,
         'bad_request',
         'The admin user cannot be deleted.',
+      );
+    }
+    const soleMembership = this.sqlite
+      .prepare(
+        `SELECT hs.id
+         FROM relay_hosted_sandbox_members m
+         JOIN relay_hosted_sandboxes hs ON hs.id = m.sandbox_id
+         WHERE m.user_id = ?
+           AND (SELECT COUNT(*) FROM relay_hosted_sandbox_members all_members
+                WHERE all_members.sandbox_id = m.sandbox_id) = 1
+         LIMIT 1`,
+      )
+      .get(userId);
+    if (soleMembership) {
+      throw new RelayStoreError(
+        409,
+        'conflict',
+        "Reassign or delete the user's hosted VM before deleting this account.",
       );
     }
     this.sqlite.prepare('DELETE FROM relay_users WHERE id = ?').run(userId);
@@ -1763,6 +1862,17 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_hosted_sandboxes_status_idx
         ON relay_hosted_sandboxes(status, updated_at);
 
+      CREATE TABLE IF NOT EXISTS relay_hosted_sandbox_members (
+        sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (sandbox_id, user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_hosted_sandbox_members_user_idx
+        ON relay_hosted_sandbox_members(user_id, sandbox_id);
+
       CREATE TABLE IF NOT EXISTS relay_hosted_operations (
         id TEXT PRIMARY KEY,
         sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
@@ -1954,6 +2064,69 @@ export class RelayStore {
       return;
     }
     this.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+
+  private migrateHostedSandboxMembers() {
+    this.sqlite.transaction(() => {
+      const legacyRows = this.sqlite
+        .prepare(
+          `SELECT id, device_id, assigned_user_id, created_by_admin_user_id, created_at
+           FROM relay_hosted_sandboxes`,
+        )
+        .all() as Array<{
+        id: string;
+        device_id: string;
+        assigned_user_id: string;
+        created_by_admin_user_id: string;
+        created_at: string;
+      }>;
+      const insertMember = this.sqlite.prepare(
+        `INSERT OR IGNORE INTO relay_hosted_sandbox_members
+          (sandbox_id, user_id, position, created_at) VALUES (?, ?, 0, ?)`,
+      );
+      const updateSandbox = this.sqlite.prepare(
+        `UPDATE relay_hosted_sandboxes SET assigned_user_id = ? WHERE id = ?`,
+      );
+      const updateDevice = this.sqlite.prepare(
+        `UPDATE relay_devices SET owner_user_id = ? WHERE id = ?`,
+      );
+      for (const row of legacyRows) {
+        if (row.assigned_user_id !== row.created_by_admin_user_id) {
+          insertMember.run(row.id, row.assigned_user_id, row.created_at);
+        }
+        updateSandbox.run(row.created_by_admin_user_id, row.id);
+        updateDevice.run(row.created_by_admin_user_id, row.device_id);
+      }
+    })();
+  }
+
+  private requireHostedSandboxMembers(userIds: string[]) {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length < 1 || uniqueIds.length > 20) {
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'A hosted VM requires between 1 and 20 assigned users.',
+      );
+    }
+    if (uniqueIds.length !== userIds.length) {
+      throw new RelayStoreError(
+        400,
+        'bad_request',
+        'Assigned users must be unique.',
+      );
+    }
+    return uniqueIds.map((userId) => {
+      const user = this.requireUser(userId);
+      if (user.role !== 'user' || !user.enabled) {
+        throw new RelayStoreError(
+          400,
+          'bad_request',
+          'Hosted VMs can only be assigned to enabled user accounts.',
+        );
+      }
+      return user;
+    });
   }
 
   private importLegacyJson(legacyJsonPath?: string) {
@@ -2533,6 +2706,23 @@ export class RelayStore {
       .filter((device): device is StoredDevice => Boolean(device));
   }
 
+  private getHostedDevicesByMember(userId: string) {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT d.*
+           FROM relay_hosted_sandbox_members m
+           JOIN relay_hosted_sandboxes hs ON hs.id = m.sandbox_id
+           JOIN relay_devices d ON d.id = hs.device_id
+           WHERE m.user_id = ?
+           ORDER BY d.created_at ASC`,
+        )
+        .all(userId) as DeviceRow[]
+    )
+      .map((row) => this.rowToDevice(row))
+      .filter((device): device is StoredDevice => Boolean(device));
+  }
+
   private getSharesByOwner(ownerUserId: string) {
     return (
       this.sqlite
@@ -2842,14 +3032,33 @@ export class RelayStore {
   }
 
   private rowToHostedSandbox(row: HostedSandboxRow): RelayHostedSandboxDto {
-    const user = this.getUser(row.assigned_user_id);
+    const assignedUsers = (
+      this.sqlite
+        .prepare(
+          `SELECT u.*
+           FROM relay_hosted_sandbox_members m
+           JOIN relay_users u ON u.id = m.user_id
+           WHERE m.sandbox_id = ?
+           ORDER BY m.position ASC, m.created_at ASC`,
+        )
+        .all(row.id) as UserRow[]
+    )
+      .map((userRow) => this.rowToUser(userRow))
+      .filter((user): user is StoredUser => Boolean(user))
+      .map((user) => ({
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+      }));
+    const primaryUser = assignedUsers[0];
     const device = this.getDevice(row.device_id);
     return {
       id: row.id,
       deviceId: row.device_id,
       deviceName: device?.name ?? 'Hosted supervisor VM',
-      assignedUserId: row.assigned_user_id,
-      assignedUsername: user?.username ?? 'unknown',
+      assignedUserId: primaryUser?.userId ?? row.assigned_user_id,
+      assignedUsername: primaryUser?.username ?? 'unknown',
+      assignedUsers,
       createdByAdminUserId: row.created_by_admin_user_id,
       provider: 'incus',
       providerInstanceId: row.provider_instance_id,

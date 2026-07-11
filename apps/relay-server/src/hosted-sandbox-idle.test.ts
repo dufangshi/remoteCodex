@@ -55,7 +55,7 @@ function setup() {
   const service = new HostedSandboxService(store, fake, lifecycleConfig());
   const created = store.createHostedSandboxRequested({
     createdByAdminUserId: admin.id,
-    assignedUserId: registration.session.user!.id,
+    assignedUserIds: [registration.session.user!.id],
     deviceName: 'Idle VM',
     imageVersion: 'ubuntu-24.04-v1',
     resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },

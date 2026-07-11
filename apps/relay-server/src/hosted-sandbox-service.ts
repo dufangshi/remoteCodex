@@ -37,7 +37,7 @@ export class HostedSandboxService {
 
   async create(input: {
     createdByAdminUserId: string;
-    assignedUserId: string;
+    assignedUserIds: string[];
     deviceName: string;
     imageVersion: string;
     resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
@@ -56,7 +56,7 @@ export class HostedSandboxService {
     try {
       const created = this.store.createHostedSandboxRequested({
         createdByAdminUserId: input.createdByAdminUserId,
-        assignedUserId: input.assignedUserId,
+        assignedUserIds: input.assignedUserIds,
         deviceName: input.deviceName,
         imageVersion: input.imageVersion,
         resources: input.resources,
@@ -77,6 +77,10 @@ export class HostedSandboxService {
         .catch(() => undefined);
       throw error;
     }
+  }
+
+  updateMembers(id: string, userIds: string[]) {
+    return this.store.setHostedSandboxMembers(id, userIds);
   }
 
   retry(id: string) {

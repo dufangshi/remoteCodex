@@ -45,6 +45,17 @@ const adminSummary = {
       deviceCount: 0,
       conversationCount: 1,
     },
+    {
+      id: 'user-3',
+      email: 'member@example.test',
+      username: 'member',
+      role: 'user' as const,
+      enabled: true,
+      createdAt: '2026-06-16T00:00:00.000Z',
+      lastSeenAt: null,
+      deviceCount: 0,
+      conversationCount: 0,
+    },
   ],
   devices: [
     {
@@ -234,6 +245,13 @@ describe('RelayAdminPage', () => {
       deviceName: 'Hosted Codex',
       assignedUserId: 'user-1',
       assignedUsername: 'owner',
+      assignedUsers: [
+        {
+          userId: 'user-1',
+          username: 'owner',
+          email: 'owner@example.test',
+        },
+      ],
       createdByAdminUserId: 'admin-user',
       provider: 'incus' as const,
       providerInstanceId: 'rcd-11111111-1111-4111-8111-111111111111',
@@ -340,6 +358,26 @@ describe('RelayAdminPage', () => {
             }),
           });
         }
+        if (
+          url ===
+            '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/members' &&
+          init?.method === 'PUT'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...hostedSandbox,
+              assignedUsers: [
+                ...hostedSandbox.assignedUsers,
+                {
+                  userId: 'user-3',
+                  username: 'member',
+                  email: 'member@example.test',
+                },
+              ],
+            }),
+          });
+        }
         if (url === '/relay/admin/hosted-sandboxes') {
           return Promise.resolve({
             ok: true,
@@ -393,6 +431,10 @@ describe('RelayAdminPage', () => {
     fireEvent.change(screen.getByLabelText('OpenAI Platform API key'), {
       target: { value: 'sk-test-not-a-real-secret-123456789' },
     });
+    fireEvent.click(screen.getByLabelText('Assign owner (owner@example.test)'));
+    fireEvent.click(
+      screen.getByLabelText('Assign member (member@example.test)'),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Create hosted VM' }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -409,9 +451,30 @@ describe('RelayAdminPage', () => {
         body: expect.stringContaining('https://sub.lnz-study.com'),
       }),
     );
+    expect(fetch).toHaveBeenCalledWith(
+      '/relay/admin/hosted-sandboxes',
+      expect.objectContaining({
+        body: expect.stringContaining('"assignedUserIds":["user-1","user-3"]'),
+      }),
+    );
     expect(
       screen.queryByDisplayValue('sk-test-not-a-real-secret-123456789'),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Access · 1 user'));
+    fireEvent.click(
+      screen.getByLabelText('Grant member (member@example.test) access'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save access' }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/members',
+        expect.objectContaining({
+          method: 'PUT',
+          body: '{"assignedUserIds":["user-1","user-3"]}',
+        }),
+      ),
+    );
   });
 
   it('degrades only the hosted creation surface when Incus is disabled', async () => {

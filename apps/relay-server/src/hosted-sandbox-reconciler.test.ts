@@ -38,7 +38,7 @@ function setup() {
   const credentialRef = `rcc_${'x'.repeat(32)}`;
   const created = store.createHostedSandboxRequested({
     createdByAdminUserId: admin.id,
-    assignedUserId: user.session.user!.id,
+    assignedUserIds: [user.session.user!.id],
     deviceName: 'Reconcile VM',
     imageVersion: 'ubuntu-24.04-v1',
     resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },

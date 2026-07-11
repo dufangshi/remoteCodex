@@ -417,12 +417,19 @@ export interface RelayHostedCodexConfigDto {
   goals: boolean;
 }
 
+export interface RelayHostedSandboxMemberDto {
+  userId: string;
+  username: string;
+  email: string;
+}
+
 export interface RelayHostedSandboxDto {
   id: string;
   deviceId: string;
   deviceName: string;
   assignedUserId: string;
   assignedUsername: string;
+  assignedUsers: RelayHostedSandboxMemberDto[];
   createdByAdminUserId: string;
   provider: 'incus';
   providerInstanceId: string | null;

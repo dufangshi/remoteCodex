@@ -140,7 +140,7 @@ describe('hosted sandbox create saga', () => {
       url: '/relay/admin/hosted-sandboxes',
       headers: { authorization: `Bearer ${adminToken}` },
       payload: {
-        assignedUserId,
+        assignedUserIds: [assignedUserId],
         deviceName: 'Hosted Codex',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
@@ -161,7 +161,7 @@ describe('hosted sandbox create saga', () => {
       });
       expect(detail.json()).toMatchObject({
         status: 'starting',
-        assignedUserId,
+        assignedUsers: [{ userId: assignedUserId, username: 'hosted-user' }],
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
         operations: [{ action: 'create', status: 'succeeded' }],
       });
@@ -180,6 +180,39 @@ describe('hosted sandbox create saga', () => {
       }),
       `relay-sandbox-provision-${sandboxId}`,
     );
+
+    const secondRegistration = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'hosted-second@example.test',
+        username: 'hosted-second',
+        password: 'password123',
+      },
+    });
+    const secondUserId = secondRegistration.json().session.user.id as string;
+    const members = await app.inject({
+      method: 'PUT',
+      url: `/relay/admin/hosted-sandboxes/${sandboxId}/members`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { assignedUserIds: [assignedUserId, secondUserId] },
+    });
+    expect(members.statusCode).toBe(200);
+    expect(members.json().assignedUsers).toEqual([
+      expect.objectContaining({ userId: assignedUserId }),
+      expect.objectContaining({ userId: secondUserId }),
+    ]);
+    const secondPortal = await app.inject({
+      method: 'GET',
+      url: '/relay/portal',
+      headers: {
+        authorization: `Bearer ${secondRegistration.json().token as string}`,
+      },
+    });
+    expect(secondPortal.statusCode).toBe(200);
+    expect(secondPortal.json().devices).toEqual([
+      expect.objectContaining({ id: deviceId, hostedStatus: 'starting' }),
+    ]);
 
     const ordinaryDelete = await app.inject({
       method: 'DELETE',
@@ -298,7 +331,7 @@ describe('hosted sandbox create saga', () => {
       url: '/relay/admin/hosted-sandboxes',
       headers: { authorization: `Bearer ${adminToken}` },
       payload: {
-        assignedUserId,
+        assignedUserIds: [assignedUserId],
         deviceName: 'Failing hosted VM',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },
@@ -353,7 +386,7 @@ describe('hosted sandbox create saga', () => {
       url: '/relay/admin/hosted-sandboxes',
       headers: { authorization: `Bearer ${adminToken}` },
       payload: {
-        assignedUserId,
+        assignedUserIds: [assignedUserId],
         deviceName: 'Restart reconcile VM',
         imageVersion: 'ubuntu-24.04-v1',
         resources: { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 },

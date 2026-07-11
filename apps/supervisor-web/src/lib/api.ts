@@ -824,9 +824,13 @@ export function fetchHostedSandbox(id: string) {
 }
 
 export function createHostedSandbox(input: {
-  assignedUserId: string;
+  assignedUserIds: string[];
   deviceName: string;
-  imageVersion: 'ubuntu-24.04-v1' | 'ubuntu-24.04-v2' | 'ubuntu-24.04-v3';
+  imageVersion:
+    | 'ubuntu-24.04-v1'
+    | 'ubuntu-24.04-v2'
+    | 'ubuntu-24.04-v3'
+    | 'ubuntu-24.04-v4';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
   openaiApiKey: string;
   codexConfig: RelayHostedCodexConfigDto;
@@ -837,6 +841,20 @@ export function createHostedSandbox(input: {
   }>(
     '/relay/admin/hosted-sandboxes',
     { method: 'POST', body: JSON.stringify(input) },
+    { auth: 'relay-admin' },
+  );
+}
+
+export function updateHostedSandboxMembers(
+  id: string,
+  assignedUserIds: string[],
+) {
+  return request<RelayHostedSandboxDetailDto>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/members`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ assignedUserIds }),
+    },
     { auth: 'relay-admin' },
   );
 }

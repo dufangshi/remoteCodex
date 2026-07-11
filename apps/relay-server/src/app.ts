@@ -123,7 +123,7 @@ const hostedCodexConfigSchema = z
   });
 const createHostedSandboxSchema = z
   .object({
-    assignedUserId: z.string().uuid(),
+    assignedUserIds: z.array(z.string().uuid()).min(1).max(20),
     deviceName: z.string().trim().min(1).max(120),
     imageVersion: z.enum([
       'ubuntu-24.04-v1',
@@ -138,6 +138,11 @@ const createHostedSandboxSchema = z
     }),
     openaiApiKey: z.string().min(20).max(512),
     codexConfig: hostedCodexConfigSchema,
+  })
+  .strict();
+const updateHostedSandboxMembersSchema = z
+  .object({
+    assignedUserIds: z.array(z.string().uuid()).min(1).max(20),
   })
   .strict();
 const hostedSnapshotSchema = z.object({
@@ -702,6 +707,24 @@ export function buildRelayServer(
     });
     return reply.code(202).send(result);
   });
+
+  app.put(
+    '/relay/admin/hosted-sandboxes/:sandboxId/members',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) {
+        return;
+      }
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const body = updateHostedSandboxMembersSchema.parse(request.body ?? {});
+      return hostedSandboxService.updateMembers(
+        sandboxId,
+        body.assignedUserIds,
+      );
+    },
+  );
 
   app.post(
     '/relay/admin/hosted-sandboxes/:sandboxId/retry',

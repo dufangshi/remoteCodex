@@ -59,6 +59,7 @@ import {
   runHostedSandboxReconciliation,
   setRelayUserEnabled,
   snapshotHostedSandbox,
+  updateHostedSandboxMembers,
   updateRelayRegistrationSettings,
 } from '../lib/api';
 
@@ -506,9 +507,7 @@ function HostedSandboxesPanel({
   const eligibleUsers = users.filter(
     (user) => user.role === 'user' && user.enabled,
   );
-  const [assignedUserId, setAssignedUserId] = useState(
-    eligibleUsers[0]?.id ?? '',
-  );
+  const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
   const [deviceName, setDeviceName] = useState('Hosted Codex');
   const [resourcePreset, setResourcePreset] = useState<'standard' | 'large'>(
     'standard',
@@ -521,7 +520,8 @@ function HostedSandboxesPanel({
   const [reasoningEffort, setReasoningEffort] = useState<
     'low' | 'medium' | 'high' | 'xhigh'
   >('low');
-  const canCreate = capability?.available === true && Boolean(assignedUserId);
+  const canCreate =
+    capability?.available === true && assignedUserIds.length > 0;
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -532,9 +532,9 @@ function HostedSandboxesPanel({
         : { cpuCount: 1, memoryMiB: 1536, diskGiB: 10 };
     await onAction('hosted:create', () =>
       createHostedSandbox({
-        assignedUserId,
+        assignedUserIds,
         deviceName,
-        imageVersion: 'ubuntu-24.04-v3',
+        imageVersion: 'ubuntu-24.04-v4',
         resources,
         openaiApiKey,
         codexConfig: {
@@ -651,23 +651,48 @@ function HostedSandboxesPanel({
             className="grid gap-4 border-t border-[var(--theme-border)] p-4 lg:grid-cols-2"
             onSubmit={submitCreate}
           >
-            <label className="text-sm text-[var(--theme-fg-soft)]">
-              Assigned user
-              <select
-                className="relay-input mt-2 w-full"
-                disabled={!canCreate && !capability?.available}
-                onChange={(event) => setAssignedUserId(event.target.value)}
-                required
-                value={assignedUserId}
-              >
-                <option value="">Select a user</option>
-                {eligibleUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.username} ({user.email})
-                  </option>
-                ))}
-              </select>
-            </label>
+            <fieldset className="text-sm text-[var(--theme-fg-soft)]">
+              <legend>Assigned users</legend>
+              <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)]">
+                {eligibleUsers.length ? (
+                  eligibleUsers.map((user) => (
+                    <label
+                      className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-[var(--theme-border)] px-3 last:border-b-0 hover:bg-[var(--theme-hover)]"
+                      key={user.id}
+                    >
+                      <input
+                        aria-label={`Assign ${user.username} (${user.email})`}
+                        checked={assignedUserIds.includes(user.id)}
+                        disabled={!capability?.available}
+                        onChange={(event) =>
+                          setAssignedUserIds((current) =>
+                            event.target.checked
+                              ? [...current, user.id]
+                              : current.filter((id) => id !== user.id),
+                          )
+                        }
+                        type="checkbox"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium text-[var(--theme-fg)]">
+                          {user.username}
+                        </span>
+                        <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
+                          {user.email}
+                        </span>
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <p className="px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                    Create and enable a user account before assigning a VM.
+                  </p>
+                )}
+              </div>
+              <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+                {assignedUserIds.length} selected · all receive full VM access
+              </span>
+            </fieldset>
             <label className="text-sm text-[var(--theme-fg-soft)]">
               Device name
               <input
@@ -820,6 +845,7 @@ function HostedSandboxesPanel({
                 key={sandbox.id}
                 onAction={onAction}
                 sandbox={sandbox}
+                users={eligibleUsers}
               />
             ))}
           </div>
@@ -966,15 +992,27 @@ function HostedSandboxRow({
   busyKey,
   onAction,
   sandbox,
+  users,
 }: {
   busyKey: string | null;
   onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
   sandbox: RelayHostedSandboxDto;
+  users: RelayAdminSummaryDto['users'];
 }) {
   const [credential, setCredential] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [memberIds, setMemberIds] = useState(
+    sandbox.assignedUsers.map((user) => user.userId),
+  );
+  useEffect(() => {
+    setMemberIds(sandbox.assignedUsers.map((user) => user.userId));
+  }, [sandbox.assignedUsers]);
   const busy = busyKey?.endsWith(sandbox.id) ?? false;
   const tone = hostedStatusTone(sandbox.status);
+  const savedMemberIds = sandbox.assignedUsers.map((user) => user.userId);
+  const membersChanged =
+    memberIds.length !== savedMemberIds.length ||
+    memberIds.some((id) => !savedMemberIds.includes(id));
   return (
     <article className="px-4 py-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -994,7 +1032,7 @@ function HostedSandboxRow({
             ) : null}
           </div>
           <p className="mt-1 text-sm text-[var(--theme-fg-soft)]">
-            {sandbox.assignedUsername}
+            {sandbox.assignedUsers.map((user) => user.username).join(', ')}
             <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
             {sandbox.resources.cpuCount} CPU ·{' '}
             {formatMemory(sandbox.resources.memoryMiB)} ·{' '}
@@ -1110,6 +1148,64 @@ function HostedSandboxRow({
           )}
         </div>
       </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
+          Access · {sandbox.assignedUsers.length} user
+          {sandbox.assignedUsers.length === 1 ? '' : 's'}
+        </summary>
+        <div className="mt-3 max-w-2xl">
+          <p className="mb-2 text-xs text-[var(--theme-fg-muted)]">
+            Selected users can create workspaces and threads and fully control
+            this VM.
+          </p>
+          <div className="max-h-48 overflow-y-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)]">
+            {users.map((user) => (
+              <label
+                className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-[var(--theme-border)] px-3 last:border-b-0 hover:bg-[var(--theme-hover)]"
+                key={user.id}
+              >
+                <input
+                  aria-label={`Grant ${user.username} (${user.email}) access`}
+                  checked={memberIds.includes(user.id)}
+                  onChange={(event) =>
+                    setMemberIds((current) =>
+                      event.target.checked
+                        ? [...current, user.id]
+                        : current.filter((id) => id !== user.id),
+                    )
+                  }
+                  type="checkbox"
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium text-[var(--theme-fg)]">
+                    {user.username}
+                  </span>
+                  <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
+                    {user.email}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-xs text-[var(--theme-fg-muted)]">
+              {memberIds.length} selected
+            </span>
+            <button
+              className="relay-button-secondary min-h-11"
+              disabled={busy || memberIds.length === 0 || !membersChanged}
+              onClick={() =>
+                void onAction(`members:${sandbox.id}`, () =>
+                  updateHostedSandboxMembers(sandbox.id, memberIds),
+                )
+              }
+              type="button"
+            >
+              Save access
+            </button>
+          </div>
+        </div>
+      </details>
       <details className="mt-3">
         <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
           Rotate credential
