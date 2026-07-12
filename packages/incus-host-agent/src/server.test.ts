@@ -45,6 +45,7 @@ async function setup(
     operationDir: path.join(tempDir, 'operations'),
     auditLog: path.join(tempDir, 'audit.jsonl'),
     secretDir: path.join(tempDir, 'credentials'),
+    guestProvisionScript: '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
     secretMasterKey: Buffer.alloc(32, 1),
   };
   const events: AuditEvent[] = [];

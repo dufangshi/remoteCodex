@@ -80,6 +80,7 @@ const schema = z.object({
   REMOTE_CODEX_INCUS_OPERATION_DIR: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_AUDIT_LOG: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_SECRET_DIR: z.string().min(1).optional(),
+  REMOTE_CODEX_INCUS_GUEST_PROVISION_SCRIPT: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_SECRET_MASTER_KEY: z
     .string()
     .regex(/^[a-fA-F0-9]{64}$/)
@@ -108,6 +109,7 @@ export interface IncusHostAgentConfig {
   operationDir: string;
   auditLog: string;
   secretDir: string;
+  guestProvisionScript: string;
   secretMasterKey: Buffer | null;
 }
 
@@ -149,6 +151,10 @@ export function loadIncusHostAgentConfig(
     secretDir: path.resolve(
       parsed.REMOTE_CODEX_INCUS_SECRET_DIR ??
         '.local/incus-host-agent/credentials',
+    ),
+    guestProvisionScript: path.resolve(
+      parsed.REMOTE_CODEX_INCUS_GUEST_PROVISION_SCRIPT ??
+        '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
     ),
     secretMasterKey: parsed.REMOTE_CODEX_INCUS_SECRET_MASTER_KEY
       ? Buffer.from(parsed.REMOTE_CODEX_INCUS_SECRET_MASTER_KEY, 'hex')

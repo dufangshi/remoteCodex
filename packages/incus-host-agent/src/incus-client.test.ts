@@ -27,6 +27,7 @@ function config(): IncusHostAgentConfig {
     operationDir: '/tmp/operations',
     auditLog: '/tmp/audit.jsonl',
     secretDir: '/tmp/credentials',
+    guestProvisionScript: '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
     secretMasterKey: Buffer.alloc(32, 1),
   };
 }
@@ -342,6 +343,7 @@ describe('IncusClient policy', () => {
       )
       .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(result('{"status":"provisioned"}'));
     const client = new IncusClient(config(), { run });
 
@@ -362,10 +364,11 @@ describe('IncusClient policy', () => {
       'true',
     ]);
     expect(run.mock.calls[2]?.[1]).toContain('cloud-init');
-    const args = run.mock.calls[3]?.[1] ?? [];
+    expect(run.mock.calls[3]?.[1]).toContain('file');
+    const args = run.mock.calls[4]?.[1] ?? [];
     expect(args).toContain('/usr/local/sbin/remote-codex-provision');
     expect(JSON.stringify(args)).not.toContain(secret);
-    expect(run.mock.calls[3]?.[3]).toContain(secret);
+    expect(run.mock.calls[4]?.[3]).toContain(secret);
   });
 
   it('waits for the guest agent before invoking the provision helper', async () => {
@@ -378,6 +381,7 @@ describe('IncusClient policy', () => {
           result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
         )
         .mockResolvedValueOnce(result('', 1))
+        .mockResolvedValueOnce(result())
         .mockResolvedValueOnce(result())
         .mockResolvedValueOnce(result())
         .mockResolvedValueOnce(result('{"status":"provisioned"}'));
@@ -394,9 +398,10 @@ describe('IncusClient policy', () => {
         id: sandboxId,
         provisioned: true,
       });
-      expect(run).toHaveBeenCalledTimes(5);
+      expect(run).toHaveBeenCalledTimes(6);
       expect(run.mock.calls[3]?.[1]).toContain('cloud-init');
-      expect(run.mock.calls[4]?.[1]).toContain(
+      expect(run.mock.calls[4]?.[1]).toContain('file');
+      expect(run.mock.calls[5]?.[1]).toContain(
         '/usr/local/sbin/remote-codex-provision',
       );
     } finally {

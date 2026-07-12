@@ -268,6 +268,17 @@ export class IncusClient {
       'status',
       '--wait',
     ]);
+    // Keep existing VMs compatible when the provisioning contract evolves.
+    // The helper contains no credentials; secrets still travel only on stdin.
+    await this.run([
+      'file',
+      'push',
+      this.config.guestProvisionScript,
+      `${current.name}/usr/local/sbin/remote-codex-provision`,
+      '--mode=0700',
+      '--uid=0',
+      '--gid=0',
+    ]);
     await this.run(
       ['exec', current.name, '--', '/usr/local/sbin/remote-codex-provision'],
       `${JSON.stringify({

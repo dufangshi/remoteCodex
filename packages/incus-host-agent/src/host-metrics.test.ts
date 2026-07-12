@@ -26,6 +26,7 @@ function config(): IncusHostAgentConfig {
     operationDir: '/tmp/operations',
     auditLog: '/tmp/audit.jsonl',
     secretDir: '/tmp/credentials',
+    guestProvisionScript: '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
     secretMasterKey: Buffer.alloc(32, 1),
   };
 }
