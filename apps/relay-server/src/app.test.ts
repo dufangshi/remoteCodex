@@ -646,7 +646,10 @@ describe('relay server', () => {
       const session = await app.inject({
         method: 'GET',
         url: '/relay/auth/session',
-        headers: { cookie: String(callback.headers['set-cookie']) },
+        headers: {
+          authorization: 'Bearer stale-relay-token',
+          cookie: String(callback.headers['set-cookie']),
+        },
       });
       expect(session.json().user).toMatchObject({ email: 'oauth.user@example.test', username: 'oauthuser' });
     } finally {

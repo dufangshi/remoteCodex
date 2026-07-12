@@ -431,7 +431,7 @@ export function buildRelayServer(
   });
 
   app.get('/relay/auth/session', async (request) => {
-    return { ...store.verifySession(readRelaySessionToken(request)), registrationSettings: authSettings() };
+    return { ...verifyRelayRequestSession(request, store), registrationSettings: authSettings() };
   });
 
   app.get('/relay/auth/oauth/:provider/start', async (request, reply) => {
@@ -1240,7 +1240,7 @@ export function buildRelayServer(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket, request) => {
-        const session = store.verifySession(readRelaySessionToken(request));
+        const session = verifyRelayRequestSession(request, store);
         const deviceId = pathParam(request.params, 'deviceId');
         const threadId = queryString(request.query, 'threadId');
         if (!session.authenticated || !session.user || !deviceId) {
@@ -1297,7 +1297,7 @@ export function buildRelayServer(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket, request) => {
-        const session = store.verifySession(readRelaySessionToken(request));
+        const session = verifyRelayRequestSession(request, store);
         if (!session.authenticated || !session.user) {
           socket.close(1008, 'Relay login is required.');
           return;
@@ -1815,7 +1815,7 @@ function requireRelayUser(
   store: RelayStore,
   options: { admin?: boolean } = {},
 ) {
-  const session = store.verifySession(readRelaySessionToken(request));
+  const session = verifyRelayRequestSession(request, store);
   if (!session.authenticated || !session.user) {
     reply.status(401).send({
       code: 'unauthorized',
@@ -1842,13 +1842,19 @@ function requireRelayUser(
   return session.user;
 }
 
-function readRelaySessionToken(request: FastifyRequest) {
-  return (
-    bearerToken(request.headers.authorization) ??
-    queryToken(request.query, 'relaySession') ??
-    queryToken(request.query, 'token') ??
-    readCookie(request.headers.cookie, RELAY_COOKIE_NAME)
-  );
+function verifyRelayRequestSession(request: FastifyRequest, store: RelayStore) {
+  const candidates = [
+    bearerToken(request.headers.authorization),
+    queryToken(request.query, 'relaySession'),
+    queryToken(request.query, 'token'),
+    readCookie(request.headers.cookie, RELAY_COOKIE_NAME),
+  ];
+  for (const token of candidates) {
+    if (!token) continue;
+    const session = store.verifySession(token);
+    if (session.authenticated) return session;
+  }
+  return store.emptySession();
 }
 
 function attachRelayCookie(reply: FastifyReply, token: string) {
