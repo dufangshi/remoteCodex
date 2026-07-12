@@ -112,6 +112,14 @@ function RelayAuthPanel({
       if (mode === 'login') {
         await relayLogin({ identifier, password });
       } else {
+        if (password.length < 8) {
+          setError('Password must be at least 8 characters.');
+          return;
+        }
+        if (username.trim().length < 3) {
+          setError('Username must be at least 3 characters.');
+          return;
+        }
         const result = await relayRegister({ email, username, password, registrationPassword });
         if (result.pendingApproval) {
           setNotice('Registration request sent. An admin must approve it before you can sign in.');
@@ -145,12 +153,13 @@ function RelayAuthPanel({
           />
         ) : (
           <>
-            <RelayInput autoComplete="email" label="Email" onChange={setEmail} value={email} />
-            <RelayInput autoComplete="username" label="Username" onChange={setUsername} value={username} />
+            <RelayInput autoComplete="email" label="Email" onChange={setEmail} required type="email" value={email} />
+            <RelayInput autoComplete="username" label="Username" minLength={3} onChange={setUsername} required value={username} />
             <RelayInput
               autoComplete="one-time-code"
               label="Registration password"
               onChange={setRegistrationPassword}
+              required
               type="password"
               value={registrationPassword}
             />
@@ -160,8 +169,12 @@ function RelayAuthPanel({
           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           label="Password"
           onChange={setPassword}
+          required
           type="password"
           value={password}
+          {...(mode === 'register'
+            ? { description: 'Use at least 8 characters.', minLength: 8 }
+            : {})}
         />
         {error ? <RelayNotice tone="danger">{error}</RelayNotice> : null}
         {notice ? <RelayNotice tone="accent">{notice}</RelayNotice> : null}
@@ -202,12 +215,18 @@ function RelayInput({
   onChange,
   type = 'text',
   autoComplete,
+  description,
+  minLength,
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   autoComplete?: string;
+  description?: string;
+  minLength?: number;
+  required?: boolean;
 }) {
   return (
     <label className="block text-sm text-[var(--theme-fg-soft)]">
@@ -215,10 +234,15 @@ function RelayInput({
       <input
         autoComplete={autoComplete}
         className="relay-input mt-2 w-full"
+        minLength={minLength}
         onChange={(event) => onChange(event.target.value)}
+        required={required}
         type={type}
         value={value}
       />
+      {description ? (
+        <span className="mt-1.5 block text-xs text-[var(--theme-fg-muted)]">{description}</span>
+      ) : null}
     </label>
   );
 }

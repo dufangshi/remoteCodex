@@ -156,4 +156,33 @@ describe('RelayPortalPage', () => {
     });
     expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('relay-token');
   });
+
+  it('explains the minimum account password before submitting registration', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/relay/auth/session') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            authenticated: false,
+            user: null,
+            registrationEnabled: true,
+          }),
+        } satisfies Partial<Response>);
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/relay-portal']}>
+        <Routes>
+          <Route path="/relay-portal" element={<RelayPortalPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create relay account' }));
+    expect(screen.getByText('Use at least 8 characters.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Password/)).toHaveAttribute('minlength', '8');
+  });
 });

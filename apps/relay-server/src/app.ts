@@ -1295,9 +1295,19 @@ export function buildRelayServer(
       return;
     }
     if (error instanceof z.ZodError) {
+      const firstIssue = error.issues[0];
+      const field = firstIssue?.path[0];
+      const message =
+        field === 'password'
+          ? 'Password must be at least 8 characters.'
+          : field === 'username'
+            ? 'Username must be at least 3 characters.'
+            : field === 'email'
+              ? 'Enter a valid email address.'
+              : 'The request payload is invalid.';
       reply.status(400).send({
         code: 'bad_request',
-        message: 'The request payload is invalid.',
+        message,
         details: {
           issues: error.issues,
         },
