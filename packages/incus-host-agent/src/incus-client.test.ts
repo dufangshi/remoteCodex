@@ -341,6 +341,7 @@ describe('IncusClient policy', () => {
         result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
       )
       .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result())
       .mockResolvedValueOnce(result('{"status":"provisioned"}'));
     const client = new IncusClient(config(), { run });
 
@@ -360,10 +361,11 @@ describe('IncusClient policy', () => {
       '--',
       'true',
     ]);
-    const args = run.mock.calls[2]?.[1] ?? [];
+    expect(run.mock.calls[2]?.[1]).toContain('cloud-init');
+    const args = run.mock.calls[3]?.[1] ?? [];
     expect(args).toContain('/usr/local/sbin/remote-codex-provision');
     expect(JSON.stringify(args)).not.toContain(secret);
-    expect(run.mock.calls[2]?.[3]).toContain(secret);
+    expect(run.mock.calls[3]?.[3]).toContain(secret);
   });
 
   it('waits for the guest agent before invoking the provision helper', async () => {
@@ -376,6 +378,7 @@ describe('IncusClient policy', () => {
           result(JSON.stringify([{ status: 'Running', status_code: 103 }])),
         )
         .mockResolvedValueOnce(result('', 1))
+        .mockResolvedValueOnce(result())
         .mockResolvedValueOnce(result())
         .mockResolvedValueOnce(result('{"status":"provisioned"}'));
       const client = new IncusClient(config(), { run });
@@ -391,8 +394,9 @@ describe('IncusClient policy', () => {
         id: sandboxId,
         provisioned: true,
       });
-      expect(run).toHaveBeenCalledTimes(4);
-      expect(run.mock.calls[3]?.[1]).toContain(
+      expect(run).toHaveBeenCalledTimes(5);
+      expect(run.mock.calls[3]?.[1]).toContain('cloud-init');
+      expect(run.mock.calls[4]?.[1]).toContain(
         '/usr/local/sbin/remote-codex-provision',
       );
     } finally {

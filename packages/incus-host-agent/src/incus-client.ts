@@ -258,6 +258,16 @@ export class IncusClient {
       throw new Error('The instance must be running before provisioning.');
     }
     await this.waitForGuestAgent(current.name);
+    // The guest agent is reachable before first-boot cloud-init has finished.
+    // Wait for cloud-init so provisioning cannot race guest initialization.
+    await this.run([
+      'exec',
+      current.name,
+      '--',
+      'cloud-init',
+      'status',
+      '--wait',
+    ]);
     await this.run(
       ['exec', current.name, '--', '/usr/local/sbin/remote-codex-provision'],
       `${JSON.stringify({
