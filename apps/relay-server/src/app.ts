@@ -1222,8 +1222,12 @@ export function buildRelayServer(
                 clientConnection.deviceId,
                 clientConnection.user.id,
               );
+              const connectionControlEvent =
+                parsed.payload.type === 'supervisor.connected' ||
+                parsed.payload.type === 'supervisor.pong';
               if (
                 isolation?.enabled &&
+                !connectionControlEvent &&
                 (!eventThreadId ||
                   !store.ownsHostedThread(
                     isolation.sandboxId,
