@@ -14,6 +14,7 @@ add_path_dir "/usr/local/bin"
 add_path_dir "$HOME/.local/bin"
 add_path_dir "$HOME/.local/share/pnpm"
 add_path_dir "$HOME/Library/pnpm"
+add_path_dir "$HOME/Library/pnpm/bin"
 
 for dir in "$HOME"/.local/state/fnm_multishells/*/bin \
   "$HOME"/.cache/codex-runtimes/*/dependencies/bin; do
@@ -22,7 +23,11 @@ done
 
 export PATH
 
-if ! command -v pnpm >/dev/null 2>&1; then
+if command -v pnpm >/dev/null 2>&1; then
+  PNPM_COMMAND=(pnpm)
+elif command -v corepack >/dev/null 2>&1; then
+  PNPM_COMMAND=(corepack pnpm)
+else
   cat >&2 <<EOF
 error: pnpm was not found while building the bundled iOS thread WebView UI.
 
@@ -31,12 +36,15 @@ location, or launch Xcode from a terminal that can already run pnpm:
 
   open -a Xcode-beta "$SRCROOT/RemoteCodex.xcodeproj"
 
+Searched PATH:
+  $PATH
+
 EOF
   exit 127
 fi
 
 cd "$SRCROOT/../.."
-pnpm --filter @remote-codex/ios-thread-web build
+"${PNPM_COMMAND[@]}" --filter @remote-codex/ios-thread-web build
 
 rm -rf "$SRCROOT/RemoteCodex/Resources/WebThreadDist"
 mkdir -p "$SRCROOT/RemoteCodex/Resources/WebThreadDist"
