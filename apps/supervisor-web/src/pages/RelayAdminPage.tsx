@@ -769,7 +769,7 @@ function HostedSandboxesPanel({
               Managed VMs
             </h3>
             <p className="text-xs text-[var(--theme-fg-muted)]">
-              Turn-aware idle stop is 10 minutes after the last terminal
+              Turn-aware idle stop is 30 minutes after the last terminal
               activity.
             </p>
           </div>

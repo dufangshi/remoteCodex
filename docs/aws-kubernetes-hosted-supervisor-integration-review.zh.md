@@ -85,7 +85,7 @@ Remote Codex 应把以下持久状态全部放在 `/workspace` 下：
 
 Remote Codex 已有 turn-aware idle 规则和 provider inventory reconciler。这里不能同时运行两套拥有最终决定权的回收器：
 
-- relay 继续负责产品语义：turn 是否结束、最后用户访问、10 分钟 idle；
+- relay 继续负责产品语义：turn 是否结束、最后用户访问、30 分钟 idle；
 - Kubernetes manager 负责执行 start/stop/status 和资源枚举；
 - 外部 `SandboxReaper` 的状态对账/孤儿清理算法可以复用，但 idle 判定必须读取 relay 的活动状态，不能再使用另一份独立数据库时间戳。
 
@@ -238,11 +238,11 @@ readiness 不能只看 Pod phase。`running` 至少同时满足：
 ### Phase 5：turn-aware idle 与恢复
 
 - relay 保持活动真相：turn 未结束绝不 stop。
-- turn 结束且 10 分钟无访问时调用 Kubernetes stop，删除 Pod/Service。
+- turn 结束且 30 分钟无访问时调用 Kubernetes stop，删除 Pod/Service。
 - 新访问触发 start；UI 自动等待 Pod Ready + device online。
 - 复用 reaper 的 stale/orphan reconciliation，但禁用其独立 idle clock。
 
-验收：长 turn 超过 10 分钟不会被停止；结束后 idle 10 分钟停止；再次访问自动恢复且文件/数据库不丢失。
+验收：长 turn 超过 30 分钟不会被停止；结束后 idle 30 分钟停止；再次访问自动恢复且文件/数据库不丢失。
 
 ### Phase 6：真实 AWS E2E 与故障测试
 

@@ -19,7 +19,7 @@ function lifecycleConfig(): RelayServerConfig['hostedSandbox'] {
     agentToken: 'host-agent-token-long-enough',
     relayServerUrl: 'wss://relay.example.test',
     requestTimeoutMs: 25,
-    idleTimeoutMs: 10 * 60_000,
+    idleTimeoutMs: 30 * 60_000,
     reconcileIntervalMs: 5 * 60_000,
   };
 }
@@ -76,7 +76,7 @@ afterEach(async () => {
 });
 
 describe('turn-aware hosted sandbox idle lifecycle', () => {
-  it('never stops during an active turn and waits ten minutes after terminal', async () => {
+  it('never stops during an active turn and waits thirty minutes after terminal', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'));
     const { service, fake, created, store } = setup();
@@ -106,7 +106,7 @@ describe('turn-aware hosted sandbox idle lifecycle', () => {
       turnId: 'turn-1',
       kind: 'turn_terminal',
     });
-    await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+    await vi.advanceTimersByTimeAsync(30 * 60_000 - 1);
     expect(fake.stop).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await vi.runAllTicks();
@@ -121,14 +121,14 @@ describe('turn-aware hosted sandbox idle lifecycle', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'));
     const { service, fake, created, store } = setup();
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
     expect(service.recordUserActivity(created.sandbox.deviceId)).toMatchObject({
       hosted: true,
       waking: false,
     });
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
     expect(fake.stop).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
     await vi.runAllTicks();
     expect(fake.stop).toHaveBeenCalledOnce();
 

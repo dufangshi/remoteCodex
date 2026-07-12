@@ -168,7 +168,7 @@ export function loadRelayServerConfig(
       relayServerUrl: parsed.REMOTE_CODEX_HOSTED_RELAY_SERVER_URL ?? null,
       requestTimeoutMs:
         parsed.REMOTE_CODEX_INCUS_HOST_AGENT_TIMEOUT_MS ?? 1_500,
-      idleTimeoutMs: parsed.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS ?? 10 * 60_000,
+      idleTimeoutMs: parsed.REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS ?? 30 * 60_000,
       reconcileIntervalMs:
         parsed.REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS ?? 5 * 60_000,
     },
