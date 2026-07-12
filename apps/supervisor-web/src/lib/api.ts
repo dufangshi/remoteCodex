@@ -537,7 +537,7 @@ function withAuthInit(
 
   return {
     ...init,
-    credentials: init.credentials ?? (relayMode ? 'omit' : 'same-origin'),
+    credentials: init.credentials ?? 'same-origin',
     headers,
   };
 }

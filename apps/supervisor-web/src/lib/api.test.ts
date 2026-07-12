@@ -98,7 +98,7 @@ describe('api request helper', () => {
     expect(call?.[0]).toBe('/relay/admin');
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer admin-token');
-    expect(call?.[1]?.credentials).toBe('omit');
+    expect(call?.[1]?.credentials).toBe('same-origin');
   });
 
   it('stores admin login separately from the normal relay token', async () => {
@@ -138,10 +138,10 @@ describe('api request helper', () => {
     }));
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.has('Authorization')).toBe(false);
-    expect(call?.[1]?.credentials).toBe('omit');
+    expect(call?.[1]?.credentials).toBe('same-origin');
   });
 
-  it('keeps relay portal login and session checks cookie-independent', async () => {
+  it('sends same-origin cookies for relay OAuth sessions while keeping bearer login support', async () => {
     enableRelayMode();
     vi.stubGlobal(
       'fetch',
@@ -168,13 +168,13 @@ describe('api request helper', () => {
     await fetchRelaySession();
     let call = vi.mocked(fetch).mock.calls.at(-1);
     expect(call?.[0]).toBe('/relay/auth/session');
-    expect(call?.[1]?.credentials).toBe('omit');
+    expect(call?.[1]?.credentials).toBe('same-origin');
     expect(new Headers(call?.[1]?.headers).has('Authorization')).toBe(false);
 
     await relayLogin({ identifier: 'normal', password: 'secret' });
     call = vi.mocked(fetch).mock.calls.at(-1);
     expect(call?.[0]).toBe('/relay/auth/login');
-    expect(call?.[1]?.credentials).toBe('omit');
+    expect(call?.[1]?.credentials).toBe('same-origin');
     expect(new Headers(call?.[1]?.headers).has('Authorization')).toBe(false);
     expect(window.localStorage.getItem('remote-codex-relay-token')).toBe('normal-token');
   });
