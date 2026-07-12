@@ -364,7 +364,13 @@ export class HostedSandboxService {
 
   private restoreIdleTimers() {
     for (const candidate of this.store.listHostedIdleDeadlines()) {
-      this.scheduleIdleTimer(candidate.id, candidate.deadlineAt);
+      const normalized = this.store.armHostedIdleDeadline(
+        candidate.id,
+        this.config.idleTimeoutMs,
+      );
+      if (normalized?.idleDeadlineAt && normalized.status === 'online') {
+        this.scheduleIdleTimer(normalized.id, normalized.idleDeadlineAt);
+      }
     }
   }
 
