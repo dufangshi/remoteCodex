@@ -486,6 +486,112 @@ export class RelayStore {
     return this.getHostedSandboxDetail(id)!;
   }
 
+  setHostedWorkspaceIsolation(id: string, enabled: boolean) {
+    const result = this.sqlite
+      .prepare(
+        `UPDATE relay_hosted_sandboxes
+         SET workspace_isolation_enabled = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(enabled ? 1 : 0, new Date().toISOString(), id);
+    if (result.changes === 0) {
+      throw new RelayStoreError(404, 'not_found', 'Hosted VM was not found.');
+    }
+    return this.getHostedSandboxDetail(id)!;
+  }
+
+  hostedWorkspaceIsolation(deviceId: string) {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, workspace_isolation_enabled
+         FROM relay_hosted_sandboxes WHERE device_id = ?`,
+      )
+      .get(deviceId) as
+      | { id: string; workspace_isolation_enabled: number }
+      | undefined;
+    return row
+      ? { sandboxId: row.id, enabled: Boolean(row.workspace_isolation_enabled) }
+      : null;
+  }
+
+  hostedWorkspaceIsolationForUser(deviceId: string, userId: string) {
+    const row = this.sqlite
+      .prepare(
+        `SELECT hs.id, hs.workspace_isolation_enabled
+         FROM relay_hosted_sandboxes hs
+         JOIN relay_hosted_sandbox_members m ON m.sandbox_id = hs.id
+         WHERE hs.device_id = ? AND m.user_id = ?`,
+      )
+      .get(deviceId, userId) as
+      | { id: string; workspace_isolation_enabled: number }
+      | undefined;
+    return row
+      ? { sandboxId: row.id, enabled: Boolean(row.workspace_isolation_enabled) }
+      : null;
+  }
+
+  hostedUserWorkspaceIds(sandboxId: string, userId: string) {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT workspace_id FROM relay_hosted_user_workspaces
+           WHERE sandbox_id = ? AND user_id = ? ORDER BY created_at`,
+        )
+        .all(sandboxId, userId) as Array<{ workspace_id: string }>
+    ).map((row) => row.workspace_id);
+  }
+
+  recordHostedUserWorkspace(
+    sandboxId: string,
+    userId: string,
+    workspaceId: string,
+    initial = false,
+  ) {
+    this.sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO relay_hosted_user_workspaces
+          (sandbox_id, user_id, workspace_id, initial_workspace, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(sandboxId, userId, workspaceId, initial ? 1 : 0, new Date().toISOString());
+  }
+
+  ownsHostedWorkspace(sandboxId: string, userId: string, workspaceId: string) {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1 FROM relay_hosted_user_workspaces
+           WHERE sandbox_id = ? AND user_id = ? AND workspace_id = ?`,
+        )
+        .get(sandboxId, userId, workspaceId),
+    );
+  }
+
+  recordHostedUserThread(
+    sandboxId: string,
+    userId: string,
+    threadId: string,
+    workspaceId: string,
+  ) {
+    this.sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO relay_hosted_user_threads
+          (sandbox_id, user_id, thread_id, workspace_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(sandboxId, userId, threadId, workspaceId, new Date().toISOString());
+  }
+
+  ownsHostedThread(sandboxId: string, userId: string, threadId: string) {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1 FROM relay_hosted_user_threads
+           WHERE sandbox_id = ? AND user_id = ? AND thread_id = ?`,
+        )
+        .get(sandboxId, userId, threadId),
+    );
+  }
+
   listHostedProviderRecords(): Array<{
     id: string;
     credentialRef: string;
@@ -1954,6 +2060,30 @@ export class RelayStore {
       CREATE INDEX IF NOT EXISTS relay_hosted_sandbox_members_user_idx
         ON relay_hosted_sandbox_members(user_id, sandbox_id);
 
+      CREATE TABLE IF NOT EXISTS relay_hosted_user_workspaces (
+        sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL,
+        initial_workspace INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (sandbox_id, workspace_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_hosted_user_workspaces_user_idx
+        ON relay_hosted_user_workspaces(sandbox_id, user_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS relay_hosted_user_threads (
+        sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        thread_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (sandbox_id, thread_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS relay_hosted_user_threads_user_idx
+        ON relay_hosted_user_threads(sandbox_id, user_id, created_at);
+
       CREATE TABLE IF NOT EXISTS relay_hosted_operations (
         id TEXT PRIMARY KEY,
         sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
@@ -2108,6 +2238,11 @@ export class RelayStore {
       'INTEGER NOT NULL DEFAULT 0',
     );
     this.ensureColumn('relay_hosted_sandboxes', 'codex_config_json', 'TEXT');
+    this.ensureColumn(
+      'relay_hosted_sandboxes',
+      'workspace_isolation_enabled',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
     this.ensureColumn('relay_shares', 'thread_title', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_label', 'TEXT');
@@ -3178,6 +3313,7 @@ export class RelayStore {
       assignedUserId: primaryUser?.userId ?? row.assigned_user_id,
       assignedUsername: primaryUser?.username ?? 'unknown',
       assignedUsers,
+      workspaceIsolationEnabled: Boolean(row.workspace_isolation_enabled),
       createdByAdminUserId: row.created_by_admin_user_id,
       provider: 'incus',
       providerInstanceId: row.provider_instance_id,
@@ -3354,6 +3490,7 @@ interface HostedSandboxRow {
   last_user_activity_at: string | null;
   idle_deadline_at: string | null;
   lifecycle_generation: number;
+  workspace_isolation_enabled: number;
   created_at: string;
   updated_at: string;
 }

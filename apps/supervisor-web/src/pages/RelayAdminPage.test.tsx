@@ -252,6 +252,7 @@ describe('RelayAdminPage', () => {
           email: 'owner@example.test',
         },
       ],
+      workspaceIsolationEnabled: false,
       createdByAdminUserId: 'admin-user',
       provider: 'incus' as const,
       providerInstanceId: 'rcd-11111111-1111-4111-8111-111111111111',
@@ -360,6 +361,19 @@ describe('RelayAdminPage', () => {
         }
         if (
           url ===
+            '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/settings' &&
+          init?.method === 'PATCH'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...hostedSandbox,
+              workspaceIsolationEnabled: true,
+            }),
+          });
+        }
+        if (
+          url ===
             '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/members' &&
           init?.method === 'PUT'
         ) {
@@ -433,6 +447,18 @@ describe('RelayAdminPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('1 active turn')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByLabelText('Isolate user workspaces for Hosted Codex'),
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/admin/hosted-sandboxes/11111111-1111-4111-8111-111111111111/settings',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: '{"workspaceIsolationEnabled":true}',
+        }),
+      ),
+    );
     expect(screen.getByText('1 inventory issue')).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Run inventory audit' }),

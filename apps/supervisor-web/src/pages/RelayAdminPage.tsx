@@ -60,6 +60,7 @@ import {
   setRelayUserEnabled,
   snapshotHostedSandbox,
   updateHostedSandboxMembers,
+  updateHostedSandboxSettings,
   updateHostedCodexFiles,
   updateRelayRegistrationSettings,
 } from '../lib/api';
@@ -977,6 +978,9 @@ function HostedSandboxRow({
                 {sandbox.activeTurnCount === 1 ? '' : 's'}
               </HostedStatusPill>
             ) : null}
+            {sandbox.workspaceIsolationEnabled ? (
+              <HostedStatusPill tone="success">Private workspaces</HostedStatusPill>
+            ) : null}
           </div>
           <p className="mt-1 text-sm text-[var(--theme-fg-soft)]">
             {sandbox.assignedUsers.map((user) => user.username).join(', ')}
@@ -1094,6 +1098,32 @@ function HostedSandboxRow({
             </button>
           )}
         </div>
+      </div>
+      <div className="mt-3 max-w-2xl rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+        <label className="flex cursor-pointer items-start justify-between gap-4">
+          <span>
+            <span className="block text-sm font-medium text-[var(--theme-fg)]">
+              Isolate user workspaces
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
+              Each authorized user sees only their own workspaces. Their first visit creates a private workspace and an initial Codex thread.
+            </span>
+          </span>
+          <input
+            aria-label={`Isolate user workspaces for ${sandbox.deviceName}`}
+            checked={sandbox.workspaceIsolationEnabled}
+            className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-strong)]"
+            disabled={busy}
+            onChange={(event) =>
+              void onAction(`settings:${sandbox.id}`, () =>
+                updateHostedSandboxSettings(sandbox.id, {
+                  workspaceIsolationEnabled: event.target.checked,
+                }),
+              )
+            }
+            type="checkbox"
+          />
+        </label>
       </div>
       <details className="mt-3">
         <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">

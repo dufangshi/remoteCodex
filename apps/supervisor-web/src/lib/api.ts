@@ -892,6 +892,17 @@ export function updateHostedSandboxMembers(
   );
 }
 
+export function updateHostedSandboxSettings(
+  id: string,
+  input: { workspaceIsolationEnabled: boolean },
+) {
+  return request<RelayHostedSandboxDetailDto>(
+    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/settings`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+    { auth: 'relay-admin' },
+  );
+}
+
 export function runHostedSandboxAction(
   id: string,
   action: 'start' | 'stop' | 'retry',

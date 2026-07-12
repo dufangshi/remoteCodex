@@ -74,6 +74,7 @@ interface AuthenticatedRelayRequest extends FastifyRequest {
 const RELAY_REQUEST_TIMEOUT_MS = 30_000;
 const RELAY_PORTAL_METADATA_TIMEOUT_MS = 900;
 const WEBSOCKET_OPEN = 1;
+const hostedBootstrapPromises = new Map<string, Promise<void>>();
 const RELAY_COOKIE_NAME = 'remote_codex_relay_session';
 const threadAccessSchema = z.enum(['read', 'control']);
 const workspaceAccessSchema = z.enum(['none', 'read', 'write']);
@@ -149,6 +150,9 @@ const updateHostedSandboxMembersSchema = z
   .object({
     assignedUserIds: z.array(z.string().uuid()).min(1).max(20),
   })
+  .strict();
+const updateHostedSandboxSettingsSchema = z
+  .object({ workspaceIsolationEnabled: z.boolean() })
   .strict();
 const hostedSnapshotSchema = z.object({
   name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/),
@@ -807,6 +811,22 @@ export function buildRelayServer(
     },
   );
 
+  app.patch(
+    '/relay/admin/hosted-sandboxes/:sandboxId/settings',
+    async (request, reply) => {
+      const user = requireRelayUser(request, reply, store, { admin: true });
+      if (!user) return;
+      const { sandboxId } = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const body = updateHostedSandboxSettingsSchema.parse(request.body ?? {});
+      return store.setHostedWorkspaceIsolation(
+        sandboxId,
+        body.workspaceIsolationEnabled,
+      );
+    },
+  );
+
   app.post(
     '/relay/admin/hosted-sandboxes/:sandboxId/retry',
     async (request, reply) => {
@@ -1180,8 +1200,8 @@ export function buildRelayServer(
             const clientConnection = connection.clientSockets.get(
               parsed.clientId,
             );
+            const eventThreadId = threadIdFromSocketPayload(parsed.payload);
             if (clientConnection) {
-              const eventThreadId = threadIdFromSocketPayload(parsed.payload);
               const freshAccess = store.effectiveAccess(
                 clientConnection.user.id,
                 clientConnection.deviceId,
@@ -1198,6 +1218,21 @@ export function buildRelayServer(
                 return;
               }
               clientConnection.access = freshAccess;
+              const isolation = store.hostedWorkspaceIsolationForUser(
+                clientConnection.deviceId,
+                clientConnection.user.id,
+              );
+              if (
+                isolation?.enabled &&
+                (!eventThreadId ||
+                  !store.ownsHostedThread(
+                    isolation.sandboxId,
+                    clientConnection.user.id,
+                    eventThreadId,
+                  ))
+              ) {
+                return;
+              }
             }
             if (
               clientConnection &&
@@ -1252,6 +1287,18 @@ export function buildRelayServer(
         });
         if (!access) {
           socket.close(1008, 'Device access is not allowed.');
+          return;
+        }
+        const isolation = store.hostedWorkspaceIsolationForUser(
+          deviceId,
+          session.user.id,
+        );
+        if (
+          isolation?.enabled &&
+          threadId &&
+          !store.ownsHostedThread(isolation.sandboxId, session.user.id, threadId)
+        ) {
+          socket.close(1008, 'This thread belongs to another VM user.');
           return;
         }
 
@@ -1535,6 +1582,87 @@ async function forwardRelayHttp(input: {
   }
 
   try {
+    const isolation = input.store.hostedWorkspaceIsolationForUser(
+      input.deviceId,
+      input.user.id,
+    );
+    if (isolation?.enabled) {
+      if (
+        input.request.method.toUpperCase() === 'GET' &&
+        (targetUrl.pathname === '/api/workspaces' ||
+          targetUrl.pathname === '/api/threads')
+      ) {
+        await ensureHostedUserBootstrap({
+          store: input.store,
+          supervisor,
+          deviceId: input.deviceId,
+          sandboxId: isolation.sandboxId,
+          user: input.user,
+        });
+      }
+      if (
+        workspaceId &&
+        !input.store.ownsHostedWorkspace(
+          isolation.sandboxId,
+          input.user.id,
+          workspaceId,
+        )
+      ) {
+        input.reply.status(403).send({
+          code: 'forbidden',
+          message: 'This workspace belongs to another VM user.',
+        } satisfies ApiErrorShape);
+        return;
+      }
+      if (
+        threadId &&
+        !input.store.ownsHostedThread(
+          isolation.sandboxId,
+          input.user.id,
+          threadId,
+        )
+      ) {
+        input.reply.status(403).send({
+          code: 'forbidden',
+          message: 'This thread belongs to another VM user.',
+        } satisfies ApiErrorShape);
+        return;
+      }
+      if (
+        input.request.method.toUpperCase() === 'POST' &&
+        targetUrl.pathname === '/api/threads/start'
+      ) {
+        const requestedWorkspaceId =
+          isObject(input.request.body) &&
+          typeof input.request.body.workspaceId === 'string'
+            ? input.request.body.workspaceId
+            : null;
+        if (
+          !requestedWorkspaceId ||
+          !input.store.ownsHostedWorkspace(
+            isolation.sandboxId,
+            input.user.id,
+            requestedWorkspaceId,
+          )
+        ) {
+          input.reply.status(403).send({
+            code: 'forbidden',
+            message: 'Create threads only in your own workspace.',
+          } satisfies ApiErrorShape);
+          return;
+        }
+      }
+      if (
+        input.request.method.toUpperCase() === 'POST' &&
+        targetUrl.pathname === '/api/threads/import'
+      ) {
+        input.reply.status(403).send({
+          code: 'forbidden',
+          message: 'Thread import is unavailable while user workspace isolation is enabled.',
+        } satisfies ApiErrorShape);
+        return;
+      }
+    }
     const requestId = randomUUID();
     const requestBody = relayRequestBody(input.request.body);
     const response = await supervisor.requestBroker.forward(supervisor.socket, {
@@ -1557,6 +1685,18 @@ async function forwardRelayHttp(input: {
       if (canForwardResponseHeader(name)) {
         input.reply.header(name, value);
       }
+    }
+    if (isolation?.enabled && response.statusCode >= 200 && response.statusCode < 300) {
+      const transformed = transformHostedIsolatedResponse({
+        store: input.store,
+        sandboxId: isolation.sandboxId,
+        userId: input.user.id,
+        method: input.request.method,
+        pathname: targetUrl.pathname,
+        response,
+      });
+      input.reply.status(response.statusCode).send(transformed);
+      return;
     }
     input.reply.status(response.statusCode).send(relayResponseBody(response));
   } catch (error) {
@@ -1608,6 +1748,176 @@ async function forwardSharedThreadList(input: {
       Boolean(thread),
     ),
   );
+}
+
+async function ensureHostedUserBootstrap(input: {
+  store: RelayStore;
+  supervisor: SupervisorConnection;
+  deviceId: string;
+  sandboxId: string;
+  user: RelayUserDto;
+}) {
+  if (input.store.hostedUserWorkspaceIds(input.sandboxId, input.user.id).length) {
+    return;
+  }
+  const key = `${input.sandboxId}:${input.user.id}`;
+  const existing = hostedBootstrapPromises.get(key);
+  if (existing) return existing;
+  const pending = (async () => {
+    const slug = input.user.username
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'user';
+    const directory = `${slug}-${input.user.id.slice(0, 8)}`;
+    const label = `${input.user.username}'s workspace`;
+    const current = await forwardSupervisorCommandJson(
+      input.supervisor,
+      input.deviceId,
+      'GET',
+      '/api/workspaces',
+    );
+    const currentWorkspaces = Array.isArray(current) ? current : [];
+    let workspace = currentWorkspaces.find(
+      (candidate) =>
+        isObject(candidate) &&
+        typeof candidate.absPath === 'string' &&
+        candidate.absPath.endsWith(`/${directory}`),
+    );
+    if (!workspace) {
+      workspace = await forwardSupervisorCommandJson(
+        input.supervisor,
+        input.deviceId,
+        'POST',
+        '/api/workspaces',
+        { absPath: directory, label },
+      );
+    }
+    const workspaceId = stringField(workspace, 'id');
+    if (!workspaceId) throw new Error('Initial workspace creation returned no id.');
+    const thread = await forwardSupervisorCommandJson(
+      input.supervisor,
+      input.deviceId,
+      'POST',
+      '/api/threads/start',
+      {
+        workspaceId,
+        title: 'Getting started',
+        provider: 'codex',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'low',
+        approvalMode: 'yolo',
+      },
+    );
+    const threadId = stringField(thread, 'id');
+    if (!threadId) throw new Error('Initial thread creation returned no id.');
+    input.store.recordHostedUserWorkspace(
+      input.sandboxId,
+      input.user.id,
+      workspaceId,
+      true,
+    );
+    input.store.recordHostedUserThread(
+      input.sandboxId,
+      input.user.id,
+      threadId,
+      workspaceId,
+    );
+  })().finally(() => hostedBootstrapPromises.delete(key));
+  hostedBootstrapPromises.set(key, pending);
+  return pending;
+}
+
+async function forwardSupervisorCommandJson(
+  supervisor: SupervisorConnection,
+  deviceId: string,
+  method: string,
+  path: string,
+  body?: unknown,
+) {
+  const response = await supervisor.requestBroker.forward(supervisor.socket, {
+    type: 'relay.request',
+    timestamp: new Date().toISOString(),
+    requestId: randomUUID(),
+    deviceId,
+    payload: {
+      method,
+      path,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? null : JSON.stringify(body),
+    },
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(`Supervisor bootstrap request failed with ${response.statusCode}.`);
+  }
+  return JSON.parse(relayJsonBody(response)) as unknown;
+}
+
+function transformHostedIsolatedResponse(input: {
+  store: RelayStore;
+  sandboxId: string;
+  userId: string;
+  method: string;
+  pathname: string;
+  response: RelayHttpResponsePayload;
+}) {
+  const raw = relayJsonBody(input.response);
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw) as unknown;
+  } catch {
+    return relayResponseBody(input.response);
+  }
+  const method = input.method.toUpperCase();
+  if (method === 'GET' && input.pathname === '/api/workspaces' && Array.isArray(payload)) {
+    const owned = new Set(
+      input.store.hostedUserWorkspaceIds(input.sandboxId, input.userId),
+    );
+    return payload.filter(
+      (workspace) => isObject(workspace) && owned.has(stringField(workspace, 'id') ?? ''),
+    );
+  }
+  if (method === 'POST' && input.pathname === '/api/workspaces' && isObject(payload)) {
+    const workspaceId = stringField(payload, 'id');
+    if (workspaceId) {
+      input.store.recordHostedUserWorkspace(
+        input.sandboxId,
+        input.userId,
+        workspaceId,
+      );
+    }
+    return payload;
+  }
+  if (method === 'GET' && input.pathname === '/api/threads' && Array.isArray(payload)) {
+    const ownedWorkspaces = new Set(
+      input.store.hostedUserWorkspaceIds(input.sandboxId, input.userId),
+    );
+    return payload.filter((thread) => {
+      if (!isObject(thread)) return false;
+      const threadId = stringField(thread, 'id');
+      const workspaceId = stringField(thread, 'workspaceId');
+      if (!threadId || !workspaceId || !ownedWorkspaces.has(workspaceId)) return false;
+      input.store.recordHostedUserThread(
+        input.sandboxId,
+        input.userId,
+        threadId,
+        workspaceId,
+      );
+      return true;
+    });
+  }
+  if (method === 'POST' && input.pathname === '/api/threads/start' && isObject(payload)) {
+    const threadId = stringField(payload, 'id');
+    const workspaceId = stringField(payload, 'workspaceId');
+    if (threadId && workspaceId) {
+      input.store.recordHostedUserThread(
+        input.sandboxId,
+        input.userId,
+        threadId,
+        workspaceId,
+      );
+    }
+  }
+  return payload;
 }
 
 function relayResponseBody(response: {

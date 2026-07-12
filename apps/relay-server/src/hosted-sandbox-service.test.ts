@@ -162,6 +162,16 @@ describe('hosted sandbox create saga', () => {
     expect(create.body).not.toContain('rcd_');
     const sandboxId = create.json().sandbox.id as string;
     const deviceId = create.json().sandbox.deviceId as string;
+    expect(create.json().sandbox.workspaceIsolationEnabled).toBe(false);
+
+    const isolation = await app.inject({
+      method: 'PATCH',
+      url: `/relay/admin/hosted-sandboxes/${sandboxId}/settings`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { workspaceIsolationEnabled: true },
+    });
+    expect(isolation.statusCode).toBe(200);
+    expect(isolation.json().workspaceIsolationEnabled).toBe(true);
 
     await waitFor(async () => {
       const detail = await app.inject({

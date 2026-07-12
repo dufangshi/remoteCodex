@@ -443,6 +443,7 @@ export interface RelayHostedSandboxDto {
   assignedUserId: string;
   assignedUsername: string;
   assignedUsers: RelayHostedSandboxMemberDto[];
+  workspaceIsolationEnabled: boolean;
   createdByAdminUserId: string;
   provider: 'incus';
   providerInstanceId: string | null;
