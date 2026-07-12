@@ -549,7 +549,7 @@ function HostedSandboxesPanel({
       createHostedSandbox({
         assignedUserIds,
         deviceName,
-        imageVersion: 'ubuntu-24.04-v4',
+        imageVersion: 'ubuntu-24.04-v5',
         resources,
         backends: ['codex'],
         codexFiles: {

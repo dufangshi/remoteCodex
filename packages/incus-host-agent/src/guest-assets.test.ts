@@ -10,7 +10,7 @@ describe('hosted supervisor golden image assets', () => {
       fs.readFileSync(path.join(guestDir, 'image-manifest.json'), 'utf8'),
     ) as Record<string, unknown>;
     expect(manifest).toMatchObject({
-      imageVersion: 'ubuntu-24.04-v4',
+      imageVersion: 'ubuntu-24.04-v5',
       architecture: 'x86_64',
       baseImageFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       node: {
@@ -39,6 +39,15 @@ describe('hosted supervisor golden image assets', () => {
     expect(provision).toContain('base_url = ${base_url_toml}');
     expect(provision).toContain('[features]');
     expect(provision).toContain('goals = ${goals}');
+  });
+
+  it('clears the builder machine identity before publishing the image', () => {
+    const buildScript = fs.readFileSync(
+      path.join(guestDir, 'build-golden-image.sh'),
+      'utf8',
+    );
+    expect(buildScript).toContain('truncate -s 0 /etc/machine-id');
+    expect(buildScript).toContain('rm -f /var/lib/dbus/machine-id');
   });
 
   it('ships a disabled-until-provisioned, hardened systemd service', () => {

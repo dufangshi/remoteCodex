@@ -1,6 +1,6 @@
 {
-  "imageVersion": "ubuntu-24.04-v4",
-  "alias": "remote-codex-ubuntu-24.04-v4",
+  "imageVersion": "ubuntu-24.04-v5",
+  "alias": "remote-codex-ubuntu-24.04-v5",
   "baseImage": "images:ubuntu/24.04/cloud",
   "baseImageFingerprint": "da45c129b31dc618ea059c1e18c464b74c6feb8d93f4895a7c62f3fcec1105b3",
   "architecture": "x86_64",

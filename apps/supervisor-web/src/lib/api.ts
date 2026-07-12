@@ -862,7 +862,8 @@ export function createHostedSandbox(input: {
     | 'ubuntu-24.04-v1'
     | 'ubuntu-24.04-v2'
     | 'ubuntu-24.04-v3'
-    | 'ubuntu-24.04-v4';
+    | 'ubuntu-24.04-v4'
+    | 'ubuntu-24.04-v5';
   resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
   backends: ['codex'];
   codexFiles: RelayHostedCodexFilesDto;

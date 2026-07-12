@@ -83,6 +83,14 @@ codex --version
 remote-codex version
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
+
+# A published VM image must not retain the builder's machine identity. systemd
+# uses this value to derive the DHCP client identifier; cloning it makes every
+# guest request the same lease and causes intermittent network/tunnel loss when
+# more than one hosted VM is running. An empty file is populated from each
+# Incus VM's unique UUID during its first boot.
+truncate -s 0 /etc/machine-id
+rm -f /var/lib/dbus/machine-id
 GUEST_SETUP
 
 incus --project "${project}" exec "${builder}" -- systemctl poweroff >/dev/null 2>&1 || true
