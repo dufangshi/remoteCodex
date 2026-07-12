@@ -696,6 +696,24 @@ export class RelayStore {
 
   armHostedIdleDeadline(id: string, idleTimeoutMs: number) {
     const now = new Date();
+    const current = this.getHostedSandboxDetail(id);
+    if (!current || current.activeTurnCount > 0) {
+      return current;
+    }
+    const activityDeadline = current.lastUserActivityAt
+      ? new Date(
+          new Date(current.lastUserActivityAt).getTime() + idleTimeoutMs,
+        ).toISOString()
+      : null;
+    const deadline = activityDeadline
+      ? current.idleDeadlineAt && current.idleDeadlineAt < activityDeadline
+        ? current.idleDeadlineAt
+        : activityDeadline
+      : current.idleDeadlineAt ??
+        new Date(now.getTime() + idleTimeoutMs).toISOString();
+    if (deadline === current.idleDeadlineAt) {
+      return current;
+    }
     this.sqlite
       .prepare(
         `
@@ -705,11 +723,7 @@ export class RelayStore {
           WHERE id = ? AND active_turn_count = 0
         `,
       )
-      .run(
-        new Date(now.getTime() + idleTimeoutMs).toISOString(),
-        now.toISOString(),
-        id,
-      );
+      .run(deadline, now.toISOString(), id);
     return this.getHostedSandboxDetail(id);
   }
 

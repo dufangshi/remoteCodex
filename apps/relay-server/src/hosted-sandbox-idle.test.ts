@@ -141,4 +141,24 @@ describe('turn-aware hosted sandbox idle lifecycle', () => {
     );
     service.close();
   });
+
+  it('does not extend the idle deadline when the supervisor reconnects', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'));
+    const { service, fake, created, store } = setup();
+    const originalDeadline = store.getHostedSandboxDetail(
+      created.sandbox.id,
+    )?.idleDeadlineAt;
+
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    service.markOnline(created.sandbox.deviceId);
+    expect(
+      store.getHostedSandboxDetail(created.sandbox.id)?.idleDeadlineAt,
+    ).toBe(originalDeadline);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await vi.runAllTicks();
+    expect(fake.stop).toHaveBeenCalledOnce();
+    service.close();
+  });
 });
