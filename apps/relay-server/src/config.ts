@@ -16,6 +16,14 @@ export interface RelayServerConfig {
   registrationEnabled: boolean;
   registrationEnabledConfigured: boolean;
   registrationPassword: string | null;
+  publicBaseUrl?: string | null;
+  googleOAuthClientId?: string | null;
+  googleOAuthClientSecret?: string | null;
+  googleOAuthEnabled?: boolean;
+  githubOAuthClientId?: string | null;
+  githubOAuthClientSecret?: string | null;
+  githubOAuthEnabled?: boolean;
+  emailVerificationConfigured?: boolean;
   webDistDir: string | null;
   hostedSandbox: {
     provider: 'disabled' | 'incus';
@@ -42,6 +50,15 @@ const envSchema = z.object({
   REMOTE_CODEX_RELAY_SESSION_SECRET: z.string().min(16).optional(),
   REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: z.string().optional(),
   REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: z.string().min(8).optional(),
+  REMOTE_CODEX_PUBLIC_BASE_URL: z.string().url().optional(),
+  REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
+  REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  REMOTE_CODEX_GOOGLE_OAUTH_ENABLED: z.string().optional(),
+  REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID: z.string().min(1).optional(),
+  REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  REMOTE_CODEX_GITHUB_OAUTH_ENABLED: z.string().optional(),
+  REMOTE_CODEX_EMAIL_VERIFICATION_SECRET: z.string().min(16).optional(),
+  REMOTE_CODEX_POSTMARK_SERVER_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_RELAY_WEB_DIST_DIR: z.string().min(1).optional(),
   REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER: z
     .enum(['disabled', 'incus'])
@@ -104,6 +121,15 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD,
     ),
+    REMOTE_CODEX_PUBLIC_BASE_URL: optionalNonEmpty(env.REMOTE_CODEX_PUBLIC_BASE_URL),
+    REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID: optionalNonEmpty(env.REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID),
+    REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET: optionalNonEmpty(env.REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET),
+    REMOTE_CODEX_GOOGLE_OAUTH_ENABLED: optionalNonEmpty(env.REMOTE_CODEX_GOOGLE_OAUTH_ENABLED),
+    REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID: optionalNonEmpty(env.REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID),
+    REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET: optionalNonEmpty(env.REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET),
+    REMOTE_CODEX_GITHUB_OAUTH_ENABLED: optionalNonEmpty(env.REMOTE_CODEX_GITHUB_OAUTH_ENABLED),
+    REMOTE_CODEX_EMAIL_VERIFICATION_SECRET: optionalNonEmpty(env.REMOTE_CODEX_EMAIL_VERIFICATION_SECRET),
+    REMOTE_CODEX_POSTMARK_SERVER_TOKEN: optionalNonEmpty(env.REMOTE_CODEX_POSTMARK_SERVER_TOKEN),
     REMOTE_CODEX_RELAY_WEB_DIST_DIR: optionalNonEmpty(
       env.REMOTE_CODEX_RELAY_WEB_DIST_DIR,
     ),
@@ -159,6 +185,17 @@ export function loadRelayServerConfig(
       parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED !== undefined,
     registrationPassword:
       parsed.REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD ?? null,
+    publicBaseUrl: parsed.REMOTE_CODEX_PUBLIC_BASE_URL?.replace(/\/$/, '') ?? null,
+    googleOAuthClientId: parsed.REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID ?? null,
+    googleOAuthClientSecret: parsed.REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET ?? null,
+    googleOAuthEnabled: parsed.REMOTE_CODEX_GOOGLE_OAUTH_ENABLED !== 'false',
+    githubOAuthClientId: parsed.REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID ?? null,
+    githubOAuthClientSecret: parsed.REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET ?? null,
+    githubOAuthEnabled: parsed.REMOTE_CODEX_GITHUB_OAUTH_ENABLED !== 'false',
+    emailVerificationConfigured: Boolean(
+      parsed.REMOTE_CODEX_EMAIL_VERIFICATION_SECRET &&
+        parsed.REMOTE_CODEX_POSTMARK_SERVER_TOKEN,
+    ),
     webDistDir:
       parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? defaultRelayWebDistDir(),
     hostedSandbox: {

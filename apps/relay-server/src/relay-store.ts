@@ -87,6 +87,15 @@ interface PendingRegistrationRecord {
   status: 'pending' | 'approved' | 'rejected';
   reviewedAt: string | null;
   reviewedByUserId: string | null;
+  provider: 'password' | 'google' | 'github';
+  providerSubject: string | null;
+}
+
+export interface RelayExternalIdentity {
+  provider: 'google' | 'github';
+  subject: string;
+  email: string;
+  username: string;
 }
 
 export interface RelayAdminMetadata {
@@ -192,6 +201,8 @@ export class RelayStore {
     email: string;
     username: string;
     password: string;
+    provider?: 'password' | 'google' | 'github';
+    providerSubject?: string | null;
   }) {
     if (!this.registrationEnabled()) {
       throw new RelayStoreError(
@@ -257,9 +268,47 @@ export class RelayStore {
       status: 'pending',
       reviewedAt: null,
       reviewedByUserId: null,
+      provider: input.provider ?? 'password',
+      providerSubject: input.providerSubject ?? null,
     };
     this.insertPendingRegistration(record);
     return this.publicPendingRegistration(record);
+  }
+
+  authenticateExternalIdentity(identity: RelayExternalIdentity, approvalRequired: boolean) {
+    const linked = this.sqlite.prepare(
+      'SELECT user_id FROM relay_user_identities WHERE provider = ? AND provider_subject = ?',
+    ).get(identity.provider, identity.subject) as { user_id: string } | undefined;
+    if (linked) {
+      const user = this.requireUser(linked.user_id);
+      if (!user.enabled) throw new RelayStoreError(401, 'unauthorized', 'This relay account is disabled.');
+      return { kind: 'login' as const, result: this.createLoginResult(user) };
+    }
+    if (!this.registrationEnabled()) {
+      throw new RelayStoreError(403, 'forbidden', 'Registration is currently disabled.');
+    }
+    if (this.getUserByIdentifier(identity.email)) {
+      throw new RelayStoreError(409, 'conflict', 'An account with this email already exists. Sign in with its current method before linking OAuth.');
+    }
+    const username = this.availableUsername(identity.username);
+    const password = crypto.randomBytes(32).toString('base64url');
+    if (approvalRequired) {
+      const request = this.requestRegistrationApproval({
+        email: identity.email,
+        username,
+        password,
+        provider: identity.provider,
+        providerSubject: identity.subject,
+      });
+      return { kind: 'pending' as const, request };
+    }
+    const user = this.createStoredUser({ email: identity.email, username, password, role: 'user' });
+    const create = this.sqlite.transaction(() => {
+      this.insertUser(user);
+      this.insertIdentity(user.id, identity.provider, identity.subject, identity.email);
+    });
+    create();
+    return { kind: 'login' as const, result: this.createLoginResult(user) };
   }
 
   login(input: { identifier: string; password: string }) {
@@ -1400,6 +1449,12 @@ export class RelayStore {
       registrationPassword: this.getSetting('registrationPassword'),
       approvalRequired:
         this.getSetting('registrationApprovalRequired') === 'true',
+      googleAuthEnabled: this.getSetting('googleAuthEnabled') === 'true',
+      githubAuthEnabled: this.getSetting('githubAuthEnabled') === 'true',
+      emailVerificationEnabled: this.getSetting('emailVerificationEnabled') === 'true',
+      googleAuthAvailable: false,
+      githubAuthAvailable: false,
+      emailVerificationAvailable: false,
     };
   }
 
@@ -1428,7 +1483,16 @@ export class RelayStore {
         input.approvalRequired ? 'true' : 'false',
       );
     }
+    for (const key of ['googleAuthEnabled', 'githubAuthEnabled', 'emailVerificationEnabled'] as const) {
+      if (input[key] !== undefined) this.setSetting(key, input[key] ? 'true' : 'false');
+    }
     return this.registrationSettings();
+  }
+
+  ensureAuthSettings(input: { google: boolean; github: boolean }) {
+    if (this.getSetting('googleAuthEnabled') === null) this.setSetting('googleAuthEnabled', input.google ? 'true' : 'false');
+    if (this.getSetting('githubAuthEnabled') === null) this.setSetting('githubAuthEnabled', input.github ? 'true' : 'false');
+    if (this.getSetting('emailVerificationEnabled') === null) this.setSetting('emailVerificationEnabled', 'false');
   }
 
   ensureRegistrationPassword(password: string | null) {
@@ -1453,6 +1517,9 @@ export class RelayStore {
     };
     const approve = this.sqlite.transaction(() => {
       this.insertUser(user);
+      if (record.providerSubject && record.provider !== 'password') {
+        this.insertIdentity(user.id, record.provider, record.providerSubject, record.email);
+      }
       this.sqlite
         .prepare(
           `
@@ -2008,9 +2075,21 @@ export class RelayStore {
         reviewed_by_user_id TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS relay_user_identities (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'github')),
+        provider_subject TEXT NOT NULL,
+        provider_email TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(provider, provider_subject)
+      );
+
       CREATE INDEX IF NOT EXISTS relay_pending_registrations_status_idx ON relay_pending_registrations(status, created_at DESC);
     `);
     this.ensureColumn('relay_users', 'last_seen_at', 'TEXT');
+    this.ensureColumn('relay_pending_registrations', 'provider', "TEXT NOT NULL DEFAULT 'password'");
+    this.ensureColumn('relay_pending_registrations', 'provider_subject', 'TEXT');
     this.ensureColumn('relay_devices', 'token', 'TEXT');
     this.ensureColumn(
       'relay_hosted_sandboxes',
@@ -2991,6 +3070,7 @@ export class RelayStore {
       email: record.email,
       username: record.username,
       createdAt: record.createdAt,
+      provider: record.provider,
     };
   }
 
@@ -3000,8 +3080,8 @@ export class RelayStore {
         `
           INSERT INTO relay_pending_registrations (
             id, email, username, password_salt, password_hash,
-            created_at, status, reviewed_at, reviewed_by_user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, status, reviewed_at, reviewed_by_user_id, provider, provider_subject
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -3014,7 +3094,32 @@ export class RelayStore {
         record.status,
         record.reviewedAt,
         record.reviewedByUserId,
+        record.provider,
+        record.providerSubject,
       );
+  }
+
+  private insertIdentity(userId: string, provider: 'google' | 'github', subject: string, email: string) {
+    this.sqlite.prepare(`
+      INSERT INTO relay_user_identities (
+        id, user_id, provider, provider_subject, provider_email, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(crypto.randomUUID(), userId, provider, subject, email, new Date().toISOString());
+  }
+
+  private availableUsername(input: string) {
+    const base = normalizeUsername(input).slice(0, 48) || 'user';
+    let candidate = base.length >= 3 ? base : `${base}user`;
+    let suffix = 1;
+    const isTaken = (username: string) => Boolean(
+      this.getUserByUsername(username) || this.sqlite.prepare(
+        "SELECT 1 FROM relay_pending_registrations WHERE username = ? AND status = 'pending' LIMIT 1",
+      ).get(username),
+    );
+    while (isTaken(candidate)) {
+      candidate = `${base.slice(0, 42)}-${suffix++}`;
+    }
+    return candidate;
   }
 
   private rowToUser(row?: UserRow): StoredUser | null {
@@ -3178,6 +3283,8 @@ export class RelayStore {
       status: row.status,
       reviewedAt: row.reviewed_at ?? null,
       reviewedByUserId: row.reviewed_by_user_id ?? null,
+      provider: row.provider ?? 'password',
+      providerSubject: row.provider_subject ?? null,
     };
   }
 }
@@ -3341,6 +3448,8 @@ interface PendingRegistrationRow {
   status: 'pending' | 'approved' | 'rejected';
   reviewed_at: string | null;
   reviewed_by_user_id: string | null;
+  provider?: 'password' | 'google' | 'github';
+  provider_subject?: string | null;
 }
 
 export class RelayStoreError extends Error {

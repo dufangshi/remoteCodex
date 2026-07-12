@@ -146,6 +146,12 @@ export interface RelayRegistrationSettingsDto {
   enabled: boolean;
   registrationPassword: string | null;
   approvalRequired: boolean;
+  googleAuthEnabled: boolean;
+  githubAuthEnabled: boolean;
+  emailVerificationEnabled: boolean;
+  googleAuthAvailable: boolean;
+  githubAuthAvailable: boolean;
+  emailVerificationAvailable: boolean;
 }
 
 export interface RelayPendingRegistrationDto {
@@ -153,6 +159,7 @@ export interface RelayPendingRegistrationDto {
   email: string;
   username: string;
   createdAt: string;
+  provider?: 'password' | 'google' | 'github';
 }
 
 export type RelayThreadAccessDto = 'read' | 'control';
@@ -298,6 +305,7 @@ export interface RelaySessionDto {
   authenticated: boolean;
   user: RelayUserDto | null;
   registrationEnabled: boolean;
+  registrationSettings?: RelayRegistrationSettingsDto;
 }
 
 export interface RelayLoginResultDto {

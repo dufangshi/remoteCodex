@@ -27,6 +27,14 @@ function testConfig(
     registrationEnabled: true,
     registrationEnabledConfigured: false,
     registrationPassword: null,
+    publicBaseUrl: null,
+    googleOAuthClientId: null,
+    googleOAuthClientSecret: null,
+    googleOAuthEnabled: true,
+    githubOAuthClientId: null,
+    githubOAuthClientSecret: null,
+    githubOAuthEnabled: true,
+    emailVerificationConfigured: false,
     webDistDir: null,
     hostedSandbox: {
       provider: 'disabled',
@@ -605,6 +613,46 @@ describe('relay server', () => {
     });
 
     await app.close();
+  });
+
+  it('registers a Google OAuth user from verified profile data', async () => {
+    const app = buildRelayServer(testConfig({
+      publicBaseUrl: 'https://relay.example.test',
+      googleOAuthClientId: 'google-client-id',
+      googleOAuthClientSecret: 'google-client-secret',
+    }));
+    await app.ready();
+
+    const start = await app.inject({ method: 'GET', url: '/relay/auth/oauth/google/start' });
+    expect(start.statusCode).toBe(302);
+    const authorizeUrl = new URL(start.headers.location!);
+    expect(authorizeUrl.searchParams.get('redirect_uri')).toBe('https://relay.example.test/relay/auth/oauth/google/callback');
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'google-access-token' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        sub: 'google-subject-1',
+        email: 'OAuth.User@example.test',
+        email_verified: true,
+      }), { status: 200 })) as typeof fetch;
+    try {
+      const callback = await app.inject({
+        method: 'GET',
+        url: `/relay/auth/oauth/google/callback?code=test-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state')!)}`,
+      });
+      expect(callback.statusCode).toBe(302);
+      expect(callback.headers.location).toBe('/relay-portal');
+      const session = await app.inject({
+        method: 'GET',
+        url: '/relay/auth/session',
+        headers: { cookie: String(callback.headers['set-cookie']) },
+      });
+      expect(session.json().user).toMatchObject({ email: 'oauth.user@example.test', username: 'oauthuser' });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await app.close();
+    }
   });
 
   it('requires the configured registration password when registering users', async () => {

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import type {
   RelaySessionDto,
@@ -25,6 +25,7 @@ function errorMessage(caught: unknown, fallback: string) {
 
 export function RelayPortalPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +75,9 @@ export function RelayPortalPage() {
       <RelayFrame>
         <RelayAuthPanel
           registrationEnabled={session?.registrationEnabled ?? true}
+          settings={session?.registrationSettings}
+          oauthNotice={new URLSearchParams(location.search).has('oauthPending') ? 'OAuth registration received. An admin must approve it before you can sign in.' : null}
+          oauthError={new URLSearchParams(location.search).get('oauthError')}
           initialError={error}
           onAuthenticated={handleAuthenticated}
         />
@@ -86,10 +90,16 @@ export function RelayPortalPage() {
 
 function RelayAuthPanel({
   registrationEnabled,
+  settings,
+  oauthNotice,
+  oauthError,
   initialError,
   onAuthenticated,
 }: {
   registrationEnabled: boolean;
+  settings: RelaySessionDto['registrationSettings'];
+  oauthNotice: string | null;
+  oauthError: string | null;
   initialError: string | null;
   onAuthenticated: () => Promise<void>;
 }) {
@@ -99,8 +109,8 @@ function RelayAuthPanel({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [registrationPassword, setRegistrationPassword] = useState('');
-  const [error, setError] = useState(initialError);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState(initialError ?? oauthError);
+  const [notice, setNotice] = useState<string | null>(oauthNotice);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -143,7 +153,14 @@ function RelayAuthPanel({
       <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
         {mode === 'login' ? 'Sign in' : 'Create account'}
       </h1>
-      <form className="mt-5 space-y-4" onSubmit={submit}>
+      {(settings?.googleAuthEnabled || settings?.githubAuthEnabled) ? (
+        <div className="mt-5 grid gap-2">
+          {settings.googleAuthEnabled ? <a className="relay-button-secondary flex h-11 items-center justify-center" href="/relay/auth/oauth/google/start">Continue with Google</a> : null}
+          {settings.githubAuthEnabled ? <a className="relay-button-secondary flex h-11 items-center justify-center" href="/relay/auth/oauth/github/start">Continue with GitHub</a> : null}
+          <div className="flex items-center gap-3 py-1 text-xs text-[var(--theme-fg-muted)]"><span className="h-px flex-1 bg-[var(--theme-border)]" /><span>or use password</span><span className="h-px flex-1 bg-[var(--theme-border)]" /></div>
+        </div>
+      ) : null}
+      <form className="mt-4 space-y-4" onSubmit={submit}>
         {mode === 'login' ? (
           <RelayInput
             autoComplete="username"

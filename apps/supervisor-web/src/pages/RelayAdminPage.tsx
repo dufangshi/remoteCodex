@@ -2102,6 +2102,12 @@ function SettingsPanel({
               onChange({ ...draft, approvalRequired })
             }
           />
+          <div className="space-y-3 border-t border-[var(--theme-border)] pt-4">
+            <Checkbox checked={draft.googleAuthEnabled} disabled={!draft.googleAuthAvailable} label="Enable Google authentication" onChange={(googleAuthEnabled) => onChange({ ...draft, googleAuthEnabled })} />
+            <Checkbox checked={draft.githubAuthEnabled} disabled={!draft.githubAuthAvailable} label="Enable GitHub authentication" onChange={(githubAuthEnabled) => onChange({ ...draft, githubAuthEnabled })} />
+            <Checkbox checked={draft.emailVerificationEnabled} disabled={!draft.emailVerificationAvailable} label="Enable email verification" onChange={(emailVerificationEnabled) => onChange({ ...draft, emailVerificationEnabled })} />
+            {!draft.emailVerificationAvailable ? <p className="text-xs text-[var(--theme-fg-muted)]">Configure the email provider and verification secret to enable this option.</p> : null}
+          </div>
           <button
             className="relay-button-primary inline-flex items-center gap-2"
             disabled={busy}
@@ -2295,17 +2301,20 @@ function Td({
 
 function Checkbox({
   checked,
+  disabled = false,
   label,
   onChange,
 }: {
   checked: boolean;
+  disabled?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex items-center gap-3 text-sm text-[var(--theme-fg-soft)]">
+    <label className={`flex items-center gap-3 text-sm ${disabled ? 'text-[var(--theme-fg-muted)] opacity-60' : 'text-[var(--theme-fg-soft)]'}`}>
       <input
         checked={checked}
+        disabled={disabled}
         className="h-4 w-4 accent-[var(--theme-accent)]"
         onChange={(event) => onChange(event.target.checked)}
         type="checkbox"

@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 
 import type {
@@ -244,6 +245,9 @@ const updateRegistrationSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   registrationPassword: z.string().nullable().optional(),
   approvalRequired: z.boolean().optional(),
+  googleAuthEnabled: z.boolean().optional(),
+  githubAuthEnabled: z.boolean().optional(),
+  emailVerificationEnabled: z.boolean().optional(),
 });
 const updateAccountSchema = z.object({
   username: z.string().trim().min(3).optional(),
@@ -353,6 +357,12 @@ export function buildRelayServer(
     store.setRegistrationEnabled(config.registrationEnabled);
   }
   store.ensureRegistrationPassword(config.registrationPassword);
+  const googleAvailable = Boolean(config.googleOAuthClientId && config.googleOAuthClientSecret);
+  const githubAvailable = Boolean(config.githubOAuthClientId && config.githubOAuthClientSecret);
+  store.ensureAuthSettings({
+    google: googleAvailable && config.googleOAuthEnabled !== false,
+    github: githubAvailable && config.githubOAuthEnabled !== false,
+  });
   store.seedAdmin({
     username: config.adminUsername,
     email: config.adminEmail,
@@ -413,8 +423,62 @@ export function buildRelayServer(
     } satisfies RelayHealthDto;
   });
 
+  const authSettings = () => ({
+    ...store.registrationSettings(),
+    googleAuthAvailable: googleAvailable,
+    githubAuthAvailable: githubAvailable,
+    emailVerificationAvailable: config.emailVerificationConfigured,
+  });
+
   app.get('/relay/auth/session', async (request) => {
-    return store.verifySession(readRelaySessionToken(request));
+    return { ...store.verifySession(readRelaySessionToken(request)), registrationSettings: authSettings() };
+  });
+
+  app.get('/relay/auth/oauth/:provider/start', async (request, reply) => {
+    const { provider } = z.object({ provider: z.enum(['google', 'github']) }).parse(request.params);
+    const settings = authSettings();
+    if (provider === 'google' ? !settings.googleAuthEnabled || !googleAvailable : !settings.githubAuthEnabled || !githubAvailable) {
+      reply.status(403).send({ code: 'forbidden', message: `${provider === 'google' ? 'Google' : 'GitHub'} authentication is disabled.` } satisfies ApiErrorShape);
+      return;
+    }
+    const state = signOAuthState(provider, config.sessionSecret);
+    const callback = oauthCallbackUrl(request, config, provider);
+    const url = provider === 'google'
+      ? new URL('https://accounts.google.com/o/oauth2/v2/auth')
+      : new URL('https://github.com/login/oauth/authorize');
+    url.searchParams.set('client_id', provider === 'google' ? config.googleOAuthClientId! : config.githubOAuthClientId!);
+    url.searchParams.set('redirect_uri', callback);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', state);
+    url.searchParams.set('scope', provider === 'google' ? 'openid email profile' : 'read:user user:email');
+    if (provider === 'google') url.searchParams.set('prompt', 'select_account');
+    reply.redirect(url.toString());
+  });
+
+  app.get('/relay/auth/oauth/:provider/callback', async (request, reply) => {
+    const { provider } = z.object({ provider: z.enum(['google', 'github']) }).parse(request.params);
+    const query = z.object({ code: z.string().min(1), state: z.string().min(1) }).parse(request.query);
+    if (!verifyOAuthState(query.state, provider, config.sessionSecret)) {
+      reply.redirect('/relay-portal?oauthError=OAuth%20request%20expired%20or%20was%20invalid.');
+      return;
+    }
+    try {
+      const identity = provider === 'google'
+        ? await fetchGoogleIdentity(query.code, oauthCallbackUrl(request, config, provider), config)
+        : await fetchGitHubIdentity(query.code, oauthCallbackUrl(request, config, provider), config);
+      const outcome = store.authenticateExternalIdentity(identity, store.registrationSettings().approvalRequired);
+      if (outcome.kind === 'pending') {
+        reply.redirect('/relay-portal?oauthPending=1');
+        return;
+      }
+      store.recordUserSeen(outcome.result.session.user!.id);
+      attachRelayCookie(reply, outcome.result.token);
+      reply.redirect('/relay-portal');
+    } catch (error) {
+      request.log.error(error);
+      const message = error instanceof RelayStoreError ? error.message : 'OAuth authentication failed.';
+      reply.redirect(`/relay-portal?oauthError=${encodeURIComponent(message)}`);
+    }
   });
 
   app.post('/relay/auth/register', async (request, reply) => {
@@ -631,7 +695,8 @@ export function buildRelayServer(
         ? { conversationWindowDays: query.days }
         : {}),
     });
-    return enrichAdminSummary(baseSummary, state, store, query.days);
+    const summary = await enrichAdminSummary(baseSummary, state, store, query.days);
+    return { ...summary, settings: authSettings() };
   });
 
   app.get(
@@ -867,6 +932,9 @@ export function buildRelayServer(
       return;
     }
     const body = updateRegistrationSettingsSchema.parse(request.body ?? {});
+    if (body.googleAuthEnabled && !googleAvailable) throw new RelayStoreError(400, 'bad_request', 'Google OAuth credentials are not configured.');
+    if (body.githubAuthEnabled && !githubAvailable) throw new RelayStoreError(400, 'bad_request', 'GitHub OAuth credentials are not configured.');
+    if (body.emailVerificationEnabled && !config.emailVerificationConfigured) throw new RelayStoreError(400, 'bad_request', 'Email verification is not configured.');
     const settings = store.updateRegistrationSettings({
       ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
       ...(body.registrationPassword !== undefined
@@ -875,10 +943,13 @@ export function buildRelayServer(
       ...(body.approvalRequired !== undefined
         ? { approvalRequired: body.approvalRequired }
         : {}),
+      ...(body.googleAuthEnabled !== undefined ? { googleAuthEnabled: body.googleAuthEnabled } : {}),
+      ...(body.githubAuthEnabled !== undefined ? { githubAuthEnabled: body.githubAuthEnabled } : {}),
+      ...(body.emailVerificationEnabled !== undefined ? { emailVerificationEnabled: body.emailVerificationEnabled } : {}),
     });
     return {
       registrationEnabled: settings.enabled,
-      settings,
+      settings: { ...settings, googleAuthAvailable: googleAvailable, githubAuthAvailable: githubAvailable, emailVerificationAvailable: config.emailVerificationConfigured },
     };
   });
 
@@ -1792,6 +1863,71 @@ function clearRelayCookie(reply: FastifyReply) {
     'set-cookie',
     `${RELAY_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
   );
+}
+
+function oauthCallbackUrl(request: FastifyRequest, config: RelayServerConfig, provider: 'google' | 'github') {
+  const configured = config.publicBaseUrl?.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
+  const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
+  const protocol = forwardedProto || request.protocol;
+  const host = String(request.headers['x-forwarded-host'] ?? request.headers.host ?? 'localhost:8788').split(',')[0]?.trim();
+  const base = configured || `${protocol}://${host}`;
+  return `${base}/relay/auth/oauth/${provider}/callback`;
+}
+
+function signOAuthState(provider: 'google' | 'github', secret: string) {
+  const payload = Buffer.from(JSON.stringify({ provider, expiresAt: Date.now() + 10 * 60_000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifyOAuthState(state: string, provider: 'google' | 'github', secret: string) {
+  const [payload, signature] = state.split('.');
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac('sha256', secret).update(payload).digest();
+  const actual = Buffer.from(signature, 'base64url');
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return false;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { provider?: string; expiresAt?: number };
+    return parsed.provider === provider && typeof parsed.expiresAt === 'number' && parsed.expiresAt > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+async function fetchGoogleIdentity(code: string, redirectUri: string, config: RelayServerConfig) {
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code, client_id: config.googleOAuthClientId!, client_secret: config.googleOAuthClientSecret!, redirect_uri: redirectUri, grant_type: 'authorization_code' }),
+  });
+  if (!tokenResponse.ok) throw new Error('Google token exchange failed.');
+  const tokens = await tokenResponse.json() as { access_token?: string };
+  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: `Bearer ${tokens.access_token}` } });
+  if (!response.ok) throw new Error('Google profile lookup failed.');
+  const profile = await response.json() as { sub?: string; email?: string; email_verified?: boolean; name?: string };
+  if (!profile.sub || !profile.email || !profile.email_verified) throw new Error('Google did not provide a verified email address.');
+  return { provider: 'google' as const, subject: profile.sub, email: profile.email.toLowerCase(), username: profile.email.split('@')[0] || profile.name || 'google-user' };
+}
+
+async function fetchGitHubIdentity(code: string, redirectUri: string, config: RelayServerConfig) {
+  const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code, client_id: config.githubOAuthClientId!, client_secret: config.githubOAuthClientSecret!, redirect_uri: redirectUri }),
+  });
+  if (!tokenResponse.ok) throw new Error('GitHub token exchange failed.');
+  const tokens = await tokenResponse.json() as { access_token?: string };
+  const headers = { accept: 'application/vnd.github+json', authorization: `Bearer ${tokens.access_token}`, 'user-agent': 'remote-codex-relay' };
+  const [userResponse, emailsResponse] = await Promise.all([
+    fetch('https://api.github.com/user', { headers }),
+    fetch('https://api.github.com/user/emails', { headers }),
+  ]);
+  if (!userResponse.ok || !emailsResponse.ok) throw new Error('GitHub profile lookup failed.');
+  const user = await userResponse.json() as { id?: number; login?: string };
+  const emails = await emailsResponse.json() as Array<{ email?: string; verified?: boolean; primary?: boolean }>;
+  const email = emails.find((item) => item.primary && item.verified)?.email ?? emails.find((item) => item.verified)?.email;
+  if (!user.id || !user.login || !email) throw new Error('GitHub did not provide a verified email address.');
+  return { provider: 'github' as const, subject: String(user.id), email: email.toLowerCase(), username: user.login };
 }
 
 function connectionStatus(state: RelayState) {
