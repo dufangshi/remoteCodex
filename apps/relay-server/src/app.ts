@@ -1183,6 +1183,12 @@ export function buildRelayServer(
           return;
         }
 
+        const lifecycle = hostedSandboxService.wakeIfStopped(deviceId);
+        if (lifecycle.waking) {
+          socket.close(1013, 'Hosted supervisor VM is starting.');
+          return;
+        }
+
         const supervisor = state.supervisors.get(deviceId);
         if (!supervisor || supervisor.socket.readyState !== WEBSOCKET_OPEN) {
           socket.close(1013, 'No supervisor is connected for this device.');

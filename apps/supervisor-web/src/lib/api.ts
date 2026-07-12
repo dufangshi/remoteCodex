@@ -106,6 +106,27 @@ const RELAY_MODE_STORAGE_KEY = 'remote-codex-relay-mode';
 const RELAY_DEVICE_STORAGE_KEY = 'remote-codex-relay-device-id';
 const RELAY_THREAD_STORAGE_KEY = 'remote-codex-relay-thread-id';
 type RequestAuthMode = 'default' | 'relay-admin' | 'none';
+export const HOSTED_VM_WAKE_EVENT = 'remote-codex:hosted-vm-wake';
+
+function emitHostedVmWake(detail: { state: 'starting' | 'connected'; attempt: number }) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(HOSTED_VM_WAKE_EVENT, { detail }));
+  }
+}
+
+function waitForHostedVmRetry(delayMs: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(resolve, delayMs);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        window.clearTimeout(timer);
+        reject(signal.reason ?? new DOMException('Request aborted.', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
 
 declare global {
   interface Window {
@@ -406,23 +427,33 @@ async function request<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(
-    apiPath(String(input)),
-    withAuthInit(
-      {
-        ...init,
-        headers,
-      },
-      options.auth,
-    ),
+  const requestInit = withAuthInit(
+    {
+      ...init,
+      headers,
+    },
+    options.auth,
   );
-
-  if (!response.ok) {
+  let wakeAttempt = 0;
+  while (true) {
+    const response = await fetch(apiPath(String(input)), requestInit);
+    if (response.ok) {
+      if (wakeAttempt > 0) {
+        emitHostedVmWake({ state: 'connected', attempt: wakeAttempt });
+      }
+      return (await response.json()) as T;
+    }
     const payload = await readApiErrorPayload(response);
-    throw new ApiError(response.status, payload);
+    const hostedVmStarting =
+      response.status === 503 &&
+      payload.details?.reason === 'hosted_sandbox_starting';
+    if (!hostedVmStarting || wakeAttempt >= 60) {
+      throw new ApiError(response.status, payload);
+    }
+    wakeAttempt += 1;
+    emitHostedVmWake({ state: 'starting', attempt: wakeAttempt });
+    await waitForHostedVmRetry(1_500, requestInit.signal);
   }
-
-  return (await response.json()) as T;
 }
 
 function fallbackDownloadFilename(input: RequestInfo | URL) {

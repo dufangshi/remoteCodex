@@ -235,7 +235,6 @@ describe('WorkspacesPage', () => {
     );
 
     renderPage();
-    expect(await screen.findByText('Starting hosted VM')).toBeInTheDocument();
     expect(screen.queryByText(/Retry shortly/i)).not.toBeInTheDocument();
     expect(
       await screen.findByText('No workspaces yet', {}, { timeout: 3_000 })

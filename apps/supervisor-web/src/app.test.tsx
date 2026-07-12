@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@remote-codex/thread-ui', async () => {
@@ -59,6 +59,7 @@ vi.mock('@remote-codex/thread-ui', async () => {
 });
 
 import { App } from './app';
+import { HOSTED_VM_WAKE_EVENT } from './lib/api';
 
 describe('App', () => {
   beforeEach(() => {
@@ -107,6 +108,55 @@ describe('App', () => {
       expect(screen.getByText('No workspaces yet')).toBeInTheDocument();
       expect(screen.getByText('/Users/test')).toBeInTheDocument();
     });
+  });
+
+  it('shows global hosted VM startup progress on every app route', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            authenticated: true,
+            username: null,
+            expiresAt: null,
+            mode: 'local',
+            authRequired: false,
+          }),
+        })
+        .mockResolvedValueOnce({ ok: true, json: async () => [] })
+        .mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            workspaceRoot: '/Users/test',
+            environment: 'test',
+          }),
+        }),
+    );
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText('No workspaces yet')).toBeInTheDocument(),
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(HOSTED_VM_WAKE_EVENT, {
+          detail: { state: 'starting', attempt: 3 },
+        }),
+      );
+    });
+    expect(screen.getByText('Starting hosted VM')).toBeInTheDocument();
+    expect(screen.getByText('Check 3')).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(HOSTED_VM_WAKE_EVENT, {
+          detail: { state: 'connected', attempt: 3 },
+        }),
+      );
+    });
+    expect(screen.queryByText('Starting hosted VM')).not.toBeInTheDocument();
   });
 
   it('shows login only when the supervisor reports auth is required', async () => {
