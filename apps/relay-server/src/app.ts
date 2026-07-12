@@ -1769,6 +1769,7 @@ async function ensureHostedUserBootstrap(input: {
       .replace(/[^a-z0-9._-]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'user';
     const directory = `${slug}-${input.user.id.slice(0, 8)}`;
+    const absoluteDirectory = `/home/remote-codex/workspaces/${directory}`;
     const label = `${input.user.username}'s workspace`;
     const current = await forwardSupervisorCommandJson(
       input.supervisor,
@@ -1781,7 +1782,7 @@ async function ensureHostedUserBootstrap(input: {
       (candidate) =>
         isObject(candidate) &&
         typeof candidate.absPath === 'string' &&
-        candidate.absPath.endsWith(`/${directory}`),
+        candidate.absPath === absoluteDirectory,
     );
     if (!workspace) {
       workspace = await forwardSupervisorCommandJson(
@@ -1789,7 +1790,7 @@ async function ensureHostedUserBootstrap(input: {
         input.deviceId,
         'POST',
         '/api/workspaces',
-        { absPath: directory, label },
+        { absPath: absoluteDirectory, label },
       );
     }
     const workspaceId = stringField(workspace, 'id');
@@ -1847,7 +1848,18 @@ async function forwardSupervisorCommandJson(
     },
   });
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new Error(`Supervisor bootstrap request failed with ${response.statusCode}.`);
+    let detail = relayJsonBody(response);
+    try {
+      const payload = JSON.parse(detail) as unknown;
+      detail = isObject(payload) && typeof payload.message === 'string'
+        ? payload.message
+        : detail;
+    } catch {
+      // Keep the bounded raw response when the supervisor did not return JSON.
+    }
+    throw new Error(
+      `Supervisor bootstrap request failed with ${response.statusCode}: ${detail.slice(0, 300)}`,
+    );
   }
   return JSON.parse(relayJsonBody(response)) as unknown;
 }
