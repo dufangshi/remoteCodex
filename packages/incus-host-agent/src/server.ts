@@ -399,6 +399,15 @@ export function buildIncusHostAgent(input: {
         .code(400)
         .send({ code: 'bad_request', message: 'Request validation failed.' });
     }
+    if (
+      error instanceof Error &&
+      error.message === 'The hosted running instance limit has been reached.'
+    ) {
+      return reply.code(409).send({
+        code: 'running_instance_limit_reached',
+        message: error.message,
+      });
+    }
     return reply.code(502).send({
       code: 'incus_operation_failed',
       message: 'Incus operation failed.',

@@ -249,6 +249,29 @@ describe('Incus host-agent API', () => {
     await app.close();
   });
 
+  it('returns an actionable conflict when the running VM limit is reached', async () => {
+    const start = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('The hosted running instance limit has been reached.'),
+      );
+    const { app, token } = await setup({ start } as Partial<IncusClient>);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/instances/${crypto.randomUUID()}/start`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'idempotency-key': `start-${crypto.randomUUID()}`,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      code: 'running_instance_limit_reached',
+      message: 'The hosted running instance limit has been reached.',
+    });
+    await app.close();
+  });
+
   it('requires an idempotency key for mutations', async () => {
     const { app, token } = await setup();
     const response = await app.inject({

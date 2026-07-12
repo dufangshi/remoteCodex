@@ -152,8 +152,10 @@ export function RelayAdminPage() {
     void load();
   }, []);
 
-  async function loadHosted() {
-    setHostedLoading(true);
+  async function loadHosted(options: { showLoading?: boolean } = {}) {
+    if (options.showLoading !== false) {
+      setHostedLoading(true);
+    }
     setHostedError(null);
     const [capability, sandboxes, reconciliation] = await Promise.allSettled([
       fetchHostedSandboxCapability(),
@@ -179,7 +181,9 @@ export function RelayAdminPage() {
         (current) => current ?? errorMessage(reconciliation.reason),
       );
     }
-    setHostedLoading(false);
+    if (options.showLoading !== false) {
+      setHostedLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -187,6 +191,20 @@ export function RelayAdminPage() {
       void loadHosted();
     }
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'hosted') return;
+    const hasPendingSandbox = hostedSandboxes.some((sandbox) =>
+      ['requested', 'creating', 'starting', 'provisioning', 'stopping', 'deleting'].includes(
+        sandbox.status,
+      ),
+    );
+    const intervalId = window.setInterval(
+      () => void loadHosted({ showLoading: false }),
+      hasPendingSandbox ? 2_000 : 15_000,
+    );
+    return () => window.clearInterval(intervalId);
+  }, [tab, hostedSandboxes]);
 
   async function hostedAction(
     busyKeyValue: string,

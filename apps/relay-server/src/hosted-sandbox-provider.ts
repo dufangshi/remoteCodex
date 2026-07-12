@@ -69,6 +69,15 @@ export interface HostedSandboxInstance {
   statusCode: number | null;
 }
 
+export class HostedSandboxProviderError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export class DisabledHostedSandboxProvider implements HostedSandboxProvider {
   async capability(): Promise<RelayHostedSandboxCapabilityDto> {
     return {
@@ -331,8 +340,17 @@ export class IncusHostedSandboxProvider implements HostedSandboxProvider {
       request,
     );
     if (!response.ok) {
-      throw new Error(
-        `Incus host-agent request failed with ${response.status}.`,
+      const payload = (await response.json().catch(() => null)) as {
+        code?: unknown;
+        message?: unknown;
+      } | null;
+      const detail =
+        typeof payload?.message === 'string' && payload.message.trim()
+          ? payload.message.trim()
+          : `Incus host-agent request failed with ${response.status}.`;
+      throw new HostedSandboxProviderError(
+        typeof payload?.code === 'string' ? payload.code : 'provider_request_failed',
+        detail,
       );
     }
     return (await response.json()) as T;

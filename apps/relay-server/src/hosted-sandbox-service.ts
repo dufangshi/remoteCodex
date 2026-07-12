@@ -7,7 +7,10 @@ import type {
   RelayHostedSandboxOperationDto,
 } from '../../../packages/shared/src/index';
 import type { RelayServerConfig } from './config';
-import type { HostedSandboxProvider } from './hosted-sandbox-provider';
+import {
+  HostedSandboxProviderError,
+  type HostedSandboxProvider,
+} from './hosted-sandbox-provider';
 import { RelayStore, RelayStoreError } from './relay-store';
 
 export class HostedSandboxService {
@@ -441,10 +444,17 @@ export class HostedSandboxService {
       );
       this.store.updateHostedOperation(operationId, 'succeeded');
       this.store.updateHostedSandboxStatus(sandboxId, 'starting');
-    } catch {
+    } catch (caught) {
+      const detail =
+        caught instanceof HostedSandboxProviderError &&
+        caught.code === 'running_instance_limit_reached'
+          ? caught.message
+          : null;
       const error = {
         code: 'hosted_sandbox_create_failed',
-        message: 'Hosted supervisor VM creation failed.',
+        message: detail
+          ? `Hosted supervisor VM creation failed: ${detail}`
+          : 'Hosted supervisor VM creation failed.',
       };
       this.store.updateHostedOperation(operationId, 'failed', error);
       this.store.updateHostedSandboxStatus(sandboxId, 'error', {
