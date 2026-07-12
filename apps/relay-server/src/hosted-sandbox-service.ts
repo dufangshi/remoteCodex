@@ -109,7 +109,11 @@ export class HostedSandboxService {
   }
 
   start(id: string) {
-    this.detail(id);
+    const detail = this.detail(id);
+    this.store.recordHostedUserActivity(
+      detail.deviceId,
+      this.config.idleTimeoutMs,
+    );
     const operation = this.store.createHostedOperation(id, 'start');
     this.scheduleLifecycle(id, operation, async () => {
       this.store.updateHostedSandboxStatus(id, 'starting');
@@ -288,13 +292,6 @@ export class HostedSandboxService {
     const sandbox = this.store.getHostedSandboxByDeviceId(deviceId);
     if (!sandbox) return { hosted: false, waking: false };
     if (sandbox.status === 'stopped') {
-      // Waking is an explicit consequence of a user's request. Rebase the
-      // deadline before starting so an expired pre-stop deadline cannot shut
-      // the guest down again while it is still booting.
-      this.store.recordHostedUserActivity(
-        deviceId,
-        this.config.idleTimeoutMs,
-      );
       this.start(sandbox.id);
       return { hosted: true, waking: true };
     }

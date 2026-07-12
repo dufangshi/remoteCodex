@@ -183,4 +183,25 @@ describe('turn-aware hosted sandbox idle lifecycle', () => {
     expect(fake.stop).toHaveBeenCalledOnce();
     restarted.close();
   });
+
+  it('rearms the deadline for an explicit start action', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'));
+    const { service, fake, created, store } = setup();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await vi.runAllTicks();
+    expect(store.getHostedSandboxDetail(created.sandbox.id)?.status).toBe(
+      'stopped',
+    );
+
+    service.start(created.sandbox.id);
+    await vi.runAllTicks();
+    expect(fake.start).toHaveBeenCalledOnce();
+    expect(store.getHostedSandboxDetail(created.sandbox.id)).toMatchObject({
+      status: 'starting',
+      lastUserActivityAt: new Date().toISOString(),
+      idleDeadlineAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
+    service.close();
+  });
 });
