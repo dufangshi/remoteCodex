@@ -136,9 +136,11 @@ describe('turn-aware hosted sandbox idle lifecycle', () => {
     expect(wake).toEqual({ hosted: true, waking: true });
     await vi.runAllTicks();
     expect(fake.start).toHaveBeenCalledOnce();
-    expect(store.getHostedSandboxDetail(created.sandbox.id)?.status).toBe(
-      'starting',
-    );
+    expect(store.getHostedSandboxDetail(created.sandbox.id)).toMatchObject({
+      status: 'starting',
+      lastUserActivityAt: new Date().toISOString(),
+      idleDeadlineAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
     service.close();
   });
 
