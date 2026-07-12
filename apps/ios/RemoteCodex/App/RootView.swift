@@ -579,6 +579,7 @@ struct AppSettingsSheet: View {
 struct RelayAccountSettingsSheet: View {
     let environment: AppEnvironment
     let connection: SupervisorConnectionConfig
+    let onLogout: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var session: RelaySession?
     @State private var username = ""
@@ -588,6 +589,8 @@ struct RelayAccountSettingsSheet: View {
     @State private var loading = false
     @State private var savingProfile = false
     @State private var savingPassword = false
+    @State private var passwordExpanded = false
+    @State private var loggingOut = false
     @State private var message: String?
     @State private var errorMessage: String?
 
@@ -628,18 +631,33 @@ struct RelayAccountSettingsSheet: View {
                             .disabled(savingProfile || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                         Section("Password") {
-                            SecureField("Current password", text: $currentPassword)
-                            SecureField("New password", text: $newPassword)
-                            SecureField("Confirm password", text: $confirmPassword)
-                            Button(savingPassword ? "Saving..." : "Change password") {
-                                Task { await savePassword() }
+                            if passwordExpanded {
+                                SecureField("Current password", text: $currentPassword)
+                                SecureField("New password", text: $newPassword)
+                                SecureField("Confirm password", text: $confirmPassword)
+                                Button(savingPassword ? "Saving..." : "Save password") {
+                                    Task { await savePassword() }
+                                }
+                                .disabled(
+                                    savingPassword ||
+                                        currentPassword.isEmpty ||
+                                        newPassword.count < 8 ||
+                                        confirmPassword.isEmpty
+                                )
+                                Button("Cancel", role: .cancel) {
+                                    resetPasswordEditor()
+                                }
+                            } else {
+                                Button("Modify password") {
+                                    passwordExpanded = true
+                                }
                             }
-                            .disabled(
-                                savingPassword ||
-                                    currentPassword.isEmpty ||
-                                    newPassword.count < 8 ||
-                                    confirmPassword.isEmpty
-                            )
+                        }
+                        Section {
+                            Button(loggingOut ? "Logging out..." : "Logout", role: .destructive) {
+                                Task { await logout() }
+                            }
+                            .disabled(loggingOut)
                         }
                     } else if !loading {
                         ContentUnavailableView(
@@ -711,10 +729,33 @@ struct RelayAccountSettingsSheet: View {
             currentPassword = ""
             newPassword = ""
             confirmPassword = ""
+            passwordExpanded = false
             message = "Password changed."
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func resetPasswordEditor() {
+        currentPassword = ""
+        newPassword = ""
+        confirmPassword = ""
+        passwordExpanded = false
+        errorMessage = nil
+    }
+
+    private func logout() async {
+        loggingOut = true
+        errorMessage = nil
+        defer { loggingOut = false }
+        do {
+            _ = try await client.logoutRelay()
+        } catch {
+            // Local logout must still succeed if the relay is temporarily unavailable.
+        }
+        environment.settingsStore.clearAuthToken()
+        dismiss()
+        onLogout()
     }
 }
 

@@ -46,6 +46,27 @@ class SupervisorApiClient(
         return json.toRelayLoginResult()
     }
 
+    fun fetchRelaySession(): RelaySession {
+        return requestJson("/relay/auth/session").toRelaySession()
+    }
+
+    fun relayLogout() {
+        requestJson("/relay/auth/logout", method = "POST")
+    }
+
+    fun updateRelayAccount(username: String): RelayUser {
+        val body = JSONObject().put("username", username).toString()
+        return requestJson("/relay/account", method = "PATCH", body = body).toRelayUser()
+    }
+
+    fun updateRelayPassword(currentPassword: String, newPassword: String): RelayUser {
+        val body = JSONObject()
+            .put("currentPassword", currentPassword)
+            .put("newPassword", newPassword)
+            .toString()
+        return requestJson("/relay/account/password", method = "PATCH", body = body).toRelayUser()
+    }
+
     fun fetchHealth(): SupervisorHealth {
         val path = when (config.mode) {
             SupervisorConnectionMode.Local,

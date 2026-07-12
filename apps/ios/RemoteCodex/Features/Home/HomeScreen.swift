@@ -568,7 +568,8 @@ struct HomeScreen: View {
         .sheet(isPresented: $showingAccounts) {
             RelayAccountSettingsSheet(
                 environment: model.environment,
-                connection: model.connection
+                connection: model.connection,
+                onLogout: onChangeConnection
             )
         }
         .sheet(item: $renameTarget) { workspace in

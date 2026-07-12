@@ -512,7 +512,7 @@ class MainActivity : ComponentActivity() {
                             onManageDevices = {
                                 connectionRoute = ConnectionRoute.RelayDevices
                             },
-                            onChangeAccount = {
+                            onLogout = {
                                 settingsRepository.clearAuthToken()
                                 supervisorConnection = activeConnection.copy(
                                     authToken = null,

@@ -1433,11 +1433,36 @@ fun SupervisorAccountPanel(
     onClose: () -> Unit,
     onDisconnect: () -> Unit,
     onManageDevices: () -> Unit,
-    onChangeAccount: () -> Unit,
+    onLogout: () -> Unit,
     onReauthenticate: () -> Unit,
     onChangeMode: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
+    val relayClient = remember(config) { SupervisorApiClient(config) }
+    var relayUser by remember(config) { mutableStateOf<com.remotecodex.android.api.RelayUser?>(null) }
+    var accountLoading by remember(config) { mutableStateOf(config.mode == SupervisorConnectionMode.Relay) }
+    var accountBusy by remember { mutableStateOf(false) }
+    var username by remember { mutableStateOf("") }
+    var passwordExpanded by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var accountMessage by remember { mutableStateOf<String?>(null) }
+    var accountError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(config) {
+        if (config.mode != SupervisorConnectionMode.Relay) return@LaunchedEffect
+        accountLoading = true
+        runCatching { withContext(Dispatchers.IO) { relayClient.fetchRelaySession() } }
+            .onSuccess { session ->
+                relayUser = session.user
+                username = session.user?.username.orEmpty()
+            }
+            .onFailure { accountError = it.message ?: "Unable to load account." }
+        accountLoading = false
+    }
+
     GraphDialogOverlay(onDismiss = onClose, modifier = modifier) {
         GraphDialogFrame(
             title = "Supervisor account",
@@ -1480,6 +1505,108 @@ fun SupervisorAccountPanel(
                         label = "Device",
                         value = config.relayDeviceId?.takeIf { it.isNotBlank() } ?: "No device selected",
                     )
+                    if (accountLoading) {
+                        Text("Loading account...", color = ThreadColors.ForegroundMuted)
+                    }
+                    accountError?.let { Text(it, color = ThreadColors.Danger) }
+                    accountMessage?.let { Text(it, color = ThreadColors.Success) }
+                    relayUser?.let { user ->
+                        ConnectionSettingText(label = "Email", value = user.email)
+                        ConnectionTextField(
+                            label = "Username",
+                            value = username,
+                            onValueChange = { username = it },
+                            contentDescription = "Relay username",
+                        )
+                        GraphButton(
+                            label = if (accountBusy) "Saving..." else "Save username",
+                            enabled = !accountBusy && username.isNotBlank() && username != user.username,
+                            variant = GraphButtonVariant.Secondary,
+                            size = GraphButtonSize.Default,
+                            onClick = {
+                                scope.launch {
+                                    accountBusy = true
+                                    accountError = null
+                                    accountMessage = null
+                                    runCatching { withContext(Dispatchers.IO) { relayClient.updateRelayAccount(username.trim()) } }
+                                        .onSuccess {
+                                            relayUser = it
+                                            username = it.username
+                                            accountMessage = "Account updated."
+                                        }
+                                        .onFailure { accountError = it.message ?: "Unable to update account." }
+                                    accountBusy = false
+                                }
+                            },
+                        )
+                        if (!passwordExpanded) {
+                            GraphButton(
+                                label = "Modify password",
+                                variant = GraphButtonVariant.Outline,
+                                size = GraphButtonSize.Default,
+                                contentDescription = "Modify relay password",
+                                onClick = { passwordExpanded = true },
+                            )
+                        } else {
+                            ConnectionTextField(
+                                label = "Current password",
+                                value = currentPassword,
+                                onValueChange = { currentPassword = it },
+                                contentDescription = "Current relay password",
+                                password = true,
+                            )
+                            ConnectionTextField(
+                                label = "New password",
+                                value = newPassword,
+                                onValueChange = { newPassword = it },
+                                contentDescription = "New relay password",
+                                password = true,
+                            )
+                            ConnectionTextField(
+                                label = "Confirm password",
+                                value = confirmPassword,
+                                onValueChange = { confirmPassword = it },
+                                contentDescription = "Confirm relay password",
+                                password = true,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                GraphButton(
+                                    label = "Cancel",
+                                    variant = GraphButtonVariant.Outline,
+                                    size = GraphButtonSize.Small,
+                                    onClick = {
+                                        passwordExpanded = false
+                                        currentPassword = ""
+                                        newPassword = ""
+                                        confirmPassword = ""
+                                    },
+                                )
+                                GraphButton(
+                                    label = if (accountBusy) "Saving..." else "Save password",
+                                    enabled = !accountBusy && currentPassword.isNotEmpty() && newPassword.length >= 8 && newPassword == confirmPassword,
+                                    variant = GraphButtonVariant.Secondary,
+                                    size = GraphButtonSize.Small,
+                                    onClick = {
+                                        scope.launch {
+                                            accountBusy = true
+                                            accountError = null
+                                            accountMessage = null
+                                            runCatching { withContext(Dispatchers.IO) { relayClient.updateRelayPassword(currentPassword, newPassword) } }
+                                                .onSuccess {
+                                                    passwordExpanded = false
+                                                    currentPassword = ""
+                                                    newPassword = ""
+                                                    confirmPassword = ""
+                                                    accountMessage = "Password changed."
+                                                }
+                                                .onFailure { accountError = it.message ?: "Unable to change password." }
+                                            accountBusy = false
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                     GraphButton(
                         label = "Manage devices",
                         enabled = !config.authToken.isNullOrBlank(),
@@ -1492,13 +1619,16 @@ fun SupervisorAccountPanel(
                         },
                     )
                     GraphButton(
-                        label = "Change account",
-                        variant = GraphButtonVariant.Outline,
+                        label = "Logout",
+                        variant = GraphButtonVariant.Destructive,
                         size = GraphButtonSize.Default,
-                        contentDescription = "Change relay account",
+                        contentDescription = "Logout of relay account",
                         onClick = {
-                            onClose()
-                            onChangeAccount()
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { relayClient.relayLogout() } }
+                                onClose()
+                                onLogout()
+                            }
                         },
                     )
                 }

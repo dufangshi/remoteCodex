@@ -538,7 +538,12 @@ struct ConnectionScreen: View {
         .sheet(isPresented: $showingAccounts) {
             RelayAccountSettingsSheet(
                 environment: environment,
-                connection: relayAccountConnection
+                connection: relayAccountConnection,
+                onLogout: {
+                    model.authToken = ""
+                    model.relayDeviceId = ""
+                    model.route = .relayAuth
+                }
             )
         }
         .sheet(isPresented: $showingAddDevice, onDismiss: {

@@ -121,6 +121,10 @@ final class SupervisorAPIClient: @unchecked Sendable {
         try await requestJSON("/relay/auth/session")
     }
 
+    func logoutRelay() async throws -> RelaySession {
+        try await requestJSON("/relay/auth/logout", method: "POST")
+    }
+
     func updateRelayAccount(username: String) async throws -> RelayUser {
         try await requestJSON(
             "/relay/account",

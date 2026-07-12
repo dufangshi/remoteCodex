@@ -117,7 +117,8 @@ struct ThreadDetailWebViewScreen: View {
         .sheet(isPresented: $showingAccounts) {
             RelayAccountSettingsSheet(
                 environment: environment,
-                connection: connection
+                connection: connection,
+                onLogout: onChangeConnection
             )
         }
         .overlay(alignment: .bottom) {

@@ -545,7 +545,8 @@ struct WorkspaceDetailScreen: View {
         .sheet(isPresented: $showingAccounts) {
             RelayAccountSettingsSheet(
                 environment: environment,
-                connection: connection
+                connection: connection,
+                onLogout: onChangeConnection
             )
         }
         .sheet(item: $model.previewFile) { file in
