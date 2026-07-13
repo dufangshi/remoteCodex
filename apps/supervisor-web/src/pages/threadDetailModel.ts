@@ -26,7 +26,42 @@ export function appendLatestTurns(
   latest: ThreadDetailDto['turns'],
 ) {
   const latestIds = new Set(latest.map((turn) => turn.id));
-  return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
+  const latestReplacements = latest.filter((turn) =>
+    turn.items.some((item) => item.kind === 'userMessage'),
+  );
+  return [
+    ...existing.filter((turn) => {
+      if (latestIds.has(turn.id)) {
+        return false;
+      }
+      if (turn.status !== 'inProgress') {
+        return true;
+      }
+      const existingPrompt = turn.items.find(
+        (item) => item.kind === 'userMessage',
+      )?.text.trim();
+      const existingStartedAt = turn.startedAt
+        ? Date.parse(turn.startedAt)
+        : Number.NaN;
+      if (!existingPrompt || !Number.isFinite(existingStartedAt)) {
+        return true;
+      }
+      return !latestReplacements.some((replacement) => {
+        const replacementPrompt = replacement.items.find(
+          (item) => item.kind === 'userMessage',
+        )?.text.trim();
+        const replacementStartedAt = replacement.startedAt
+          ? Date.parse(replacement.startedAt)
+          : Number.NaN;
+        return (
+          replacementPrompt === existingPrompt
+          && Number.isFinite(replacementStartedAt)
+          && Math.abs(replacementStartedAt - existingStartedAt) <= 15_000
+        );
+      });
+    }),
+    ...latest,
+  ];
 }
 
 export function applyLiveItemTimestampsToTurns(

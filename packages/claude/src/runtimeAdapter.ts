@@ -1254,6 +1254,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   >();
   private subscriptionAuthKind: 'subscription' | 'apiKey' | 'unknown' = 'unknown';
   private subscriptionUsageObservedAt: string | null = null;
+  private readonly historicalTurnIdAliases = new Map<string, Map<string, string>>();
   private readonly clientApp: string;
   private sdkLoadError: string | null = null;
 
@@ -1491,7 +1492,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       workspacePath: options.workspacePath || cwd,
       ...(options.localThreadId ? { localThreadId: options.localThreadId } : {}),
     };
-    const turns = await this.sessionMessagesToTurns(messages, historyAssetContext);
+    const turns = this.applyHistoricalTurnIdAliases(
+      providerSessionId,
+      await this.sessionMessagesToTurns(messages, historyAssetContext),
+    );
     const activeTurn = [...this.activeTurns.values()].find(
       (turn) => turn.providerSessionId === providerSessionId,
     );
@@ -1767,6 +1771,16 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       return turns;
     }
 
+    const transcriptTurn = turns[transcriptTurnIndex];
+    if (transcriptTurn && transcriptTurn.providerTurnId !== activeTurn.providerTurnId) {
+      let aliases = this.historicalTurnIdAliases.get(providerSessionId);
+      if (!aliases) {
+        aliases = new Map();
+        this.historicalTurnIdAliases.set(providerSessionId, aliases);
+      }
+      aliases.set(transcriptTurn.providerTurnId, activeTurn.providerTurnId);
+    }
+
     return turns.map((turn, index) => {
       if (index !== transcriptTurnIndex) {
         return turn;
@@ -1781,6 +1795,20 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           activeItems,
         ),
       });
+    });
+  }
+
+  private applyHistoricalTurnIdAliases(
+    providerSessionId: string,
+    turns: AgentTurn[],
+  ) {
+    const aliases = this.historicalTurnIdAliases.get(providerSessionId);
+    if (!aliases || aliases.size === 0) {
+      return turns;
+    }
+    return turns.map((turn) => {
+      const providerTurnId = aliases.get(turn.providerTurnId);
+      return providerTurnId ? { ...turn, providerTurnId } : turn;
     });
   }
 

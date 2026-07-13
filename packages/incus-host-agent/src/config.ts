@@ -164,7 +164,7 @@ export function loadIncusHostAgentConfig(
         '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
     ),
     guestRuntimeVersion:
-      parsed.REMOTE_CODEX_GUEST_RUNTIME_VERSION ?? '0.11.33',
+      parsed.REMOTE_CODEX_GUEST_RUNTIME_VERSION ?? '0.11.34',
     guestRuntimeUpgradeScript: path.resolve(
       parsed.REMOTE_CODEX_GUEST_RUNTIME_UPGRADE_SCRIPT ??
         '/opt/remote-codex-incus-host-agent/guest/remote-codex-upgrade-runtime',

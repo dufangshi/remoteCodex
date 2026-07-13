@@ -81,6 +81,22 @@ describe('threadDetailModel', () => {
       .toEqual(['turn-2', 'turn-3', 'turn-4']);
   });
 
+  it('replaces a stale running Claude turn when history assigns its canonical id', () => {
+    const stale = {
+      ...makeTurn('local-turn'),
+      startedAt: '2026-05-24T00:00:02.000Z',
+      status: 'inProgress' as const,
+      items: [{ id: 'local-user', kind: 'userMessage' as const, text: 'reply a 3' }],
+    };
+    const materialized = {
+      ...makeTurn('claude-turn-message-uuid'),
+      startedAt: '2026-05-24T00:00:02.400Z',
+      items: [{ id: 'claude-user', kind: 'userMessage' as const, text: 'reply a 3' }],
+    };
+
+    expect(appendLatestTurns([stale], [materialized])).toEqual([materialized]);
+  });
+
   it('merges pending requests by id, removes resolved requests, and keeps creation order', () => {
     const requestA = makePendingRequest('a', '2026-05-24T00:00:01.000Z');
     const staleRequestB = makePendingRequest('b', '2026-05-24T00:00:02.000Z');

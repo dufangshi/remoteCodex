@@ -600,6 +600,13 @@ describe('ClaudeRuntimeAdapter', () => {
         }),
       ],
     });
+
+    await adapter.interruptTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: started.providerTurnId,
+    });
+    const reloadedSession = await adapter.readSession('claude-session-1');
+    expect(reloadedSession.turns[0]?.providerTurnId).toBe(started.providerTurnId);
   });
 
   it('keeps image blocks visible when reading Claude session history', async () => {
