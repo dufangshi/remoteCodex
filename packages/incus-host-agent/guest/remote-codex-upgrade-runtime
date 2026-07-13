@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Runtime upgrades are root-owned global installs. Do not inherit a user's
+# project-level npm settings from the exec/systemd working directory.
+export NPM_CONFIG_USERCONFIG=/dev/null
+
 target_version="${1:-}"
 if [[ ! "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
   echo "A valid remote-codex version is required." >&2
