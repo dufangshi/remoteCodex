@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -380,8 +381,9 @@ fun SupervisorConnectionSetupScreen(
             statusMessage = null
             return
         }
-        relayPortal?.devices?.firstOrNull { it.id == targetDeviceId }?.let { device ->
-            if (!device.connected) {
+        val selectedDevice = relayPortal?.devices?.firstOrNull { it.id == targetDeviceId }
+        selectedDevice?.let { device ->
+            if (!device.connected && device.hostedStatus == null) {
                 errorMessage = "Relay backend is offline. Start its relay supervisor or choose an online device."
                 statusMessage = null
                 return
@@ -392,22 +394,41 @@ fun SupervisorConnectionSetupScreen(
         errorMessage = null
         statusMessage = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val config = SupervisorConnectionConfig(
-                        mode = SupervisorConnectionMode.Relay,
-                        baseUrl = baseUrl,
-                        authToken = token,
-                        relayDeviceId = targetDeviceId,
-                        relayThreadId = null,
-                    )
-                    connectAndCheck(
-                        baseConfig = config,
-                        mode = SupervisorConnectionMode.Relay,
-                        username = username,
-                        password = password,
-                    )
+            val config = SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = baseUrl,
+                authToken = token,
+                relayDeviceId = targetDeviceId,
+                relayThreadId = null,
+            )
+            val result = runCatching {
+                var lastError: Throwable? = null
+                var attempts = 0
+                while (attempts < 80) {
+                    try {
+                        return@runCatching withContext(Dispatchers.IO) {
+                            connectAndCheck(
+                                baseConfig = config,
+                                mode = SupervisorConnectionMode.Relay,
+                                username = username,
+                                password = password,
+                            )
+                        }
+                    } catch (error: Throwable) {
+                        lastError = error
+                        val portal = withContext(Dispatchers.IO) {
+                            SupervisorApiClient(buildBaseConfig(token)).fetchRelayPortal()
+                        }
+                        relayPortal = portal
+                        val current = portal.devices.firstOrNull { it.id == targetDeviceId }
+                        val hostedStarting = current?.hostedStatus == "stopped" || current?.hostedStatus == "starting"
+                        if (selectedDevice?.hostedStatus == null && !hostedStarting) throw error
+                        if (current?.hostedStatus == "error") throw error
+                        attempts += 1
+                        delay(1_500)
+                    }
                 }
+                throw lastError ?: IllegalStateException("Hosted VM did not become ready in time.")
             }
             busy = false
             result
@@ -1971,13 +1992,14 @@ private fun RelayDeviceRow(
     onShare: () -> Unit,
     onRevoke: () -> Unit,
 ) {
+    val hostedStarting = selected && busy && device.hostedStatus != null
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
             .border(1.dp, if (selected) ThreadColors.Info.copy(alpha = 0.42f) else ThreadColors.Border, RoundedCornerShape(12.dp))
-            .clickable(enabled = !busy && device.connected, onClick = onConnect)
+            .clickable(enabled = !busy && (device.connected || device.hostedStatus == "stopped"), onClick = onConnect)
             .padding(10.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -1998,8 +2020,16 @@ private fun RelayDeviceRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 GraphBadge(
-                    label = if (device.connected) "Online" else "Offline",
+                    label = device.hostedStatus?.replaceFirstChar { it.uppercase() } ?: if (device.connected) "Online" else "Offline",
                     variant = if (device.connected) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
+                )
+            }
+            if (hostedStarting) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    text = if (device.hostedStatus == "starting") "Starting VM…" else "Waking VM…",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2013,8 +2043,8 @@ private fun RelayDeviceRow(
                     onClick = onCopySetup,
                 )
                 GraphButton(
-                    label = if (busy && selected) "Connecting..." else "Connect",
-                    enabled = !busy && device.connected,
+                    label = if (hostedStarting) "Starting…" else if (busy && selected) "Connecting..." else if (device.hostedStatus == "stopped") "Start & connect" else "Connect",
+                    enabled = !busy && (device.connected || device.hostedStatus == "stopped"),
                     variant = GraphButtonVariant.Default,
                     size = GraphButtonSize.Small,
                     contentDescription = "Connect relay device ${device.name}",

@@ -993,6 +993,7 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
     var connectedAt: String?
     var lastHeartbeatAt: String?
     var lastSeenAt: String?
+    var hostedStatus: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1005,6 +1006,7 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         case connectedAt
         case lastHeartbeatAt
         case lastSeenAt
+        case hostedStatus
     }
 
     init(
@@ -1016,7 +1018,8 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         createdAt: String? = nil,
         connectedAt: String? = nil,
         lastHeartbeatAt: String? = nil,
-        lastSeenAt: String? = nil
+        lastSeenAt: String? = nil,
+        hostedStatus: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -1027,6 +1030,7 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         self.connectedAt = connectedAt
         self.lastHeartbeatAt = lastHeartbeatAt
         self.lastSeenAt = lastSeenAt
+        self.hostedStatus = hostedStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -1042,6 +1046,7 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         connectedAt = try container.decodeIfPresent(String.self, forKey: .connectedAt)
         lastHeartbeatAt = try container.decodeIfPresent(String.self, forKey: .lastHeartbeatAt)
         lastSeenAt = try container.decodeIfPresent(String.self, forKey: .lastSeenAt)
+        hostedStatus = try container.decodeIfPresent(String.self, forKey: .hostedStatus)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1055,6 +1060,7 @@ struct RelayDeviceSummary: Codable, Equatable, Identifiable {
         try container.encodeIfPresent(connectedAt, forKey: .connectedAt)
         try container.encodeIfPresent(lastHeartbeatAt, forKey: .lastHeartbeatAt)
         try container.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
+        try container.encodeIfPresent(hostedStatus, forKey: .hostedStatus)
     }
 }
 

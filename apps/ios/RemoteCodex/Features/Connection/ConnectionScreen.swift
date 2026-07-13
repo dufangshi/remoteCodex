@@ -309,6 +309,11 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func connectRelayDevice(_ device: RelayDeviceSummary) async {
+        guard !busy else { return }
+        guard device.online || device.hostedStatus == "stopped" || device.hostedStatus == "starting" else {
+            return
+        }
+        relayDeviceId = device.id
         await runBusy {
             let config = SupervisorConnectionConfig(
                 mode: .relay,
@@ -316,7 +321,29 @@ final class ConnectionViewModel: ObservableObject {
                 authToken: authToken,
                 relayDeviceId: device.id
             )
-            _ = try await environment.apiClientFactory(config).checkConnection()
+            var connected = false
+            var lastError: Error?
+            for _ in 0..<80 {
+                do {
+                    _ = try await environment.apiClientFactory(config).checkConnection()
+                    connected = true
+                    break
+                } catch {
+                    lastError = error
+                    let portal = try await environment.apiClientFactory(
+                        SupervisorConnectionConfig(mode: .relay, baseURL: baseURL, authToken: authToken)
+                    ).fetchRelayPortal()
+                    relayPortal = portal
+                    let current = portal.devices.first { $0.id == device.id }
+                    let isStarting = current?.hostedStatus == "stopped" || current?.hostedStatus == "starting"
+                    if device.hostedStatus == nil && !isStarting { throw error }
+                    if current?.hostedStatus == "error" { throw error }
+                    try await Task.sleep(for: .milliseconds(1_500))
+                }
+            }
+            if !connected {
+                throw lastError ?? URLError(.timedOut)
+            }
             try environment.settingsStore.writeSupervisorConnection(config)
             try environment.settingsStore.upsertSavedSupervisorDevice(config: config)
             refreshSavedDevices()
@@ -462,7 +489,6 @@ struct ConnectionScreen: View {
     @StateObject private var model: ConnectionViewModel
     let environment: AppEnvironment
     let onThemeModeSelected: (ThemeMode) -> Void
-    @State private var offlineDevice: RelayDeviceSummary?
     @State private var revokeDevice: RelayDeviceSummary?
     @State private var sharingRelayDevice: RelayDeviceSummary?
     @State private var editingShare: RelaySessionShareSummary?
@@ -634,16 +660,6 @@ struct ConnectionScreen: View {
         } message: {
             Text(deleteDevice?.name ?? "This device")
         }
-        .alert("Device is offline", isPresented: offlineDeviceAlertPresented) {
-            Button("Cancel", role: .cancel) {}
-            Button("Save anyway") {
-                if let offlineDevice {
-                    Task { await model.saveRelayDeviceWithoutHealthCheck(offlineDevice) }
-                }
-            }
-        } message: {
-            Text("Workspaces will not load until the private backend connects to the relay.")
-        }
         .alert("Revoke Device?", isPresented: revokeDeviceAlertPresented) {
             Button("Cancel", role: .cancel) {
                 revokeDevice = nil
@@ -750,17 +766,6 @@ struct ConnectionScreen: View {
             set: { presented in
                 if !presented {
                     deleteDevice = nil
-                }
-            }
-        )
-    }
-
-    private var offlineDeviceAlertPresented: Binding<Bool> {
-        Binding(
-            get: { offlineDevice != nil },
-            set: { presented in
-                if !presented {
-                    offlineDevice = nil
                 }
             }
         )
@@ -948,14 +953,7 @@ struct ConnectionScreen: View {
             ForEach(model.relayPortal?.devices ?? []) { device in
                 RelayDeviceRow(
                     device: device,
-                    selected: model.relayDeviceId == device.id,
-                    onConnect: {
-                        if device.online {
-                            Task { await model.connectRelayDevice(device) }
-                        } else {
-                            offlineDevice = device
-                        }
-                    },
+                    busy: model.busy && model.relayDeviceId == device.id,
                     onCopySetup: {
                         model.copyRelayDeviceSetup(device)
                     },
@@ -964,11 +962,7 @@ struct ConnectionScreen: View {
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if device.online {
-                        Task { await model.connectRelayDevice(device) }
-                    } else {
-                        offlineDevice = device
-                    }
+                    Task { await model.connectRelayDevice(device) }
                 }
             }
         } header: {
@@ -1191,8 +1185,7 @@ private struct SavedDeviceRow: View {
 
 private struct RelayDeviceRow: View {
     let device: RelayDeviceSummary
-    let selected: Bool
-    let onConnect: () -> Void
+    let busy: Bool
     let onCopySetup: () -> Void
     let onShare: () -> Void
     let onRevoke: () -> Void
@@ -1202,16 +1195,21 @@ private struct RelayDeviceRow: View {
             HStack {
                 Text(device.name).font(.headline)
                 Spacer()
-                GraphBadge(text: device.online ? "Online" : "Offline", tone: device.online ? .success : .warning)
+                GraphBadge(
+                    text: device.hostedStatus?.capitalized ?? (device.online ? "Online" : "Offline"),
+                    tone: device.online ? .success : .warning
+                )
             }
             Text(relayDeviceStatusLine(device))
                 .font(.caption)
                 .remoteCodexStatusText()
+            if busy {
+                ProgressView(device.hostedStatus == nil ? "Connecting…" : "Starting VM…")
+                    .progressViewStyle(.linear)
+            }
             HStack {
                 Button("Copy Setup", action: onCopySetup)
                     .disabled(device.token?.trimmedNonEmpty == nil)
-                Button(selected ? "Connected" : "Connect", action: onConnect)
-                    .disabled(selected)
                 Button("Share", action: onShare)
                 Button("Revoke", role: .destructive, action: onRevoke)
             }
@@ -1643,6 +1641,12 @@ private extension RelayAccessGrantSummary {
 }
 
 private func relayDeviceStatusLine(_ device: RelayDeviceSummary) -> String {
+    if device.hostedStatus == "stopped" {
+        return "Stopped. Tap this card to start and connect."
+    }
+    if device.hostedStatus == "starting" {
+        return "Hosted VM is starting."
+    }
     let timestamp = device.lastHeartbeatAt ?? device.lastSeenAt ?? device.createdAt
     if device.online {
         return "Last heartbeat: \(formatRelayTimestamp(timestamp))"

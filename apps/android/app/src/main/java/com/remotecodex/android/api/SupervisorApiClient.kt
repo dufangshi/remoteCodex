@@ -1147,6 +1147,7 @@ private fun JSONObject.toRelayDeviceSummary(): RelayDeviceSummary {
         connectedAt = optNullableString("connectedAt"),
         lastHeartbeatAt = optNullableString("lastHeartbeatAt"),
         createdAt = optString("createdAt"),
+        hostedStatus = optNullableString("hostedStatus"),
     )
 }
 

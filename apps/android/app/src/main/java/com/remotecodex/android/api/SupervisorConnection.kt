@@ -666,6 +666,7 @@ data class RelayDeviceSummary(
     val connectedAt: String?,
     val lastHeartbeatAt: String?,
     val createdAt: String,
+    val hostedStatus: String? = null,
 )
 
 data class RelayPortalSummary(
