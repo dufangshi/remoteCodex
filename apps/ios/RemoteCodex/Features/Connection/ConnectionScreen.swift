@@ -961,6 +961,8 @@ struct ConnectionScreen: View {
                     onRevoke: { revokeDevice = device }
                 )
                 .contentShape(Rectangle())
+                .accessibilityIdentifier("relay-device-\(device.id)")
+                .accessibilityHint("Opens this relay device")
                 .onTapGesture {
                     Task { await model.connectRelayDevice(device) }
                 }

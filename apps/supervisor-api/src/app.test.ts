@@ -1268,7 +1268,8 @@ describe('supervisor api', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      status: 'ok'
+      status: 'ok',
+      activeTurnCount: 0,
     });
   });
 

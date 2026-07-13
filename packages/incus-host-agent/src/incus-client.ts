@@ -150,6 +150,8 @@ export class IncusClient {
         `limits.cpu=${selected.cpuCount}`,
         '--config',
         `limits.memory=${selected.memoryMiB}MiB`,
+        '--config',
+        `user.remote-codex.runtime-version=${this.config.guestRuntimeVersion}`,
         '--device',
         `root,size=${selected.diskGiB}GiB`,
       ]);
@@ -191,6 +193,7 @@ export class IncusClient {
         }
         await this.run(['start', current.name]);
       }
+      await this.applyDesiredRuntime(current.name);
       return this.status(id);
     });
   }
@@ -257,9 +260,9 @@ export class IncusClient {
     if (current.status.toLowerCase() !== 'running') {
       throw new Error('The instance must be running before provisioning.');
     }
-    await this.waitForGuestAgent(current.name);
     // The guest agent is reachable before first-boot cloud-init has finished.
     // Wait for cloud-init so provisioning cannot race guest initialization.
+    await this.waitForGuestAgent(current.name);
     await this.run([
       'exec',
       current.name,
@@ -268,6 +271,7 @@ export class IncusClient {
       'status',
       '--wait',
     ]);
+    await this.applyDesiredRuntime(current.name, true);
     // Keep existing VMs compatible when the provisioning contract evolves.
     // The helper contains no credentials; secrets still travel only on stdin.
     await this.run([
@@ -444,5 +448,37 @@ export class IncusClient {
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
     throw new Error('The guest agent did not become ready for provisioning.');
+  }
+
+  private async applyDesiredRuntime(instance: string, guestReady = false) {
+    if (!guestReady) {
+      await this.waitForGuestAgent(instance);
+    }
+    await this.run([
+      'file',
+      'push',
+      this.config.guestRuntimeUpgradeScript,
+      `${instance}/usr/local/sbin/remote-codex-upgrade-runtime`,
+      '--mode=0700',
+      '--uid=0',
+      '--gid=0',
+    ]);
+    const result = await this.runner.run(
+      this.config.incusBinary,
+      [
+        '--force-local',
+        '--project',
+        this.config.project,
+        'exec',
+        instance,
+        '--',
+        '/usr/local/sbin/remote-codex-upgrade-runtime',
+        this.config.guestRuntimeVersion,
+      ],
+      Math.max(this.config.commandTimeoutMs, 10 * 60_000),
+    );
+    if (result.exitCode !== 0) {
+      throw new IncusCommandError('Guest runtime upgrade failed.', result.exitCode);
+    }
   }
 }

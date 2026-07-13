@@ -1,0 +1,79 @@
+name: Hosted supervisor runtime rollout
+
+on:
+  workflow_run:
+    workflows:
+      - Publish npm package
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-supervisor-runtime-rollout
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    name: Roll out runtime to Incus VMs
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout published revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve and verify published version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          published="$(npm view "remote-codex@${version}" version)"
+          test "${published}" = "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Package rollout assets
+        run: |
+          set -euo pipefail
+          tar -czf packages/incus-host-agent/remote-codex-runtime-rollout.tgz \
+            -C packages/incus-host-agent guest/remote-codex-upgrade-runtime deploy/rollout-runtime.sh
+
+      - name: Upload rollout assets
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          source: packages/incus-host-agent/remote-codex-runtime-rollout.tgz
+          target: /tmp
+          overwrite: true
+          strip_components: 2
+
+      - name: Roll out one running VM at a time
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          timeout: 60m
+          command_timeout: 40m
+          script: |
+            set -euo pipefail
+            release="/opt/remote-codex-incus-host-agent/runtime-rollouts/${{ github.event.workflow_run.head_sha }}"
+            sudo install -d -o root -g root -m 0755 "${release}"
+            sudo tar -xzf /tmp/remote-codex-runtime-rollout.tgz -C "${release}"
+            sudo install -o root -g root -m 0700 \
+              "${release}/guest/remote-codex-upgrade-runtime" \
+              /opt/remote-codex-incus-host-agent/guest/remote-codex-upgrade-runtime
+            sudo install -o root -g root -m 0755 \
+              "${release}/deploy/rollout-runtime.sh" \
+              /opt/remote-codex-incus-host-agent/deploy/rollout-runtime.sh
+            sudo /opt/remote-codex-incus-host-agent/deploy/rollout-runtime.sh \
+              "${{ steps.version.outputs.version }}"

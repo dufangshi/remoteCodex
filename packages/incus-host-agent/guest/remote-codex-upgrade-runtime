@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_version="${1:-}"
+if [[ ! "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+  echo "A valid remote-codex version is required." >&2
+  exit 2
+fi
+
+service="remote-codex-relay-supervisor.service"
+retry_unit="remote-codex-runtime-upgrade-${target_version//[^0-9A-Za-z]/-}"
+current_version="$(remote-codex version 2>/dev/null | awk '{print $NF}' | tail -1)"
+if [ "${current_version}" = "${target_version}" ]; then
+  systemctl stop "${retry_unit}.timer" >/dev/null 2>&1 || true
+  printf '{"status":"current","version":"%s"}\n' "${target_version}"
+  exit 0
+fi
+
+previous_version="${current_version}"
+database="/home/remote-codex/.remote-codex/supervisor.sqlite"
+backup_dir="/home/remote-codex/.remote-codex/runtime-upgrade-backups"
+backup="${backup_dir}/supervisor-${current_version:-unknown}-$(date -u +%Y%m%dT%H%M%SZ).sqlite"
+
+health="$(curl -fsS --max-time 3 http://127.0.0.1:8787/healthz)"
+active_turns="$(jq -er '.activeTurnCount // empty | select(type == "number" and . >= 0)' <<<"${health}" 2>/dev/null || true)"
+if [ -z "${active_turns}" ]; then
+  npm_root="$(npm root --global)"
+  active_turns="$(node --input-type=module - "${database}" "${npm_root}" <<'NODE'
+import { createRequire } from 'node:module';
+const [, , databasePath, npmRoot] = process.argv;
+const require = createRequire(`${npmRoot}/remote-codex/package.json`);
+const Database = require('better-sqlite3');
+const database = new Database(databasePath, { readonly: true });
+const row = database.prepare("SELECT COUNT(*) AS count FROM threads WHERE status = 'running'").get();
+database.close();
+process.stdout.write(String(row.count));
+NODE
+  )"
+fi
+if [ "${active_turns}" -gt 0 ]; then
+  if ! systemctl list-units --all "${retry_unit}.timer" --no-legend | grep -q "${retry_unit}.timer"; then
+    systemd-run \
+      --unit="${retry_unit}" \
+      --on-active=5m \
+      --on-unit-active=5m \
+      --timer-property=AccuracySec=30s \
+      /usr/local/sbin/remote-codex-upgrade-runtime "${target_version}" >/dev/null
+  fi
+  printf '{"status":"deferred","version":"%s","activeTurnCount":%s}\n' \
+    "${target_version}" "${active_turns}"
+  exit 0
+fi
+
+rollback() {
+  local exit_code=$?
+  if [ -n "${previous_version}" ]; then
+    npm install --global --omit=dev "remote-codex@${previous_version}" >/dev/null 2>&1 || true
+  fi
+  systemctl restart "${service}" >/dev/null 2>&1 || true
+  echo "Runtime upgrade to ${target_version} failed; attempted rollback to ${previous_version:-unknown}." >&2
+  exit "${exit_code}"
+}
+trap rollback ERR
+
+systemctl stop "${service}"
+if [ -f "${database}" ]; then
+  install -d -o remote-codex -g remote-codex -m 0700 "${backup_dir}"
+  install -o remote-codex -g remote-codex -m 0600 "${database}" "${backup}"
+fi
+
+npm install --global --omit=dev "remote-codex@${target_version}"
+installed_version="$(remote-codex version 2>/dev/null | awk '{print $NF}' | tail -1)"
+test "${installed_version}" = "${target_version}"
+
+systemctl restart "${service}"
+for _ in $(seq 1 45); do
+  if systemctl is-active --quiet "${service}" && \
+    curl -fsS --max-time 2 http://127.0.0.1:8787/healthz >/dev/null; then
+    install -d -o root -g root -m 0755 /etc/remote-codex
+    printf '%s\n' "${target_version}" >/etc/remote-codex/runtime-version
+    chmod 0644 /etc/remote-codex/runtime-version
+    systemctl stop "${retry_unit}.timer" >/dev/null 2>&1 || true
+    trap - ERR
+    printf '{"status":"upgraded","previousVersion":"%s","version":"%s"}\n' \
+      "${previous_version}" "${target_version}"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "Supervisor health check timed out after runtime upgrade." >&2
+exit 1

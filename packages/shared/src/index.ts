@@ -717,6 +717,7 @@ export interface VersionDto {
 export interface HealthDto {
   status: 'ok';
   timestamp: string;
+  activeTurnCount: number;
 }
 
 export type ProviderHostFileNameDto = string;

@@ -64,4 +64,28 @@ describe('hosted supervisor golden image assets', () => {
       'ExecStart=/usr/local/bin/remote-codex relay-supervisor run',
     );
   });
+
+  it('ships a health-checked runtime upgrader with package rollback', () => {
+    const upgrade = fs.readFileSync(
+      path.join(guestDir, 'remote-codex-upgrade-runtime'),
+      'utf8',
+    );
+    expect(upgrade).toContain('npm install --global --omit=dev "remote-codex@${target_version}"');
+    expect(upgrade).toContain('curl -fsS --max-time 2 http://127.0.0.1:8787/healthz');
+    expect(upgrade).toContain('attempted rollback to ${previous_version:-unknown}');
+    expect(upgrade).toContain('runtime-upgrade-backups');
+    expect(upgrade).toContain("'.activeTurnCount");
+    expect(upgrade).toContain('--on-unit-active=5m');
+  });
+
+  it('rolls running VMs one at a time and defers stopped VMs', () => {
+    const rollout = fs.readFileSync(
+      path.resolve(guestDir, '../deploy/rollout-runtime.sh'),
+      'utf8',
+    );
+    expect(rollout).toContain('flock -n 9');
+    expect(rollout).toContain('user.remote-codex.runtime-version');
+    expect(rollout).toContain('it will upgrade to ${target_version} on its next start');
+    expect(rollout).toContain('/usr/local/sbin/remote-codex-upgrade-runtime');
+  });
 });

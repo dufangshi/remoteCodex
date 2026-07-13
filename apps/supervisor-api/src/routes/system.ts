@@ -46,9 +46,13 @@ function parseProviderHostFileParams(params: unknown) {
 
 export async function registerSystemRoutes(app: FastifyInstance) {
   app.get('/healthz', async () => {
+    const activeTurnCount = app.services.database.sqlite
+      .prepare("SELECT COUNT(*) AS count FROM threads WHERE status = 'running'")
+      .get() as { count: number };
     return {
       status: 'ok',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      activeTurnCount: activeTurnCount.count,
     } satisfies HealthDto;
   });
 

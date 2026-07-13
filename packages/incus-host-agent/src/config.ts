@@ -81,6 +81,11 @@ const schema = z.object({
   REMOTE_CODEX_INCUS_AUDIT_LOG: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_SECRET_DIR: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_GUEST_PROVISION_SCRIPT: z.string().min(1).optional(),
+  REMOTE_CODEX_GUEST_RUNTIME_VERSION: z
+    .string()
+    .regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:[.-][0-9A-Za-z.-]+)?$/)
+    .optional(),
+  REMOTE_CODEX_GUEST_RUNTIME_UPGRADE_SCRIPT: z.string().min(1).optional(),
   REMOTE_CODEX_INCUS_SECRET_MASTER_KEY: z
     .string()
     .regex(/^[a-fA-F0-9]{64}$/)
@@ -110,6 +115,8 @@ export interface IncusHostAgentConfig {
   auditLog: string;
   secretDir: string;
   guestProvisionScript: string;
+  guestRuntimeVersion: string;
+  guestRuntimeUpgradeScript: string;
   secretMasterKey: Buffer | null;
 }
 
@@ -155,6 +162,12 @@ export function loadIncusHostAgentConfig(
     guestProvisionScript: path.resolve(
       parsed.REMOTE_CODEX_INCUS_GUEST_PROVISION_SCRIPT ??
         '/opt/remote-codex-incus-host-agent/guest/remote-codex-provision',
+    ),
+    guestRuntimeVersion:
+      parsed.REMOTE_CODEX_GUEST_RUNTIME_VERSION ?? '0.11.32',
+    guestRuntimeUpgradeScript: path.resolve(
+      parsed.REMOTE_CODEX_GUEST_RUNTIME_UPGRADE_SCRIPT ??
+        '/opt/remote-codex-incus-host-agent/guest/remote-codex-upgrade-runtime',
     ),
     secretMasterKey: parsed.REMOTE_CODEX_INCUS_SECRET_MASTER_KEY
       ? Buffer.from(parsed.REMOTE_CODEX_INCUS_SECRET_MASTER_KEY, 'hex')

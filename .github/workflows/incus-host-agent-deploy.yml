@@ -122,6 +122,19 @@ jobs:
               echo 'REMOTE_CODEX_INCUS_MAX_RUNNING_INSTANCES=2' | \
                 sudo tee -a /etc/remote-codex/incus-host-agent.env >/dev/null
             fi
+            runtime_version="$(jq -r .remoteCodex.version guest/image-manifest.json)"
+            if sudo grep -q '^REMOTE_CODEX_GUEST_RUNTIME_VERSION=' /etc/remote-codex/incus-host-agent.env; then
+              sudo sed -i \
+                "s/^REMOTE_CODEX_GUEST_RUNTIME_VERSION=.*/REMOTE_CODEX_GUEST_RUNTIME_VERSION=${runtime_version}/" \
+                /etc/remote-codex/incus-host-agent.env
+            else
+              echo "REMOTE_CODEX_GUEST_RUNTIME_VERSION=${runtime_version}" | \
+                sudo tee -a /etc/remote-codex/incus-host-agent.env >/dev/null
+            fi
+            if ! sudo grep -q '^REMOTE_CODEX_GUEST_RUNTIME_UPGRADE_SCRIPT=' /etc/remote-codex/incus-host-agent.env; then
+              echo 'REMOTE_CODEX_GUEST_RUNTIME_UPGRADE_SCRIPT=/opt/remote-codex-incus-host-agent/guest/remote-codex-upgrade-runtime' | \
+                sudo tee -a /etc/remote-codex/incus-host-agent.env >/dev/null
+            fi
             sudo systemctl restart remote-codex-incus-host-agent.service
 
             token="$(sudo sed -n 's/^REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN=//p' /etc/remote-codex/incus-host-agent.env)"
