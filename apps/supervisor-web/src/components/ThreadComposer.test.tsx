@@ -115,6 +115,52 @@ describe('ThreadComposer', () => {
     vi.restoreAllMocks();
   });
 
+  it('accepts only one submit while the first request is in flight', async () => {
+    let resolveSubmit!: () => void;
+    const onSubmit = vi.fn(
+      () => new Promise<void>((resolve) => { resolveSubmit = resolve; }),
+    );
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
+        onSubmit={onSubmit}
+      />,
+    );
+    setPromptValue(screen.getByLabelText('Prompt'), 'Send once');
+    const send = screen.getByRole('button', { name: 'Send Prompt' });
+    fireEvent.click(send);
+    fireEvent.click(send);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    resolveSubmit();
+    await waitFor(() => expect(screen.getByLabelText('Prompt')).toHaveTextContent(''));
+  });
+
+  it('ignores auto-repeated Enter key events', () => {
+    const onSubmit = vi.fn();
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
+        onSubmit={onSubmit}
+      />,
+    );
+    const prompt = screen.getByLabelText('Prompt');
+    setPromptValue(prompt, 'Do not repeat');
+    fireEvent.keyDown(prompt, { key: 'Enter', repeat: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('updates the model and resets reasoning effort to that model default', async () => {
     const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
 
@@ -333,7 +379,8 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
     expect(screen.getByRole('button', { name: /\/fast/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /\/compact/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /\/goal/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View goals' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open goal composer' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /\/fast/i }));
     await waitFor(() => {
@@ -460,7 +507,7 @@ describe('ThreadComposer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
-    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open goal composer' }));
 
     await waitFor(() => {
       expect(onOpenGoal).toHaveBeenCalled();
@@ -511,11 +558,11 @@ describe('ThreadComposer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
-    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open goal composer' }));
     expect(screen.getByRole('button', { name: /Set goal/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
-    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open goal composer' }));
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Set goal/i })).not.toBeInTheDocument();
@@ -523,7 +570,7 @@ describe('ThreadComposer', () => {
     expect(screen.queryByLabelText('Goal token budget')).not.toBeInTheDocument();
   });
 
-  it('highlights the goal slash item while an active goal exists', () => {
+  it('shows the active goal in the slash toolbox goal list', () => {
     render(
       <ThreadComposer
         activeView="chat"
@@ -553,9 +600,9 @@ describe('ThreadComposer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
 
-    expect(screen.getByRole('button', { name: /\/goal/i })).toHaveClass(
-      'ui-status-warning',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'View goals' }));
+    expect(screen.getByText('Keep tests green.')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
   it('opens the slash toolbox upward, keeps the trigger neutral, and highlights fast inside the list', () => {

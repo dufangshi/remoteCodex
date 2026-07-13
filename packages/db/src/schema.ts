@@ -33,6 +33,7 @@ export const threads = sqliteTable('threads', {
   fastBaseModel: text('fast_base_model'),
   fastBaseReasoningEffort: text('fast_base_reasoning_effort'),
   collaborationMode: text('collaboration_mode').notNull().default('default'),
+  activeTurnCollaborationMode: text('active_turn_collaboration_mode'),
   approvalMode: text('approval_mode'),
   sandboxMode: text('sandbox_mode'),
   status: text('status'),
@@ -113,9 +114,28 @@ export const threadPendingSteers = sqliteTable('thread_pending_steers', {
   clientRequestId: text('client_request_id'),
   displayPrompt: text('display_prompt').notNull(),
   submittedPrompt: text('submitted_prompt').notNull(),
+  delivery: text('delivery').notNull().default('steer'),
+  turnConfigJson: text('turn_config_json'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+export const threadPromptRequests = sqliteTable(
+  'thread_prompt_requests',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    clientRequestId: text('client_request_id').notNull(),
+    status: text('status').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    threadClientRequestUnique: uniqueIndex(
+      'thread_prompt_requests_thread_client_request_idx',
+    ).on(table.threadId, table.clientRequestId),
+  }),
+);
 
 export const threadHistoryItems = sqliteTable(
   'thread_history_items',

@@ -324,12 +324,12 @@ describe('AndroidThreadDetailPage', () => {
     });
 
     await waitFor(() => {
-      const submit = buttonByText('Share session');
+      const submit = buttonByText('Share this thread');
       expect(submit?.disabled).toBe(false);
     });
 
     await act(async () => {
-      buttonByText('Share session')?.click();
+      buttonByText('Share this thread')?.click();
     });
 
     await waitFor(() => {
@@ -407,7 +407,7 @@ describe('AndroidThreadDetailPage', () => {
         'Only the owner can share this session.',
       );
     });
-    expect(buttonByText('Share session')?.disabled).toBe(true);
+    expect(buttonByText('Share this thread')?.disabled).toBe(true);
     expect(mocks.client.createRelayShare).not.toHaveBeenCalled();
   });
 });

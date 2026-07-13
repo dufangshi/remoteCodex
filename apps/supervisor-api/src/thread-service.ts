@@ -13,20 +13,27 @@ import type { RuntimeConfig } from '../../../packages/config/src/index';
 import {
   createThreadRecord,
   DatabaseClient,
+  createThreadPromptRequestRecord,
+  deleteExpiredThreadPromptRequestRecords,
+  deleteThreadPromptRequestRecord,
+  getThreadPromptRequestRecord,
   getThreadRecordByProviderSessionId,
   getThreadRecordById,
   getWorkspaceRecordById,
   listThreadRecords,
+  markThreadPromptRequestAccepted,
   updateThreadRecord
 } from '../../../packages/db/src/index';
 import {
   ApprovalMode,
+  CollaborationModeDto,
   CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
   ImportThreadInput,
   CreateThreadHookInput,
   ModelOptionDto,
+  ReasoningEffortDto,
   RespondThreadActionRequestInput,
   ResumeThreadInput,
   SendThreadPromptInput,
@@ -46,6 +53,7 @@ import {
   ThreadHistoryItemDetailDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
+  SandboxModeDto,
   ThreadTurnDto,
   truncateAutoThreadTitle,
   UntrustThreadHookInput,
@@ -158,6 +166,7 @@ function canUseRuntimePagedTurns(
 export class ThreadService {
   private readonly liveState = new ThreadLiveStateStore();
   private readonly queuedContinuationDrains = new Set<string>();
+  private readonly promptRequestsInFlight = new Map<string, Promise<ThreadDto>>();
   private readonly detailAssembler: ThreadDetailAssembler;
   private readonly usageAccounting: ThreadUsageAccounting;
   private readonly requestCoordinator: ProviderRequestCoordinator;
@@ -397,8 +406,7 @@ export class ThreadService {
         normalizeThreadGoalStatusForThread: (goal, record) =>
           this.goalCoordinator.normalizeThreadGoalStatusForThread(goal, record),
         shouldPreservePendingSteersForCompletedTurn: (record, turnId) =>
-          !this.runtimeSupportsLiveRunningTurnInput(record.provider) &&
-          this.auxiliaryState.hasPendingSteersForTurn(record.id, turnId),
+          this.shouldPreserveCompletedPendingSteer(record.id, turnId),
         scheduleQueuedContinuationDrain: (localThreadId, turnId) =>
           this.scheduleQueuedContinuationDrain(localThreadId, turnId),
         persistLiveHistoryItem: (localThreadId, turnId, item) =>
@@ -842,6 +850,70 @@ export class ThreadService {
     input: SendThreadPromptInput,
     options: SendPromptOptions = {},
   ): Promise<ThreadDto> {
+    const clientRequestId = input.clientRequestId?.trim();
+    if (!clientRequestId) {
+      return this.sendPromptOnce(localThreadId, input, options);
+    }
+
+    const requestKey = `${localThreadId}:${clientRequestId}`;
+    const activeRequest = this.promptRequestsInFlight.get(requestKey);
+    if (activeRequest) {
+      return activeRequest;
+    }
+
+    const request = this.sendPromptIdempotently(
+      localThreadId,
+      { ...input, clientRequestId },
+      options,
+    );
+    this.promptRequestsInFlight.set(requestKey, request);
+    try {
+      return await request;
+    } finally {
+      if (this.promptRequestsInFlight.get(requestKey) === request) {
+        this.promptRequestsInFlight.delete(requestKey);
+      }
+    }
+  }
+
+  private async sendPromptIdempotently(
+    localThreadId: string,
+    input: SendThreadPromptInput & { clientRequestId: string },
+    options: SendPromptOptions,
+  ) {
+    deleteExpiredThreadPromptRequestRecords(
+      this.db,
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+    const existing = getThreadPromptRequestRecord(
+      this.db,
+      localThreadId,
+      input.clientRequestId,
+    );
+    if (existing) {
+      const record = this.requireThreadRecord(localThreadId);
+      return this.toThreadDto(
+        record,
+        await this.listLoadedProviderSessionIds(record.provider),
+      );
+    }
+
+    createThreadPromptRequestRecord(this.db, localThreadId, input.clientRequestId);
+    try {
+      const result = await this.sendPromptOnce(localThreadId, input, options);
+      markThreadPromptRequestAccepted(this.db, localThreadId, input.clientRequestId);
+      return result;
+    } catch (error) {
+      deleteThreadPromptRequestRecord(this.db, localThreadId, input.clientRequestId);
+      throw error;
+    }
+  }
+
+  private async sendPromptOnce(
+    localThreadId: string,
+    input: SendThreadPromptInput,
+    options: SendPromptOptions = {},
+  ): Promise<ThreadDto> {
     let record = this.requireThreadRecord(localThreadId);
     await this.importCoordinator.assertImportedThreadReadyForPrompt({
       source: record.source,
@@ -921,7 +993,13 @@ export class ThreadService {
       record.status !== 'failed' &&
       record.status !== 'interrupted';
     if (hasActiveProviderTurn && record.providerTurnId) {
-      if (!turnConfig.supportsRunningTurnInput) {
+      const activeTurnCollaborationMode = normalizeCollaborationMode(
+        record.activeTurnCollaborationMode ?? record.collaborationMode,
+      );
+      if (
+        !turnConfig.supportsRunningTurnInput ||
+        activeTurnCollaborationMode !== turnConfig.collaborationMode
+      ) {
         return this.promptTurnCoordinator.queueContinuationPromptTurn(localThreadId, {
           ...connectedRecord,
           providerTurnId: record.providerTurnId,
@@ -1349,10 +1427,7 @@ export class ThreadService {
     if (!record) {
       return false;
     }
-    return (
-      !this.runtimeSupportsLiveRunningTurnInput(record.provider) &&
-      this.auxiliaryState.hasPendingSteersForTurn(localThreadId, turnId)
-    );
+    return this.auxiliaryState.hasQueuedContinuationsForTurn(localThreadId, turnId);
   }
 
   private shouldPreserveMissingPendingSteer(localThreadId: string, turnId: string) {
@@ -1363,14 +1438,14 @@ export class ThreadService {
     if (record.status === 'failed' || record.status === 'interrupted') {
       return false;
     }
-    if (this.runtimeSupportsLiveRunningTurnInput(record.provider)) {
-      return false;
-    }
     const activeDisplayTurnId = this.liveState.displayTurnIdForRuntimeTurn(
       localThreadId,
       record.providerTurnId,
     );
-    return record.providerTurnId === turnId || activeDisplayTurnId === turnId;
+    return (
+      (record.providerTurnId === turnId || activeDisplayTurnId === turnId) &&
+      this.auxiliaryState.hasQueuedContinuationsForTurn(localThreadId, turnId)
+    );
   }
 
   private scheduleQueuedContinuationDrain(localThreadId: string, turnId: string) {
@@ -1399,7 +1474,7 @@ export class ThreadService {
     const pending = this.auxiliaryState.listPendingSteerRecordsForTurn(
       localThreadId,
       turnId,
-    )[0];
+    ).find((entry) => entry.delivery === 'continuation');
     if (!pending) {
       return;
     }
@@ -1421,25 +1496,28 @@ export class ThreadService {
     const developerInstructions = combineDeveloperInstructions([
       pluginDeveloperInstructions(this.pluginService),
     ]);
-    const turnConfig = await this.sessionCoordinator.resolvePromptTurnConfig({
-      provider: record.provider,
-      currentModel: record.model,
-      currentReasoningEffort: record.reasoningEffort,
-      currentFastMode: record.fastMode,
-      currentCollaborationMode: record.collaborationMode,
-      currentSandboxMode: record.sandboxMode,
-      approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
-      promptInput: {},
-    });
+    const queuedConfig = parseQueuedTurnConfig(pending.turnConfigJson);
+    const turnConfig = queuedConfig ?? await this.sessionCoordinator.resolvePromptTurnConfig({
+        provider: record.provider,
+        currentModel: record.model,
+        currentReasoningEffort: record.reasoningEffort,
+        currentFastMode: record.fastMode,
+        currentCollaborationMode: record.collaborationMode,
+        currentSandboxMode: record.sandboxMode,
+        approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
+        promptInput: {},
+      });
 
-    const queuedUserItemId = `queued-continuation:${pending.id}:user`;
-    this.historyPersistence.persistProjectedHistoryItem(localThreadId, turnId, {
-      id: queuedUserItemId,
-      kind: 'userMessage',
-      text: pending.displayPrompt,
-      createdAt: new Date().toISOString(),
-      sequence: this.liveState.recordTurnItemOrder(localThreadId, turnId, queuedUserItemId),
-    } as ThreadHistoryItemDto);
+    if (!queuedConfig?.startNewTurn) {
+      const queuedUserItemId = `queued-continuation:${pending.id}:user`;
+      this.historyPersistence.persistProjectedHistoryItem(localThreadId, turnId, {
+        id: queuedUserItemId,
+        kind: 'userMessage',
+        text: pending.displayPrompt,
+        createdAt: new Date().toISOString(),
+        sequence: this.liveState.recordTurnItemOrder(localThreadId, turnId, queuedUserItemId),
+      } as ThreadHistoryItemDto);
+    }
 
     await this.promptTurnCoordinator.startPromptTurn(localThreadId, {
       ...record,
@@ -1454,8 +1532,9 @@ export class ThreadService {
       sandboxMode: turnConfig.sandboxMode,
       performanceMode: turnConfig.performanceMode,
       workspacePath: workspace.absPath,
-      hidden: true,
-      displayTurnId: turnId,
+      ...(queuedConfig?.startNewTurn
+        ? {}
+        : { hidden: true, displayTurnId: turnId }),
     });
     this.auxiliaryState.deletePendingSteerRecord(localThreadId, pending.id, turnId);
   }
@@ -1588,4 +1667,40 @@ export class ThreadService {
     );
   }
 
+}
+
+interface QueuedTurnConfig {
+  effectiveModel: string | null;
+  normalizedReasoning: ReasoningEffortDto | null;
+  collaborationMode: CollaborationModeDto;
+  sandboxMode: SandboxModeDto;
+  performanceMode: 'fast' | 'standard';
+  startNewTurn: boolean;
+}
+
+function parseQueuedTurnConfig(value: string | null | undefined): QueuedTurnConfig | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<QueuedTurnConfig>;
+    if (
+      (parsed.collaborationMode !== 'default' && parsed.collaborationMode !== 'plan') ||
+      (parsed.performanceMode !== 'fast' && parsed.performanceMode !== 'standard') ||
+      typeof parsed.startNewTurn !== 'boolean'
+    ) {
+      return null;
+    }
+    return {
+      effectiveModel:
+        typeof parsed.effectiveModel === 'string' ? parsed.effectiveModel : null,
+      normalizedReasoning: parsed.normalizedReasoning ?? null,
+      collaborationMode: parsed.collaborationMode,
+      sandboxMode: parsed.sandboxMode ?? 'workspace-write',
+      performanceMode: parsed.performanceMode,
+      startNewTurn: parsed.startNewTurn,
+    };
+  } catch {
+    return null;
+  }
 }

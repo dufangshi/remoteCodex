@@ -2,6 +2,7 @@ import type {
   ApplyProviderHostConfigArchiveResultDto,
   AgentBackendDto,
   AgentBackendIdDto,
+  AgentSubscriptionUsageDto,
   ApiErrorShape,
   AuthLoginResultDto,
   AuthSessionDto,
@@ -1057,6 +1058,13 @@ export function fetchAgentBackendStatus(provider: AgentBackendIdDto) {
     {
       cache: 'no-store',
     },
+  );
+}
+
+export function fetchAgentSubscriptionUsage(provider: AgentBackendIdDto) {
+  return request<{ usage: AgentSubscriptionUsageDto | null }>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/subscription-usage`,
+    { cache: 'no-store' },
   );
 }
 

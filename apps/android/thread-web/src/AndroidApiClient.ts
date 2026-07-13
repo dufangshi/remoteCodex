@@ -1,5 +1,7 @@
 import type {
   AgentBackendDto,
+  AgentBackendIdDto,
+  AgentSubscriptionUsageDto,
   ApiErrorShape,
   CreateRelaySessionShareInput,
   CreateThreadInput,
@@ -13,10 +15,12 @@ import type {
   ThreadExportFormatDto,
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
+  ThreadGoalDto,
   ThreadWorkspaceUploadResultDto,
   ThreadWorkspaceFilePreviewDto,
   ThreadWorkspaceTreeNodeDto,
   UpdateThreadSettingsInput,
+  UpdateThreadGoalInput,
   WorkspaceDto,
 } from '@remote-codex/shared';
 
@@ -258,6 +262,13 @@ export class AndroidApiClient {
     });
   }
 
+  fetchAgentSubscriptionUsage(provider: AgentBackendIdDto) {
+    return this.requestJson<{ usage: AgentSubscriptionUsageDto | null }>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/subscription-usage`,
+      { cache: 'no-store' },
+    );
+  }
+
   fetchThreadDetail(
     threadId: string,
     input: number | { limit?: number; beforeTurnId?: string | null } = 3,
@@ -298,6 +309,20 @@ export class AndroidApiClient {
         method: 'PATCH',
         body: JSON.stringify(input),
       },
+    );
+  }
+
+  fetchThreadGoal(threadId: string) {
+    return this.requestJson<{ goal: ThreadGoalDto | null }>(
+      `/api/threads/${encodeURIComponent(threadId)}/goal`,
+      { cache: 'no-store' },
+    );
+  }
+
+  updateThreadGoal(threadId: string, input: UpdateThreadGoalInput) {
+    return this.requestJson<{ goal: ThreadGoalDto | null }>(
+      `/api/threads/${encodeURIComponent(threadId)}/goal`,
+      { method: 'PATCH', body: JSON.stringify(input) },
     );
   }
 

@@ -380,6 +380,17 @@ const codexBackendResponse = {
     },
     usage: { contextWindow: true, tokenUsage: true, costUsd: false },
   },
+  managementSchema: {
+    hostConfigFiles: [],
+    toolboxItems: [
+      { action: 'goal', command: '/goal', label: 'Goal' },
+    ],
+    hookCommandTemplates: [],
+    providerConfigFormat: 'toml',
+    mcpConfigFormat: 'codex-toml',
+    configArchives: true,
+    buildRestart: true,
+  },
 };
 
 const claudeBackendResponse = {
@@ -976,7 +987,7 @@ describe('ThreadDetailPage', () => {
     const slashButton = slashButtons[0];
     expect(slashButton).toBeDefined();
     fireEvent.click(slashButton!);
-    fireEvent.click(await screen.findByText('/goal'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open goal composer' }));
 
     expect(await screen.findByLabelText('Goal token budget')).toBeInTheDocument();
     expect(screen.queryByText('/goal is unavailable in this view.')).not.toBeInTheDocument();
@@ -1098,7 +1109,7 @@ describe('ThreadDetailPage', () => {
 
     await screen.findByText('hello');
     fireEvent.click(screen.getAllByLabelText('Open slash toolbox')[0]!);
-    fireEvent.click(await screen.findByText('/goal'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open goal composer' }));
     setPromptValue(
       screen.getByRole('textbox', { name: 'Prompt' }),
       'Keep polishing goal mode.',
@@ -1230,9 +1241,9 @@ describe('ThreadDetailPage', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText('Demo Thread');
+    await screen.findByRole('heading', { name: 'Demo Thread' });
     fireEvent.click(screen.getAllByLabelText('Open slash toolbox')[0]!);
-    fireEvent.click(await screen.findByText('/goal'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open goal composer' }));
     setPromptValue(
       screen.getByRole('textbox', { name: 'Prompt' }),
       'Reconnect before goal.',
@@ -1295,7 +1306,7 @@ describe('ThreadDetailPage', () => {
     await waitFor(() => {
       expect(screen.queryByText('Sibling Thread')).not.toBeInTheDocument();
     });
-    expect(screen.getByText('Demo Thread')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Demo Thread' })).toBeInTheDocument();
   });
 
   it('reloads backend controls for a directly opened Claude thread', async () => {
@@ -1888,7 +1899,7 @@ describe('ThreadDetailPage', () => {
     });
 
     expect(screen.queryByText('Loading thread detail...')).not.toBeInTheDocument();
-    expect(screen.getByTitle('Demo Thread')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Demo Thread' })).toBeInTheDocument();
     expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
   });
 
@@ -2186,7 +2197,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Imported Thread'),
+        screen.getByRole('heading', { name: 'Imported Thread' }),
       ).toBeInTheDocument();
     });
 
@@ -4712,7 +4723,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Demo Thread'),
+        screen.getByRole('heading', { name: 'Demo Thread' }),
       ).toBeInTheDocument();
     });
 
@@ -4868,7 +4879,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Demo Thread'),
+        screen.getByRole('heading', { name: 'Demo Thread' }),
       ).toBeInTheDocument();
     });
 
@@ -4996,7 +5007,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Connected Imported Thread'),
+        screen.getByRole('heading', { name: 'Connected Imported Thread' }),
       ).toBeInTheDocument();
     });
 
@@ -6089,15 +6100,9 @@ describe('ThreadDetailPage', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.getAllByLabelText('Open goal monitor').length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getAllByLabelText('Open goal monitor')[0]!);
-
-    await waitFor(() => {
-      expect(screen.getByText('Goal monitor')).toBeInTheDocument();
-    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View goals' }));
+    expect(await screen.findByText('Goals')).toBeInTheDocument();
     expect(
       screen.getAllByText('现在审查/home/u/dev/EIAgente/references/EI...'),
     ).toHaveLength(1);
@@ -6776,7 +6781,7 @@ describe('ThreadDetailPage', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText('Claude Thread');
+    await screen.findByRole('heading', { name: 'Claude Thread' });
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
     fireEvent.click(await screen.findByRole('button', { name: /\/usage/i }));
 

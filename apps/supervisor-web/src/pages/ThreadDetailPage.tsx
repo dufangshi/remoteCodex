@@ -1,10 +1,12 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Share2 } from 'lucide-react';
 
 import {
   AgentProviderCapabilitiesDto,
   AgentBackendManagementSchemaDto,
   AgentRuntimeStatusDto,
+  AgentSubscriptionUsageDto,
   ModelOptionDto,
   RelayEffectiveAccessDto,
   SupervisorSocketServerEnvelope,
@@ -50,6 +52,7 @@ import {
   deleteThread,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
+  fetchAgentSubscriptionUsage,
   fetchProviderHostFile,
   fetchRelayAccess,
   fetchRelayPortal,
@@ -79,8 +82,6 @@ import {
   applyLiveItemTimestampsToTurns,
   createClientRequestId,
   findTurnWithUserMessage,
-  formatGoalRuntime,
-  formatGoalTokenUsage,
   getReasoningEffortAvailability,
   isThreadActionRequest,
   mergeGoalHistory,
@@ -291,24 +292,6 @@ function CopyIcon() {
   );
 }
 
-function ExportIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4 w-4 fill-none stroke-current"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4.25 2.25h5.2l2.3 2.3v9.2h-7.5a2 2 0 0 1-2-2v-7.5a2 2 0 0 1 2-2Z" />
-      <path d="M9.25 2.5v2.25h2.25" />
-      <path d="M7 6.75v4" />
-      <path d="m5.45 9.35 1.55 1.55 1.55-1.55" />
-    </svg>
-  );
-}
-
 function RealtimeConnectionIcon({
   status,
 }: {
@@ -381,6 +364,7 @@ export function ThreadDetailPage() {
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
+  const promptSubmissionInFlightRef = useRef(false);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
@@ -388,6 +372,8 @@ export function ThreadDetailPage() {
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
   const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [backendCapabilities, setBackendCapabilities] = useState<AgentProviderCapabilitiesDto | null>(null);
+  const [subscriptionUsage, setSubscriptionUsage] =
+    useState<AgentSubscriptionUsageDto | null>(null);
   const [backendManagementSchema, setBackendManagementSchema] =
     useState<AgentBackendManagementSchemaDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
@@ -515,25 +501,20 @@ export function ThreadDetailPage() {
     backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
       ?.name ?? null;
   const {
-    expandedGoalIds,
     exportBusy,
     exportDialogOpen,
     exportTurnsState,
     forkTurnOptionsState,
-    goalActionBusy,
-    goalMonitorOpen,
     goalState,
     handleCreateHook,
     handleExportTranscript,
     handleForkLatest,
     handleForkTurn,
-    handleGoalStatusAction,
     handleOpenForkTurns,
     handleOpenGoal,
     handleOpenHooks,
     handleOpenMcp,
     handleOpenSkills,
-    handleTerminateGoal,
     handleTrustHook,
     handleUntrustHook,
     handleUpdateGoal,
@@ -541,9 +522,7 @@ export function ThreadDetailPage() {
     hooksState,
     loadExportTurns,
     mcpState,
-    setExpandedGoalIds,
     setExportDialogOpen,
-    setGoalMonitorOpen,
     setGoalState,
     skillsState,
   } = useThreadAuxiliaryActions({
@@ -1095,6 +1074,40 @@ export function ThreadDetailPage() {
     }
     document.title = detail.thread.title;
   }, [detail?.thread.title]);
+
+  useEffect(() => {
+    const provider = detail?.thread.provider;
+    if (!provider || (provider !== 'codex' && provider !== 'claude')) {
+      setSubscriptionUsage(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const result = await fetchAgentSubscriptionUsage(provider);
+        if (!cancelled) {
+          setSubscriptionUsage(
+            result.usage?.authKind === 'subscription' &&
+              result.usage.windows.length > 0
+              ? result.usage
+              : null,
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setSubscriptionUsage((current) =>
+            current ? { ...current, stale: true } : null,
+          );
+        }
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [detail?.thread.provider]);
 
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
@@ -1929,7 +1942,7 @@ export function ThreadDetailPage() {
     }
   }, [detail, id, loadingEarlier]);
 
-  async function handlePrompt(input: SendThreadPromptRequestInput) {
+  async function performPromptSubmission(input: SendThreadPromptRequestInput) {
     if (activeView === 'shell') {
       if (detail?.thread.isLoaded === false) {
         await handleThreadConnectionToggle({ attachShell: true });
@@ -2199,6 +2212,18 @@ export function ThreadDetailPage() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handlePrompt(input: SendThreadPromptRequestInput) {
+    if (promptSubmissionInFlightRef.current) {
+      return false;
+    }
+    promptSubmissionInFlightRef.current = true;
+    try {
+      return await performPromptSubmission(input);
+    } finally {
+      promptSubmissionInFlightRef.current = false;
     }
   }
 
@@ -2988,144 +3013,6 @@ export function ThreadDetailPage() {
   const monitorGoals = currentGoal
     ? mergeGoalHistory(goalHistory, currentGoal)
     : normalizeGoalHistory(goalHistory);
-  const supportsGoals = backendCapabilities?.controls.goals ?? false;
-  const goalIndicatorIcon = (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4 w-4 fill-none stroke-current"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="8" cy="8" r="5.5" />
-      <circle cx="8" cy="8" r="2" />
-      <path d="M8 1.7v2M8 12.3v2M1.7 8h2M12.3 8h2" />
-    </svg>
-  );
-  const goalMonitorPanel = goalMonitorOpen && supportsGoals ? (
-    <div className="host-dialog w-96 max-w-[calc(100vw-1.5rem)] rounded-lg border p-3 text-left shadow-[var(--theme-shadow)] backdrop-blur">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="host-page-title text-sm font-semibold">Goal monitor</p>
-          <p className="host-muted text-xs">Current thread only</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setGoalMonitorOpen(false)}
-          className="host-secondary-button rounded-md border px-2.5 py-1 text-xs transition"
-        >
-          Close
-        </button>
-      </div>
-      {goalState.error ? (
-        <p className="host-error mt-3 rounded-lg border px-3 py-2 text-xs">
-          {goalState.error}
-        </p>
-      ) : null}
-      <div className="mt-3 max-h-[28rem] space-y-2 overflow-auto pr-1">
-        {monitorGoals.length === 0 ? (
-          <p className="host-empty-state rounded-lg border px-3 py-3 text-sm">
-            No goals in this thread yet.
-          </p>
-        ) : (
-          monitorGoals.map((goal) => {
-            const key = `${goal.threadId}:${goal.objective}:${goal.createdAt}`;
-            const expanded = expandedGoalIds.has(key);
-            const active = ['active', 'paused', 'budgetLimited'].includes(goal.status);
-            return (
-              <div
-                key={key}
-                className={`rounded-lg border px-3 py-3 ${
-                  active
-                    ? 'ui-status-info'
-                    : 'host-surface-strong'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedGoalIds((current) => {
-                        const next = new Set(current);
-                        if (next.has(key)) {
-                          next.delete(key);
-                        } else {
-                          next.add(key);
-                        }
-                        return next;
-                      })
-                    }
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <p
-                      className={`text-sm font-medium leading-5 ${
-                        expanded ? '' : 'line-clamp-2'
-                      }`}
-                    >
-                      {goal.objective}
-                    </p>
-                  </button>
-                  <span className="host-muted shrink-0 rounded-full border border-[var(--theme-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em]">
-                    {goal.status}
-                  </span>
-                </div>
-                <div className="host-muted mt-2 flex flex-wrap gap-2 text-[11px]">
-                  <span>{formatGoalRuntime(goal.timeUsedSeconds)}</span>
-                  <span>{formatGoalTokenUsage(goal)}</span>
-                  <span title={formatLongTimestamp(goal.updatedAt)}>
-                    Updated {new Date(goal.updatedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-                {active ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={goalActionBusy || goal.status === 'active'}
-                      onClick={() => void handleGoalStatusAction('active')}
-                      className="ui-status-info rounded-md px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Continue
-                    </button>
-                    <button
-                      type="button"
-                      disabled={goalActionBusy || goal.status === 'paused'}
-                      onClick={() => void handleGoalStatusAction('paused')}
-                      className="host-secondary-button rounded-md border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Pause
-                    </button>
-                    <button
-                      type="button"
-                      disabled={goalActionBusy}
-                      onClick={() => void handleTerminateGoal()}
-                      className="rounded-md border border-[var(--status-danger-border)] px-3 py-1.5 text-xs text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Terminate
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  ) : null;
-  const goalMonitorButton = supportsGoals ? (
-    <button
-      type="button"
-      aria-label="Open goal monitor"
-      title="Open goal monitor"
-      onClick={() => {
-        setGoalMonitorOpen((current) => !current);
-        void handleOpenGoal();
-      }}
-      className="ui-status-info inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-[var(--theme-shadow)] transition lg:h-9 lg:w-9"
-    >
-      {goalIndicatorIcon}
-    </button>
-  ) : null;
   const relayAccessBadge = useMemo(
     () =>
       relayAccess?.kind === 'shared' ? (
@@ -3152,7 +3039,7 @@ export function ThreadDetailPage() {
         disabled={!detail}
         className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-[var(--theme-shadow)] transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
       >
-        <ExportIcon />
+        <Share2 className="h-4 w-4" aria-hidden="true" />
       </button>
     ),
     [detail],
@@ -3160,22 +3047,20 @@ export function ThreadDetailPage() {
   const mobileSessionConnectionButton = useMemo(
     () => (
       <div className="relative flex items-center justify-end gap-1.5">
-        {goalMonitorButton}
         {relayAccessBadge}
         {mobileSessionConnectionControl}
       </div>
     ),
-    [goalMonitorButton, mobileSessionConnectionControl, relayAccessBadge],
+    [mobileSessionConnectionControl, relayAccessBadge],
   );
   const surfaceActions = useMemo(
     () => (
       <div className="flex items-center justify-end gap-2">
         {relayAccessBadge}
-        {goalMonitorButton}
         {desktopSessionConnectionIndicator}
       </div>
     ),
-    [desktopSessionConnectionIndicator, goalMonitorButton, relayAccessBadge],
+    [desktopSessionConnectionIndicator, relayAccessBadge],
   );
   const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
     () => ({
@@ -3232,6 +3117,7 @@ export function ThreadDetailPage() {
         sandboxMode: null,
         modelOptions,
         contextUsage: detail.thread.contextUsage,
+        subscriptionUsage,
         capabilities: backendCapabilities,
         toolboxItems: backendManagementSchema?.toolboxItems ?? [],
         hookCommandTemplates:
@@ -3268,6 +3154,7 @@ export function ThreadDetailPage() {
             }
           : {}),
         goalState,
+        goalHistory: monitorGoals,
         ...(relayThreadCanControl
           ? {
               onOpenGoal: handleOpenGoal,
@@ -3501,7 +3388,6 @@ export function ThreadDetailPage() {
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
       threadActionsButton={threadActionsButton}
       surfaceActions={surfaceActions}
-      floatingPanel={goalMonitorPanel}
       workspaceFeatures={SUPERVISOR_WORKSPACE_FEATURES}
       workspaceFocusPathRequest={workspaceFocusPathRequest}
       activeView={activeView}

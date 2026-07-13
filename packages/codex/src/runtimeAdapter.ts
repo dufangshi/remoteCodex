@@ -484,6 +484,20 @@ function mapCodexNotification(event: CodexServerEvent): AgentRuntimeEvent | null
   }
 }
 
+function formatRateLimitWindowLabel(
+  durationMinutes: number | null,
+  fallback: string,
+) {
+  if (durationMinutes === null) return fallback;
+  if (durationMinutes % (60 * 24) === 0) {
+    return `${durationMinutes / (60 * 24)}d`;
+  }
+  if (durationMinutes % 60 === 0) {
+    return `${durationMinutes / 60}h`;
+  }
+  return `${durationMinutes}m`;
+}
+
 function mapCodexRuntimeError(error: unknown): never {
   if (error instanceof AgentRuntimeError) {
     throw error;
@@ -615,6 +629,58 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   getStatus(): AgentRuntimeStatus {
     return mapStatus(this.manager.getStatus());
+  }
+
+  async getSubscriptionUsage() {
+    const account = await codexRuntimeCall(() => this.manager.readAccount());
+    if (account.account?.type === 'apiKey') {
+      return {
+        provider: 'codex' as const,
+        authKind: 'apiKey' as const,
+        observedAt: new Date().toISOString(),
+        stale: false,
+        windows: [],
+      };
+    }
+    if (account.account?.type !== 'chatgpt') {
+      return null;
+    }
+    const response = await codexRuntimeCall(() =>
+      this.manager.readAccountRateLimits(),
+    );
+    const buckets = response.rateLimitsByLimitId;
+    const snapshot =
+      (buckets && (buckets.codex ?? Object.values(buckets)[0])) ??
+      response.rateLimits;
+    const record = snapshot && typeof snapshot === 'object'
+      ? (snapshot as Record<string, unknown>)
+      : {};
+    const windows = ['primary', 'secondary'].flatMap((id) => {
+      const value = record[id];
+      if (!value || typeof value !== 'object') return [];
+      const window = value as Record<string, unknown>;
+      const usedPercent = Number(window.usedPercent);
+      if (!Number.isFinite(usedPercent)) return [];
+      const duration = Number(window.windowDurationMins);
+      const durationMinutes = Number.isFinite(duration) ? duration : null;
+      const resetsAt = Number(window.resetsAt);
+      return [{
+        id,
+        durationMinutes,
+        label: formatRateLimitWindowLabel(durationMinutes, id),
+        usedPercent: Math.max(0, Math.min(100, usedPercent)),
+        resetsAt: Number.isFinite(resetsAt)
+          ? new Date(resetsAt * 1000).toISOString()
+          : null,
+      }];
+    });
+    return {
+      provider: 'codex' as const,
+      authKind: 'subscription' as const,
+      observedAt: new Date().toISOString(),
+      stale: false,
+      windows,
+    };
   }
 
   start() {

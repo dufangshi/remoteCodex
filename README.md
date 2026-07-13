@@ -126,8 +126,12 @@ remote-codex stop
 
 Default npm CLI ports:
 
-- Web: `http://127.0.0.1:45673`
-- API: `http://127.0.0.1:45674`
+- Web: `http://127.0.0.1:45673` locally, or `http://<host-lan-ip>:45673`
+- API: `http://127.0.0.1:45674` locally, or `http://<host-lan-ip>:45674`
+
+Both listeners bind to `0.0.0.0` by default. Local mode is unauthenticated, so
+use it only on a trusted LAN/VPN. Set `SERVICE_HOST=127.0.0.1` and
+`SERVICE_API_HOST=127.0.0.1` to make the service host-only.
 
 Override with `SERVICE_PORT` and `SERVICE_API_PORT`.
 
@@ -281,8 +285,12 @@ remote-codex stop
 
 npm CLI 默认端口：
 
-- Web: `http://127.0.0.1:45673`
-- API: `http://127.0.0.1:45674`
+- Web：本机使用 `http://127.0.0.1:45673`，内网设备使用 `http://<宿主机内网IP>:45673`
+- API：本机使用 `http://127.0.0.1:45674`，内网设备使用 `http://<宿主机内网IP>:45674`
+
+两个服务默认监听 `0.0.0.0`。local 模式没有登录鉴权，只应在可信 LAN/VPN
+中使用。如需限制为仅本机访问，请同时设置 `SERVICE_HOST=127.0.0.1` 和
+`SERVICE_API_HOST=127.0.0.1`。
 
 可用 `SERVICE_PORT` 和 `SERVICE_API_PORT` 覆盖。
 

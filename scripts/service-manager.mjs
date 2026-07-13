@@ -23,9 +23,9 @@ const webIndex = path.join(repoRoot, 'apps', 'supervisor-web', 'dist', 'index.ht
 const defaultServicePort = supportsSourceRestart ? 4173 : 45673;
 const defaultApiPort = supportsSourceRestart ? 8787 : 45674;
 
-const serviceHost = process.env.SERVICE_HOST ?? '127.0.0.1';
+const serviceHost = process.env.SERVICE_HOST ?? '0.0.0.0';
 const servicePort = parsePort(process.env.SERVICE_PORT, defaultServicePort);
-const apiHost = process.env.SERVICE_API_HOST ?? '127.0.0.1';
+const apiHost = process.env.SERVICE_API_HOST ?? '0.0.0.0';
 const apiPort = parsePort(process.env.SERVICE_API_PORT, defaultApiPort);
 
 const command = process.argv[2];

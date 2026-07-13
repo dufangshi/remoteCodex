@@ -2116,6 +2116,39 @@ describe('supervisor api', () => {
     ]);
   });
 
+  it('returns only normalized subscription usage and hides API-key windows', async () => {
+    const apiKeyResponse = await app.inject({
+      method: 'GET',
+      url: '/api/agent-runtimes/codex/subscription-usage',
+    });
+    expect(apiKeyResponse.statusCode).toBe(200);
+    expect(apiKeyResponse.json()).toMatchObject({
+      usage: { provider: 'codex', authKind: 'apiKey', windows: [] },
+    });
+
+    fakeCodexManager.accountType = 'chatgpt';
+    fakeCodexManager.accountRateLimits = {
+      rateLimits: {
+        primary: {
+          usedPercent: 20,
+          windowDurationMins: 300,
+          resetsAt: 1_800_000_000,
+        },
+      },
+    };
+    const subscriptionResponse = await app.inject({
+      method: 'GET',
+      url: '/api/agent-runtimes/codex/subscription-usage',
+    });
+    expect(subscriptionResponse.json()).toMatchObject({
+      usage: {
+        provider: 'codex',
+        authKind: 'subscription',
+        windows: [{ label: '5h', usedPercent: 20 }],
+      },
+    });
+  });
+
   it('returns install command failure details for backend operations', async () => {
     await app.close();
     const failingRuntime = new FakeInstallRuntime();
@@ -5546,6 +5579,199 @@ describe('supervisor api', () => {
         },
       ],
     });
+  });
+
+  it('queues a new turn when collaboration mode changes during an active Codex turn', async () => {
+    fakeCodexManager.materializeSteersImmediately = false;
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Mode Switch Queue Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Implement the current task.',
+        collaborationMode: 'default',
+      },
+    });
+    const firstTurnId = firstPromptResponse.json().activeTurnId;
+
+    const queuedResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Plan the next task instead.',
+        collaborationMode: 'plan',
+        clientRequestId: 'mode-switch-plan-1',
+      },
+    });
+
+    expect(queuedResponse.statusCode).toBe(200);
+    expect(queuedResponse.json()).toMatchObject({
+      status: 'running',
+      activeTurnId: firstTurnId,
+    });
+    expect(fakeCodexManager.steerTurnCalls).toEqual([]);
+
+    const queuedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(queuedDetailResponse.json().pendingSteers).toEqual([
+      expect.objectContaining({
+        clientRequestId: 'mode-switch-plan-1',
+        turnId: firstTurnId,
+        prompt: 'Plan the next task instead.',
+        delivery: 'continuation',
+      }),
+    ]);
+
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turn: {
+          id: firstTurnId,
+          status: 'completed',
+          error: null,
+          items: [],
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
+      prompt: 'Plan the next task instead.',
+      collaborationMode: 'plan',
+    });
+    expect(fakeCodexManager.threads.get(createdThread.providerSessionId)?.turns).toHaveLength(2);
+
+    const continuedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(continuedDetailResponse.json()).toMatchObject({
+      thread: {
+        status: 'running',
+        collaborationMode: 'plan',
+      },
+      pendingSteers: [],
+    });
+    expect(continuedDetailResponse.json().thread.activeTurnId).not.toBe(firstTurnId);
+
+    const planTurnId = continuedDetailResponse.json().thread.activeTurnId;
+    const sameModeResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Add one more point to this plan.',
+        collaborationMode: 'plan',
+        clientRequestId: 'same-plan-steer-1',
+      },
+    });
+    expect(sameModeResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.steerTurnCalls.at(-1)).toMatchObject({
+      turnId: planTurnId,
+      prompt: 'Add one more point to this plan.',
+    });
+
+    const reverseModeResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Now implement it in default mode.',
+        collaborationMode: 'default',
+        clientRequestId: 'mode-switch-default-1',
+      },
+    });
+    expect(reverseModeResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.steerTurnCalls).toHaveLength(1);
+    const reverseDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(reverseDetailResponse.json().pendingSteers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clientRequestId: 'mode-switch-default-1',
+          turnId: planTurnId,
+          delivery: 'continuation',
+        }),
+      ]),
+    );
+  });
+
+  it('accepts a prompt client request id at most once', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Idempotent Prompt Thread',
+      },
+    });
+    const thread = createResponse.json();
+    const payload = {
+      prompt: 'Send this exactly once.',
+      clientRequestId: 'same-client-request',
+    };
+
+    const [firstResponse, duplicateResponse] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/threads/${thread.id}/prompt`,
+        payload,
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/threads/${thread.id}/prompt`,
+        payload,
+      }),
+    ]);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(duplicateResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls).toHaveLength(1);
+    expect(fakeCodexManager.threads.get(thread.providerSessionId)?.turns).toHaveLength(1);
+
+    const retryResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: {
+        prompt: 'A changed body must not reuse the same request id.',
+        clientRequestId: 'same-client-request',
+      },
+    });
+    expect(retryResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls).toHaveLength(1);
+    expect(fakeCodexManager.steerTurnCalls).toHaveLength(0);
   });
 
   it('disconnects a thread and marks it as not loaded', async () => {

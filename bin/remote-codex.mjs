@@ -851,9 +851,9 @@ What it starts:
   API          http://SERVICE_API_HOST:SERVICE_API_PORT
 
 Environment:
-  SERVICE_HOST              Web listen host. Default 127.0.0.1.
+  SERVICE_HOST              Web listen host. Default 0.0.0.0.
   SERVICE_PORT              Web listen port. Default ${defaultServicePort}.
-  SERVICE_API_HOST          API listen host. Default 127.0.0.1.
+  SERVICE_API_HOST          API listen host. Default 0.0.0.0.
   SERVICE_API_PORT          API listen port. Default ${defaultApiPort}.
   REMOTE_CODEX_SERVICE_DIR  Service state/log directory.
   LOG_LEVEL                 API log level. Default warn for service mode.
@@ -871,7 +871,10 @@ Supervisor configuration forwarded to the API:
   OPENCODE_COMMAND          OpenCode executable. Default opencode.
 
 Example:
-  SERVICE_HOST=127.0.0.1 SERVICE_PORT=4173 remote-codex start
+  remote-codex start
+
+Restrict the service to this machine:
+  SERVICE_HOST=127.0.0.1 SERVICE_API_HOST=127.0.0.1 remote-codex start
 
 Expose over Tailscale after start:
   tailscale serve --bg http://127.0.0.1:${defaultServicePort}

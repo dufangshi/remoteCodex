@@ -85,6 +85,18 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
     return runtimeDto(app, provider);
   });
 
+  app.get('/api/agent-runtimes/:provider/subscription-usage', async (request) => {
+    const { provider } = providerParamSchema.parse(request.params);
+    const runtime = app.services.agentRuntimes.getOptional(provider);
+    if (!runtime) {
+      throw providerNotConfigured(provider);
+    }
+    if (!runtime.getSubscriptionUsage) {
+      return { usage: null };
+    }
+    return { usage: await runtime.getSubscriptionUsage() };
+  });
+
   app.post('/api/agent-runtimes/:provider/restart', async (request) => {
     const { provider } = providerParamSchema.parse(request.params);
     const runtime = app.services.agentRuntimes.getOptional(provider);

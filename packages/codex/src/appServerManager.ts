@@ -320,6 +320,22 @@ export class CodexAppServerManager extends EventEmitter {
     return response.data.map(mapModel);
   }
 
+  async readAccount() {
+    await this.ensureReady();
+    return this.client!.request<{
+      account: { type: string } | null;
+      requiresOpenaiAuth: boolean;
+    }>('account/read', { refreshToken: false });
+  }
+
+  async readAccountRateLimits() {
+    await this.ensureReady();
+    return this.client!.request<{
+      rateLimits: unknown;
+      rateLimitsByLimitId?: Record<string, unknown> | null;
+    }>('account/rateLimits/read', null);
+  }
+
   async listThreads(): Promise<CodexThreadRecord[]> {
     await this.ensureReady();
     const response = await this.client!.request<{ data: any[] }>('thread/list', {

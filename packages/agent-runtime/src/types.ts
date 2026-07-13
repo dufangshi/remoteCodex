@@ -582,4 +582,17 @@ export interface AgentRuntime extends EventEmitter {
   getGoal?(providerSessionId: string): Promise<AgentGoal | null>;
   setGoal?(input: SetAgentGoalInput): Promise<AgentGoal>;
   clearGoal?(providerSessionId: string): Promise<boolean>;
+  getSubscriptionUsage?(): Promise<{
+    provider: 'codex' | 'claude';
+    authKind: 'subscription' | 'apiKey' | 'unknown';
+    observedAt: string;
+    stale: boolean;
+    windows: Array<{
+      id: string;
+      durationMinutes: number | null;
+      label: string;
+      usedPercent: number;
+      resetsAt: string | null;
+    }>;
+  } | null>;
 }

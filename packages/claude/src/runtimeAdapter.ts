@@ -119,6 +119,19 @@ interface SDKMessage {
   modelUsage?: unknown;
   errors?: string[];
   stop_reason?: string;
+  rate_limit_info?: SDKRateLimitInfo;
+}
+interface SDKRateLimitInfo {
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  resetsAt?: number;
+  rateLimitType?:
+    | 'five_hour'
+    | 'seven_day'
+    | 'seven_day_opus'
+    | 'seven_day_sonnet'
+    | 'seven_day_overage_included'
+    | 'overage';
+  utilization?: number;
 }
 interface SDKUserMessage {
   type: 'user';
@@ -1222,6 +1235,11 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly sessionModels = new Map<string, string | null>();
   private readonly sessionApprovalModes = new Map<string, StartAgentSessionInput['approvalMode']>();
   private readonly liveUserPrompts = new Map<string, Map<string, string>>();
+  private readonly subscriptionUsageWindows = new Map<
+    'five_hour' | 'seven_day',
+    { usedPercent: number; resetsAt: string | null }
+  >();
+  private subscriptionUsageObservedAt: string | null = null;
   private readonly clientApp: string;
   private sdkLoadError: string | null = null;
 
@@ -1240,6 +1258,46 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   getStatus(): AgentRuntimeStatus {
     return { ...this.status };
+  }
+
+  async getSubscriptionUsage() {
+    const observedAt = this.subscriptionUsageObservedAt ?? new Date().toISOString();
+    const windows = [...this.subscriptionUsageWindows.entries()].map(([id, window]) => ({
+      id,
+      durationMinutes: id === 'five_hour' ? 300 : 10_080,
+      label: id === 'five_hour' ? '5h' : '7d',
+      usedPercent: window.usedPercent,
+      resetsAt: window.resetsAt,
+    }));
+    return {
+      provider: 'claude' as const,
+      authKind: windows.length > 0 ? 'subscription' as const : 'unknown' as const,
+      observedAt,
+      stale: false,
+      windows,
+    };
+  }
+
+  private captureRateLimit(message: SDKMessage) {
+    if (message.type !== 'rate_limit_event') {
+      return;
+    }
+    const info = message.rate_limit_info;
+    if (
+      !info
+      || (info.rateLimitType !== 'five_hour' && info.rateLimitType !== 'seven_day')
+      || typeof info.utilization !== 'number'
+      || !Number.isFinite(info.utilization)
+    ) {
+      return;
+    }
+    this.subscriptionUsageWindows.set(info.rateLimitType, {
+      usedPercent: Math.max(0, Math.min(100, info.utilization * 100)),
+      resetsAt: typeof info.resetsAt === 'number'
+        ? new Date(info.resetsAt * 1000).toISOString()
+        : null,
+    });
+    this.subscriptionUsageObservedAt = new Date().toISOString();
   }
 
   private updateToolboxItemsFromSystemInit(message: SDKMessage) {
@@ -1408,6 +1466,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     try {
       for await (const message of query) {
         rawMessages.push(message);
+        this.captureRateLimit(message);
         if (message.type === 'system' && message.subtype === 'init') {
           this.updateToolboxItemsFromSystemInit(message);
           const sessionId = message.session_id;
@@ -1699,6 +1758,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     try {
       for await (const message of state.query) {
         rawMessages.push(message);
+        this.captureRateLimit(message);
         this.consumeMessage(state, message);
         const status = queryResultStatus(message);
         if (status) {

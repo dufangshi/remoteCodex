@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
@@ -12,6 +12,7 @@ import {
   threadGoals,
   threadHistoryItems,
   threadPendingSteers,
+  threadPromptRequests,
   threadTurnMetadata,
   threads,
   viewerSessions,
@@ -36,6 +37,7 @@ export interface CreateThreadRecordInput {
   fastBaseModel?: string | null;
   fastBaseReasoningEffort?: string | null;
   collaborationMode?: string;
+  activeTurnCollaborationMode?: string | null;
   approvalMode: string;
   sandboxMode?: string | null;
   summaryText?: string | null;
@@ -54,6 +56,7 @@ export interface UpdateThreadRecordInput {
   fastBaseModel?: string | null;
   fastBaseReasoningEffort?: string | null;
   collaborationMode?: string;
+  activeTurnCollaborationMode?: string | null;
   approvalMode?: string;
   sandboxMode?: string | null;
   status?: string;
@@ -83,6 +86,8 @@ export interface CreateThreadPendingSteerRecordInput {
   clientRequestId?: string | null;
   displayPrompt: string;
   submittedPrompt: string;
+  delivery?: 'steer' | 'continuation';
+  turnConfigJson?: string | null;
 }
 
 export interface UpsertThreadHistoryItemRecordInput {
@@ -283,6 +288,7 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     fastBaseModel: input.fastBaseModel ?? null,
     fastBaseReasoningEffort: input.fastBaseReasoningEffort ?? null,
     collaborationMode: input.collaborationMode ?? 'default',
+    activeTurnCollaborationMode: input.activeTurnCollaborationMode ?? null,
     approvalMode: input.approvalMode,
     sandboxMode: input.sandboxMode ?? null,
     status: 'idle',
@@ -538,6 +544,8 @@ export function createThreadPendingSteerRecord(
     clientRequestId: input.clientRequestId ?? null,
     displayPrompt: input.displayPrompt,
     submittedPrompt: input.submittedPrompt,
+    delivery: input.delivery ?? 'steer',
+    turnConfigJson: input.turnConfigJson ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -555,6 +563,93 @@ export function deleteThreadPendingSteerRecordsByThreadId(
   threadId: string,
 ) {
   db.delete(threadPendingSteers).where(eq(threadPendingSteers.threadId, threadId)).run();
+}
+
+export function getThreadPromptRequestRecord(
+  db: DatabaseClient,
+  threadId: string,
+  clientRequestId: string,
+) {
+  return db
+    .select()
+    .from(threadPromptRequests)
+    .where(
+      and(
+        eq(threadPromptRequests.threadId, threadId),
+        eq(threadPromptRequests.clientRequestId, clientRequestId),
+      ),
+    )
+    .get();
+}
+
+export function createThreadPromptRequestRecord(
+  db: DatabaseClient,
+  threadId: string,
+  clientRequestId: string,
+) {
+  const now = new Date().toISOString();
+  db.insert(threadPromptRequests)
+    .values({
+      id: randomUUID(),
+      threadId,
+      clientRequestId,
+      status: 'processing',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .run();
+  return getThreadPromptRequestRecord(db, threadId, clientRequestId)!;
+}
+
+export function markThreadPromptRequestAccepted(
+  db: DatabaseClient,
+  threadId: string,
+  clientRequestId: string,
+) {
+  db.update(threadPromptRequests)
+    .set({ status: 'accepted', updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(threadPromptRequests.threadId, threadId),
+        eq(threadPromptRequests.clientRequestId, clientRequestId),
+      ),
+    )
+    .run();
+}
+
+export function deleteExpiredThreadPromptRequestRecords(
+  db: DatabaseClient,
+  cutoff: string,
+) {
+  return db
+    .delete(threadPromptRequests)
+    .where(lt(threadPromptRequests.updatedAt, cutoff))
+    .run();
+}
+
+export function deleteThreadPromptRequestRecord(
+  db: DatabaseClient,
+  threadId: string,
+  clientRequestId: string,
+) {
+  db.delete(threadPromptRequests)
+    .where(
+      and(
+        eq(threadPromptRequests.threadId, threadId),
+        eq(threadPromptRequests.clientRequestId, clientRequestId),
+      ),
+    )
+    .run();
+}
+
+export function deleteThreadPromptRequestRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  db.delete(threadPromptRequests)
+    .where(eq(threadPromptRequests.threadId, threadId))
+    .run();
 }
 
 export function listThreadActivityNotesByThreadId(

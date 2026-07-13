@@ -2620,7 +2620,7 @@ function isAllowedSharedRuntimeMetadataRequest(
   if (pathname === '/api/plugins') {
     return true;
   }
-  return /^\/api\/agent-runtimes\/[^/]+\/(?:status|models)$/.test(pathname);
+  return /^\/api\/agent-runtimes\/[^/]+\/(?:status|models|subscription-usage)$/.test(pathname);
 }
 
 function threadIdFromPath(pathValue: string) {

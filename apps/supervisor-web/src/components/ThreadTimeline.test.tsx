@@ -2135,6 +2135,7 @@ describe('ThreadTimeline', () => {
         pendingSteers={[
           {
             id: 'pending-steer-1',
+            delivery: 'steer',
             clientRequestId: 'client-steer-1',
             turnId: 'turn-1',
             prompt: 'Accepted steer prompt',
@@ -2197,6 +2198,7 @@ describe('ThreadTimeline', () => {
         pendingSteers={[
           {
             id: 'pending-steer-1',
+            delivery: 'steer',
             clientRequestId: 'client-steer-1',
             turnId: 'turn-1',
             prompt: 'Queued prompt to cancel',
@@ -2259,6 +2261,7 @@ describe('ThreadTimeline', () => {
         pendingSteers={[
           {
             id: 'pending-steer-1',
+            delivery: 'steer',
             clientRequestId: 'client-steer-1',
             turnId: 'turn-1',
             prompt: 'Steer after sleep.',
@@ -4520,7 +4523,9 @@ describe('ThreadTimeline', () => {
       screen.getByText('Intermediate agent note should collapse.'),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse turn 1' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Worked for 1m 21s. Collapse turn 1' }),
+    );
 
     expect(screen.getByText('Keep this prompt visible.')).toBeInTheDocument();
     expect(screen.getByText('Keep this final reply visible.')).toBeInTheDocument();
@@ -4609,7 +4614,7 @@ describe('ThreadTimeline', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Final reply stays in expanded turn.')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Collapse turn 1' }),
+      screen.getByRole('button', { name: 'Worked for 1m 21s. Collapse turn 1' }),
     ).toBeInTheDocument();
   });
 

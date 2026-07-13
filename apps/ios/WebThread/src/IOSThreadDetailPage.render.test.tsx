@@ -281,7 +281,7 @@ describe('IOSThreadDetailPage relay sharing UI', () => {
         'Only the owner can share this session.',
       );
     });
-    expect(buttonByText('Share session')?.disabled).toBe(true);
+    expect(buttonByText('Share this thread')?.disabled).toBe(true);
     expect(mocks.client.createRelayShare).not.toHaveBeenCalled();
   });
 });

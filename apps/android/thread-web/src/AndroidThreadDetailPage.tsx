@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentBackendToolboxItemSchemaDto,
   AgentProviderCapabilitiesDto,
+  AgentSubscriptionUsageDto,
   ExportThreadPdfInput,
   ModelOptionDto,
   RelayEffectiveAccessDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadExportTurnOptionsDto,
+  UpdateThreadGoalInput,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
@@ -129,6 +131,7 @@ export function AndroidThreadDetailPage({
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
+  const promptSubmissionInFlightRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -172,6 +175,8 @@ export function AndroidThreadDetailPage({
   >([]);
   const [capabilities, setCapabilities] =
     useState<AgentProviderCapabilitiesDto | null>(null);
+  const [subscriptionUsage, setSubscriptionUsage] =
+    useState<AgentSubscriptionUsageDto | null>(null);
   const [sceneActive, setSceneActive] = useState(true);
   const sceneActiveRef = useRef(true);
   const [themeMode, setThemeMode] = useState<AndroidThemeMode>(
@@ -187,6 +192,37 @@ export function AndroidThreadDetailPage({
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  useEffect(() => {
+    const provider = detail?.thread.provider;
+    if (!provider || (provider !== 'codex' && provider !== 'claude')) {
+      setSubscriptionUsage(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const result = await client.fetchAgentSubscriptionUsage(provider);
+        if (!cancelled) {
+          setSubscriptionUsage(
+            result.usage?.authKind === 'subscription' && result.usage.windows.length
+              ? result.usage
+              : null,
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setSubscriptionUsage((current) => current ? { ...current, stale: true } : null);
+        }
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [client, detail?.thread.provider]);
 
   useEffect(() => {
     historyLimitRef.current = historyLimit;
@@ -422,10 +458,14 @@ export function AndroidThreadDetailPage({
 
   const submitPromptText = useCallback(
     async (prompt: string) => {
+      if (promptSubmissionInFlightRef.current) {
+        return false;
+      }
       const currentDetail = detailRef.current;
       if (!currentDetail) {
         return false;
       }
+      promptSubmissionInFlightRef.current = true;
       const previousDetail = currentDetail;
       const optimistic = buildOptimisticPromptDetail(currentDetail, prompt);
       setSubmitting(true);
@@ -450,6 +490,7 @@ export function AndroidThreadDetailPage({
         return false;
       } finally {
         setSubmitting(false);
+        promptSubmissionInFlightRef.current = false;
       }
     },
     [client, refreshThreadDetail],
@@ -545,6 +586,29 @@ export function AndroidThreadDetailPage({
       }
     },
     [client, detail, refreshThreadDetail],
+  );
+
+  const openThreadGoals = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail) return;
+    try {
+      const result = await client.fetchThreadGoal(currentDetail.thread.id);
+      setDetail((current) =>
+        current ? { ...current, goal: result.goal } : current,
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }, [client]);
+
+  const updateThreadGoal = useCallback(
+    async (input: UpdateThreadGoalInput) => {
+      const currentDetail = detailRef.current;
+      if (!currentDetail) return;
+      await client.updateThreadGoal(currentDetail.thread.id, input);
+      await refreshThreadDetail({ reportError: true });
+    },
+    [client, refreshThreadDetail],
   );
 
   const renameThread = useCallback(
@@ -1330,7 +1394,14 @@ export function AndroidThreadDetailPage({
                 hideSandboxModeControl: true,
                 modelOptions,
                 toolboxItems,
+                goalState: {
+                  status: 'ready',
+                  data: detail.goal,
+                  error: null,
+                },
+                goalHistory: detail.goalHistory ?? [],
                 contextUsage: detail.thread.contextUsage ?? null,
+                subscriptionUsage,
                 capabilities,
                 threadConnected: detail.thread.isLoaded,
                 disabled:
@@ -1355,6 +1426,12 @@ export function AndroidThreadDetailPage({
                 },
                 ...(effectiveThreadIsOwner
                   ? { onUpdateSettings: updateThreadSettings }
+                  : {}),
+                ...(effectiveThreadCanControl
+                  ? {
+                      onOpenGoal: openThreadGoals,
+                      onUpdateGoal: updateThreadGoal,
+                    }
                   : {}),
               }
             : undefined

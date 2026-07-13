@@ -448,6 +448,7 @@ export class ThreadRuntimeEventProjector {
 
         updateThreadRecord(db, record.id, {
           providerTurnId: null,
+          activeTurnCollaborationMode: null,
           status:
             event.turn.status === 'failed'
               ? 'failed'
@@ -478,7 +479,10 @@ export class ThreadRuntimeEventProjector {
         callbacks.clearTerminalPendingRequests(record.id, true);
         if (
           event.turn.status === 'completed' &&
-          callbacks.normalizeCollaborationMode(record.collaborationMode) === 'plan' &&
+          !preservePendingSteers &&
+          callbacks.normalizeCollaborationMode(
+            record.activeTurnCollaborationMode ?? record.collaborationMode,
+          ) === 'plan' &&
           turnItems.some((item) => item.kind === 'plan') &&
           !callbacks.hasPendingAskUserQuestion(record.id)
         ) {
@@ -517,6 +521,7 @@ export class ThreadRuntimeEventProjector {
           event.providerTurnId;
         updateThreadRecord(db, record.id, {
           providerTurnId: null,
+          activeTurnCollaborationMode: null,
           status: 'failed',
           lastError: event.error,
           lastTurnCompletedAt: new Date().toISOString(),

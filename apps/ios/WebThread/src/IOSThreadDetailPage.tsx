@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentBackendToolboxItemSchemaDto,
   AgentProviderCapabilitiesDto,
+  AgentSubscriptionUsageDto,
   ExportThreadPdfInput,
   ModelOptionDto,
   PromptAttachmentKindDto,
@@ -12,6 +13,7 @@ import type {
   ThreadExportTurnOptionsDto,
   ThreadForkTurnOptionDto,
   ThreadHistoryItemDto,
+  UpdateThreadGoalInput,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
@@ -234,6 +236,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const detailRef = useRef<ThreadDetailDto | null>(
     bootstrap.fixture ? mockDetail : null,
   );
+  const promptSubmissionInFlightRef = useRef(false);
   const [loading, setLoading] = useState(!bootstrap.fixture);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -280,6 +283,8 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   >([]);
   const [capabilities, setCapabilities] =
     useState<AgentProviderCapabilitiesDto | null>(null);
+  const [subscriptionUsage, setSubscriptionUsage] =
+    useState<AgentSubscriptionUsageDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sceneActive, setSceneActive] = useState(true);
   const sceneActiveRef = useRef(true);
@@ -332,6 +337,37 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  useEffect(() => {
+    const provider = detail?.thread.provider;
+    if (!provider || (provider !== 'codex' && provider !== 'claude') || bootstrap.fixture) {
+      setSubscriptionUsage(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const result = await client.fetchAgentSubscriptionUsage(provider);
+        if (!cancelled) {
+          setSubscriptionUsage(
+            result.usage?.authKind === 'subscription' && result.usage.windows.length
+              ? result.usage
+              : null,
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setSubscriptionUsage((current) => current ? { ...current, stale: true } : null);
+        }
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [bootstrap.fixture, client, detail?.thread.provider]);
 
   const resolveWorkspaceId = useCallback((workspaceId?: string | null) => {
     return (
@@ -996,10 +1032,14 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
 
   const submitPromptText = useCallback(
     async (prompt: string) => {
+      if (promptSubmissionInFlightRef.current) {
+        return false;
+      }
       const currentDetail = detailRef.current;
       if (bootstrap.fixture || !currentDetail) {
         return;
       }
+      promptSubmissionInFlightRef.current = true;
       const previousDetail = currentDetail;
       const optimistic = buildOptimisticPromptDetail(currentDetail, prompt);
       setSubmitting(true);
@@ -1029,6 +1069,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         return false;
       } finally {
         setSubmitting(false);
+        promptSubmissionInFlightRef.current = false;
       }
     },
     [bootstrap.fixture, client, refreshThreadDetail],
@@ -1094,6 +1135,29 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       }
     },
     [bootstrap.fixture, client, detail, refreshThreadDetail],
+  );
+
+  const openThreadGoals = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail || bootstrap.fixture) return;
+    try {
+      const result = await client.fetchThreadGoal(currentDetail.thread.id);
+      setDetail((current) =>
+        current ? { ...current, goal: result.goal } : current,
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }, [bootstrap.fixture, client]);
+
+  const updateThreadGoal = useCallback(
+    async (input: UpdateThreadGoalInput) => {
+      const currentDetail = detailRef.current;
+      if (!currentDetail || bootstrap.fixture) return;
+      await client.updateThreadGoal(currentDetail.thread.id, input);
+      await refreshThreadDetail({ reportError: true });
+    },
+    [bootstrap.fixture, client, refreshThreadDetail],
   );
 
   const renameThread = useCallback(
@@ -3624,8 +3688,15 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                 followTail,
                 modelOptions,
                 toolboxItems,
+                goalState: {
+                  status: 'ready',
+                  data: detail.goal,
+                  error: null,
+                },
+                goalHistory: detail.goalHistory ?? [],
                 forkTurnOptionsState,
                 contextUsage: detail.thread.contextUsage ?? null,
+                subscriptionUsage,
                 capabilities,
                 threadConnected: detail.thread.isLoaded,
                 disabled: !detail.thread.isLoaded || !effectiveThreadCanControl,
@@ -3639,6 +3710,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                 onPickAttachment: pickNativeAttachments,
                 ...(effectiveThreadIsOwner
                   ? { onUpdateSettings: updateThreadSettings }
+                  : {}),
+                ...(effectiveThreadCanControl
+                  ? {
+                      onOpenGoal: openThreadGoals,
+                      onUpdateGoal: updateThreadGoal,
+                    }
                   : {}),
                 onToggleFollow: () => {
                   setScrollRequestKey((current) => current + 1);

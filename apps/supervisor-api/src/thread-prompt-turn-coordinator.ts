@@ -45,6 +45,7 @@ interface PromptTurnRecord {
 interface RunningPromptTurnRecord extends PromptTurnRecord {
   providerTurnId: string;
   status: string | null;
+  activeTurnCollaborationMode?: string | null;
 }
 
 interface PromptTurnInput {
@@ -187,6 +188,7 @@ export class ThreadPromptTurnCoordinator {
       model: input.effectiveModel,
       reasoningEffort: input.normalizedReasoning,
       collaborationMode: input.collaborationMode,
+      activeTurnCollaborationMode: input.collaborationMode,
       sandboxMode: input.sandboxMode,
     };
 
@@ -339,6 +341,7 @@ export class ThreadPromptTurnCoordinator {
           clientRequestId: input.clientRequestId,
           displayPrompt: input.displayPrompt,
           submittedPrompt: input.prompt,
+          delivery: 'steer',
         });
         this.callbacks.invalidateThreadDetailCache(localThreadId);
         this.callbacks.emitThreadUpdated(localThreadId, {
@@ -404,6 +407,17 @@ export class ThreadPromptTurnCoordinator {
       clientRequestId: input.clientRequestId,
       displayPrompt: input.displayPrompt,
       submittedPrompt: input.prompt,
+      delivery: 'continuation',
+      turnConfigJson: JSON.stringify({
+        effectiveModel: input.effectiveModel,
+        normalizedReasoning: input.normalizedReasoning,
+        collaborationMode: input.collaborationMode,
+        sandboxMode: input.sandboxMode,
+        performanceMode: input.performanceMode,
+        startNewTurn:
+          input.collaborationMode !==
+          (record.activeTurnCollaborationMode === 'plan' ? 'plan' : 'default'),
+      }),
     });
     this.callbacks.invalidateThreadDetailCache(localThreadId);
     this.callbacks.emitThreadUpdated(localThreadId, {

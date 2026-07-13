@@ -128,6 +128,7 @@ export class ThreadAuxiliaryStateStore {
       clientRequestId: record.clientRequestId ?? null,
       turnId: record.turnId,
       prompt: record.displayPrompt,
+      delivery: record.delivery === 'continuation' ? 'continuation' : 'steer',
       createdAt: record.createdAt,
     }));
   }
@@ -146,6 +147,12 @@ export class ThreadAuxiliaryStateStore {
 
   hasPendingSteersForTurn(localThreadId: string, turnId: string) {
     return this.listPendingSteerRecordsForTurn(localThreadId, turnId).length > 0;
+  }
+
+  hasQueuedContinuationsForTurn(localThreadId: string, turnId: string) {
+    return this.listPendingSteerRecordsForTurn(localThreadId, turnId).some(
+      (record) => record.delivery === 'continuation',
+    );
   }
 
   deletePendingSteerRecord(localThreadId: string, id: string, turnId?: string) {

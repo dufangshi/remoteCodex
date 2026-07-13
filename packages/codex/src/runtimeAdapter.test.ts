@@ -27,6 +27,22 @@ class FakeCodexManager extends EventEmitter {
       items: [],
     };
   }
+
+  async readAccount() {
+    return { account: { type: 'chatgpt' }, requiresOpenaiAuth: true };
+  }
+
+  async readAccountRateLimits() {
+    return {
+      rateLimits: {},
+      rateLimitsByLimitId: {
+        codex: {
+          primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+          secondary: { usedPercent: 75, windowDurationMins: 10_080, resetsAt: 1_800_604_800 },
+        },
+      },
+    };
+  }
 }
 
 describe('CodexRuntimeAdapter', () => {
@@ -72,5 +88,33 @@ describe('CodexRuntimeAdapter', () => {
       },
       { type: 'text', text: '.', text_elements: [] },
     ]);
+  });
+
+  it('maps ChatGPT rate-limit windows without assuming fixed durations', async () => {
+    const adapter = new CodexRuntimeAdapter(new FakeCodexManager() as never);
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      provider: 'codex',
+      authKind: 'subscription',
+      stale: false,
+      windows: [
+        { id: 'primary', label: '5h', durationMinutes: 300, usedPercent: 40 },
+        { id: 'secondary', label: '7d', durationMinutes: 10_080, usedPercent: 75 },
+      ],
+    });
+  });
+
+  it('hides subscription windows for API-key authentication', async () => {
+    const manager = new FakeCodexManager();
+    manager.readAccount = async () => ({
+      account: { type: 'apiKey' },
+      requiresOpenaiAuth: true,
+    });
+    const adapter = new CodexRuntimeAdapter(manager as never);
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      authKind: 'apiKey',
+      windows: [],
+    });
   });
 });

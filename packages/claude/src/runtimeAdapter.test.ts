@@ -208,6 +208,70 @@ function makeAdapter(
 }
 
 describe('ClaudeRuntimeAdapter', () => {
+  it('captures Claude subscription rate-limit windows from SDK events', async () => {
+    const adapter = makeAdapter(() => [
+      systemInit(),
+      {
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed',
+          rateLimitType: 'five_hour',
+          utilization: 0.23,
+          resetsAt: 1_800_000_000,
+        },
+        uuid: '00000000-0000-4000-8000-000000000003',
+        session_id: 'claude-session-1',
+      },
+      {
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed_warning',
+          rateLimitType: 'seven_day',
+          utilization: 0.84,
+          resetsAt: 1_800_086_400,
+        },
+        uuid: '00000000-0000-4000-8000-000000000004',
+        session_id: 'claude-session-1',
+      },
+      result(),
+    ]);
+
+    await adapter.start();
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      provider: 'claude',
+      authKind: 'unknown',
+      windows: [],
+    });
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      provider: 'claude',
+      authKind: 'subscription',
+      stale: false,
+      windows: [
+        {
+          id: 'five_hour',
+          durationMinutes: 300,
+          label: '5h',
+          usedPercent: 23,
+          resetsAt: new Date(1_800_000_000 * 1000).toISOString(),
+        },
+        {
+          id: 'seven_day',
+          durationMinutes: 10_080,
+          label: '7d',
+          usedPercent: 84,
+          resetsAt: new Date(1_800_086_400 * 1000).toISOString(),
+        },
+      ],
+    });
+  });
+
   it('passes the configured Claude executable to the SDK', async () => {
     const sdkOptions: Record<string, unknown>[] = [];
     const adapter = new ClaudeRuntimeAdapter({

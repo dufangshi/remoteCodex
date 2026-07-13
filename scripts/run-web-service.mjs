@@ -13,9 +13,9 @@ const sourceCheckout =
 const defaultServicePort = sourceCheckout ? 4173 : 45673;
 const defaultApiPort = sourceCheckout ? 8787 : 45674;
 
-const serviceHost = process.env.SERVICE_HOST ?? '127.0.0.1';
+const serviceHost = process.env.SERVICE_HOST ?? '0.0.0.0';
 const servicePort = parsePort(process.env.SERVICE_PORT, defaultServicePort);
-const apiHost = process.env.SERVICE_API_HOST ?? '127.0.0.1';
+const apiHost = process.env.SERVICE_API_HOST ?? '0.0.0.0';
 const apiPort = parsePort(process.env.SERVICE_API_PORT, defaultApiPort);
 const distDir = path.resolve(
   process.env.SERVICE_WEB_DIST_DIR ?? path.join(repoRoot, 'apps/supervisor-web/dist')

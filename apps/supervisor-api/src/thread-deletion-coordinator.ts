@@ -9,6 +9,7 @@ import {
   deleteThreadGoalRecordsByThreadId,
   deleteThreadHistoryItemRecordsByThreadId,
   deleteThreadPendingSteerRecordsByThreadId,
+  deleteThreadPromptRequestRecordsByThreadId,
   deleteThreadRecord,
   deleteThreadTurnMetadataByThreadId,
   deleteViewerSessionsByThreadId,
@@ -68,6 +69,7 @@ export class ThreadDeletionCoordinator {
     deleteThreadGoalRecordsByThreadId(this.db, localThreadId);
     deleteThreadHistoryItemRecordsByThreadId(this.db, localThreadId);
     deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
+    deleteThreadPromptRequestRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
 

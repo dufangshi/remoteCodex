@@ -14,6 +14,13 @@ The supervisor is treated as a trusted local or private-network service, such as
 
 Use this for development and trusted LAN/VPN setups.
 
+`remote-codex start` listens on `0.0.0.0` for both the Web UI and supervisor API
+unless `SERVICE_HOST` or `SERVICE_API_HOST` is set. Other devices on the same
+trusted LAN can therefore connect using the host machine's LAN address. Local
+mode has no login requirement, so do not expose these ports to an untrusted
+network. To restrict access to the host machine, set both listener variables to
+`127.0.0.1`.
+
 ### `server`
 
 The supervisor is deployed as a reachable server and must protect API access.

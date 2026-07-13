@@ -77,11 +77,17 @@ export class FakeCodexManager extends EventEmitter {
   serverRequestResponses: Array<{ id: number; result: unknown }> = [];
   stopCalls = 0;
   startCalls = 0;
+  accountType: 'apiKey' | 'chatgpt' = 'apiKey';
+  accountRateLimits: {
+    rateLimits: unknown;
+    rateLimitsByLimitId?: Record<string, unknown> | null;
+  } = { rateLimits: {} };
   startTurnCalls: Array<{
     threadId: string;
     prompt: string;
     developerInstructions?: string | null;
     effort?: ReasoningEffort | null;
+    collaborationMode?: 'default' | 'plan' | null;
     serviceTier?: 'fast' | 'flex' | null;
   }> = [];
   resumeThreadCalls: Array<{
@@ -105,6 +111,17 @@ export class FakeCodexManager extends EventEmitter {
 
   async listModels() {
     return this.models;
+  }
+
+  async readAccount() {
+    return {
+      account: { type: this.accountType },
+      requiresOpenaiAuth: true,
+    };
+  }
+
+  async readAccountRateLimits() {
+    return this.accountRateLimits;
   }
 
   async listThreads() {
@@ -236,6 +253,9 @@ export class FakeCodexManager extends EventEmitter {
         ? { developerInstructions: input.developerInstructions }
         : {}),
       ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(input.collaborationMode !== undefined
+        ? { collaborationMode: input.collaborationMode }
+        : {}),
       ...(input.serviceTier !== undefined
         ? { serviceTier: input.serviceTier }
         : {}),
