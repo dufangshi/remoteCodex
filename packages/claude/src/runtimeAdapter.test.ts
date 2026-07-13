@@ -15,6 +15,7 @@ interface Query extends AsyncIterable<SDKMessage> {
   interrupt(): Promise<void>;
   supportedModels(): Promise<any[]>;
   mcpServerStatus(): Promise<any[]>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<any>;
 }
 
 function wait(ms = 0) {
@@ -29,7 +30,7 @@ class FakeQuery implements Query {
 
   constructor(
     private readonly messages: SDKMessage[],
-    private readonly options: { holdOpen?: boolean } = {},
+    private readonly options: { holdOpen?: boolean; usage?: Record<string, any> } = {},
   ) {}
 
   [Symbol.asyncIterator]() {
@@ -103,6 +104,12 @@ class FakeQuery implements Query {
   }
   async getContextUsage(): Promise<any> {
     return {};
+  }
+  async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<any> {
+    if (!this.options.usage) {
+      throw new Error('Structured usage unavailable in this fixture.');
+    }
+    return this.options.usage;
   }
   async readFile(): Promise<any> {
     return {};
@@ -208,6 +215,55 @@ function makeAdapter(
 }
 
 describe('ClaudeRuntimeAdapter', () => {
+  it('actively reads Claude subscription windows from the structured usage API', async () => {
+    const adapter = makeAdapter(() => new FakeQuery(
+      [systemInit(), result()],
+      {
+        usage: {
+          subscription_type: 'max',
+          rate_limits_available: true,
+          rate_limits: {
+            five_hour: {
+              utilization: 23,
+              resets_at: '2027-01-15T08:00:00.000Z',
+            },
+            seven_day: {
+              utilization: 84,
+              resets_at: '2027-01-20T08:00:00.000Z',
+            },
+          },
+        },
+      },
+    ));
+
+    await adapter.start();
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      provider: 'claude',
+      authKind: 'subscription',
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5h',
+          usedPercent: 23,
+          resetsAt: '2027-01-15T08:00:00.000Z',
+        },
+        {
+          id: 'seven_day',
+          label: '7d',
+          usedPercent: 84,
+          resetsAt: '2027-01-20T08:00:00.000Z',
+        },
+      ],
+    });
+  });
+
   it('captures Claude subscription rate-limit windows from SDK events', async () => {
     const adapter = makeAdapter(() => [
       systemInit(),

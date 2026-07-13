@@ -367,7 +367,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [bootstrap.fixture, client, detail?.thread.provider]);
+  }, [
+    bootstrap.fixture,
+    client,
+    detail?.thread.lastTurnCompletedAt,
+    detail?.thread.provider,
+  ]);
 
   const resolveWorkspaceId = useCallback((workspaceId?: string | null) => {
     return (

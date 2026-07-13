@@ -222,7 +222,7 @@ export function AndroidThreadDetailPage({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [client, detail?.thread.provider]);
+  }, [client, detail?.thread.lastTurnCompletedAt, detail?.thread.provider]);
 
   useEffect(() => {
     historyLimitRef.current = historyLimit;

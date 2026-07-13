@@ -397,7 +397,7 @@ export function turnHasUserMessage(
 ) {
   return (
     turn?.items.some(
-      (item) => item.kind === 'userMessage' && item.text.trim() === prompt,
+      (item) => item.kind === 'userMessage' && item.text.trim() === prompt.trim(),
     ) ?? false
   );
 }
@@ -452,6 +452,34 @@ export function findTurnWithUserMessage(
       ? turns.find((turn) => turnHasPhotoPromptText(turn, prompt)) ?? null
       : null)
   );
+}
+
+export function findMaterializedOptimisticTurn(
+  turns: ThreadDetailDto['turns'],
+  optimistic: { id: string; serverTurnId: string | null; prompt: string },
+) {
+  return turns.find((turn) => {
+    const matchesAuthoritativeId =
+      (optimistic.serverTurnId !== null && turn.id === optimistic.serverTurnId)
+      || turn.id === optimistic.id;
+    if (
+      matchesAuthoritativeId
+      && turn.items.some((item) => item.kind === 'userMessage')
+    ) {
+      return true;
+    }
+
+    return (
+      turnHasUserMessage(turn, optimistic.prompt)
+      || (
+        promptHasPhotoPlaceholder(optimistic.prompt)
+        && (
+          turnHasPhotoPromptText(turn, optimistic.prompt)
+          || turnHasPhotoAttachment(turn)
+        )
+      )
+    );
+  }) ?? null;
 }
 
 export function mergeTurnTokenUsage(

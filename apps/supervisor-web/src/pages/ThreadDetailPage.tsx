@@ -81,6 +81,7 @@ import {
   appendLatestTurns,
   applyLiveItemTimestampsToTurns,
   createClientRequestId,
+  findMaterializedOptimisticTurn,
   findTurnWithUserMessage,
   getReasoningEffortAvailability,
   isThreadActionRequest,
@@ -997,22 +998,22 @@ export function ThreadDetailPage() {
           };
         }
         if (materializedTurn && current.serverTurnId) {
-          const materializedTurnHasPrompt =
-            turnHasUserMessage(materializedTurn, current.prompt) ||
-            (
-              promptHasPhotoPlaceholder(current.prompt) &&
-              (
-                turnHasPhotoPromptText(materializedTurn, current.prompt) ||
-                turnHasPhotoAttachment(materializedTurn)
-              )
-            );
-
-          if (!materializedTurnHasPrompt) {
+          const hasMaterializedUserMessage = materializedTurn.items.some(
+            (item) => item.kind === 'userMessage',
+          );
+          if (!hasMaterializedUserMessage) {
             return {
               ...current,
               id: materializedTurn.id,
               serverTurnId: materializedTurn.id,
-              status: current.status === 'failed' ? current.status : 'inProgress',
+              status:
+                current.status === 'failed'
+                  ? current.status
+                  : materializedTurn.status === 'inProgress'
+                    ? 'inProgress'
+                    : materializedTurn.status === 'failed'
+                      ? 'failed'
+                      : 'completed',
             };
           }
 
@@ -1107,7 +1108,7 @@ export function ThreadDetailPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [detail?.thread.provider]);
+  }, [detail?.thread.lastTurnCompletedAt, detail?.thread.provider]);
 
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
@@ -2882,35 +2883,9 @@ export function ThreadDetailPage() {
 
   const settingsContent = null;
 
-  const optimisticServerTurnId = optimisticTurn?.serverTurnId ?? null;
   const optimisticMaterializedTurn =
     optimisticTurn && detail
-      ? detail.turns.find(
-          (turn) => {
-            const hasOptimisticPrompt =
-              turnHasUserMessage(turn, optimisticTurn.prompt) ||
-              (
-                promptHasPhotoPlaceholder(optimisticTurn.prompt) &&
-                (
-                  turnHasPhotoPromptText(turn, optimisticTurn.prompt) ||
-                  turnHasPhotoAttachment(turn)
-                )
-              );
-
-            return (
-              hasOptimisticPrompt &&
-              (
-                (optimisticServerTurnId && turn.id === optimisticServerTurnId) ||
-                turn.id === optimisticTurn.id ||
-                turnHasUserMessage(turn, optimisticTurn.prompt) ||
-                (
-                  promptHasPhotoPlaceholder(optimisticTurn.prompt) &&
-                  turnHasPhotoPromptText(turn, optimisticTurn.prompt)
-                )
-              )
-            );
-          },
-        ) ?? null
+      ? findMaterializedOptimisticTurn(detail.turns, optimisticTurn)
       : null;
   const timelineOptimisticTurn = useMemo(
     () =>

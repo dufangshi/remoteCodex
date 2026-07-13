@@ -99,6 +99,19 @@ interface Query extends AsyncIterable<SDKMessage> {
   interrupt(): Promise<void>;
   supportedModels(): Promise<ModelInfo[]>;
   mcpServerStatus(): Promise<McpServerStatus[]>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?(): Promise<SDKUsageResponse>;
+}
+interface SDKUsageWindow {
+  utilization: number | null;
+  resets_at: string | null;
+}
+interface SDKUsageResponse {
+  subscription_type: string | null;
+  rate_limits_available: boolean;
+  rate_limits: {
+    five_hour?: SDKUsageWindow | null;
+    seven_day?: SDKUsageWindow | null;
+  } | null;
 }
 interface SDKMessage {
   type: string;
@@ -1239,6 +1252,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     'five_hour' | 'seven_day',
     { usedPercent: number; resetsAt: string | null }
   >();
+  private subscriptionAuthKind: 'subscription' | 'apiKey' | 'unknown' = 'unknown';
   private subscriptionUsageObservedAt: string | null = null;
   private readonly clientApp: string;
   private sdkLoadError: string | null = null;
@@ -1271,7 +1285,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }));
     return {
       provider: 'claude' as const,
-      authKind: windows.length > 0 ? 'subscription' as const : 'unknown' as const,
+      authKind: this.subscriptionAuthKind,
       observedAt,
       stale: false,
       windows,
@@ -1297,7 +1311,54 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         ? new Date(info.resetsAt * 1000).toISOString()
         : null,
     });
+    this.subscriptionAuthKind = 'subscription';
     this.subscriptionUsageObservedAt = new Date().toISOString();
+  }
+
+  private async captureStructuredSubscriptionUsage(query: Query) {
+    const getUsage = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+    if (!getUsage) {
+      return;
+    }
+
+    try {
+      const usage = await getUsage.call(query);
+      const nextWindows = new Map<
+        'five_hour' | 'seven_day',
+        { usedPercent: number; resetsAt: string | null }
+      >();
+      const addWindow = (
+        id: 'five_hour' | 'seven_day',
+        window: SDKUsageWindow | null | undefined,
+      ) => {
+        if (
+          typeof window?.utilization !== 'number'
+          || !Number.isFinite(window.utilization)
+        ) {
+          return;
+        }
+        nextWindows.set(id, {
+          usedPercent: Math.max(0, Math.min(100, window.utilization)),
+          resetsAt: typeof window.resets_at === 'string' ? window.resets_at : null,
+        });
+      };
+      addWindow('five_hour', usage.rate_limits?.five_hour);
+      addWindow('seven_day', usage.rate_limits?.seven_day);
+
+      this.subscriptionUsageWindows.clear();
+      for (const [id, window] of nextWindows) {
+        this.subscriptionUsageWindows.set(id, window);
+      }
+      this.subscriptionAuthKind = usage.subscription_type
+        ? 'subscription'
+        : usage.rate_limits_available
+          ? 'subscription'
+          : 'apiKey';
+      this.subscriptionUsageObservedAt = new Date().toISOString();
+    } catch {
+      // This SDK method is experimental. Rate-limit events remain the
+      // compatibility fallback for Claude versions that do not expose it.
+    }
   }
 
   private updateToolboxItemsFromSystemInit(message: SDKMessage) {
@@ -1463,9 +1524,14 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     let providerSessionId: string | null = null;
     let model: string | null = input.model;
     const rawMessages: SDKMessage[] = [];
+    let capturedStructuredUsage = false;
     try {
       for await (const message of query) {
         rawMessages.push(message);
+        if (!capturedStructuredUsage) {
+          capturedStructuredUsage = true;
+          await this.captureStructuredSubscriptionUsage(query);
+        }
         this.captureRateLimit(message);
         if (message.type === 'system' && message.subtype === 'init') {
           this.updateToolboxItemsFromSystemInit(message);
@@ -1755,9 +1821,14 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const rawMessages: SDKMessage[] = [];
     let terminalStatus: AgentTurn['status'] | null = null;
     let terminalError: string | null = null;
+    let capturedStructuredUsage = false;
     try {
       for await (const message of state.query) {
         rawMessages.push(message);
+        if (!capturedStructuredUsage) {
+          capturedStructuredUsage = true;
+          await this.captureStructuredSubscriptionUsage(state.query);
+        }
         this.captureRateLimit(message);
         this.consumeMessage(state, message);
         const status = queryResultStatus(message);

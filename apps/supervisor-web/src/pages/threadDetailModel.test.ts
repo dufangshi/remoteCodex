@@ -4,6 +4,7 @@ import type { ThreadDetailDto } from '@remote-codex/shared';
 import {
   appendLatestTurns,
   applyLiveItemTimestampsToTurns,
+  findMaterializedOptimisticTurn,
   findTurnWithUserMessage,
   mergeGoalHistory,
   mergeLiveHistoryItem,
@@ -43,6 +44,34 @@ function makePendingRequest(
 }
 
 describe('threadDetailModel', () => {
+  it('matches optimistic prompts after transport whitespace normalization', () => {
+    const turn = makeTurn('turn-1', [
+      {
+        id: 'user-1',
+        kind: 'userMessage',
+        text: 'hi, reply 1',
+      },
+    ]);
+
+    expect(findTurnWithUserMessage([turn], 'hi, reply 1\n')).toBe(turn);
+  });
+
+  it('treats a server turn id as authoritative after Claude normalizes prompt text', () => {
+    const turn = makeTurn('claude-turn-1', [
+      {
+        id: 'user-1',
+        kind: 'userMessage',
+        text: 'hi, reply 1\n\n<system-reminder>context</system-reminder>',
+      },
+    ]);
+
+    expect(findMaterializedOptimisticTurn([turn], {
+      id: 'optimistic-1',
+      serverTurnId: 'claude-turn-1',
+      prompt: 'hi, reply 1',
+    })).toBe(turn);
+  });
+
   it('prepends and appends turn pages without duplicating overlapping turn ids', () => {
     const existing = [makeTurn('turn-2'), makeTurn('turn-3')];
 
