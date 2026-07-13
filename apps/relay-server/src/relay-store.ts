@@ -673,6 +673,11 @@ export class RelayStore {
               provider_instance_id = COALESCE(?, provider_instance_id),
               last_error_code = ?,
               last_error_message = ?,
+              running_since = CASE
+                WHEN ? = 'stopped' THEN NULL
+                WHEN ? = 'starting' AND running_since IS NULL THEN ?
+                ELSE running_since
+              END,
               updated_at = ?
           WHERE id = ?
         `,
@@ -682,6 +687,9 @@ export class RelayStore {
         options.providerInstanceId ?? null,
         options.errorCode ?? null,
         options.errorMessage ?? null,
+        status,
+        status,
+        new Date().toISOString(),
         new Date().toISOString(),
         id,
       );
@@ -755,11 +763,12 @@ export class RelayStore {
         `
           UPDATE relay_hosted_sandboxes
           SET status = 'online', last_error_code = NULL,
-              last_error_message = NULL, updated_at = ?
+              last_error_message = NULL,
+              running_since = COALESCE(running_since, ?), updated_at = ?
           WHERE device_id = ? AND status != 'deleting'
         `,
       )
-      .run(new Date().toISOString(), deviceId);
+      .run(new Date().toISOString(), new Date().toISOString(), deviceId);
   }
 
   getHostedSandboxByDeviceId(deviceId: string) {
@@ -2243,6 +2252,7 @@ export class RelayStore {
       'workspace_isolation_enabled',
       'INTEGER NOT NULL DEFAULT 0',
     );
+    this.ensureColumn('relay_hosted_sandboxes', 'running_since', 'TEXT');
     this.ensureColumn('relay_shares', 'thread_title', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_id', 'TEXT');
     this.ensureColumn('relay_shares', 'workspace_label', 'TEXT');
@@ -3329,6 +3339,7 @@ export class RelayStore {
       activeTurnCount: row.active_turn_count,
       lastUserActivityAt: row.last_user_activity_at,
       idleDeadlineAt: row.idle_deadline_at,
+      runningSince: row.running_since,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -3491,6 +3502,7 @@ interface HostedSandboxRow {
   idle_deadline_at: string | null;
   lifecycle_generation: number;
   workspace_isolation_enabled: number;
+  running_since: string | null;
   created_at: string;
   updated_at: string;
 }

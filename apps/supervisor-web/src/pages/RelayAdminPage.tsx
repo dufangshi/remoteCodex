@@ -22,6 +22,7 @@ import {
   Share2,
   Trash2,
   Users,
+  X,
 } from 'lucide-react';
 
 import type {
@@ -948,6 +949,8 @@ function HostedSandboxRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
+  const [manageOpen, setManageOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const busy = busyKey?.endsWith(sandbox.id) ?? false;
   const tone = hostedStatusTone(sandbox.status);
   const memberIds = sandbox.assignedUsers.map((user) => user.userId);
@@ -961,6 +964,20 @@ function HostedSandboxRow({
       );
     })
     .slice(0, 6);
+  useEffect(() => {
+    if (!sandbox.runningSince) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [sandbox.runningSince]);
+
+  useEffect(() => {
+    if (!manageOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setManageOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [manageOpen]);
   return (
     <article className="px-4 py-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -991,6 +1008,9 @@ function HostedSandboxRow({
           </p>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
             Updated {formatTimestamp(sandbox.updatedAt)}
+            {sandbox.runningSince
+              ? ` · running for ${formatRunningDuration(sandbox.runningSince, now)}`
+              : ''}
             {sandbox.idleDeadlineAt
               ? ` · idle stop ${formatTimestamp(sandbox.idleDeadlineAt)}`
               : ''}
@@ -1065,6 +1085,15 @@ function HostedSandboxRow({
             <Camera className="h-4 w-4" />
             Snapshot
           </button>
+          <button
+            className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
+            disabled={busy}
+            onClick={() => setManageOpen(true)}
+            type="button"
+          >
+            <Settings className="h-4 w-4" />
+            Manage
+          </button>
           {confirmDelete ? (
             <span className="inline-flex items-center gap-2 rounded-md bg-[var(--status-danger-bg)] p-1">
               <button
@@ -1099,7 +1128,40 @@ function HostedSandboxRow({
           )}
         </div>
       </div>
-      <div className="mt-3 max-w-2xl rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+      {manageOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
+          <button
+            aria-label="Close VM management"
+            className="absolute inset-0 bg-[var(--overlay-scrim)]"
+            onClick={() => setManageOpen(false)}
+            type="button"
+          />
+          <section
+            aria-label={`Manage ${sandbox.deviceName}`}
+            aria-modal="true"
+            className="relative flex h-full w-full max-w-2xl flex-col border-l border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-[var(--theme-shadow)]"
+            role="dialog"
+          >
+            <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[var(--theme-border)] px-5">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-[var(--theme-fg)]">
+                  Manage {sandbox.deviceName}
+                </h3>
+                <p className="mt-0.5 text-xs text-[var(--theme-fg-muted)]">
+                  Access, isolation, credentials, and recovery settings
+                </p>
+              </div>
+              <button
+                aria-label="Close VM management"
+                className="relay-button-secondary inline-flex h-10 w-10 items-center justify-center p-0"
+                onClick={() => setManageOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="max-w-2xl rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
         <label className="flex cursor-pointer items-start justify-between gap-4">
           <span>
             <span className="block text-sm font-medium text-[var(--theme-fg)]">
@@ -1124,8 +1186,8 @@ function HostedSandboxRow({
             type="checkbox"
           />
         </label>
-      </div>
-      <details className="mt-3">
+              </div>
+              <details className="mt-4" open>
         <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
           Access · {sandbox.assignedUsers.length} user
           {sandbox.assignedUsers.length === 1 ? '' : 's'}
@@ -1251,12 +1313,20 @@ function HostedSandboxRow({
             ))}
           </ul>
         </div>
-      </details>
-      <HostedBackendFilesEditor
-        busy={busy}
-        onAction={onAction}
-        sandbox={sandbox}
-      />
+              </details>
+              <div className="mt-4 rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                <span className="font-medium text-[var(--theme-fg)]">Snapshots</span>
+                {' '}capture the VM disk as a local Incus restore point before risky changes. They are not off-host backups and are not restored automatically.
+              </div>
+              <HostedBackendFilesEditor
+                busy={busy}
+                onAction={onAction}
+                sandbox={sandbox}
+              />
+            </div>
+          </section>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -2642,6 +2712,18 @@ function compareNullableDate(field: 'lastSeenAt') {
 
 function formatTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'never';
+}
+
+function formatRunningDuration(value: string, now: number) {
+  const startedAt = Date.parse(value);
+  if (!Number.isFinite(startedAt)) return 'unknown';
+  const totalMinutes = Math.max(0, Math.floor((now - startedAt) / 60_000));
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function initials(username: string | null | undefined) {

@@ -264,6 +264,7 @@ describe('RelayAdminPage', () => {
       activeTurnCount: 1,
       lastUserActivityAt: '2026-06-18T00:15:00.000Z',
       idleDeadlineAt: null,
+      runningSince: '2026-06-18T00:00:00.000Z',
       createdAt: '2026-06-18T00:00:00.000Z',
       updatedAt: '2026-06-18T00:15:00.000Z',
     };
@@ -447,6 +448,9 @@ describe('RelayAdminPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('1 active turn')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    expect(screen.getByText(/running for \d+d \d+h/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+    expect(screen.getByRole('dialog', { name: 'Manage Hosted Codex' })).toBeInTheDocument();
     fireEvent.click(
       screen.getByLabelText('Isolate user workspaces for Hosted Codex'),
     );
@@ -512,7 +516,6 @@ describe('RelayAdminPage', () => {
       screen.queryByDisplayValue(/sk-test-not-a-real-secret/),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Access · 1 user'));
     fireEvent.click(
       screen.getByRole('button', { name: 'Add authorized user' }),
     );

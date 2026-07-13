@@ -455,6 +455,7 @@ export interface RelayHostedSandboxDto {
   activeTurnCount: number;
   lastUserActivityAt: string | null;
   idleDeadlineAt: string | null;
+  runningSince: string | null;
   createdAt: string;
   updatedAt: string;
 }
