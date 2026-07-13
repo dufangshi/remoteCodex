@@ -95,7 +95,7 @@ jobs:
           pnpm pack --pack-destination artifacts
 
       - name: Publish remote-codex
-        run: npm publish "artifacts/remote-codex-${{ steps.version.outputs.version }}.tgz" --access public --provenance
+        run: npm publish "./artifacts/remote-codex-${{ steps.version.outputs.version }}.tgz" --access public --provenance
 
       - name: Verify registry availability
         shell: bash
