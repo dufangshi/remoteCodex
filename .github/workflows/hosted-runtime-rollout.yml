@@ -70,6 +70,9 @@ jobs:
             set -euo pipefail
             release="/opt/remote-codex-incus-host-agent/runtime-rollouts/${{ github.sha }}"
             sudo install -d -o root -g root -m 0755 "${release}"
+            sudo install -d -o root -g root -m 0755 \
+              /opt/remote-codex-incus-host-agent/guest \
+              /opt/remote-codex-incus-host-agent/deploy
             sudo tar -xzf /tmp/remote-codex-runtime-rollout.tgz -C "${release}"
             sudo install -o root -g root -m 0700 \
               "${release}/guest/remote-codex-upgrade-runtime" \
