@@ -404,6 +404,8 @@ export function ThreadDetailPage() {
   >(null);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
+  const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -3180,9 +3182,11 @@ export function ThreadDetailPage() {
       respondingRequestId,
       onRespondToRequest: handleRespondToRequest,
       scrollRequestKey,
+      nextTurnScrollRequestKey,
       bottomSpacer: timelineBottomSpacer,
       className: 'thread-timeline-surface min-h-0 flex-1',
       onTailVisibilityChange: setFollowTail,
+      onNextTurnAvailabilityChange: setCanJumpToNextTurn,
       loadingEarlier,
       onLoadEarlier: handleLoadEarlierTurns,
       onOpenThread: openThread,
@@ -3206,6 +3210,7 @@ export function ThreadDetailPage() {
       optimisticSteers,
       respondingRequestId,
       scrollRequestKey,
+      nextTurnScrollRequestKey,
       timelineBottomSpacer,
       timelineOptimisticTurn,
     ],
@@ -3285,6 +3290,9 @@ export function ThreadDetailPage() {
             }
           : {}),
         onToggleFollow: () => setScrollRequestKey((current) => current + 1),
+        canJumpToNextTurn,
+        onJumpToNextTurn: () =>
+          setNextTurnScrollRequestKey((current) => current + 1),
         ...(relayThreadCanControl
           ? { onUpdateSettings: handleUpdateThreadSettings }
           : {}),
