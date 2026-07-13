@@ -73,8 +73,15 @@ jobs:
       - name: Validate publishable package
         run: |
           set -euo pipefail
-          pnpm typecheck
+          pnpm --filter @remote-codex/shared typecheck
+          pnpm --filter @remote-codex/db typecheck
+          pnpm --filter @remote-codex/codex typecheck
+          pnpm --filter @remote-codex/claude typecheck
+          pnpm --filter @remote-codex/supervisor-api typecheck
+          pnpm --filter @remote-codex/relay-server typecheck
+          pnpm --filter @remote-codex/incus-host-agent typecheck
           pnpm --filter @remote-codex/supervisor-api test
+          pnpm --filter @remote-codex/incus-host-agent test
           pnpm build:package
           mkdir -p artifacts
           pnpm pack --pack-destination artifacts
