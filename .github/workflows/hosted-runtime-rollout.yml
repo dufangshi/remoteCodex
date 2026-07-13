@@ -1,11 +1,12 @@
 name: Hosted supervisor runtime rollout
 
 on:
-  workflow_run:
-    workflows:
-      - Publish npm package
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published remote-codex npm version to roll out
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,22 +18,23 @@ concurrency:
 jobs:
   rollout:
     name: Roll out runtime to Incus VMs
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - name: Checkout published revision
+      - name: Checkout rollout tooling
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Resolve and verify published version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
+          version="${{ inputs.version }}"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid remote-codex version: ${version}" >&2
+            exit 1
+          fi
           published="$(npm view "remote-codex@${version}" version)"
           test "${published}" = "${version}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
@@ -66,7 +68,7 @@ jobs:
           command_timeout: 40m
           script: |
             set -euo pipefail
-            release="/opt/remote-codex-incus-host-agent/runtime-rollouts/${{ github.event.workflow_run.head_sha }}"
+            release="/opt/remote-codex-incus-host-agent/runtime-rollouts/${{ github.sha }}"
             sudo install -d -o root -g root -m 0755 "${release}"
             sudo tar -xzf /tmp/remote-codex-runtime-rollout.tgz -C "${release}"
             sudo install -o root -g root -m 0700 \

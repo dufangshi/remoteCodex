@@ -5,18 +5,27 @@ The Relay container and the supervisor running inside an Incus VM are separate d
 ## Release flow
 
 1. Any change to publishable runtime paths must include a new root `package.json` version.
-2. `Publish npm package` validates the repository, packs the complete runtime, and publishes `remote-codex` with npm trusted publishing and provenance.
-3. A successful npm publication triggers `Hosted supervisor runtime rollout`.
+2. Validate and pack the runtime locally, then publish it manually with the existing project-level `.npmrc` credentials:
+
+   ```bash
+   pnpm typecheck
+   pnpm --filter @remote-codex/supervisor-api test
+   pnpm --filter @remote-codex/incus-host-agent test
+   mkdir -p artifacts
+   npm pack --pack-destination artifacts
+   npm publish ./artifacts/remote-codex-<version>.tgz --access public
+   ```
+
+3. After npm confirms the published version, manually dispatch `Hosted supervisor runtime rollout` with that exact version. For example:
+
+   ```bash
+   gh workflow run hosted-runtime-rollout.yml -f version=<version>
+   ```
+
 4. The rollout records the desired version on every managed Incus VM.
 5. Running VMs upgrade serially. Stopped VMs remain stopped and upgrade automatically on their next start.
 
-The npm package must configure GitHub Actions trusted publishing for:
-
-- repository: `dufangshi/remoteCodex`
-- workflow: `npm-release.yml`
-- environment: none
-
-No long-lived npm token is stored in GitHub.
+The `.npmrc` remains local and uncommitted. The rollout workflow has no npm publishing permission and only accepts a version that is already visible in the public registry.
 
 ## Turn-aware behavior
 
@@ -28,7 +37,6 @@ Before installation, the guest stops the supervisor cleanly and stores a protect
 
 Useful files:
 
-- `.github/workflows/npm-release.yml`
 - `.github/workflows/hosted-runtime-rollout.yml`
 - `packages/incus-host-agent/deploy/rollout-runtime.sh`
 - `packages/incus-host-agent/guest/remote-codex-upgrade-runtime`
