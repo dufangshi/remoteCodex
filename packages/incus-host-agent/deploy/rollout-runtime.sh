@@ -4,6 +4,7 @@ set -euo pipefail
 # Ignore a deploy user's project-level npm settings (notably `prefix`), which
 # otherwise make read-only registry checks fail when this script runs via sudo.
 export NPM_CONFIG_USERCONFIG=/dev/null
+cd /
 
 target_version="${1:-}"
 if [[ ! "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
