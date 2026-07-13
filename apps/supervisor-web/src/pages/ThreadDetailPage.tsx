@@ -404,7 +404,9 @@ export function ThreadDetailPage() {
   >(null);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
   const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
+  const [canJumpToPreviousTurn, setCanJumpToPreviousTurn] = useState(false);
   const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -3182,10 +3184,12 @@ export function ThreadDetailPage() {
       respondingRequestId,
       onRespondToRequest: handleRespondToRequest,
       scrollRequestKey,
+      previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
       bottomSpacer: timelineBottomSpacer,
       className: 'thread-timeline-surface min-h-0 flex-1',
       onTailVisibilityChange: setFollowTail,
+      onPreviousTurnAvailabilityChange: setCanJumpToPreviousTurn,
       onNextTurnAvailabilityChange: setCanJumpToNextTurn,
       loadingEarlier,
       onLoadEarlier: handleLoadEarlierTurns,
@@ -3210,6 +3214,7 @@ export function ThreadDetailPage() {
       optimisticSteers,
       respondingRequestId,
       scrollRequestKey,
+      previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
       timelineBottomSpacer,
       timelineOptimisticTurn,
@@ -3290,6 +3295,9 @@ export function ThreadDetailPage() {
             }
           : {}),
         onToggleFollow: () => setScrollRequestKey((current) => current + 1),
+        canJumpToPreviousTurn,
+        onJumpToPreviousTurn: () =>
+          setPreviousTurnScrollRequestKey((current) => current + 1),
         canJumpToNextTurn,
         onJumpToNextTurn: () =>
           setNextTurnScrollRequestKey((current) => current + 1),
