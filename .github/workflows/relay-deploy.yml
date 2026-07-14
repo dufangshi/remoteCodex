@@ -61,6 +61,8 @@ jobs:
           push: true
           secret-envs: |
             remote_codex_thread_ui_deploy_key=REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64
+          build-args: |
+            REMOTE_CODEX_THREAD_UI_CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           tags: |
             ${{ steps.image.outputs.image_latest }}
             ${{ steps.image.outputs.image_sha }}
