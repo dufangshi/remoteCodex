@@ -260,3 +260,25 @@ body,
   overflow-wrap: anywhere;
   color: var(--theme-fg);
 }
+
+.thread-ui-shell :where(
+  .thread-graph-message-time,
+  .thread-graph-relative-time,
+  .thread-graph-history-tool-time,
+  .thread-graph-history-tool-time .thread-graph-relative-time
+) {
+  font-size: 0.625rem !important;
+  font-weight: 400;
+  line-height: 1 !important;
+}
+
+@media (min-width: 640px) {
+  .thread-ui-shell :where(
+    .thread-graph-message-time,
+    .thread-graph-relative-time,
+    .thread-graph-history-tool-time,
+    .thread-graph-history-tool-time .thread-graph-relative-time
+  ) {
+    font-size: 0.6875rem !important;
+  }
+}

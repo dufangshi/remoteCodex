@@ -15,6 +15,7 @@ declare global {
     __REMOTE_CODEX_ANDROID_BOOTSTRAP__?: Partial<AndroidThreadBootstrap>;
     remoteCodexAndroidHost?: {
       setSceneActive?(active: boolean): void;
+      resumeSceneActive?(): void;
       setTheme?(theme: AndroidThemeMode): void;
       openSettings?(): void;
       receiveNativeHttpResponse?(response: {

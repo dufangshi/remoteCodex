@@ -64,6 +64,7 @@ vi.mock('@remote-codex/thread-ui', async () => {
       mobileHeaderAction,
       dialogs,
       composerProps,
+      timelineProps,
     }: {
       detail: ThreadDetailDto | null;
       threadActionsButton?: React.ReactNode;
@@ -71,11 +72,17 @@ vi.mock('@remote-codex/thread-ui', async () => {
       mobileHeaderAction?: React.ReactNode;
       dialogs?: React.ReactNode;
       composerProps?: { subscriptionUsage?: unknown };
+      timelineProps?: { autoCollapseCompletedTurns?: boolean };
     }) =>
       React.createElement(
         'div',
         null,
         React.createElement('h1', null, detail?.thread.title ?? 'Loading'),
+        React.createElement(
+          'span',
+          { 'data-testid': 'auto-collapse' },
+          String(timelineProps?.autoCollapseCompletedTurns ?? false),
+        ),
         threadActionsButton,
         surfaceActions,
         mobileHeaderAction,
@@ -306,6 +313,7 @@ describe('IOSThreadDetailPage relay sharing UI', () => {
 
     await waitFor(() => {
       expect(document.body.textContent).toContain('iOS relay thread');
+      expect(document.querySelector('[data-testid="auto-collapse"]')?.textContent).toBe('true');
     });
 
     const actionsButton = document.querySelector<HTMLButtonElement>(

@@ -527,8 +527,13 @@ private fun WebView.setThreadWebTheme(themeMode: ThemeMode) {
 }
 
 private fun WebView.setThreadWebSceneActive(active: Boolean) {
+    val script = if (active) {
+        "window.remoteCodexAndroidHost && window.remoteCodexAndroidHost.resumeSceneActive && window.remoteCodexAndroidHost.resumeSceneActive();"
+    } else {
+        "window.remoteCodexAndroidHost && window.remoteCodexAndroidHost.setSceneActive && window.remoteCodexAndroidHost.setSceneActive(false);"
+    }
     evaluateJavascript(
-        "window.remoteCodexAndroidHost && window.remoteCodexAndroidHost.setSceneActive && window.remoteCodexAndroidHost.setSceneActive($active);",
+        script,
         null,
     )
 }

@@ -237,6 +237,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     bootstrap.fixture ? mockDetail : null,
   );
   const promptSubmissionInFlightRef = useRef(false);
+  const projectedEventRevisionRef = useRef(0);
   const [loading, setLoading] = useState(!bootstrap.fixture);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -253,6 +254,10 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
+  const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
+  const [canJumpToPreviousTurn, setCanJumpToPreviousTurn] = useState(false);
+  const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [exportTurnsState, setExportTurnsState] =
     useState<PanelState<ThreadExportTurnOptionsDto>>(idleExportTurnsState);
   const [threadShareState, setThreadShareState] = useState<{
@@ -642,23 +647,35 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         setLoading(true);
       }
 
+      const projectionRevision = projectedEventRevisionRef.current;
       try {
         const [loadedThreads, loadedDetail] = await Promise.all([
           client.listThreads(),
           client.fetchThreadDetail(threadId, historyLimitRef.current),
         ]);
+        const projectionStillCurrent =
+          projectionRevision === projectedEventRevisionRef.current;
+        const nextThreads = projectionStillCurrent
+          ? loadedThreads
+          : detailRef.current
+            ? replaceThread(loadedThreads, detailRef.current.thread)
+            : loadedThreads;
         setThreads((current) =>
-          threadListRevision(current) === threadListRevision(loadedThreads)
+          threadListRevision(current) === threadListRevision(nextThreads)
             ? current
-            : loadedThreads,
+            : nextThreads,
         );
-        setDetail((current) => {
-          if (threadDetailRevision(current) === threadDetailRevision(loadedDetail)) {
-            return current;
-          }
-          detailRef.current = loadedDetail;
-          return loadedDetail;
-        });
+        if (projectionStillCurrent) {
+          setDetail((current) => {
+            if (
+              threadDetailRevision(current) === threadDetailRevision(loadedDetail)
+            ) {
+              return current;
+            }
+            detailRef.current = loadedDetail;
+            return loadedDetail;
+          });
+        }
         setError(null);
         postNativeMessage({
           type: 'setNavigationTitle',
@@ -819,6 +836,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         onOpen() {
           lifecycleCountersRef.current.wsOpen += 1;
           setSubscriptionUsageRefreshKey((current) => current + 1);
+          if (!refreshFallbackDisabled) {
+            void refreshThreadDetail();
+          }
           if (lifecycleCountersRef.current.inactive > 0) {
             postLifecycleDebug();
           } else {
@@ -834,6 +854,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
             ? projectThreadEventIntoDetail(currentDetail, event)
             : null;
           if (projection?.projected) {
+            projectedEventRevisionRef.current += 1;
             const nextDetail = projection.detail;
             detailRef.current = nextDetail;
             if (threadDetailRevision(currentDetail) !== threadDetailRevision(nextDetail)) {
@@ -3729,6 +3750,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                 onToggleFollow: () => {
                   setScrollRequestKey((current) => current + 1);
                 },
+                canJumpToPreviousTurn,
+                onJumpToPreviousTurn: () =>
+                  setPreviousTurnScrollRequestKey((current) => current + 1),
+                canJumpToNextTurn,
+                onJumpToNextTurn: () =>
+                  setNextTurnScrollRequestKey((current) => current + 1),
                 ...(effectiveThreadIsOwner
                   ? {
                       onOpenForkTurns: loadForkTurnOptions,
@@ -3740,8 +3767,13 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
             }
           : {})}
         timelineProps={{
+          autoCollapseCompletedTurns: true,
           scrollRequestKey,
+          previousTurnScrollRequestKey,
+          nextTurnScrollRequestKey,
           onTailVisibilityChange: setFollowTail,
+          onPreviousTurnAvailabilityChange: setCanJumpToPreviousTurn,
+          onNextTurnAvailabilityChange: setCanJumpToNextTurn,
           loadingEarlier,
           onLoadEarlier: loadEarlierHistory,
           respondingRequestId,

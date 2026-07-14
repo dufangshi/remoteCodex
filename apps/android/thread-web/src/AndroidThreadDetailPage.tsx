@@ -42,6 +42,7 @@ import {
 import { postAndroidMessage } from './AndroidNativeBridge';
 import { buildOptimisticPromptDetail } from './AndroidOptimisticPrompt';
 import { subscribeToThreadEvents } from './AndroidWebSocket';
+import { projectThreadEventIntoDetail } from './AndroidWebSocketProjection';
 import { MobileThreadCreateDialogContent } from './MobileThreadCreateDialogContent';
 
 interface AndroidThreadDetailPageProps {
@@ -50,6 +51,7 @@ interface AndroidThreadDetailPageProps {
 
 const THREAD_HISTORY_INITIAL_LIMIT = 3;
 const THREAD_HISTORY_PAGE_SIZE = 3;
+const THREAD_REFRESH_INTERVAL_MS = 1500;
 
 type PanelState<T> = {
   status: 'idle' | 'loading' | 'ready' | 'failed';
@@ -132,6 +134,7 @@ export function AndroidThreadDetailPage({
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const promptSubmissionInFlightRef = useRef(false);
+  const projectedEventRevisionRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -141,6 +144,10 @@ export function AndroidThreadDetailPage({
   const [shareBusy, setShareBusy] = useState(false);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
+  const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
+  const [canJumpToPreviousTurn, setCanJumpToPreviousTurn] = useState(false);
+  const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(THREAD_HISTORY_INITIAL_LIMIT);
   const historyLimitRef = useRef(THREAD_HISTORY_INITIAL_LIMIT);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -181,6 +188,7 @@ export function AndroidThreadDetailPage({
     useState(0);
   const [sceneActive, setSceneActive] = useState(true);
   const sceneActiveRef = useRef(true);
+  const [sceneActivationKey, setSceneActivationKey] = useState(0);
   const [themeMode, setThemeMode] = useState<AndroidThemeMode>(
     bootstrap.theme ?? 'system',
   );
@@ -261,16 +269,41 @@ export function AndroidThreadDetailPage({
 
   useEffect(() => {
     const previousHost = window.remoteCodexAndroidHost;
+    let resumeTimer: number | null = null;
+    const applySceneActive = (active: boolean) => {
+      const nextActive = Boolean(active);
+      if (sceneActiveRef.current === nextActive) {
+        return false;
+      }
+      sceneActiveRef.current = nextActive;
+      setSceneActive(nextActive);
+      if (nextActive) {
+        setSceneActivationKey((current) => current + 1);
+      }
+      postAndroidMessage({
+        type: 'threadWebDebug',
+        message: `scene:${nextActive ? 'active' : 'inactive'}`,
+      });
+      return true;
+    };
     window.remoteCodexAndroidHost = {
       ...previousHost,
       setSceneActive(active: boolean) {
-        const nextActive = Boolean(active);
-        sceneActiveRef.current = nextActive;
-        setSceneActive(nextActive);
-        postAndroidMessage({
-          type: 'threadWebDebug',
-          message: `scene:${nextActive ? 'active' : 'inactive'}`,
-        });
+        applySceneActive(active);
+      },
+      resumeSceneActive() {
+        if (resumeTimer !== null) {
+          window.clearTimeout(resumeTimer);
+        }
+        if (sceneActiveRef.current) {
+          applySceneActive(false);
+          resumeTimer = window.setTimeout(() => {
+            resumeTimer = null;
+            applySceneActive(true);
+          }, 0);
+          return;
+        }
+        applySceneActive(true);
       },
       setTheme(theme: AndroidThemeMode) {
         setThemeMode(theme);
@@ -279,7 +312,27 @@ export function AndroidThreadDetailPage({
         setSettingsDialogOpen(true);
       },
     };
+
+    const handlePageInactive = () => applySceneActive(false);
+    const handlePageActive = () =>
+      window.remoteCodexAndroidHost?.resumeSceneActive?.();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        handlePageInactive();
+      } else if (document.visibilityState === 'visible') {
+        handlePageActive();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageInactive);
+    window.addEventListener('pageshow', handlePageActive);
     return () => {
+      if (resumeTimer !== null) {
+        window.clearTimeout(resumeTimer);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageInactive);
+      window.removeEventListener('pageshow', handlePageActive);
       if (previousHost) {
         window.remoteCodexAndroidHost = previousHost;
       } else {
@@ -304,23 +357,43 @@ export function AndroidThreadDetailPage({
       if (showLoading) {
         setLoading(true);
       }
+      const projectionRevision = projectedEventRevisionRef.current;
       try {
-        const [loadedThreads, loadedDetail] = await Promise.all([
-          client.listThreads(),
-          client.fetchThreadDetail(
-            bootstrap.threadId,
-            historyLimitRef.current,
+        const loadedDetail = await client.fetchThreadDetail(
+          bootstrap.threadId,
+          historyLimitRef.current,
+        );
+        const projectionStillCurrent =
+          projectionRevision === projectedEventRevisionRef.current;
+        if (projectionStillCurrent) {
+          detailRef.current = loadedDetail;
+          setDetail(loadedDetail);
+        }
+        setThreads((current) =>
+          replaceThread(
+            current,
+            projectionStillCurrent
+              ? loadedDetail.thread
+              : (detailRef.current?.thread ?? loadedDetail.thread),
           ),
-        ]);
-        detailRef.current = loadedDetail;
-        setThreads(loadedThreads);
-        setDetail(loadedDetail);
+        );
         setError(null);
         postAndroidMessage({
           type: 'setNavigationTitle',
           title: loadedDetail.thread.title,
           workspaceId: loadedDetail.workspace.id,
         });
+        void client
+          .listThreads()
+          .then((loadedThreads) => {
+            const liveThread = detailRef.current?.thread;
+            setThreads(
+              liveThread ? replaceThread(loadedThreads, liveThread) : loadedThreads,
+            );
+          })
+          .catch((caught) => {
+            console.warn('Unable to refresh Android room list.', caught);
+          });
       } catch (caught) {
         if (reportError) {
           const message = errorMessage(caught);
@@ -344,15 +417,31 @@ export function AndroidThreadDetailPage({
       return;
     }
     setLoading(true);
-    Promise.all([
-      client.listThreads(),
-      client.fetchThreadDetail(bootstrap.threadId, THREAD_HISTORY_INITIAL_LIMIT),
-    ])
-      .then(([loadedThreads, loadedDetail]) => {
+    const loadInitialDetail = async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await client.fetchThreadDetail(
+            bootstrap.threadId!,
+            THREAD_HISTORY_INITIAL_LIMIT,
+          );
+        } catch (caught) {
+          lastError = caught;
+          if (attempt < 2) {
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, 350 * (attempt + 1)),
+            );
+          }
+        }
+      }
+      throw lastError;
+    };
+    loadInitialDetail()
+      .then((loadedDetail) => {
         if (cancelled) {
           return;
         }
-        setThreads(loadedThreads);
+        setThreads((current) => replaceThread(current, loadedDetail.thread));
         detailRef.current = loadedDetail;
         setDetail(loadedDetail);
         setError(null);
@@ -361,6 +450,16 @@ export function AndroidThreadDetailPage({
           title: loadedDetail.thread.title,
           workspaceId: loadedDetail.workspace.id,
         });
+        void client
+          .listThreads()
+          .then((loadedThreads) => {
+            if (!cancelled) {
+              setThreads(loadedThreads);
+            }
+          })
+          .catch((caught) => {
+            console.warn('Unable to load Android room list.', caught);
+          });
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -383,6 +482,23 @@ export function AndroidThreadDetailPage({
     if (!detail || !sceneActive) {
       return;
     }
+    const intervalId = window.setInterval(() => {
+      void refreshThreadDetail();
+    }, THREAD_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [detail?.thread.id, refreshThreadDetail, sceneActive]);
+
+  useEffect(() => {
+    if (!detail || !sceneActive || sceneActivationKey === 0) {
+      return;
+    }
+    void refreshThreadDetail();
+  }, [detail?.thread.id, refreshThreadDetail, sceneActivationKey, sceneActive]);
+
+  useEffect(() => {
+    if (!detail || !sceneActive) {
+      return;
+    }
     let refreshTimer: number | null = null;
     const scheduleRefresh = () => {
       if (refreshTimer !== null) {
@@ -390,7 +506,7 @@ export function AndroidThreadDetailPage({
       }
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
-        void refreshThreadDetail({ reportError: true });
+        void refreshThreadDetail();
       }, 250);
     };
     const subscription = subscribeToThreadEvents(
@@ -400,13 +516,28 @@ export function AndroidThreadDetailPage({
         onOpen() {
           setSubscriptionUsageRefreshKey((current) => current + 1);
           postAndroidMessage({ type: 'threadWebDebug', message: 'ws:open' });
+          void refreshThreadDetail();
         },
         onEvent(event) {
+          const currentDetail = detailRef.current;
+          const projection = currentDetail
+            ? projectThreadEventIntoDetail(currentDetail, event)
+            : null;
+          if (projection?.projected) {
+            projectedEventRevisionRef.current += 1;
+            detailRef.current = projection.detail;
+            setDetail(projection.detail);
+            setThreads((current) =>
+              replaceThread(current, projection.detail.thread),
+            );
+          }
           postAndroidMessage({
             type: 'threadWebDebug',
-            message: `ws:${event.type}:refresh`,
+            message: `ws:${event.type}${projection?.projected ? ':projected' : ':refresh'}`,
           });
-          scheduleRefresh();
+          if (!projection?.projected) {
+            scheduleRefresh();
+          }
         },
         onError(message) {
           console.warn(message);
@@ -419,7 +550,7 @@ export function AndroidThreadDetailPage({
       }
       subscription.close();
     };
-  }, [bootstrap, detail?.thread.id, refreshThreadDetail, sceneActive]);
+  }, [bootstrap, detail?.thread.id, refreshThreadDetail, sceneActive, sceneActivationKey]);
 
   useEffect(() => {
     if (!detail) {
@@ -1432,6 +1563,12 @@ export function AndroidThreadDetailPage({
                   setFollowTail(true);
                   setScrollRequestKey((current) => current + 1);
                 },
+                canJumpToPreviousTurn,
+                onJumpToPreviousTurn: () =>
+                  setPreviousTurnScrollRequestKey((current) => current + 1),
+                canJumpToNextTurn,
+                onJumpToNextTurn: () =>
+                  setNextTurnScrollRequestKey((current) => current + 1),
                 ...(effectiveThreadIsOwner
                   ? { onUpdateSettings: updateThreadSettings }
                   : {}),
@@ -1445,8 +1582,13 @@ export function AndroidThreadDetailPage({
             : undefined
         }
         timelineProps={{
+          autoCollapseCompletedTurns: true,
           scrollRequestKey,
+          previousTurnScrollRequestKey,
+          nextTurnScrollRequestKey,
           onTailVisibilityChange: setFollowTail,
+          onPreviousTurnAvailabilityChange: setCanJumpToPreviousTurn,
+          onNextTurnAvailabilityChange: setCanJumpToNextTurn,
           loadingEarlier,
           onLoadEarlier: loadEarlierHistory,
         }}

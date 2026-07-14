@@ -58,6 +58,7 @@ vi.mock('@remote-codex/thread-ui', async () => {
     ThreadActionsDialog: dialog.ThreadActionsDialog,
     ThreadDetailSurface: ({
       detail,
+      timelineProps,
       threadActionsButton,
       surfaceActions,
       mobileHeaderAction,
@@ -70,11 +71,22 @@ vi.mock('@remote-codex/thread-ui', async () => {
       mobileHeaderAction?: React.ReactNode;
       dialogs?: React.ReactNode;
       composerProps?: { subscriptionUsage?: unknown };
+      timelineProps?: { autoCollapseCompletedTurns?: boolean };
     }) =>
       React.createElement(
         'div',
         null,
         React.createElement('h1', null, detail?.thread.title ?? 'Loading'),
+        React.createElement(
+          'p',
+          { 'data-testid': 'latest-agent-text' },
+          detail?.turns.at(-1)?.items.at(-1)?.text ?? '',
+        ),
+        React.createElement(
+          'span',
+          { 'data-testid': 'auto-collapse' },
+          String(timelineProps?.autoCollapseCompletedTurns ?? false),
+        ),
         threadActionsButton,
         surfaceActions,
         mobileHeaderAction,
@@ -458,5 +470,98 @@ describe('AndroidThreadDetailPage', () => {
     });
     expect(buttonByText('Share this thread')?.disabled).toBe(true);
     expect(mocks.client.createRelayShare).not.toHaveBeenCalled();
+  });
+
+  it('projects streamed output immediately and enables completed-turn auto collapse', async () => {
+    const { AndroidThreadDetailPage } = await import('./AndroidThreadDetailPage');
+
+    await act(async () => {
+      root.render(<AndroidThreadDetailPage bootstrap={relayBootstrap} />);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="auto-collapse"]')?.textContent).toBe('true');
+      expect(mocks.subscribeToThreadEvents).toHaveBeenCalled();
+    });
+
+    const handlers = mocks.subscribeToThreadEvents.mock.calls.at(-1)?.[2] as {
+      onEvent(event: unknown): void;
+    };
+    await act(async () => {
+      handlers.onEvent({
+        type: 'thread.output.delta',
+        threadId: 'thread-1',
+        timestamp: '2026-07-01T00:00:12.000Z',
+        payload: {
+          turnId: 'turn-1',
+          itemId: 'item-2',
+          sequence: 1,
+          delta: ' streamed',
+        },
+      });
+    });
+
+    expect(document.querySelector('[data-testid="latest-agent-text"]')?.textContent).toBe(
+      'Hi streamed',
+    );
+    expect(mocks.client.fetchThreadDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes after foreground resume and does not let an older snapshot replace a live delta', async () => {
+    const { AndroidThreadDetailPage } = await import('./AndroidThreadDetailPage');
+    let resolveRefresh: ((value: ThreadDetailDto) => void) | null = null;
+    const pendingRefresh = new Promise<ThreadDetailDto>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    mocks.client.fetchThreadDetail
+      .mockResolvedValueOnce(detail)
+      .mockReturnValueOnce(pendingRefresh);
+
+    await act(async () => {
+      root.render(<AndroidThreadDetailPage bootstrap={relayBootstrap} />);
+    });
+    await waitFor(() => {
+      expect(mocks.subscribeToThreadEvents).toHaveBeenCalled();
+    });
+
+    const handlers = mocks.subscribeToThreadEvents.mock.calls.at(-1)?.[2] as {
+      onOpen(): void;
+      onEvent(event: unknown): void;
+    };
+    await act(async () => {
+      handlers.onOpen();
+      handlers.onEvent({
+        type: 'thread.output.delta',
+        threadId: 'thread-1',
+        timestamp: '2026-07-01T00:00:12.000Z',
+        payload: {
+          turnId: 'turn-1',
+          itemId: 'item-2',
+          sequence: 1,
+          delta: ' live',
+        },
+      });
+    });
+    expect(document.querySelector('[data-testid="latest-agent-text"]')?.textContent).toBe(
+      'Hi live',
+    );
+
+    await act(async () => {
+      resolveRefresh?.(detail);
+      await pendingRefresh;
+    });
+    expect(document.querySelector('[data-testid="latest-agent-text"]')?.textContent).toBe(
+      'Hi live',
+    );
+
+    const callsBeforeResume = mocks.client.fetchThreadDetail.mock.calls.length;
+    await act(async () => {
+      window.remoteCodexAndroidHost?.resumeSceneActive?.();
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    });
+    await waitFor(() => {
+      expect(mocks.client.fetchThreadDetail.mock.calls.length).toBeGreaterThan(
+        callsBeforeResume,
+      );
+    });
   });
 });
