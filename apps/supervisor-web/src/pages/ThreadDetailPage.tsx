@@ -375,6 +375,8 @@ export function ThreadDetailPage() {
   const [backendCapabilities, setBackendCapabilities] = useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
     useState<AgentSubscriptionUsageDto | null>(null);
+  const [subscriptionUsageRefreshKey, setSubscriptionUsageRefreshKey] =
+    useState(0);
   const [backendManagementSchema, setBackendManagementSchema] =
     useState<AgentBackendManagementSchemaDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
@@ -1108,7 +1110,11 @@ export function ThreadDetailPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [detail?.thread.lastTurnCompletedAt, detail?.thread.provider]);
+  }, [
+    detail?.thread.lastTurnCompletedAt,
+    detail?.thread.provider,
+    subscriptionUsageRefreshKey,
+  ]);
 
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
@@ -1734,6 +1740,7 @@ export function ThreadDetailPage() {
         }
 
         supervisorRecoveryPendingRef.current = true;
+        setSubscriptionUsageRefreshKey((current) => current + 1);
         refreshThreadDetailSilently();
         sendSupervisorPing();
         syncRealtimeConnectionState();

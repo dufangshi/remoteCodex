@@ -32,7 +32,7 @@ class FakeCodexManager extends EventEmitter {
     return { account: { type: 'chatgpt' }, requiresOpenaiAuth: true };
   }
 
-  async readAccountRateLimits() {
+  async readAccountRateLimits(): Promise<any> {
     return {
       rateLimits: {},
       rateLimitsByLimitId: {
@@ -101,6 +101,48 @@ describe('CodexRuntimeAdapter', () => {
         { id: 'primary', label: '5h', durationMinutes: 300, usedPercent: 40 },
         { id: 'secondary', label: '7d', durationMinutes: 10_080, usedPercent: 75 },
       ],
+    });
+  });
+
+  it('uses the populated backward-compatible snapshot when a named bucket is empty', async () => {
+    const manager = new FakeCodexManager();
+    manager.readAccountRateLimits = async () => ({
+      rateLimits: {
+        primary: {
+          usedPercent: 63,
+          windowDurationMins: 10_080,
+          resetsAt: 1_800_604_800,
+        },
+      },
+      rateLimitsByLimitId: { codex: { primary: null, secondary: null } },
+    });
+    const adapter = new CodexRuntimeAdapter(manager as never);
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      provider: 'codex',
+      authKind: 'subscription',
+      windows: [
+        { id: 'primary', label: '7d', durationMinutes: 10_080, usedPercent: 63 },
+      ],
+    });
+  });
+
+  it('normalizes legacy snake-case rate-limit window fields', async () => {
+    const manager = new FakeCodexManager();
+    manager.readAccountRateLimits = async () => ({
+      rateLimits: {
+        primary: {
+          used_percent: 12,
+          window_minutes: 300,
+          resets_at: 1_800_000_000,
+        },
+      },
+      rateLimitsByLimitId: null,
+    });
+    const adapter = new CodexRuntimeAdapter(manager as never);
+
+    await expect(adapter.getSubscriptionUsage()).resolves.toMatchObject({
+      windows: [{ label: '5h', durationMinutes: 300, usedPercent: 12 }],
     });
   });
 

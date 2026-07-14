@@ -285,6 +285,8 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
     useState<AgentSubscriptionUsageDto | null>(null);
+  const [subscriptionUsageRefreshKey, setSubscriptionUsageRefreshKey] =
+    useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sceneActive, setSceneActive] = useState(true);
   const sceneActiveRef = useRef(true);
@@ -372,6 +374,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     client,
     detail?.thread.lastTurnCompletedAt,
     detail?.thread.provider,
+    subscriptionUsageRefreshKey,
   ]);
 
   const resolveWorkspaceId = useCallback((workspaceId?: string | null) => {
@@ -815,6 +818,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       {
         onOpen() {
           lifecycleCountersRef.current.wsOpen += 1;
+          setSubscriptionUsageRefreshKey((current) => current + 1);
           if (lifecycleCountersRef.current.inactive > 0) {
             postLifecycleDebug();
           } else {

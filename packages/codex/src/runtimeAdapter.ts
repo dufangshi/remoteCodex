@@ -498,6 +498,41 @@ function formatRateLimitWindowLabel(
   return `${durationMinutes}m`;
 }
 
+function recordOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function rateLimitWindowsFromSnapshot(snapshot: unknown) {
+  const record = recordOrNull(snapshot);
+  if (!record) return [];
+
+  return ['primary', 'secondary'].flatMap((id) => {
+    const window = recordOrNull(record[id]);
+    if (!window) return [];
+    const usedPercent = Number(window.usedPercent ?? window.used_percent);
+    if (!Number.isFinite(usedPercent)) return [];
+    const duration = Number(
+      window.windowDurationMins ??
+        window.window_duration_mins ??
+        window.windowMinutes ??
+        window.window_minutes,
+    );
+    const durationMinutes = Number.isFinite(duration) ? duration : null;
+    const resetsAt = Number(window.resetsAt ?? window.resets_at);
+    return [{
+      id,
+      durationMinutes,
+      label: formatRateLimitWindowLabel(durationMinutes, id),
+      usedPercent: Math.max(0, Math.min(100, usedPercent)),
+      resetsAt: Number.isFinite(resetsAt)
+        ? new Date(resetsAt * 1000).toISOString()
+        : null,
+    }];
+  });
+}
+
 function mapCodexRuntimeError(error: unknown): never {
   if (error instanceof AgentRuntimeError) {
     throw error;
@@ -649,31 +684,14 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
       this.manager.readAccountRateLimits(),
     );
     const buckets = response.rateLimitsByLimitId;
-    const snapshot =
-      (buckets && (buckets.codex ?? Object.values(buckets)[0])) ??
-      response.rateLimits;
-    const record = snapshot && typeof snapshot === 'object'
-      ? (snapshot as Record<string, unknown>)
-      : {};
-    const windows = ['primary', 'secondary'].flatMap((id) => {
-      const value = record[id];
-      if (!value || typeof value !== 'object') return [];
-      const window = value as Record<string, unknown>;
-      const usedPercent = Number(window.usedPercent);
-      if (!Number.isFinite(usedPercent)) return [];
-      const duration = Number(window.windowDurationMins);
-      const durationMinutes = Number.isFinite(duration) ? duration : null;
-      const resetsAt = Number(window.resetsAt);
-      return [{
-        id,
-        durationMinutes,
-        label: formatRateLimitWindowLabel(durationMinutes, id),
-        usedPercent: Math.max(0, Math.min(100, usedPercent)),
-        resetsAt: Number.isFinite(resetsAt)
-          ? new Date(resetsAt * 1000).toISOString()
-          : null,
-      }];
-    });
+    const candidates = [
+      response.rateLimits,
+      buckets?.codex,
+      ...Object.values(buckets ?? {}),
+    ];
+    const windows = candidates
+      .map(rateLimitWindowsFromSnapshot)
+      .sort((left, right) => right.length - left.length)[0] ?? [];
     return {
       provider: 'codex' as const,
       authKind: 'subscription' as const,

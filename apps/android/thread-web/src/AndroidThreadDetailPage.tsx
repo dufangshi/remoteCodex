@@ -177,6 +177,8 @@ export function AndroidThreadDetailPage({
     useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
     useState<AgentSubscriptionUsageDto | null>(null);
+  const [subscriptionUsageRefreshKey, setSubscriptionUsageRefreshKey] =
+    useState(0);
   const [sceneActive, setSceneActive] = useState(true);
   const sceneActiveRef = useRef(true);
   const [themeMode, setThemeMode] = useState<AndroidThemeMode>(
@@ -222,7 +224,12 @@ export function AndroidThreadDetailPage({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [client, detail?.thread.lastTurnCompletedAt, detail?.thread.provider]);
+  }, [
+    client,
+    detail?.thread.lastTurnCompletedAt,
+    detail?.thread.provider,
+    subscriptionUsageRefreshKey,
+  ]);
 
   useEffect(() => {
     historyLimitRef.current = historyLimit;
@@ -391,6 +398,7 @@ export function AndroidThreadDetailPage({
       detail.thread.id,
       {
         onOpen() {
+          setSubscriptionUsageRefreshKey((current) => current + 1);
           postAndroidMessage({ type: 'threadWebDebug', message: 'ws:open' });
         },
         onEvent(event) {
