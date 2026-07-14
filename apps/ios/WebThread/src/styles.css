@@ -180,6 +180,21 @@ body {
   padding-bottom: 0 !important;
 }
 
+.thread-ui-shell .thread-graph-composer-shell,
+.thread-ui-shell .thread-graph-composer-form,
+.thread-ui-shell .thread-graph-composer-input,
+.thread-ui-shell .thread-graph-composer-input textarea,
+.thread-ui-shell .thread-graph-composer-input [contenteditable='true'] {
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.thread-ui-shell .thread-graph-composer-input textarea,
+.thread-ui-shell .thread-graph-composer-input [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .thread-detail-surface {
   height: 100%;
   min-height: 0;

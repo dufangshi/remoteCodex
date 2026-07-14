@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     revokeRelayShare: vi.fn(),
     listModels: vi.fn(),
     listAgentRuntimes: vi.fn(),
+    fetchAgentSubscriptionUsage: vi.fn(),
     fetchThreadExportTurns: vi.fn(),
     downloadThreadTranscriptExport: vi.fn(),
     fetchWorkspaceTree: vi.fn(),
@@ -61,12 +62,14 @@ vi.mock('@remote-codex/thread-ui', async () => {
       surfaceActions,
       mobileHeaderAction,
       dialogs,
+      composerProps,
     }: {
       detail: ThreadDetailDto | null;
       threadActionsButton?: React.ReactNode;
       surfaceActions?: React.ReactNode;
       mobileHeaderAction?: React.ReactNode;
       dialogs?: React.ReactNode;
+      composerProps?: { subscriptionUsage?: unknown };
     }) =>
       React.createElement(
         'div',
@@ -76,6 +79,11 @@ vi.mock('@remote-codex/thread-ui', async () => {
         surfaceActions,
         mobileHeaderAction,
         dialogs,
+        React.createElement(
+          'output',
+          { 'data-testid': 'subscription-usage' },
+          JSON.stringify(composerProps?.subscriptionUsage ?? null),
+        ),
       ),
     threadStatusLabel: (status: string) => status,
   };
@@ -240,6 +248,7 @@ describe('AndroidThreadDetailPage', () => {
     mocks.client.fetchRelayPortal.mockResolvedValue(emptyPortal);
     mocks.client.listModels.mockResolvedValue([]);
     mocks.client.listAgentRuntimes.mockResolvedValue([]);
+    mocks.client.fetchAgentSubscriptionUsage.mockResolvedValue({ usage: null });
     mocks.client.buildWorkspaceRawFileUrl.mockReturnValue('');
     mocks.client.buildThreadImageAssetUrl.mockReturnValue('');
     mocks.client.createRelayShare.mockResolvedValue({
@@ -257,6 +266,46 @@ describe('AndroidThreadDetailPage', () => {
       revokedAt: null,
     });
     mocks.subscribeToThreadEvents.mockReturnValue({ close: vi.fn() });
+  });
+
+  it('loads subscription windows and refreshes them when the thread connects', async () => {
+    const { AndroidThreadDetailPage } = await import('./AndroidThreadDetailPage');
+    mocks.client.fetchAgentSubscriptionUsage.mockResolvedValue({
+      usage: {
+        provider: 'claude',
+        authKind: 'subscription',
+        observedAt: '2026-07-13T20:00:00.000Z',
+        stale: false,
+        windows: [
+          {
+            id: 'weekly',
+            durationMinutes: 10_080,
+            label: '7d',
+            usedPercent: 35,
+            resetsAt: '2026-07-20T20:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    await act(async () => {
+      root.render(<AndroidThreadDetailPage bootstrap={relayBootstrap} />);
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="subscription-usage"]')?.textContent)
+        .toContain('"label":"7d"');
+    });
+    const handlers = mocks.subscribeToThreadEvents.mock.calls.at(-1)?.[2] as
+      | { onOpen?: () => void }
+      | undefined;
+    await act(async () => {
+      handlers?.onOpen?.();
+    });
+    await waitFor(() => {
+      expect(mocks.client.fetchAgentSubscriptionUsage).toHaveBeenCalledTimes(2);
+    });
+    expect(mocks.client.fetchAgentSubscriptionUsage).toHaveBeenLastCalledWith('claude');
   });
 
   afterEach(() => {

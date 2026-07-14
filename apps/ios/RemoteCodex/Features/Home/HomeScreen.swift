@@ -920,9 +920,8 @@ private struct WorkspaceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button(workspace.label, action: onOpen)
+                Text(workspace.label)
                     .font(.headline)
-                    .accessibilityIdentifier("workspace-open-\(workspace.id)")
                 Spacer()
                 if workspace.isFavorite {
                     Image(systemName: "pin.fill")
@@ -944,6 +943,12 @@ private struct WorkspaceRow: View {
                 .buttonStyle(.borderless)
             }
         }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workspace-open-\(workspace.id)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open workspace", onOpen)
+        .onTapGesture(perform: onOpen)
     }
 }
 
