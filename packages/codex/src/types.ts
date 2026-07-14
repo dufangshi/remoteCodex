@@ -135,7 +135,7 @@ export interface CodexTurnItem {
 export interface CodexTurnRecord {
   id: string;
   status: CodexTurnStatus;
-  error: { message?: string } | null;
+  error: CodexTurnError | null;
   items: CodexTurnItem[];
 }
 
@@ -401,6 +401,12 @@ export interface CodexErrorEvent {
   willRetry: boolean;
 }
 
+export interface CodexTurnError {
+  message: string;
+  additionalDetails?: string | null;
+  codexErrorInfo?: unknown;
+}
+
 export type CodexServerEvent =
   | { method: 'thread/started'; params: { thread: CodexThreadRecord } }
   | { method: 'thread/status/changed'; params: { threadId: string; status: CodexThreadStatus } }
@@ -416,5 +422,5 @@ export type CodexServerEvent =
   | { method: 'turn/plan/updated'; params: { threadId: string; turnId: string; explanation: string | null; plan: Array<{ step: string; status: string }> } }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurnRecord } }
   | { method: 'item/agentMessage/delta'; params: CodexOutputDeltaEvent }
-  | { method: 'error'; params: { error: { message?: string }; willRetry: boolean; threadId: string; turnId: string } }
+  | { method: 'error'; params: { error: CodexTurnError; willRetry: boolean; threadId: string; turnId: string } }
   | { method: string; params: Record<string, unknown> };

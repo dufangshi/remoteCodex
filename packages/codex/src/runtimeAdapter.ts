@@ -45,6 +45,7 @@ import {
   CodexThreadRecord,
   CodexThreadStatus,
   CodexThreadGoalRecord,
+  CodexTurnError,
   CodexTurnRecord,
   CodexTurnItem,
   CodexServerEvent,
@@ -208,7 +209,52 @@ function mapModel(model: Awaited<ReturnType<CodexAppServerManager['listModels']>
 }
 
 function mapTurn(turn: CodexTurnRecord): AgentTurn {
-  return codexTurnToAgentTurn(turn);
+  const mapped = codexTurnToAgentTurn(turn);
+  return turn.error
+    ? {
+        ...mapped,
+        error: { message: codexTurnErrorMessage(turn.error) },
+      }
+    : mapped;
+}
+
+function nestedUpstreamErrorMessage(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const error = 'error' in parsed ? parsed.error : parsed;
+    if (typeof error !== 'object' || error === null || !('message' in error)) {
+      return null;
+    }
+    return typeof error.message === 'string' && error.message.trim()
+      ? error.message.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function codexTurnErrorMessage(error: CodexTurnError) {
+  const message = error.message?.trim() || 'Turn failed unexpectedly.';
+  const details = error.additionalDetails?.trim();
+  if (!details) {
+    return message;
+  }
+
+  const upstreamMessage = nestedUpstreamErrorMessage(details);
+  if (upstreamMessage && !message.includes(upstreamMessage)) {
+    return upstreamMessage;
+  }
+  if (message.includes(details)) {
+    return message;
+  }
+  return `${message}\n\n${details}`;
 }
 
 function mapGoal(goal: CodexThreadGoalRecord): AgentGoal {
@@ -467,15 +513,18 @@ function mapCodexNotification(event: CodexServerEvent): AgentRuntimeEvent | null
       const params = event.params as {
         threadId: string;
         turnId: string;
-        error: { message?: string };
+        error: CodexTurnError;
         willRetry: boolean;
       };
+      if (params.willRetry) {
+        return null;
+      }
       return {
         type: 'turn.failed',
         provider: 'codex',
         providerSessionId: params.threadId,
         providerTurnId: params.turnId,
-        error: params.error.message ?? 'Turn failed unexpectedly.',
+        error: codexTurnErrorMessage(params.error),
         willRetry: params.willRetry,
       };
     }

@@ -5775,6 +5775,101 @@ describe('supervisor api', () => {
     expect(fakeCodexManager.steerTurnCalls).toHaveLength(0);
   });
 
+  it('persists the final Codex upstream error as a failed agent bubble', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.6-sol',
+        approvalMode: 'yolo',
+        title: 'Upstream Error Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: { prompt: 'Continue the task.' }
+    });
+    const activeTurnId = promptResponse.json().activeTurnId as string;
+
+    fakeCodexManager.emitServerEvent({
+      method: 'error',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: activeTurnId,
+        willRetry: true,
+        error: {
+          message: 'Reconnecting... 1/5',
+          additionalDetails: 'unexpected status 404 Not Found'
+        }
+      }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const retryingDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(retryingDetail.json().thread.status).toBe('running');
+
+    const upstreamMessage =
+      'Model "gpt-5.6-sol" is not supported by any configured account in this group';
+    const finalError = {
+      message: 'Upstream request failed.',
+      additionalDetails: JSON.stringify({
+        error: { message: upstreamMessage, type: 'model_not_found' }
+      })
+    };
+    fakeCodexManager.emitServerEvent({
+      method: 'error',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: activeTurnId,
+        willRetry: false,
+        error: finalError
+      }
+    });
+    fakeCodexManager.completeTurn(
+      createdThread.providerSessionId,
+      activeTurnId,
+      'failed',
+      finalError
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const failedDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(failedDetail.statusCode).toBe(200);
+    expect(failedDetail.json().thread).toMatchObject({
+      status: 'failed',
+      lastError: upstreamMessage
+    });
+    expect(failedDetail.json().turns.at(-1)).toMatchObject({
+      id: activeTurnId,
+      status: 'failed',
+      error: upstreamMessage,
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'agentMessage',
+          text: upstreamMessage,
+          status: 'failed'
+        })
+      ])
+    });
+  });
+
   it('disconnects a thread and marks it as not loaded', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

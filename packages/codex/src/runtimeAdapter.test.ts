@@ -46,6 +46,63 @@ class FakeCodexManager extends EventEmitter {
 }
 
 describe('CodexRuntimeAdapter', () => {
+  it('does not terminate a turn while Codex is retrying an upstream request', () => {
+    const manager = new FakeCodexManager();
+    const adapter = new CodexRuntimeAdapter(manager as never);
+    const events: unknown[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    manager.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        willRetry: true,
+        error: {
+          message: 'Reconnecting... 1/5',
+          additionalDetails: 'unexpected status 404 Not Found',
+        },
+      },
+    });
+
+    expect(events).toEqual([]);
+  });
+
+  it('preserves detailed upstream errors when the final retry fails', () => {
+    const manager = new FakeCodexManager();
+    const adapter = new CodexRuntimeAdapter(manager as never);
+    const events: unknown[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    manager.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        willRetry: false,
+        error: {
+          message: 'Upstream request failed.',
+          additionalDetails: JSON.stringify({
+            error: {
+              message: 'Model "gpt-5.6-sol" is not supported by any configured account in this group',
+              type: 'model_not_found',
+            },
+          }),
+        },
+      },
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'turn.failed',
+        providerSessionId: 'thread-1',
+        providerTurnId: 'turn-1',
+        error: 'Model "gpt-5.6-sol" is not supported by any configured account in this group',
+        willRetry: false,
+      }),
+    ]);
+  });
+
   it('converts prompt photo tokens into structured local image input', async () => {
     const manager = new FakeCodexManager();
     const adapter = new CodexRuntimeAdapter(manager as never);

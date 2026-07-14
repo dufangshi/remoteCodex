@@ -7,6 +7,7 @@ import {
   CodexSkillsListEntry,
   CodexThreadGoalRecord,
   CodexThreadRecord,
+  CodexTurnError,
   JsonRpcClientError,
   ReasoningEffort,
   ThreadGoalSetInput,
@@ -382,13 +383,15 @@ export class FakeCodexManager extends EventEmitter {
     threadId: string,
     turnId: string,
     status: 'completed' | 'interrupted' | 'failed' = 'completed',
+    error: CodexTurnError | null = null,
   ) {
     const existing = this.threads.get(threadId) ?? makeThread({ id: threadId });
     const turns = existing.turns.map((turn) =>
       turn.id === turnId
-        ? {
+          ? {
             ...turn,
             status,
+            error,
           }
         : turn,
     );
@@ -396,7 +399,7 @@ export class FakeCodexManager extends EventEmitter {
       turns.find((turn) => turn.id === turnId) ?? {
         id: turnId,
         status,
-        error: null,
+        error,
         items: [],
       };
     this.threads.set(threadId, {
