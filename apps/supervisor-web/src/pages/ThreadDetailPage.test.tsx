@@ -4357,7 +4357,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.getAllByText('图中文字是什么')).toHaveLength(1);
   });
 
-  it('shows a steering bubble for prompts sent while the current turn is running', async () => {
+  it('shows a queued prompt above the composer while the current turn is running', async () => {
     const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
     const promptBodies: Array<Record<string, unknown>> = [];
     let resolvePromptRequest: (
@@ -4488,7 +4488,7 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     expect(screen.getAllByText('Steer this running turn.').length).toBeGreaterThan(0);
-    expect(screen.getByText('Steering')).toBeInTheDocument();
+    expect(screen.getByText('Queueing')).toBeInTheDocument();
     expect(screen.queryByLabelText('Sending')).not.toBeInTheDocument();
 
     resolvePromptRequest({
@@ -4516,9 +4516,7 @@ describe('ThreadDetailPage', () => {
       }),
     });
 
-    await waitFor(() => {
-      expect(screen.queryByText('Steering')).not.toBeInTheDocument();
-    });
+    expect(screen.getByText('Queueing')).toBeInTheDocument();
 
     expect(promptBodies).toHaveLength(1);
     expect(promptBodies[0]?.prompt).toBe('Steer this running turn.');

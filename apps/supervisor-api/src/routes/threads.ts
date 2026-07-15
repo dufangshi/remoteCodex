@@ -782,6 +782,22 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     );
   });
 
+  app.post(
+    '/api/threads/:id/pending-steers/:pendingSteerId/steer',
+    async (request) => {
+      const params = z
+        .object({
+          id: z.string().uuid(),
+          pendingSteerId: z.string().uuid(),
+        })
+        .parse(request.params);
+      return app.services.threadService.steerPendingPrompt(
+        params.id,
+        params.pendingSteerId,
+      );
+    },
+  );
+
   app.post('/api/threads/:id/interrupt', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = interruptSchema.parse(request.body ?? {});

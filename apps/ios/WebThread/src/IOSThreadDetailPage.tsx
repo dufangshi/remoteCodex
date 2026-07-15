@@ -1071,7 +1071,28 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       }
       promptSubmissionInFlightRef.current = true;
       const previousDetail = currentDetail;
-      const optimistic = buildOptimisticPromptDetail(currentDetail, prompt);
+      const optimistic =
+        currentDetail.thread.status === 'running' &&
+        currentDetail.thread.activeTurnId
+          ? {
+              thread: currentDetail.thread,
+              turn: null,
+              detail: {
+                ...currentDetail,
+                pendingSteers: [
+                  ...currentDetail.pendingSteers,
+                  {
+                    id: `optimistic-queue-ios-${Date.now()}`,
+                    clientRequestId: null,
+                    turnId: currentDetail.thread.activeTurnId,
+                    prompt,
+                    delivery: 'continuation' as const,
+                    createdAt: new Date().toISOString(),
+                  },
+                ],
+              },
+            }
+          : buildOptimisticPromptDetail(currentDetail, prompt);
       setSubmitting(true);
       detailRef.current = optimistic.detail;
       setDetail(optimistic.detail);
@@ -1079,7 +1100,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       setError(null);
       postNativeMessage({
         type: 'threadWebOptimisticPrompt',
-        message: `optimistic-prompt:${optimistic.turn.id}:${prompt}`,
+        message: `optimistic-prompt:${optimistic.turn?.id ?? currentDetail.thread.activeTurnId}:${prompt}`,
       });
       try {
         const updatedThread = await client.sendPrompt(currentDetail.thread.id, prompt);
@@ -1336,6 +1357,52 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     },
     [bootstrap.fixture, client],
   );
+
+  const steerPendingPrompt = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      if (bootstrap.fixture) {
+        return;
+      }
+      try {
+        const updatedDetail = await client.steerPendingPrompt(
+          threadId,
+          pendingSteerId,
+        );
+        detailRef.current = updatedDetail;
+        setDetail(updatedDetail);
+        setThreads((current) => replaceThread(current, updatedDetail.thread));
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postNativeMessage({ type: 'reportFatalError', message });
+        throw caught;
+      }
+    },
+    [bootstrap.fixture, client],
+  );
+
+  const interruptCurrentTurn = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (bootstrap.fixture || !currentDetail?.thread.activeTurnId) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updatedThread = await client.interruptThread(
+        currentDetail.thread.id,
+        currentDetail.thread.activeTurnId,
+      );
+      setThreads((current) => replaceThread(current, updatedThread));
+      await refreshThreadDetail({ reportError: true });
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      postNativeMessage({ type: 'reportFatalError', message });
+    } finally {
+      setSubmitting(false);
+    }
+  }, [bootstrap.fixture, client, refreshThreadDetail]);
 
   useEffect(() => {
     if (
@@ -2810,6 +2877,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         ...(effectiveThreadIsOwner ? { renameThread } : {}),
         ...(effectiveThreadIsOwner ? { deleteThread } : {}),
         cancelPendingSteer,
+      ...(effectiveThreadCanControl
+        ? { steerPendingPrompt, interrupt: interruptCurrentTurn }
+        : {}),
         sendPrompt: async (input) => {
           if (!effectiveThreadCanControl) {
             return false;
@@ -2869,6 +2939,8 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       bootstrap,
       client,
       cancelPendingSteer,
+    steerPendingPrompt,
+    interruptCurrentTurn,
       deleteThread,
       effectiveThreadCanControl,
       effectiveThreadIsOwner,
@@ -3737,6 +3809,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                     }
                   : {}),
                 shellAvailable: false,
+                canInterrupt: Boolean(
+                  detail.thread.activeTurnId && effectiveThreadCanControl,
+                ),
+                ...(effectiveThreadCanControl
+                  ? { onInterrupt: interruptCurrentTurn }
+                  : {}),
                 onPickAttachment: pickNativeAttachments,
                 ...(effectiveThreadIsOwner
                   ? { onUpdateSettings: updateThreadSettings }

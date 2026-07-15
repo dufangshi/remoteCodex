@@ -558,6 +558,22 @@ export function deleteThreadPendingSteerRecordById(db: DatabaseClient, id: strin
   db.delete(threadPendingSteers).where(eq(threadPendingSteers.id, id)).run();
 }
 
+export function updateThreadPendingSteerRecordDelivery(
+  db: DatabaseClient,
+  id: string,
+  delivery: 'steer' | 'continuation',
+  turnId: string,
+) {
+  db.update(threadPendingSteers)
+    .set({
+      delivery,
+      turnId,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(threadPendingSteers.id, id))
+    .run();
+}
+
 export function deleteThreadPendingSteerRecordsByThreadId(
   db: DatabaseClient,
   threadId: string,

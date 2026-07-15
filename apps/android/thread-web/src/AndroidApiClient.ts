@@ -354,6 +354,23 @@ export class AndroidApiClient {
     );
   }
 
+  steerPendingPrompt(threadId: string, pendingSteerId: string) {
+    return this.requestJson<ThreadDetailDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/pending-steers/${encodeURIComponent(pendingSteerId)}/steer`,
+      { method: 'POST' },
+    );
+  }
+
+  interruptThread(threadId: string, turnId?: string | null) {
+    return this.requestJson<ThreadDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/interrupt`,
+      {
+        method: 'POST',
+        body: JSON.stringify(turnId ? { turnId } : {}),
+      },
+    );
+  }
+
   sendPrompt(threadId: string, prompt: string) {
     return this.requestJson<ThreadDto>(
       `/api/threads/${encodeURIComponent(threadId)}/prompt`,

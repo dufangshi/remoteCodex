@@ -76,6 +76,7 @@ import {
   terminateShell,
   buildThreadImageAssetUrl,
   cancelPendingSteer,
+  steerPendingPrompt,
 } from '../lib/api';
 import {
   appendLatestTurns,
@@ -2625,6 +2626,36 @@ export function ThreadDetailPage() {
     [],
   );
 
+  const handleSteerPendingPrompt = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      setError(null);
+      try {
+        const updated = await steerPendingPrompt(threadId, pendingSteerId);
+        setDetail((current) =>
+          current
+            ? {
+                ...updated,
+                turns: appendLatestTurns(current.turns, updated.turns),
+              }
+            : updated,
+        );
+        setThreads((current) =>
+          current.map((entry) =>
+            entry.id === updated.thread.id ? updated.thread : entry,
+          ),
+        );
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to steer queued prompt.',
+        );
+        throw caught;
+      }
+    },
+    [],
+  );
+
   async function handleCompactThread() {
     if (!detail) {
       return;
@@ -3254,6 +3285,9 @@ export function ThreadDetailPage() {
       ...(relayThreadIsOwner ? { renameThread: handleRenameThread } : {}),
       ...(relayThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
       cancelPendingSteer: handleCancelPendingSteer,
+      ...(relayThreadCanControl
+        ? { steerPendingPrompt: handleSteerPendingPrompt }
+        : {}),
       sendPrompt: handlePrompt,
       ...(relayThreadCanControl ? { interrupt: handleInterrupt } : {}),
       ...(relayThreadCanControl ? { compact: handleCompactThread } : {}),
@@ -3273,6 +3307,7 @@ export function ThreadDetailPage() {
       renderNewThreadDialogContent,
       handleCompactThread,
       handleCancelPendingSteer,
+      handleSteerPendingPrompt,
       handleInterrupt,
       handleLoadHistoryItemDetail,
       handleOpenWorkspaceFile,

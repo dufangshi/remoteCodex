@@ -22,6 +22,7 @@ import {
   getWorkspaceRecordById,
   listThreadRecords,
   markThreadPromptRequestAccepted,
+  updateThreadPendingSteerRecordDelivery,
   updateThreadRecord
 } from '../../../packages/db/src/index';
 import {
@@ -993,14 +994,7 @@ export class ThreadService {
       record.status !== 'failed' &&
       record.status !== 'interrupted';
     if (hasActiveProviderTurn && record.providerTurnId) {
-      const activeTurnCollaborationMode = normalizeCollaborationMode(
-        record.activeTurnCollaborationMode ?? record.collaborationMode,
-      );
-      if (
-        !turnConfig.supportsRunningTurnInput ||
-        activeTurnCollaborationMode !== turnConfig.collaborationMode
-      ) {
-        return this.promptTurnCoordinator.queueContinuationPromptTurn(localThreadId, {
+      return this.promptTurnCoordinator.queueContinuationPromptTurn(localThreadId, {
           ...connectedRecord,
           providerTurnId: record.providerTurnId,
         }, {
@@ -1015,22 +1009,6 @@ export class ThreadService {
           performanceMode: turnConfig.performanceMode,
           workspacePath: workspace.absPath,
         });
-      }
-      return this.promptTurnCoordinator.steerOrStartPromptTurn(localThreadId, {
-        ...connectedRecord,
-        providerTurnId: record.providerTurnId,
-      }, {
-        prompt,
-        displayPrompt,
-        developerInstructions,
-        clientRequestId: input.clientRequestId ?? null,
-        effectiveModel: turnConfig.effectiveModel,
-        normalizedReasoning: turnConfig.normalizedReasoning,
-        collaborationMode: turnConfig.collaborationMode,
-        sandboxMode: turnConfig.sandboxMode,
-        performanceMode: turnConfig.performanceMode,
-        workspacePath: workspace.absPath,
-      });
     }
 
     return this.promptTurnCoordinator.startPromptTurn(localThreadId, connectedRecord, {
@@ -1315,6 +1293,65 @@ export class ThreadService {
       pending.id,
       pending.turnId,
     );
+    return this.getThreadDetail(localThreadId);
+  }
+
+  async steerPendingPrompt(
+    localThreadId: string,
+    pendingSteerId: string,
+  ): Promise<ThreadDetailDto> {
+    const record = this.requireThreadRecord(localThreadId);
+    const pending = this.auxiliaryState.findPendingSteerRecord(
+      localThreadId,
+      pendingSteerId,
+    );
+    if (!pending) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Pending queued prompt was not found.',
+      });
+    }
+    if (pending.delivery !== 'continuation') {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This prompt has already been steered.',
+      });
+    }
+    if (!record.providerTurnId || record.status !== 'running') {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message:
+          'The active turn finished before this prompt could be steered.',
+      });
+    }
+
+    const providerSessionId = this.requireProviderSessionId(record);
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.sendInput) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support steering an active turn.',
+      });
+    }
+    const workspace = this.requireWorkspaceForThread(record);
+    await runtime.sendInput({
+      providerSessionId,
+      providerTurnId: record.providerTurnId,
+      prompt: pending.submittedPrompt,
+      workspacePath: workspace.absPath,
+    });
+
+    updateThreadPendingSteerRecordDelivery(
+      this.db,
+      pending.id,
+      'steer',
+      record.providerTurnId,
+    );
+    this.invalidateThreadDetailCache(localThreadId);
+    this.emitThreadEvent('thread.updated', localThreadId, {
+      reason: 'pending_steer_updated',
+      turnId: record.providerTurnId,
+    });
     return this.getThreadDetail(localThreadId);
   }
 

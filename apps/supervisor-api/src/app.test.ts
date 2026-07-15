@@ -4923,7 +4923,7 @@ describe('supervisor api', () => {
     expect(detailUserMessage?.text).not.toContain('[localImage]');
   });
 
-  it('restores running-turn photo steers when Codex history only returns local image placeholders', async () => {
+  it('restores queued photo prompts after they are explicitly steered', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
       url: '/api/workspaces',
@@ -4986,6 +4986,19 @@ describe('supervisor api', () => {
       }
     });
     expect(steerPromptResponse.statusCode).toBe(200);
+    const queuedPhotoDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    const queuedPhoto = queuedPhotoDetailResponse.json().pendingSteers[0];
+    expect(queuedPhoto).toMatchObject({ delivery: 'continuation' });
+    expect(queuedPhoto.prompt).toContain('[PHOTO ./.temp/threads/');
+
+    const promotePhotoResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/pending-steers/${queuedPhoto.id}/steer`,
+    });
+    expect(promotePhotoResponse.statusCode).toBe(200);
     expect(fakeCodexManager.steerTurnCalls.at(-1)?.prompt).toContain(
       '[PHOTO ./.temp/threads/',
     );
@@ -5505,7 +5518,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('uses turn steer instead of rejecting prompts while a turn is already running', async () => {
+  it('queues running-turn prompts by default and steers them only on request', async () => {
     fakeCodexManager.materializeSteersImmediately = false;
 
     const workspaceResponse = await app.inject({
@@ -5549,13 +5562,7 @@ describe('supervisor api', () => {
     });
 
     expect(steerPromptResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.steerTurnCalls).toEqual([
-      expect.objectContaining({
-        threadId: createdThread.providerSessionId,
-        turnId: firstPromptResponse.json().activeTurnId,
-        prompt: 'Follow up while still running',
-      }),
-    ]);
+    expect(fakeCodexManager.steerTurnCalls).toEqual([]);
 
     const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread?.turns).toHaveLength(1);
@@ -5566,7 +5573,8 @@ describe('supervisor api', () => {
     });
 
     expect(detailResponse.statusCode).toBe(200);
-    expect(detailResponse.json()).toMatchObject({
+    const queuedDetail = detailResponse.json();
+    expect(queuedDetail).toMatchObject({
       thread: {
         id: createdThread.id,
         activeTurnId: firstPromptResponse.json().activeTurnId,
@@ -5577,9 +5585,30 @@ describe('supervisor api', () => {
           clientRequestId: 'client-steer-1',
           turnId: firstPromptResponse.json().activeTurnId,
           prompt: 'Follow up while still running',
+          delivery: 'continuation',
         },
       ],
     });
+
+    const steerResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/pending-steers/${queuedDetail.pendingSteers[0].id}/steer`,
+    });
+
+    expect(steerResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.steerTurnCalls).toEqual([
+      expect.objectContaining({
+        threadId: createdThread.providerSessionId,
+        turnId: firstPromptResponse.json().activeTurnId,
+        prompt: 'Follow up while still running',
+      }),
+    ]);
+    expect(steerResponse.json().pendingSteers).toEqual([
+      expect.objectContaining({
+        id: queuedDetail.pendingSteers[0].id,
+        delivery: 'steer',
+      }),
+    ]);
   });
 
   it('queues a new turn when collaboration mode changes during an active Codex turn', async () => {
@@ -5689,10 +5718,19 @@ describe('supervisor api', () => {
       },
     });
     expect(sameModeResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.steerTurnCalls.at(-1)).toMatchObject({
-      turnId: planTurnId,
-      prompt: 'Add one more point to this plan.',
+    expect(fakeCodexManager.steerTurnCalls).toEqual([]);
+
+    const sameModeDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
     });
+    expect(sameModeDetailResponse.json().pendingSteers).toEqual([
+      expect.objectContaining({
+        clientRequestId: 'same-plan-steer-1',
+        turnId: planTurnId,
+        delivery: 'continuation',
+      }),
+    ]);
 
     const reverseModeResponse = await app.inject({
       method: 'POST',
@@ -5704,13 +5742,18 @@ describe('supervisor api', () => {
       },
     });
     expect(reverseModeResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.steerTurnCalls).toHaveLength(1);
+    expect(fakeCodexManager.steerTurnCalls).toHaveLength(0);
     const reverseDetailResponse = await app.inject({
       method: 'GET',
       url: `/api/threads/${createdThread.id}`,
     });
     expect(reverseDetailResponse.json().pendingSteers).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          clientRequestId: 'same-plan-steer-1',
+          turnId: planTurnId,
+          delivery: 'continuation',
+        }),
         expect.objectContaining({
           clientRequestId: 'mode-switch-default-1',
           turnId: planTurnId,

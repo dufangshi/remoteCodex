@@ -71,7 +71,11 @@ vi.mock('@remote-codex/thread-ui', async () => {
       surfaceActions?: React.ReactNode;
       mobileHeaderAction?: React.ReactNode;
       dialogs?: React.ReactNode;
-      composerProps?: { subscriptionUsage?: unknown };
+      composerProps?: {
+        subscriptionUsage?: unknown;
+        canInterrupt?: boolean;
+        onInterrupt?: () => void;
+      };
       timelineProps?: { autoCollapseCompletedTurns?: boolean };
     }) =>
       React.createElement(
@@ -91,6 +95,11 @@ vi.mock('@remote-codex/thread-ui', async () => {
           'output',
           { 'data-testid': 'subscription-usage' },
           JSON.stringify(composerProps?.subscriptionUsage ?? null),
+        ),
+        React.createElement(
+          'output',
+          { 'data-testid': 'interrupt-control' },
+          `${String(composerProps?.canInterrupt ?? false)}:${typeof composerProps?.onInterrupt}`,
         ),
       ),
     threadStatusLabel: (status: string) => status,
@@ -340,5 +349,24 @@ describe('IOSThreadDetailPage relay sharing UI', () => {
     });
     expect(buttonByText('Share this thread')?.disabled).toBe(true);
     expect(mocks.client.createRelayShare).not.toHaveBeenCalled();
+  });
+
+  it('exposes the stop control while a turn is running', async () => {
+    const { IOSThreadDetailPage } = await import('./IOSThreadDetailPage');
+    mocks.client.fetchThreadDetail.mockResolvedValue({
+      ...detail,
+      thread: { ...detail.thread, status: 'running', activeTurnId: 'turn-2' },
+    });
+
+    await act(async () => {
+      root.render(<IOSThreadDetailPage bootstrap={relayBootstrap} />);
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="interrupt-control"]')
+          ?.textContent,
+      ).toBe('true:function');
+    });
   });
 });

@@ -1550,6 +1550,15 @@ export function cancelPendingSteer(id: string, pendingSteerId: string) {
   );
 }
 
+export function steerPendingPrompt(id: string, pendingSteerId: string) {
+  return request<ThreadDetailDto>(
+    `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}/steer`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
 export function updateThreadSettings(
   id: string,
   input: UpdateThreadSettingsInput,

@@ -606,7 +606,27 @@ export function AndroidThreadDetailPage({
       }
       promptSubmissionInFlightRef.current = true;
       const previousDetail = currentDetail;
-      const optimistic = buildOptimisticPromptDetail(currentDetail, prompt);
+      const optimistic =
+        currentDetail.thread.status === 'running' &&
+        currentDetail.thread.activeTurnId
+          ? {
+              thread: currentDetail.thread,
+              detail: {
+                ...currentDetail,
+                pendingSteers: [
+                  ...currentDetail.pendingSteers,
+                  {
+                    id: `optimistic-queue-android-${Date.now()}`,
+                    clientRequestId: null,
+                    turnId: currentDetail.thread.activeTurnId,
+                    prompt,
+                    delivery: 'continuation' as const,
+                    createdAt: new Date().toISOString(),
+                  },
+                ],
+              },
+            }
+          : buildOptimisticPromptDetail(currentDetail, prompt);
       setSubmitting(true);
       detailRef.current = optimistic.detail;
       setDetail(optimistic.detail);
@@ -847,6 +867,49 @@ export function AndroidThreadDetailPage({
     },
     [client],
   );
+
+  const steerPendingPrompt = useCallback(
+    async (threadId: string, pendingSteerId: string) => {
+      try {
+        const updatedDetail = await client.steerPendingPrompt(
+          threadId,
+          pendingSteerId,
+        );
+        detailRef.current = updatedDetail;
+        setDetail(updatedDetail);
+        setThreads((current) => replaceThread(current, updatedDetail.thread));
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postAndroidMessage({ type: 'reportFatalError', message });
+        throw caught;
+      }
+    },
+    [client],
+  );
+
+  const interruptCurrentTurn = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail?.thread.activeTurnId) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updatedThread = await client.interruptThread(
+        currentDetail.thread.id,
+        currentDetail.thread.activeTurnId,
+      );
+      setThreads((current) => replaceThread(current, updatedThread));
+      await refreshThreadDetail({ reportError: true });
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      postAndroidMessage({ type: 'reportFatalError', message });
+    } finally {
+      setSubmitting(false);
+    }
+  }, [client, refreshThreadDetail]);
 
   const loadExportTurns = useCallback(async () => {
     const currentDetail = detailRef.current;
@@ -1290,6 +1353,9 @@ export function AndroidThreadDetailPage({
       ...(effectiveThreadIsOwner ? { renameThread } : {}),
       ...(effectiveThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
       cancelPendingSteer,
+      ...(effectiveThreadCanControl
+        ? { steerPendingPrompt, interrupt: interruptCurrentTurn }
+        : {}),
       ...(effectiveThreadIsOwner ? { updateSettings: updateThreadSettings } : {}),
       async loadHistoryItemDetail(itemId) {
         const currentDetail = detailRef.current;
@@ -1327,6 +1393,8 @@ export function AndroidThreadDetailPage({
   }, [
     client,
     cancelPendingSteer,
+    steerPendingPrompt,
+    interruptCurrentTurn,
     effectiveThreadCanControl,
     effectiveThreadIsOwner,
     effectiveWorkspaceAccess,
@@ -1558,6 +1626,12 @@ export function AndroidThreadDetailPage({
                       }
                     : {}),
                 shellAvailable: false,
+                canInterrupt: Boolean(
+                  detail.thread.activeTurnId && effectiveThreadCanControl,
+                ),
+                ...(effectiveThreadCanControl
+                  ? { onInterrupt: interruptCurrentTurn }
+                  : {}),
                 followTail,
                 onToggleFollow: () => {
                   setFollowTail(true);
