@@ -73,7 +73,6 @@ export interface ThreadRuntimeEventProjectorCallbacks {
   ): boolean;
   scheduleQueuedContinuationDrain(
     localThreadId: string,
-    displayTurnId: string,
   ): void;
   persistLiveHistoryItem(
     localThreadId: string,
@@ -129,13 +128,18 @@ export class ThreadRuntimeEventProjector {
           return;
         }
 
-        updateThreadRecord(db, record.id, {
-          status: event.status,
-        });
+        const status =
+          event.status === 'idle' && record.providerTurnId
+            ? 'running'
+            : event.status;
+        updateThreadRecord(db, record.id, { status });
 
         callbacks.emitThreadEvent('thread.updated', record.id, {
-          status: getThreadRecordById(db, record.id)?.status ?? record.status
+          status: getThreadRecordById(db, record.id)?.status ?? status
         });
+        if (status === 'idle') {
+          callbacks.scheduleQueuedContinuationDrain(record.id);
+        }
         return;
       }
       case 'session.title.updated': {
@@ -514,7 +518,7 @@ export class ThreadRuntimeEventProjector {
         );
         liveState.clearRuntimeDisplayTurnMapping(record.id, rawTurnId);
         if (preservePendingSteers) {
-          callbacks.scheduleQueuedContinuationDrain(record.id, turnId);
+          callbacks.scheduleQueuedContinuationDrain(record.id);
         }
         return;
       }

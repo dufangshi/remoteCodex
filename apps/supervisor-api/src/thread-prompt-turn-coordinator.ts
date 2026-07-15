@@ -414,9 +414,7 @@ export class ThreadPromptTurnCoordinator {
         collaborationMode: input.collaborationMode,
         sandboxMode: input.sandboxMode,
         performanceMode: input.performanceMode,
-        startNewTurn:
-          input.collaborationMode !==
-          (record.activeTurnCollaborationMode === 'plan' ? 'plan' : 'default'),
+        startNewTurn: true,
       }),
     });
     this.callbacks.invalidateThreadDetailCache(localThreadId);

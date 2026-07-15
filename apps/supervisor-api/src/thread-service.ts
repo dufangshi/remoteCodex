@@ -50,7 +50,6 @@ import {
   ThreadGoalDto,
   ThreadHooksDto,
   TrustThreadHookInput,
-  ThreadHistoryItemDto,
   ThreadHistoryItemDetailDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
@@ -309,8 +308,8 @@ export class ThreadService {
         }),
       invalidateThreadDetailCache: (localThreadId) =>
         this.invalidateThreadDetailCache(localThreadId),
-      shouldPreserveCompletedPendingSteer: (localThreadId, turnId) =>
-        this.shouldPreserveCompletedPendingSteer(localThreadId, turnId),
+      shouldPreserveCompletedPendingSteer: (localThreadId) =>
+        this.shouldPreserveCompletedPendingSteer(localThreadId),
       shouldPreserveMissingPendingSteer: (localThreadId, turnId) =>
         this.shouldPreserveMissingPendingSteer(localThreadId, turnId),
     });
@@ -406,10 +405,10 @@ export class ThreadService {
         normalizeReasoningEffort,
         normalizeThreadGoalStatusForThread: (goal, record) =>
           this.goalCoordinator.normalizeThreadGoalStatusForThread(goal, record),
-        shouldPreservePendingSteersForCompletedTurn: (record, turnId) =>
-          this.shouldPreserveCompletedPendingSteer(record.id, turnId),
-        scheduleQueuedContinuationDrain: (localThreadId, turnId) =>
-          this.scheduleQueuedContinuationDrain(localThreadId, turnId),
+        shouldPreservePendingSteersForCompletedTurn: (record) =>
+          this.shouldPreserveCompletedPendingSteer(record.id),
+        scheduleQueuedContinuationDrain: (localThreadId) =>
+          this.scheduleQueuedContinuationDrain(localThreadId),
         persistLiveHistoryItem: (localThreadId, turnId, item) =>
           this.historyPersistence.persistLiveHistoryItem(localThreadId, turnId, item),
         persistFinalTurnOrderingHints: (localThreadId, turnId, items) =>
@@ -1459,12 +1458,12 @@ export class ThreadService {
     return Boolean(runtime.sendInput && runtime.capabilities.turns.steer);
   }
 
-  private shouldPreserveCompletedPendingSteer(localThreadId: string, turnId: string) {
+  private shouldPreserveCompletedPendingSteer(localThreadId: string) {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record) {
       return false;
     }
-    return this.auxiliaryState.hasQueuedContinuationsForTurn(localThreadId, turnId);
+    return this.auxiliaryState.hasQueuedContinuations(localThreadId);
   }
 
   private shouldPreserveMissingPendingSteer(localThreadId: string, turnId: string) {
@@ -1485,14 +1484,14 @@ export class ThreadService {
     );
   }
 
-  private scheduleQueuedContinuationDrain(localThreadId: string, turnId: string) {
-    const key = `${localThreadId}:${turnId}`;
+  private scheduleQueuedContinuationDrain(localThreadId: string) {
+    const key = localThreadId;
     if (this.queuedContinuationDrains.has(key)) {
       return;
     }
     this.queuedContinuationDrains.add(key);
     queueMicrotask(() => {
-      void this.drainQueuedContinuation(localThreadId, turnId)
+      void this.drainQueuedContinuation(localThreadId)
         .catch((error) => {
           const message =
             error instanceof Error ? error.message : 'Failed to run queued prompt.';
@@ -1507,11 +1506,8 @@ export class ThreadService {
     });
   }
 
-  private async drainQueuedContinuation(localThreadId: string, turnId: string) {
-    const pending = this.auxiliaryState.listPendingSteerRecordsForTurn(
-      localThreadId,
-      turnId,
-    ).find((entry) => entry.delivery === 'continuation');
+  private async drainQueuedContinuation(localThreadId: string) {
+    const pending = this.auxiliaryState.listQueuedContinuationRecords(localThreadId)[0];
     if (!pending) {
       return;
     }
@@ -1545,17 +1541,6 @@ export class ThreadService {
         promptInput: {},
       });
 
-    if (!queuedConfig?.startNewTurn) {
-      const queuedUserItemId = `queued-continuation:${pending.id}:user`;
-      this.historyPersistence.persistProjectedHistoryItem(localThreadId, turnId, {
-        id: queuedUserItemId,
-        kind: 'userMessage',
-        text: pending.displayPrompt,
-        createdAt: new Date().toISOString(),
-        sequence: this.liveState.recordTurnItemOrder(localThreadId, turnId, queuedUserItemId),
-      } as ThreadHistoryItemDto);
-    }
-
     await this.promptTurnCoordinator.startPromptTurn(localThreadId, {
       ...record,
       providerSessionId,
@@ -1569,11 +1554,8 @@ export class ThreadService {
       sandboxMode: turnConfig.sandboxMode,
       performanceMode: turnConfig.performanceMode,
       workspacePath: workspace.absPath,
-      ...(queuedConfig?.startNewTurn
-        ? {}
-        : { hidden: true, displayTurnId: turnId }),
     });
-    this.auxiliaryState.deletePendingSteerRecord(localThreadId, pending.id, turnId);
+    this.auxiliaryState.deletePendingSteerRecord(localThreadId, pending.id, pending.turnId);
   }
 
   private async handleProviderRuntimeRequest(request: AgentProviderRequest) {

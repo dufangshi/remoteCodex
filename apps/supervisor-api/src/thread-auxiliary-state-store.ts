@@ -139,6 +139,12 @@ export class ThreadAuxiliaryStateStore {
     );
   }
 
+  listQueuedContinuationRecords(localThreadId: string) {
+    return listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).filter(
+      (record) => record.delivery === 'continuation',
+    );
+  }
+
   findPendingSteerRecord(localThreadId: string, id: string) {
     return listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).find(
       (record) => record.id === id,
@@ -153,6 +159,10 @@ export class ThreadAuxiliaryStateStore {
     return this.listPendingSteerRecordsForTurn(localThreadId, turnId).some(
       (record) => record.delivery === 'continuation',
     );
+  }
+
+  hasQueuedContinuations(localThreadId: string) {
+    return this.listQueuedContinuationRecords(localThreadId).length > 0;
   }
 
   deletePendingSteerRecord(localThreadId: string, id: string, turnId?: string) {

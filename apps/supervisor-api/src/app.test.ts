@@ -2324,9 +2324,9 @@ describe('supervisor api', () => {
       providerSessionId: 'claude-session-1',
       prompt: 'Second prompt while running.',
       displayPrompt: 'Second prompt while running.',
-      hidden: true,
-      displayTurnId: 'claude-turn-1',
     });
+    expect(fakeClaudeRuntime.startTurnInputs.at(-1)?.hidden).toBeUndefined();
+    expect(fakeClaudeRuntime.startTurnInputs.at(-1)?.displayTurnId).toBeUndefined();
 
     const continuationDetailResponse = await app.inject({
       method: 'GET',
@@ -2349,16 +2349,17 @@ describe('supervisor api', () => {
       activeTurnId: null,
     });
     expect(completedDetailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-2',
       status: 'completed',
       model: 'sonnet',
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
       items: expect.arrayContaining([
-        expect.objectContaining({ kind: 'userMessage', text: 'Say hello.' }),
         expect.objectContaining({ kind: 'userMessage', text: 'Second prompt while running.' }),
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
     });
+    expect(completedDetailResponse.json().turns).toHaveLength(2);
   });
 
   it('persists and returns a specific provider start failure when a turn never starts', async () => {
@@ -5609,6 +5610,131 @@ describe('supervisor api', () => {
         delivery: 'steer',
       }),
     ]);
+  });
+
+  it('drains queued Codex prompts as independent turns in FIFO order', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'FIFO Queue Thread',
+      },
+    });
+    const thread = createResponse.json();
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: { prompt: 'First turn' },
+    });
+    const firstTurnId = firstPromptResponse.json().activeTurnId;
+
+    for (const prompt of ['Second turn', 'Third turn']) {
+      const queuedResponse = await app.inject({
+        method: 'POST',
+        url: `/api/threads/${thread.id}/prompt`,
+        payload: { prompt },
+      });
+      expect(queuedResponse.statusCode).toBe(200);
+    }
+
+    const queuedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(
+      queuedDetailResponse.json().pendingSteers.map((entry: any) => entry.prompt),
+    ).toEqual(['Second turn', 'Third turn']);
+
+    fakeCodexManager.completeTurn(thread.providerSessionId, firstTurnId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fakeCodexManager.startTurnCalls.map((entry) => entry.prompt)).toEqual([
+      'First turn',
+      'Second turn',
+    ]);
+    const secondDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    const secondDetail = secondDetailResponse.json();
+    expect(secondDetail.thread).toMatchObject({
+      status: 'running',
+    });
+    expect(secondDetail.thread.activeTurnId).not.toBe(firstTurnId);
+    expect(secondDetail.pendingSteers.map((entry: any) => entry.prompt)).toEqual([
+      'Third turn',
+    ]);
+    expect(secondDetail.turns.at(-1)).toMatchObject({
+      id: secondDetail.thread.activeTurnId,
+      status: 'inProgress',
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: 'userMessage', text: 'Second turn' }),
+      ]),
+    });
+    expect(
+      secondDetail.turns[0].items.some(
+        (item: any) => item.kind === 'userMessage' && item.text === 'Second turn',
+      ),
+    ).toBe(false);
+
+    fakeCodexManager.emitServerEvent({
+      method: 'thread/status/changed',
+      params: {
+        threadId: thread.providerSessionId,
+        status: { type: 'idle' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeCodexManager.startTurnCalls).toHaveLength(2);
+    const staleIdleDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(staleIdleDetailResponse.json().thread).toMatchObject({
+      status: 'running',
+      activeTurnId: secondDetail.thread.activeTurnId,
+    });
+
+    fakeCodexManager.completeTurn(
+      thread.providerSessionId,
+      secondDetail.thread.activeTurnId,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fakeCodexManager.startTurnCalls.map((entry) => entry.prompt)).toEqual([
+      'First turn',
+      'Second turn',
+      'Third turn',
+    ]);
+    const thirdDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(thirdDetailResponse.json()).toMatchObject({
+      thread: {
+        status: 'running',
+      },
+      pendingSteers: [],
+    });
+    expect(thirdDetailResponse.json().turns.at(-1)).toMatchObject({
+      id: thirdDetailResponse.json().thread.activeTurnId,
+      status: 'inProgress',
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: 'userMessage', text: 'Third turn' }),
+      ]),
+    });
   });
 
   it('queues a new turn when collaboration mode changes during an active Codex turn', async () => {
