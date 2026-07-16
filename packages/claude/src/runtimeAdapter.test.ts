@@ -22,6 +22,11 @@ function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function uuidV7At(timestamp = Date.now()) {
+  const timestampHex = Math.trunc(timestamp).toString(16).padStart(12, '0');
+  return `${timestampHex.slice(0, 8)}-${timestampHex.slice(8)}-7000-8000-000000000001`;
+}
+
 class FakeQuery implements Query {
   interrupted = false;
   closed = false;
@@ -541,6 +546,7 @@ describe('ClaudeRuntimeAdapter', () => {
 
   it('reconciles active multimodal transcript turns back to the live runtime turn id', async () => {
     let queryMessages: SDKMessage[] = [systemInit()];
+    const currentMessageUuid = uuidV7At();
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
       command: 'claude',
@@ -556,7 +562,7 @@ describe('ClaudeRuntimeAdapter', () => {
       getSessionMessages: (async () => [
         {
           type: 'user',
-          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          uuid: currentMessageUuid,
           session_id: 'claude-session-1',
           message: {
             role: 'user',
@@ -607,6 +613,99 @@ describe('ClaudeRuntimeAdapter', () => {
     });
     const reloadedSession = await adapter.readSession('claude-session-1');
     expect(reloadedSession.turns[0]?.providerTurnId).toBe(started.providerTurnId);
+  });
+
+  it('does not reconcile an old matching user-only turn as the active turn', async () => {
+    const historicalMessageUuid = uuidV7At(Date.now() - 10 * 60_000);
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: (() => new FakeQuery([systemInit()], { holdOpen: true })) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        cwd: '/tmp/workspace',
+      })) as any,
+      getSessionMessages: (async () => [{
+        type: 'user',
+        uuid: historicalMessageUuid,
+        session_id: 'claude-session-1',
+        message: { role: 'user', content: 'Repeat this prompt' },
+        parent_tool_use_id: null,
+      }] satisfies SessionMessage[]) as any,
+    });
+
+    const started = await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Repeat this prompt',
+      model: 'sonnet',
+      workspacePath: '/tmp/workspace',
+    });
+    const session = await adapter.readSession('claude-session-1');
+
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]).toMatchObject({
+      providerTurnId: `claude-turn-${historicalMessageUuid}`,
+      status: 'completed',
+    });
+
+    await adapter.interruptTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: started.providerTurnId,
+    });
+  });
+
+  it('reconciles only the current prompt when an older user-only turn exists', async () => {
+    const historicalMessageUuid = uuidV7At(Date.now() - 10 * 60_000);
+    const currentMessageUuid = uuidV7At();
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: (() => new FakeQuery([systemInit()], { holdOpen: true })) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        cwd: '/tmp/workspace',
+      })) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: historicalMessageUuid,
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'An older prompt' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: currentMessageUuid,
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'The current prompt' },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const started = await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'The current prompt',
+      model: 'sonnet',
+      workspacePath: '/tmp/workspace',
+    });
+    const session = await adapter.readSession('claude-session-1');
+
+    expect(session.turns.map((turn) => turn.providerTurnId)).toEqual([
+      `claude-turn-${historicalMessageUuid}`,
+      started.providerTurnId,
+    ]);
+    expect(session.turns[0]?.items[0]).toMatchObject({ text: 'An older prompt' });
+    expect(session.turns[1]).toMatchObject({ status: 'inProgress' });
+
+    await adapter.interruptTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: started.providerTurnId,
+    });
   });
 
   it('keeps image blocks visible when reading Claude session history', async () => {

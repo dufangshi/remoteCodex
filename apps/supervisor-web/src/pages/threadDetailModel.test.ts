@@ -97,6 +97,37 @@ describe('threadDetailModel', () => {
     expect(appendLatestTurns([stale], [materialized])).toEqual([materialized]);
   });
 
+  it('updates existing turns in place even when the latest response is reordered', () => {
+    const existing = [makeTurn('turn-1'), makeTurn('turn-2'), makeTurn('turn-3')];
+    const updatedTurn2 = { ...makeTurn('turn-2'), error: 'updated' };
+    const updatedTurn3 = { ...makeTurn('turn-3'), error: 'also updated' };
+
+    expect(appendLatestTurns(existing, [updatedTurn3, updatedTurn2])).toEqual([
+      makeTurn('turn-1'),
+      updatedTurn2,
+      updatedTurn3,
+    ]);
+  });
+
+  it('keeps only the last snapshot when a latest response repeats a turn id', () => {
+    const staleSnapshot = { ...makeTurn('turn-2'), error: 'stale' };
+    const currentSnapshot = { ...makeTurn('turn-2'), error: 'current' };
+
+    expect(appendLatestTurns([makeTurn('turn-1')], [staleSnapshot, currentSnapshot])).toEqual([
+      makeTurn('turn-1'),
+      currentSnapshot,
+    ]);
+  });
+
+  it('repairs duplicate turn ids already present in local timeline state', () => {
+    const staleSnapshot = { ...makeTurn('turn-2'), error: 'stale' };
+    const currentSnapshot = { ...makeTurn('turn-2'), error: 'current' };
+
+    expect(
+      appendLatestTurns([makeTurn('turn-1'), staleSnapshot, currentSnapshot], []),
+    ).toEqual([makeTurn('turn-1'), currentSnapshot]);
+  });
+
   it('merges pending requests by id, removes resolved requests, and keeps creation order', () => {
     const requestA = makePendingRequest('a', '2026-05-24T00:00:01.000Z');
     const staleRequestB = makePendingRequest('b', '2026-05-24T00:00:02.000Z');

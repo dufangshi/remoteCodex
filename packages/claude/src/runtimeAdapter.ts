@@ -247,6 +247,33 @@ interface ActiveClaudeTurn {
 }
 
 const promptPhotoTokenPattern = /\[PHOTO\s+([^\]]+)\]/g;
+const activeTranscriptMatchWindowMs = 120_000;
+
+function normalizePromptForTurnReconciliation(value: string) {
+  return value
+    // Claude history can rewrite or omit an image marker. The surrounding
+    // text and UUIDv7 timestamp remain stable reconciliation identifiers.
+    .replace(/\[PHOTO\s+[^\]]+\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function userPromptForTurn(turn: AgentTurn) {
+  return turn.items.find((item) => item.kind === 'userMessage')?.text ?? null;
+}
+
+function isRecentActiveTranscriptTurn(turn: AgentTurn, activeStartedAt: string) {
+  if (!turn.startedAt) {
+    return true;
+  }
+  const transcriptStartedAt = Date.parse(turn.startedAt);
+  const activeStartedAtMs = Date.parse(activeStartedAt);
+  return (
+    !Number.isFinite(transcriptStartedAt)
+    || !Number.isFinite(activeStartedAtMs)
+    || Math.abs(transcriptStartedAt - activeStartedAtMs) <= activeTranscriptMatchWindowMs
+  );
+}
 
 function mimeTypeForImagePath(filePath: string) {
   const extension = path.extname(filePath).toLowerCase();
@@ -1766,12 +1793,17 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const activeItems = [...activeTurn.itemOrder]
       .map((itemId) => activeTurn.items.get(itemId))
       .filter((item): item is AgentHistoryItem => Boolean(item));
-    const transcriptTurnIndex = turns.findLastIndex(
-      (turn) =>
-        turn.status === 'completed' &&
-        turn.items.some((item) => item.kind === 'userMessage') &&
-        !turn.items.some((item) => item.kind === 'agentMessage'),
-    );
+    const normalizedPrompt = normalizePromptForTurnReconciliation(prompt);
+    const transcriptTurnIndex = turns.findLastIndex((turn) => {
+      const transcriptPrompt = userPromptForTurn(turn);
+      return (
+        turn.status === 'completed'
+        && transcriptPrompt !== null
+        && normalizePromptForTurnReconciliation(transcriptPrompt) === normalizedPrompt
+        && !turn.items.some((item) => item.kind === 'agentMessage')
+        && isRecentActiveTranscriptTurn(turn, activeTurn.startedAt)
+      );
+    });
 
     if (transcriptTurnIndex < 0) {
       return turns;
@@ -1783,6 +1815,14 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       if (!aliases) {
         aliases = new Map();
         this.historicalTurnIdAliases.set(providerSessionId, aliases);
+      }
+      for (const [historicalTurnId, displayTurnId] of aliases) {
+        if (
+          displayTurnId === activeTurn.providerTurnId
+          && historicalTurnId !== transcriptTurn.providerTurnId
+        ) {
+          aliases.delete(historicalTurnId);
+        }
       }
       aliases.set(transcriptTurn.providerTurnId, activeTurn.providerTurnId);
     }
@@ -1812,9 +1852,20 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (!aliases || aliases.size === 0) {
       return turns;
     }
+    const rawTurnIds = new Set(turns.map((turn) => turn.providerTurnId));
+    const usedTurnIds = new Set<string>();
     return turns.map((turn) => {
       const providerTurnId = aliases.get(turn.providerTurnId);
-      return providerTurnId ? { ...turn, providerTurnId } : turn;
+      if (
+        !providerTurnId
+        || usedTurnIds.has(providerTurnId)
+        || (providerTurnId !== turn.providerTurnId && rawTurnIds.has(providerTurnId))
+      ) {
+        usedTurnIds.add(turn.providerTurnId);
+        return turn;
+      }
+      usedTurnIds.add(providerTurnId);
+      return { ...turn, providerTurnId };
     });
   }
 

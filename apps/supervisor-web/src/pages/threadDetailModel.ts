@@ -25,43 +25,84 @@ export function appendLatestTurns(
   existing: ThreadDetailDto['turns'],
   latest: ThreadDetailDto['turns'],
 ) {
-  const latestIds = new Set(latest.map((turn) => turn.id));
-  const latestReplacements = latest.filter((turn) =>
+  const seenLatestIds = new Set<string>();
+  const uniqueLatest = latest.reduceRight<ThreadDetailDto['turns']>((turns, turn) => {
+    if (!seenLatestIds.has(turn.id)) {
+      seenLatestIds.add(turn.id);
+      turns.unshift(turn);
+    }
+    return turns;
+  }, []);
+  const latestById = new Map(uniqueLatest.map((turn) => [turn.id, turn]));
+  const latestReplacements = uniqueLatest.filter((turn) =>
     turn.items.some((item) => item.kind === 'userMessage'),
   );
-  return [
-    ...existing.filter((turn) => {
-      if (latestIds.has(turn.id)) {
+  const consumedLatestIds = new Set<string>();
+  const merged = existing.map((turn) => {
+    const directReplacement = latestById.get(turn.id);
+    if (directReplacement) {
+      consumedLatestIds.add(directReplacement.id);
+      return directReplacement;
+    }
+    if (turn.status !== 'inProgress') {
+      return turn;
+    }
+    const existingPrompt = turn.items.find(
+      (item) => item.kind === 'userMessage',
+    )?.text.trim();
+    const existingStartedAt = turn.startedAt
+      ? Date.parse(turn.startedAt)
+      : Number.NaN;
+    if (!existingPrompt || !Number.isFinite(existingStartedAt)) {
+      return turn;
+    }
+    const materializedReplacement = latestReplacements.find((replacement) => {
+      if (consumedLatestIds.has(replacement.id)) {
         return false;
       }
-      if (turn.status !== 'inProgress') {
-        return true;
-      }
-      const existingPrompt = turn.items.find(
+      const replacementPrompt = replacement.items.find(
         (item) => item.kind === 'userMessage',
       )?.text.trim();
-      const existingStartedAt = turn.startedAt
-        ? Date.parse(turn.startedAt)
+      const replacementStartedAt = replacement.startedAt
+        ? Date.parse(replacement.startedAt)
         : Number.NaN;
-      if (!existingPrompt || !Number.isFinite(existingStartedAt)) {
-        return true;
+      return (
+        replacementPrompt === existingPrompt
+        && Number.isFinite(replacementStartedAt)
+        && Math.abs(replacementStartedAt - existingStartedAt) <= 15_000
+      );
+    });
+    if (!materializedReplacement) {
+      return turn;
+    }
+    consumedLatestIds.add(materializedReplacement.id);
+    return materializedReplacement;
+  });
+
+  const appended = uniqueLatest
+    .filter((turn) => !consumedLatestIds.has(turn.id))
+    .map((turn, index) => ({ turn, index }))
+    .sort((left, right) => {
+      const leftStartedAt = left.turn.startedAt ? Date.parse(left.turn.startedAt) : Number.NaN;
+      const rightStartedAt = right.turn.startedAt ? Date.parse(right.turn.startedAt) : Number.NaN;
+      if (Number.isFinite(leftStartedAt) && Number.isFinite(rightStartedAt)) {
+        return leftStartedAt - rightStartedAt || left.index - right.index;
       }
-      return !latestReplacements.some((replacement) => {
-        const replacementPrompt = replacement.items.find(
-          (item) => item.kind === 'userMessage',
-        )?.text.trim();
-        const replacementStartedAt = replacement.startedAt
-          ? Date.parse(replacement.startedAt)
-          : Number.NaN;
-        return (
-          replacementPrompt === existingPrompt
-          && Number.isFinite(replacementStartedAt)
-          && Math.abs(replacementStartedAt - existingStartedAt) <= 15_000
-        );
-      });
-    }),
-    ...latest,
-  ];
+      return left.index - right.index;
+    })
+    .map(({ turn }) => turn);
+
+  const lastMergedById = new Map(merged.map((turn) => [turn.id, turn]));
+  const emittedMergedIds = new Set<string>();
+  const stableMerged = merged.flatMap((turn) => {
+    if (emittedMergedIds.has(turn.id)) {
+      return [];
+    }
+    emittedMergedIds.add(turn.id);
+    return [lastMergedById.get(turn.id) ?? turn];
+  });
+
+  return [...stableMerged, ...appended];
 }
 
 export function applyLiveItemTimestampsToTurns(
