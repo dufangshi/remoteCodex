@@ -1503,6 +1503,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return {
       ...summary,
       cwd,
+      // Claude's persisted session metadata remains "idle" while a query is
+      // streaming. The in-memory runtime is authoritative for that interval:
+      // returning the stale persisted status makes detail polling clear the
+      // active provider turn, which in turn drops live tool items from the
+      // transcript until Claude writes its final history record.
+      status: activeTurn ? 'running' : summary.status,
       turns: this.reconcileActiveTranscriptTurn(providerSessionId, turns, activeTurn),
     };
   }

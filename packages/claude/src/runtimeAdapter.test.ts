@@ -824,6 +824,36 @@ describe('ClaudeRuntimeAdapter', () => {
     heldQuery.close();
   });
 
+  it('keeps an active Claude session running when its detail is re-read', async () => {
+    const heldQuery = new FakeQuery([systemInit()], { holdOpen: true });
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return heldQuery;
+    });
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: 'turn-1',
+      prompt: 'Keep running',
+    } as any);
+    await wait();
+
+    await expect(adapter.readSession('claude-session-1')).resolves.toMatchObject({
+      providerSessionId: 'claude-session-1',
+      status: 'running',
+    });
+
+    heldQuery.close();
+  });
+
   it('merges adjacent Claude thinking blocks into one reasoning item', () => {
     const items = assistantMessageToHistoryItems({
       messageId: 'msg_1',
