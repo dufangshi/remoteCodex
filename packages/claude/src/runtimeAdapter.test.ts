@@ -854,6 +854,61 @@ describe('ClaudeRuntimeAdapter', () => {
     heldQuery.close();
   });
 
+  it('emits complete assistant progress messages before the Claude turn finishes', async () => {
+    const heldQuery = new FakeQuery([
+      systemInit(),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_progress',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [{ type: 'text', text: 'I found the failing integration.' }],
+          usage: {} as any,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000050' as any,
+        session_id: 'claude-session-1',
+      },
+    ], { holdOpen: true });
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return heldQuery;
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      providerTurnId: 'turn-1',
+      prompt: 'Investigate the failure',
+    } as any);
+    await wait();
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'item.completed',
+        item: expect.objectContaining({
+          id: 'msg_progress:content:0',
+          kind: 'agentMessage',
+          text: 'I found the failing integration.',
+        }),
+      }),
+    );
+    expect(events.some((event) => event.type === 'turn.completed')).toBe(false);
+
+    heldQuery.close();
+  });
+
   it('merges adjacent Claude thinking blocks into one reasoning item', () => {
     const items = assistantMessageToHistoryItems({
       messageId: 'msg_1',
@@ -2018,7 +2073,11 @@ describe('ClaudeRuntimeAdapter', () => {
               : null,
         )
         .filter(Boolean),
-    ).toEqual(['claude-turn-visible', 'claude-turn-visible']);
+    ).toEqual([
+      'claude-turn-visible',
+      'claude-turn-visible',
+      'claude-turn-visible',
+    ]);
   });
 
   it('interrupts an active query', async () => {

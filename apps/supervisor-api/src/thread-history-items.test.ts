@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentTurn } from '../../../packages/agent-runtime/src/index';
+import {
+  markTransientAgentHistoryItem,
+  type AgentTurn,
+} from '../../../packages/agent-runtime/src/index';
 import { agentTurnToThreadTurnDto, mergePersistedHistoryItemsIntoTurns } from './thread-history-items';
+import { shouldPersistLiveHistoryItem } from './thread-history-items';
 
 describe('agentTurnToThreadTurnDto', () => {
+  it('persists completed assistant messages but not streaming deltas', () => {
+    expect(
+      shouldPersistLiveHistoryItem({
+        id: 'message-1',
+        kind: 'agentMessage',
+        text: 'Progress update',
+      }),
+    ).toBe(true);
+    expect(
+      shouldPersistLiveHistoryItem(
+        markTransientAgentHistoryItem({
+          id: 'message-2',
+          kind: 'agentMessage',
+          text: 'Partial',
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('normalizes item timestamps without overwriting explicit createdAt values', () => {
     const turnStartedAt = '2026-04-09T06:01:00.000Z';
     const explicitItemCreatedAt = '2026-04-09T06:01:05.000Z';

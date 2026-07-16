@@ -55,7 +55,11 @@ export class ThreadHistoryPersistenceCoordinator {
       threadId: localThreadId,
       turnId,
       itemId: item.id,
-      itemJson: JSON.stringify(item),
+      itemJson: JSON.stringify(
+        item.kind === 'agentMessage'
+          ? { ...item, sourceTurnId: turnId }
+          : item,
+      ),
     });
   }
 

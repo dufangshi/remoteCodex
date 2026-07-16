@@ -2060,9 +2060,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         const nextItem = withHistoryItemCreatedAt(item, messageCreatedAt);
         const existing = state.items.get(nextItem.id);
         addOrUpdateItem(state, nextItem);
-        if (nextItem.kind !== 'agentMessage' && !existing) {
+        if (nextItem.kind === 'agentMessage') {
+          // Unlike stream_event text deltas, complete assistant messages are
+          // delivered as SDK assistant events. Emit these immediately so
+          // progress text between Claude tool calls is visible before the
+          // enclosing turn finishes.
+          this.emitItem(state, nextItem, 'item.completed', { force: true });
+        } else if (!existing) {
           this.emitItem(state, nextItem, 'item.started');
-        } else if (nextItem.kind !== 'agentMessage' && existing) {
+        } else {
           this.emitItem(state, nextItem, 'item.started', { force: true });
         }
       }

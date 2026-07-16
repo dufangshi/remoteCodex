@@ -266,6 +266,7 @@ export function deferLargeHistoryItemDetails(
 
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
+    (item.kind === 'agentMessage' && !isTransientAgentHistoryItem(item)) ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
     item.kind === 'fileRead' ||
