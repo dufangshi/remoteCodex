@@ -46,6 +46,7 @@ import {
   isHiddenContinuationMessage,
   isHiddenInitMessage,
   limitErrorFromHistoryItems,
+  messageContentText,
   partialReasoningDelta,
   partialTextDelta,
   resultForToolUse,
@@ -133,6 +134,16 @@ interface SDKMessage {
   errors?: string[];
   stop_reason?: string;
   rate_limit_info?: SDKRateLimitInfo;
+  compact_metadata?: {
+    trigger?: 'manual' | 'auto';
+    pre_tokens?: number;
+    post_tokens?: number;
+  };
+  compact_result?: 'success' | 'failed';
+  compact_error?: string;
+  status?: 'compacting' | 'requesting' | null;
+  isCompactSummary?: boolean;
+  is_compact_summary?: boolean;
 }
 interface SDKRateLimitInfo {
   status: 'allowed' | 'allowed_warning' | 'rejected';
@@ -244,10 +255,62 @@ interface ActiveClaudeTurn {
   assistantUsage: ClaudeTokenUsageBreakdown | null;
   resultUsage: ClaudeTokenUsageBreakdown | null;
   modelContextWindow: number | null;
+  currentCompactionItemId: string | null;
 }
 
 const promptPhotoTokenPattern = /\[PHOTO\s+([^\]]+)\]/g;
+const claudeCompactSummaryPrefix =
+  'This session is being continued from a previous conversation that ran out of context.';
 const activeTranscriptMatchWindowMs = 120_000;
+
+function isClaudeCompactBoundaryMessage(message: SDKMessage | SessionMessage) {
+  if (message.type !== 'system') {
+    return false;
+  }
+  if (message.subtype === 'compact_boundary' || message.compact_metadata) {
+    return true;
+  }
+  return isRecord(message.message)
+    && (message.message.subtype === 'compact_boundary' || isRecord(message.message.compact_metadata));
+}
+
+function isClaudeCompactSummaryMessage(message: SDKMessage | SessionMessage) {
+  if (message.type !== 'user' || message.parent_tool_use_id) {
+    return false;
+  }
+  const payload = isRecord(message.message) ? message.message : null;
+  if (
+    message.isCompactSummary
+    || message.is_compact_summary
+    || payload?.isCompactSummary === true
+    || payload?.is_compact_summary === true
+  ) {
+    return true;
+  }
+  return messageContentText(message.message).trim().startsWith(claudeCompactSummaryPrefix);
+}
+
+function claudeContextCompactionItem(
+  id: string,
+  status: 'running' | 'completed' | 'failed',
+  error: string | null = null,
+): AgentHistoryItem {
+  const completed = status === 'completed';
+  const failed = status === 'failed';
+  const text = failed
+    ? 'Context compaction failed'
+    : completed
+      ? 'Context compacted'
+      : 'Compacting context';
+  return {
+    id,
+    kind: 'contextCompaction',
+    text,
+    previewText: text,
+    detailText: failed ? error : null,
+    status,
+  };
+}
 
 function normalizePromptForTurnReconciliation(value: string) {
   return value
@@ -1690,6 +1753,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       assistantUsage: null,
       resultUsage: null,
       modelContextWindow: null,
+      currentCompactionItemId: null,
     };
     this.knownSessionIds.add(input.providerSessionId);
     let sessionPrompts = this.liveUserPrompts.get(input.providerSessionId);
@@ -1973,6 +2037,62 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         this.sessionCwds.set(message.session_id, message.cwd ?? '');
         this.sessionModels.set(message.session_id, message.model ?? null);
       }
+      return;
+    }
+
+    if (message.type === 'system' && message.subtype === 'status') {
+      if (message.status === 'compacting') {
+        const existing = state.currentCompactionItemId
+          ? state.items.get(state.currentCompactionItemId)
+          : null;
+        const itemId = existing?.status === 'running'
+          ? existing.id
+          : `claude-compaction-${messageUuid(message, randomUUID())}`;
+        state.currentCompactionItemId = itemId;
+        const item = withHistoryItemCreatedAt(
+          claudeContextCompactionItem(itemId, 'running'),
+          messageCreatedAt,
+        );
+        addOrUpdateItem(state, item);
+        this.emitItem(state, item, 'item.started', { force: Boolean(existing) });
+        return;
+      }
+      if (message.compact_result) {
+        const itemId = state.currentCompactionItemId
+          ?? `claude-compaction-${messageUuid(message, randomUUID())}`;
+        const status = message.compact_result === 'success' ? 'completed' : 'failed';
+        const item = withHistoryItemCreatedAt(
+          claudeContextCompactionItem(itemId, status, message.compact_error ?? null),
+          messageCreatedAt,
+        );
+        addOrUpdateItem(state, item);
+        this.emitItem(state, item, 'item.completed');
+        state.currentCompactionItemId = status === 'failed' ? null : itemId;
+        return;
+      }
+      return;
+    }
+
+    if (isClaudeCompactBoundaryMessage(message)) {
+      const itemId = state.currentCompactionItemId
+        ?? `claude-compaction-${messageUuid(message, randomUUID())}`;
+      const previous = state.items.get(itemId);
+      const item = withHistoryItemCreatedAt(
+        claudeContextCompactionItem(itemId, 'completed'),
+        previous?.createdAt ?? messageCreatedAt,
+      );
+      addOrUpdateItem(state, item);
+      if (!previous) {
+        this.emitItem(state, item, 'item.started');
+      }
+      if (previous?.status !== 'completed') {
+        this.emitItem(state, item, 'item.completed');
+      }
+      state.currentCompactionItemId = null;
+      return;
+    }
+
+    if (isClaudeCompactSummaryMessage(message)) {
       return;
     }
 
@@ -2408,6 +2528,8 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       itemsById: Map<string, AgentHistoryItem>;
     } | null = null;
     let skippingHiddenInit = false;
+    let pendingCompactSummaryItemId: string | null = null;
+    let pendingCompactBoundaryItemId: string | null = null;
     const suppressedToolUseIds = new Set<string>();
 
     const upsertCurrentItem = (item: AgentHistoryItem) => {
@@ -2441,6 +2563,20 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     };
 
     for (const message of messages) {
+      if (isClaudeCompactBoundaryMessage(message)) {
+        const itemId: string = pendingCompactSummaryItemId
+          ?? `claude-compaction-${messageUuid(message, randomUUID())}`;
+        pendingCompactSummaryItemId = null;
+        pendingCompactBoundaryItemId = itemId;
+        upsertCurrentItem(
+          withHistoryItemCreatedAt(
+            claudeContextCompactionItem(itemId, 'completed'),
+            sessionMessageTimestamp(message) ?? current?.startedAt,
+          ),
+        );
+        continue;
+      }
+
       if (message.type === 'user') {
         const taskNotification = taskNotificationToolResult(message.message);
         if (taskNotification) {
@@ -2487,6 +2623,21 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       if (message.type === 'user' && !message.parent_tool_use_id) {
+        if (isClaudeCompactSummaryMessage(message)) {
+          const itemId: string = pendingCompactBoundaryItemId
+            ?? `claude-compaction-${messageUuid(message, randomUUID())}`;
+          if (!pendingCompactBoundaryItemId) {
+            pendingCompactSummaryItemId = itemId;
+          }
+          pendingCompactBoundaryItemId = null;
+          upsertCurrentItem(
+            withHistoryItemCreatedAt(
+              claudeContextCompactionItem(itemId, 'completed'),
+              sessionMessageTimestamp(message) ?? current?.startedAt,
+            ),
+          );
+          continue;
+        }
         if (isHiddenInitMessage(message.message)) {
           skippingHiddenInit = true;
           current = null;
@@ -2506,19 +2657,19 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             items: current.items,
           }));
         }
-        const messageUuid = message.uuid ?? randomUUID();
-        const userStartedAt = isoFromUuidV7(messageUuid);
+        const userMessageUuid = message.uuid ?? randomUUID();
+        const userStartedAt = isoFromUuidV7(userMessageUuid);
         const userItem = await this.userMessageToHistoryItem(
-          messageUuid,
+          userMessageUuid,
           message.message,
           context,
         );
         const stampedUserItem = withHistoryItemCreatedAt(userItem, userStartedAt);
         current = {
-          providerTurnId: `claude-turn-${messageUuid}`,
+          providerTurnId: `claude-turn-${userMessageUuid}`,
           startedAt: userStartedAt,
           items: [stampedUserItem],
-          itemsById: new Map([[messageUuid, stampedUserItem]]),
+          itemsById: new Map([[userMessageUuid, stampedUserItem]]),
         };
         continue;
       }

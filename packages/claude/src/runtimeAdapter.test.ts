@@ -2983,4 +2983,139 @@ describe('ClaudeRuntimeAdapter', () => {
       ]),
     );
   });
+
+  it('keeps live Claude compaction in the active turn and hides its summary', async () => {
+    const adapter = makeAdapter((prompt) => prompt === hiddenInitPrompt()
+      ? [systemInit(), result()]
+      : [
+          systemInit(),
+          {
+            type: 'assistant',
+            uuid: 'assistant-before-compact',
+            session_id: 'claude-session-1',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Before.' }] },
+            parent_tool_use_id: null,
+          },
+          {
+            type: 'system',
+            subtype: 'status',
+            status: 'compacting',
+            uuid: 'compact-status',
+            session_id: 'claude-session-1',
+          },
+          {
+            type: 'user',
+            uuid: 'compact-summary',
+            session_id: 'claude-session-1',
+            isCompactSummary: true,
+            message: { role: 'user', content: 'HIDDEN LIVE SUMMARY' },
+            parent_tool_use_id: null,
+          },
+          {
+            type: 'system',
+            subtype: 'compact_boundary',
+            compact_metadata: { trigger: 'auto', pre_tokens: 180_000 },
+            uuid: 'compact-boundary',
+            session_id: 'claude-session-1',
+          },
+          {
+            type: 'assistant',
+            uuid: 'assistant-after-compact',
+            session_id: 'claude-session-1',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'After.' }] },
+            parent_tool_use_id: null,
+          },
+          result(),
+        ]);
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      displayTurnId: 'turn-compact',
+      prompt: 'Continue working',
+    } as any);
+    await wait();
+
+    const completed = events.findLast((event) => event.type === 'turn.completed');
+    const items = completed?.type === 'turn.completed' ? completed.turn.items : [];
+    expect(completed).toMatchObject({
+      type: 'turn.completed',
+      turn: { providerTurnId: 'turn-compact', status: 'completed' },
+    });
+    expect(items.filter((item) => item.kind === 'contextCompaction')).toEqual([
+      expect.objectContaining({
+        text: 'Context compacted',
+        detailText: null,
+        status: 'completed',
+      }),
+    ]);
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'agentMessage', text: 'Before.' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'After.' }),
+    ]));
+    expect(JSON.stringify(items)).not.toContain('HIDDEN LIVE SUMMARY');
+  });
+
+  it('does not create a historical turn for Claude compact summaries', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+        firstPrompt: 'Check training',
+      })) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: uuidV7At(1_771_000_000_000),
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Check training' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-before-compact',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Before.' }] },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'compact-summary',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: 'This session is being continued from a previous conversation that ran out of context. HIDDEN HISTORICAL SUMMARY',
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-after-compact',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'After.' }] },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'userMessage', text: 'Check training' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Before.' }),
+      expect.objectContaining({
+        kind: 'contextCompaction',
+        text: 'Context compacted',
+        detailText: null,
+      }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'After.' }),
+    ]));
+    expect(JSON.stringify(session.turns)).not.toContain('HIDDEN HISTORICAL SUMMARY');
+  });
 });
