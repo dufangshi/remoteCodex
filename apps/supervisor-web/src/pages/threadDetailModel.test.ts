@@ -81,6 +81,16 @@ describe('threadDetailModel', () => {
       .toEqual(['turn-2', 'turn-3', 'turn-4']);
   });
 
+  it('does not let an older overlapping page replace a newer turn snapshot', () => {
+    const current = { ...makeTurn('turn-2'), status: 'inProgress' as const };
+    const stale = { ...makeTurn('turn-2'), status: 'completed' as const };
+
+    expect(prependTurns([current], [makeTurn('turn-1'), stale])).toEqual([
+      makeTurn('turn-1'),
+      current,
+    ]);
+  });
+
   it('replaces a stale running Claude turn when history assigns its canonical id', () => {
     const stale = {
       ...makeTurn('local-turn'),
@@ -97,16 +107,53 @@ describe('threadDetailModel', () => {
     expect(appendLatestTurns([stale], [materialized])).toEqual([materialized]);
   });
 
-  it('updates existing turns in place even when the latest response is reordered', () => {
+  it('uses the authoritative latest-page order to repair corrupted local order', () => {
     const existing = [makeTurn('turn-1'), makeTurn('turn-2'), makeTurn('turn-3')];
     const updatedTurn2 = { ...makeTurn('turn-2'), error: 'updated' };
     const updatedTurn3 = { ...makeTurn('turn-3'), error: 'also updated' };
 
     expect(appendLatestTurns(existing, [updatedTurn3, updatedTurn2])).toEqual([
       makeTurn('turn-1'),
-      updatedTurn2,
       updatedTurn3,
+      updatedTurn2,
     ]);
+  });
+
+  it('keeps paged older history before the authoritative latest page', () => {
+    const existing = [
+      makeTurn('turn-1'),
+      makeTurn('turn-4'),
+      makeTurn('turn-2'),
+      makeTurn('turn-3'),
+    ];
+    const latest = [makeTurn('turn-2'), makeTurn('turn-3'), makeTurn('turn-4')];
+
+    expect(appendLatestTurns(existing, latest).map((turn) => turn.id)).toEqual([
+      'turn-1',
+      'turn-2',
+      'turn-3',
+      'turn-4',
+    ]);
+  });
+
+  it('keeps the active turn at the tail after a transient steer snapshot reorders history', () => {
+    const steeredTurn = {
+      ...makeTurn('turn-steered'),
+      startedAt: '2026-05-24T00:00:02.000Z',
+      status: 'inProgress' as const,
+    };
+    const historicalTurn = {
+      ...makeTurn('turn-history'),
+      startedAt: '2026-05-24T00:00:03.000Z',
+    };
+
+    expect(
+      appendLatestTurns(
+        [steeredTurn, historicalTurn],
+        [historicalTurn, steeredTurn],
+        'turn-steered',
+      ).map((turn) => turn.id),
+    ).toEqual(['turn-history', 'turn-steered']);
   });
 
   it('keeps only the last snapshot when a latest response repeats a turn id', () => {

@@ -17,13 +17,14 @@ export function prependTurns(
   existing: ThreadDetailDto['turns'],
   older: ThreadDetailDto['turns'],
 ) {
-  const olderIds = new Set(older.map((turn) => turn.id));
-  return [...older, ...existing.filter((turn) => !olderIds.has(turn.id))];
+  const existingIds = new Set(existing.map((turn) => turn.id));
+  return [...older.filter((turn) => !existingIds.has(turn.id)), ...existing];
 }
 
 export function appendLatestTurns(
   existing: ThreadDetailDto['turns'],
   latest: ThreadDetailDto['turns'],
+  activeTurnId: string | null = null,
 ) {
   const seenLatestIds = new Set<string>();
   const uniqueLatest = latest.reduceRight<ThreadDetailDto['turns']>((turns, turn) => {
@@ -37,15 +38,23 @@ export function appendLatestTurns(
   const latestReplacements = uniqueLatest.filter((turn) =>
     turn.items.some((item) => item.kind === 'userMessage'),
   );
-  const consumedLatestIds = new Set<string>();
-  const merged = existing.map((turn) => {
-    const directReplacement = latestById.get(turn.id);
-    if (directReplacement) {
-      consumedLatestIds.add(directReplacement.id);
-      return directReplacement;
+  const replacedExistingIds = new Set<string>();
+  const seenExistingIds = new Set<string>();
+  const uniqueExisting = existing.reduceRight<ThreadDetailDto['turns']>((turns, turn) => {
+    if (!seenExistingIds.has(turn.id)) {
+      seenExistingIds.add(turn.id);
+      turns.unshift(turn);
+    }
+    return turns;
+  }, []);
+
+  for (const turn of uniqueExisting) {
+    if (latestById.has(turn.id)) {
+      replacedExistingIds.add(turn.id);
+      continue;
     }
     if (turn.status !== 'inProgress') {
-      return turn;
+      continue;
     }
     const existingPrompt = turn.items.find(
       (item) => item.kind === 'userMessage',
@@ -54,12 +63,9 @@ export function appendLatestTurns(
       ? Date.parse(turn.startedAt)
       : Number.NaN;
     if (!existingPrompt || !Number.isFinite(existingStartedAt)) {
-      return turn;
+      continue;
     }
     const materializedReplacement = latestReplacements.find((replacement) => {
-      if (consumedLatestIds.has(replacement.id)) {
-        return false;
-      }
       const replacementPrompt = replacement.items.find(
         (item) => item.kind === 'userMessage',
       )?.text.trim();
@@ -73,36 +79,27 @@ export function appendLatestTurns(
       );
     });
     if (!materializedReplacement) {
-      return turn;
+      continue;
     }
-    consumedLatestIds.add(materializedReplacement.id);
-    return materializedReplacement;
-  });
+    replacedExistingIds.add(turn.id);
+  }
 
-  const appended = uniqueLatest
-    .filter((turn) => !consumedLatestIds.has(turn.id))
-    .map((turn, index) => ({ turn, index }))
-    .sort((left, right) => {
-      const leftStartedAt = left.turn.startedAt ? Date.parse(left.turn.startedAt) : Number.NaN;
-      const rightStartedAt = right.turn.startedAt ? Date.parse(right.turn.startedAt) : Number.NaN;
-      if (Number.isFinite(leftStartedAt) && Number.isFinite(rightStartedAt)) {
-        return leftStartedAt - rightStartedAt || left.index - right.index;
-      }
-      return left.index - right.index;
-    })
-    .map(({ turn }) => turn);
+  // A detail response is the authoritative latest page. Keep previously loaded
+  // older pages at the front, then reproduce the server page order exactly. The
+  // previous implementation replaced matching turns in their existing slots,
+  // which made any transient client-side reordering permanent until a reload.
+  const olderTurns = uniqueExisting.filter(
+    (turn) => !latestById.has(turn.id) && !replacedExistingIds.has(turn.id),
+  );
+  const ordered = [...olderTurns, ...uniqueLatest];
+  if (!activeTurnId) {
+    return ordered;
+  }
 
-  const lastMergedById = new Map(merged.map((turn) => [turn.id, turn]));
-  const emittedMergedIds = new Set<string>();
-  const stableMerged = merged.flatMap((turn) => {
-    if (emittedMergedIds.has(turn.id)) {
-      return [];
-    }
-    emittedMergedIds.add(turn.id);
-    return [lastMergedById.get(turn.id) ?? turn];
-  });
-
-  return [...stableMerged, ...appended];
+  const activeTurn = ordered.find((turn) => turn.id === activeTurnId);
+  return activeTurn
+    ? [...ordered.filter((turn) => turn.id !== activeTurnId), activeTurn]
+    : ordered;
 }
 
 export function applyLiveItemTimestampsToTurns(

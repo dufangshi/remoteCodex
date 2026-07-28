@@ -344,6 +344,8 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
 
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
+  const activeThreadIdRef = useRef(id);
+  activeThreadIdRef.current = id;
   const location = useLocation();
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
@@ -362,6 +364,9 @@ export function ThreadDetailPage() {
   const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
   const composerHostRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
+  const detailMutationInFlightRef = useRef(0);
+  const detailMutationChainRef = useRef<Promise<void>>(Promise.resolve());
+  const detailRefreshPendingRef = useRef(false);
   const pageContextRequestIdRef = useRef(0);
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
@@ -888,11 +893,16 @@ export function ThreadDetailPage() {
         turns: applyLiveItemTimestampsToTurns(nextDetail.turns, liveItemsRef.current),
       };
       const previousDetail = detailRef.current;
-      detailRef.current = nextDetailWithLiveTimestamps;
       setLivePlan(nextDetailWithLiveTimestamps.livePlan ?? null);
-      const mergedTurns = previousDetail
-        ? appendLatestTurns(previousDetail.turns, nextDetailWithLiveTimestamps.turns)
-        : nextDetailWithLiveTimestamps.turns;
+      const mergedTurns = appendLatestTurns(
+        previousDetail?.turns ?? [],
+        nextDetailWithLiveTimestamps.turns,
+        nextDetailWithLiveTimestamps.thread.activeTurnId,
+      );
+      detailRef.current = {
+        ...nextDetailWithLiveTimestamps,
+        turns: mergedTurns,
+      };
       setLiveItems((current) =>
         reconcileLiveItemsWithDetail(
           current,
@@ -916,7 +926,11 @@ export function ThreadDetailPage() {
         current && !nextDetailWithLiveTimestamps.goalHistory
           ? {
               ...nextDetailWithLiveTimestamps,
-              turns: appendLatestTurns(current.turns, nextDetailWithLiveTimestamps.turns),
+              turns: appendLatestTurns(
+                current.turns,
+                nextDetailWithLiveTimestamps.turns,
+                nextDetailWithLiveTimestamps.thread.activeTurnId,
+              ),
               pendingRequests: mergePendingRequests(
                 current.pendingRequests,
                 nextDetailWithLiveTimestamps.pendingRequests,
@@ -927,14 +941,21 @@ export function ThreadDetailPage() {
           : current
             ? {
                 ...nextDetailWithLiveTimestamps,
-                turns: appendLatestTurns(current.turns, nextDetailWithLiveTimestamps.turns),
+                turns: appendLatestTurns(
+                  current.turns,
+                  nextDetailWithLiveTimestamps.turns,
+                  nextDetailWithLiveTimestamps.thread.activeTurnId,
+                ),
                 pendingRequests: mergePendingRequests(
                   current.pendingRequests,
                   nextDetailWithLiveTimestamps.pendingRequests,
                   resolvedRequestIdsRef.current,
                 ),
               }
-            : nextDetailWithLiveTimestamps,
+            : {
+                ...nextDetailWithLiveTimestamps,
+                turns: mergedTurns,
+              },
       );
       setThreads((current) =>
         mergeThreadIntoList(current, nextDetailWithLiveTimestamps.thread),
@@ -1171,6 +1192,11 @@ export function ThreadDetailPage() {
       reportError?: boolean;
       limit?: number;
     } = {}) => {
+      if (detailMutationInFlightRef.current > 0) {
+        detailRefreshPendingRef.current = true;
+        return;
+      }
+
       const requestId = loadRequestIdRef.current + 1;
       loadRequestIdRef.current = requestId;
       if (showLoading) {
@@ -1208,6 +1234,47 @@ export function ThreadDetailPage() {
       }
     },
     [applyDetailResponse, id, loadPageContext],
+  );
+
+  const runDetailMutation = useCallback(
+    <T extends ThreadDetailDto,>(operation: () => Promise<T>) => {
+      const scheduled = detailMutationChainRef.current.then(async () => {
+        detailMutationInFlightRef.current += 1;
+        // Invalidate a detail request that began before this mutation. Its
+        // response describes pre-mutation state and must never overwrite the
+        // mutation result.
+        loadRequestIdRef.current += 1;
+        try {
+          const updated = await operation();
+          if (updated.thread.id === activeThreadIdRef.current) {
+            applyDetailResponse(updated);
+          }
+          return updated;
+        } finally {
+          detailMutationInFlightRef.current -= 1;
+          window.setTimeout(() => {
+            if (
+              detailMutationInFlightRef.current === 0 &&
+              detailRefreshPendingRef.current
+            ) {
+              detailRefreshPendingRef.current = false;
+              void loadThreadDetail({
+                showLoading: false,
+                clearError: false,
+                reportError: false,
+              });
+            }
+          }, 0);
+        }
+      });
+
+      detailMutationChainRef.current = scheduled.then(
+        () => undefined,
+        () => undefined,
+      );
+      return scheduled;
+    },
+    [applyDetailResponse, loadThreadDetail],
   );
 
   const syncRealtimeConnectionState = useCallback(() => {
@@ -1930,15 +1997,14 @@ export function ThreadDetailPage() {
       setDetail((current) =>
         current
           ? {
-              ...earlier,
+              ...current,
               turns: prependTurns(current.turns, earlier.turns),
+              totalTurnCount: Math.max(
+                current.totalTurnCount ?? current.turns.length,
+                earlier.totalTurnCount ?? earlier.turns.length,
+              ),
             }
           : earlier,
-      );
-      setThreads((current) =>
-        current.map((entry) =>
-          entry.id === earlier.thread.id ? earlier.thread : entry,
-        ),
       );
     } catch (caught) {
       setError(
@@ -2043,7 +2109,11 @@ export function ThreadDetailPage() {
           current
             ? {
                 ...resumedDetail,
-                turns: appendLatestTurns(current.turns, resumedDetail.turns),
+                turns: appendLatestTurns(
+                  current.turns,
+                  resumedDetail.turns,
+                  resumedDetail.thread.activeTurnId,
+                ),
               }
             : resumedDetail,
         );
@@ -2261,7 +2331,11 @@ export function ThreadDetailPage() {
         current
           ? {
               ...resumed,
-              turns: appendLatestTurns(current.turns, resumed.turns),
+              turns: appendLatestTurns(
+                current.turns,
+                resumed.turns,
+                resumed.thread.activeTurnId,
+              ),
             }
           : resumed,
       );
@@ -2384,7 +2458,11 @@ export function ThreadDetailPage() {
           current
             ? {
                 ...disconnected,
-                turns: appendLatestTurns(current.turns, disconnected.turns),
+                turns: appendLatestTurns(
+                  current.turns,
+                  disconnected.turns,
+                  disconnected.thread.activeTurnId,
+                ),
               }
             : disconnected,
         );
@@ -2408,7 +2486,11 @@ export function ThreadDetailPage() {
         current
           ? {
               ...resumed,
-              turns: appendLatestTurns(current.turns, resumed.turns),
+              turns: appendLatestTurns(
+                current.turns,
+                resumed.turns,
+                resumed.thread.activeTurnId,
+              ),
             }
           : resumed,
       );
@@ -2569,17 +2651,11 @@ export function ThreadDetailPage() {
     setError(null);
 
     try {
-      const updated = await respondToThreadRequest(id, requestId, input);
-      setDetail((current) =>
-        current
-          ? {
-              ...updated,
-              turns: appendLatestTurns(current.turns, updated.turns),
-            }
-          : updated,
-      );
-      setLivePlan(updated.livePlan ?? null);
-      setLiveItems(updated.liveItems ?? null);
+      await runDetailMutation(async () => {
+        const updated = await respondToThreadRequest(id, requestId, input);
+        resolvedRequestIdsRef.current.add(requestId);
+        return updated;
+      });
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -2589,7 +2665,7 @@ export function ThreadDetailPage() {
     } finally {
       setRespondingRequestId(null);
     }
-  }, [id]);
+  }, [id, relayAccess, runDetailMutation]);
 
   const handleLoadHistoryItemDetail = useCallback(
     (itemId: string) => fetchThreadHistoryItemDetail(id, itemId),
@@ -2600,19 +2676,8 @@ export function ThreadDetailPage() {
     async (threadId: string, pendingSteerId: string) => {
       setError(null);
       try {
-        const updated = await cancelPendingSteer(threadId, pendingSteerId);
-        setDetail((current) =>
-          current
-            ? {
-                ...updated,
-                turns: appendLatestTurns(current.turns, updated.turns),
-              }
-            : updated,
-        );
-        setThreads((current) =>
-          current.map((entry) =>
-            entry.id === updated.thread.id ? updated.thread : entry,
-          ),
+        await runDetailMutation(() =>
+          cancelPendingSteer(threadId, pendingSteerId),
         );
       } catch (caught) {
         setError(
@@ -2623,26 +2688,15 @@ export function ThreadDetailPage() {
         throw caught;
       }
     },
-    [],
+    [runDetailMutation],
   );
 
   const handleSteerPendingPrompt = useCallback(
     async (threadId: string, pendingSteerId: string) => {
       setError(null);
       try {
-        const updated = await steerPendingPrompt(threadId, pendingSteerId);
-        setDetail((current) =>
-          current
-            ? {
-                ...updated,
-                turns: appendLatestTurns(current.turns, updated.turns),
-              }
-            : updated,
-        );
-        setThreads((current) =>
-          current.map((entry) =>
-            entry.id === updated.thread.id ? updated.thread : entry,
-          ),
+        await runDetailMutation(() =>
+          steerPendingPrompt(threadId, pendingSteerId),
         );
       } catch (caught) {
         setError(
@@ -2653,7 +2707,7 @@ export function ThreadDetailPage() {
         throw caught;
       }
     },
-    [],
+    [runDetailMutation],
   );
 
   async function handleCompactThread() {

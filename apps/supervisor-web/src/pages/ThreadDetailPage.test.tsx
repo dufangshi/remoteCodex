@@ -4523,6 +4523,151 @@ describe('ThreadDetailPage', () => {
     expect(typeof promptBodies[0]?.clientRequestId).toBe('string');
   });
 
+  it('does not let a stale realtime refresh undo cancel steer or reorder the active turn', async () => {
+    const oldStartedAt = '2026-04-10T00:00:01.000Z';
+    const activeStartedAt = '2026-04-10T00:00:02.000Z';
+    const staleRefresh = createDeferred<ReturnType<typeof okJsonResponse>>();
+    const cancelResponse = createDeferred<ReturnType<typeof okJsonResponse>>();
+    let detailRequestCount = 0;
+
+    const thread = {
+      id: 'thread-1',
+      workspaceId: 'workspace-1',
+      providerSessionId: 'codex-1',
+      source: 'supervisor',
+      title: 'Demo Thread',
+      model: 'gpt-5',
+      reasoningEffort: 'medium',
+      collaborationMode: 'default',
+      approvalMode: 'yolo',
+      status: 'running',
+      summaryText: 'Current running prompt',
+      lastError: null,
+      activeTurnId: 'turn-active',
+      isLoaded: true,
+      isPinned: false,
+      createdAt: oldStartedAt,
+      updatedAt: activeStartedAt,
+      lastTurnStartedAt: activeStartedAt,
+      lastTurnCompletedAt: null,
+    };
+    const workspace = {
+      id: 'workspace-1',
+      hostId: 'host-1',
+      label: 'Demo Workspace',
+      absPath: '/tmp/demo',
+      isFavorite: false,
+      createdAt: oldStartedAt,
+      lastOpenedAt: null,
+    };
+    const historicalTurn = {
+      id: 'turn-history',
+      startedAt: oldStartedAt,
+      status: 'completed' as const,
+      error: null,
+      items: [{ id: 'history-user', kind: 'userMessage' as const, text: 'Old prompt' }],
+    };
+    const activeTurn = {
+      id: 'turn-active',
+      startedAt: activeStartedAt,
+      status: 'inProgress' as const,
+      error: null,
+      items: [{ id: 'active-user', kind: 'userMessage' as const, text: 'Current prompt' }],
+    };
+    const pendingSteer = {
+      id: 'pending-steer-1',
+      delivery: 'steer' as const,
+      clientRequestId: 'client-steer-1',
+      turnId: 'turn-active',
+      prompt: 'Queued prompt to cancel',
+      createdAt: activeStartedAt,
+    };
+    const detailResponse = (options?: {
+      pending?: boolean;
+      turns?: Array<typeof historicalTurn | typeof activeTurn>;
+    }) => ({
+      thread,
+      workspace,
+      workspacePathStatus: 'present' as const,
+      pendingRequests: [],
+      pendingSteers: options?.pending === false ? [] : [pendingSteer],
+      turns: options?.turns ?? [historicalTurn, activeTurn],
+      totalTurnCount: 2,
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([thread]);
+        }
+        if (
+          url.endsWith('/api/threads/thread-1/pending-steers/pending-steer-1') &&
+          init?.method === 'DELETE'
+        ) {
+          return cancelResponse.promise;
+        }
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailRequestCount += 1;
+          return detailRequestCount === 1
+            ? okJsonResponse(detailResponse())
+            : staleRefresh.promise;
+        }
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Queued prompt to cancel');
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.updated',
+      threadId: 'thread-1',
+      payload: { reason: 'test_stale_refresh' },
+    });
+    await waitFor(() => expect(detailRequestCount).toBe(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    cancelResponse.resolve(
+      okJsonResponse(detailResponse({
+        pending: false,
+        // The mutation response itself may carry a transient provider order.
+        turns: [activeTurn, historicalTurn],
+      })),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('Queued prompt to cancel')).not.toBeInTheDocument();
+    });
+
+    staleRefresh.resolve(okJsonResponse(detailResponse()));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Queued prompt to cancel')).not.toBeInTheDocument();
+    const oldPrompt = screen.getByText('Old prompt');
+    const currentPrompt = screen.getByText('Current prompt');
+    expect(
+      oldPrompt.compareDocumentPosition(currentPrompt) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('keeps the optimistic user bubble when a goal turn first materializes with only agent output', async () => {
     const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
     const goalPrompt = 'Continue the active goal.';
