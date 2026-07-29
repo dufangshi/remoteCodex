@@ -529,6 +529,31 @@ export class RelayStore {
       : null;
   }
 
+  hostedWorkspaceBootstrapContext(deviceId: string): {
+    sandboxId: string;
+    users: RelayUserDto[];
+  } | null {
+    const sandbox = this.hostedWorkspaceIsolation(deviceId);
+    if (!sandbox?.enabled) {
+      return null;
+    }
+    const users = (
+      this.sqlite
+        .prepare(
+          `SELECT u.*
+           FROM relay_hosted_sandbox_members m
+           JOIN relay_users u ON u.id = m.user_id
+           WHERE m.sandbox_id = ? AND u.enabled = 1
+           ORDER BY m.position ASC, m.created_at ASC`,
+        )
+        .all(sandbox.sandboxId) as UserRow[]
+    )
+      .map((row) => this.rowToUser(row))
+      .filter((user): user is StoredUser => Boolean(user))
+      .map((user) => this.publicUser(user));
+    return { sandboxId: sandbox.sandboxId, users };
+  }
+
   hostedUserWorkspaceIds(sandboxId: string, userId: string) {
     return (
       this.sqlite
@@ -548,11 +573,27 @@ export class RelayStore {
   ) {
     this.sqlite
       .prepare(
-        `INSERT OR IGNORE INTO relay_hosted_user_workspaces
+        `INSERT INTO relay_hosted_user_workspaces
           (sandbox_id, user_id, workspace_id, initial_workspace, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(sandbox_id, workspace_id) DO UPDATE SET
+           initial_workspace = MAX(
+             relay_hosted_user_workspaces.initial_workspace,
+             excluded.initial_workspace
+           )`,
       )
       .run(sandboxId, userId, workspaceId, initial ? 1 : 0, new Date().toISOString());
+  }
+
+  hostedInitialWorkspaceId(sandboxId: string, userId: string) {
+    const row = this.sqlite
+      .prepare(
+        `SELECT workspace_id FROM relay_hosted_user_workspaces
+         WHERE sandbox_id = ? AND user_id = ? AND initial_workspace = 1
+         ORDER BY created_at ASC LIMIT 1`,
+      )
+      .get(sandboxId, userId) as { workspace_id: string } | undefined;
+    return row?.workspace_id ?? null;
   }
 
   ownsHostedWorkspace(sandboxId: string, userId: string, workspaceId: string) {
@@ -589,6 +630,22 @@ export class RelayStore {
            WHERE sandbox_id = ? AND user_id = ? AND thread_id = ?`,
         )
         .get(sandboxId, userId, threadId),
+    );
+  }
+
+  hasHostedUserThreadInWorkspace(
+    sandboxId: string,
+    userId: string,
+    workspaceId: string,
+  ) {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1 FROM relay_hosted_user_threads
+           WHERE sandbox_id = ? AND user_id = ? AND workspace_id = ?
+           LIMIT 1`,
+        )
+        .get(sandboxId, userId, workspaceId),
     );
   }
 

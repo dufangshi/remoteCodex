@@ -393,6 +393,41 @@ export function buildRelayServer(
     hostedSandboxProvider,
     config.hostedSandbox,
   );
+  const scheduleHostedUserBootstraps = (deviceId: string) => {
+    const context = store.hostedWorkspaceBootstrapContext(deviceId);
+    const supervisor = state.supervisors.get(deviceId);
+    if (
+      !context ||
+      !supervisor ||
+      supervisor.socket.readyState !== WEBSOCKET_OPEN
+    ) {
+      return;
+    }
+    void Promise.allSettled(
+      context.users.map((bootstrapUser) =>
+        ensureHostedUserBootstrap({
+          store,
+          supervisor,
+          deviceId,
+          sandboxId: context.sandboxId,
+          user: bootstrapUser,
+        }),
+      ),
+    ).then((results) => {
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          app.log.warn(
+            {
+              err: result.reason,
+              deviceId,
+              userId: context.users[index]?.id,
+            },
+            'Hosted VM user bootstrap failed.',
+          );
+        }
+      });
+    });
+  };
   const allowedWebViewCorsOrigins = webViewCorsOrigins(
     options.env ?? process.env,
   );
@@ -804,10 +839,12 @@ export function buildRelayServer(
         .object({ sandboxId: z.string().uuid() })
         .parse(request.params);
       const body = updateHostedSandboxMembersSchema.parse(request.body ?? {});
-      return hostedSandboxService.updateMembers(
+      const sandbox = hostedSandboxService.updateMembers(
         sandboxId,
         body.assignedUserIds,
       );
+      scheduleHostedUserBootstraps(sandbox.deviceId);
+      return sandbox;
     },
   );
 
@@ -820,10 +857,14 @@ export function buildRelayServer(
         .object({ sandboxId: z.string().uuid() })
         .parse(request.params);
       const body = updateHostedSandboxSettingsSchema.parse(request.body ?? {});
-      return store.setHostedWorkspaceIsolation(
+      const sandbox = store.setHostedWorkspaceIsolation(
         sandboxId,
         body.workspaceIsolationEnabled,
       );
+      if (sandbox.workspaceIsolationEnabled) {
+        scheduleHostedUserBootstraps(sandbox.deviceId);
+      }
+      return sandbox;
     },
   );
 
@@ -1266,6 +1307,8 @@ export function buildRelayServer(
             clientConnection.socket.close();
           }
         });
+
+        scheduleHostedUserBootstraps(deviceId);
       },
     });
 
@@ -1761,9 +1804,6 @@ async function ensureHostedUserBootstrap(input: {
   sandboxId: string;
   user: RelayUserDto;
 }) {
-  if (input.store.hostedUserWorkspaceIds(input.sandboxId, input.user.id).length) {
-    return;
-  }
   const key = `${input.sandboxId}:${input.user.id}`;
   const existing = hostedBootstrapPromises.get(key);
   if (existing) return existing;
@@ -1775,58 +1815,74 @@ async function ensureHostedUserBootstrap(input: {
     const directory = `${slug}-${input.user.id.slice(0, 8)}`;
     const absoluteDirectory = `/home/remote-codex/workspaces/${directory}`;
     const label = `${input.user.username}'s workspace`;
-    const current = await forwardSupervisorCommandJson(
-      input.supervisor,
-      input.deviceId,
-      'GET',
-      '/api/workspaces',
+    let workspaceId = input.store.hostedInitialWorkspaceId(
+      input.sandboxId,
+      input.user.id,
     );
-    const currentWorkspaces = Array.isArray(current) ? current : [];
-    let workspace = currentWorkspaces.find(
-      (candidate) =>
-        isObject(candidate) &&
-        typeof candidate.absPath === 'string' &&
-        candidate.absPath === absoluteDirectory,
-    );
-    if (!workspace) {
-      workspace = await forwardSupervisorCommandJson(
+    if (!workspaceId) {
+      const current = await forwardSupervisorCommandJson(
+        input.supervisor,
+        input.deviceId,
+        'GET',
+        '/api/workspaces',
+      );
+      const currentWorkspaces = Array.isArray(current) ? current : [];
+      let workspace = currentWorkspaces.find(
+        (candidate) =>
+          isObject(candidate) &&
+          typeof candidate.absPath === 'string' &&
+          candidate.absPath === absoluteDirectory,
+      );
+      if (!workspace) {
+        workspace = await forwardSupervisorCommandJson(
+          input.supervisor,
+          input.deviceId,
+          'POST',
+          '/api/workspaces',
+          { absPath: absoluteDirectory, label },
+        );
+      }
+      workspaceId = stringField(workspace, 'id');
+      if (!workspaceId) {
+        throw new Error('Initial workspace creation returned no id.');
+      }
+      input.store.recordHostedUserWorkspace(
+        input.sandboxId,
+        input.user.id,
+        workspaceId,
+        true,
+      );
+    }
+    if (
+      !input.store.hasHostedUserThreadInWorkspace(
+        input.sandboxId,
+        input.user.id,
+        workspaceId,
+      )
+    ) {
+      const thread = await forwardSupervisorCommandJson(
         input.supervisor,
         input.deviceId,
         'POST',
-        '/api/workspaces',
-        { absPath: absoluteDirectory, label },
+        '/api/threads/start',
+        {
+          workspaceId,
+          title: 'Getting started',
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'low',
+          approvalMode: 'yolo',
+        },
+      );
+      const threadId = stringField(thread, 'id');
+      if (!threadId) throw new Error('Initial thread creation returned no id.');
+      input.store.recordHostedUserThread(
+        input.sandboxId,
+        input.user.id,
+        threadId,
+        workspaceId,
       );
     }
-    const workspaceId = stringField(workspace, 'id');
-    if (!workspaceId) throw new Error('Initial workspace creation returned no id.');
-    const thread = await forwardSupervisorCommandJson(
-      input.supervisor,
-      input.deviceId,
-      'POST',
-      '/api/threads/start',
-      {
-        workspaceId,
-        title: 'Getting started',
-        provider: 'codex',
-        model: 'gpt-5.6-sol',
-        reasoningEffort: 'low',
-        approvalMode: 'yolo',
-      },
-    );
-    const threadId = stringField(thread, 'id');
-    if (!threadId) throw new Error('Initial thread creation returned no id.');
-    input.store.recordHostedUserWorkspace(
-      input.sandboxId,
-      input.user.id,
-      workspaceId,
-      true,
-    );
-    input.store.recordHostedUserThread(
-      input.sandboxId,
-      input.user.id,
-      threadId,
-      workspaceId,
-    );
   })().finally(() => hostedBootstrapPromises.delete(key));
   hostedBootstrapPromises.set(key, pending);
   return pending;
@@ -2626,7 +2682,9 @@ function isAllowedSharedRuntimeMetadataRequest(
 function threadIdFromPath(pathValue: string) {
   const pathname = new URL(pathValue, 'http://relay.local').pathname;
   const match = /^\/api\/threads\/([^/?#]+)/.exec(pathname);
-  return match ? decodeURIComponent(match[1]!) : null;
+  if (!match) return null;
+  const threadId = decodeURIComponent(match[1]!);
+  return threadId === 'start' || threadId === 'import' ? null : threadId;
 }
 
 function workspaceIdFromPath(pathValue: string) {
