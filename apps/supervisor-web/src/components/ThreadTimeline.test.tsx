@@ -1276,7 +1276,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText('Batch')).toBeInTheDocument();
+    expect(screen.queryByText('Batch')).not.toBeInTheDocument();
     expect(screen.getByText('3 commands')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Expand 3 command entries' }),
