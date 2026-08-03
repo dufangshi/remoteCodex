@@ -70,7 +70,7 @@ export class ThreadAuxiliaryStateStore {
         );
       return {
         id: record.id,
-        kind: 'fastMode',
+        kind: record.kind === 'goal' ? 'goal' : 'fastMode',
         text: record.text,
         createdAt: record.createdAt,
         anchorTurnId: record.anchorTurnId ?? fallbackAnchor?.id ?? null,
@@ -108,7 +108,7 @@ export class ThreadAuxiliaryStateStore {
 
   appendActivityNote(
     localThreadId: string,
-    input: { kind: 'fastMode'; text: string },
+    input: { kind: 'fastMode' | 'goal'; text: string },
   ) {
     const cachedAnchorTurnId =
       this.callbacks.cachedTurns(localThreadId).at(-1)?.id ?? null;

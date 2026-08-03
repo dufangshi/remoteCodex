@@ -146,6 +146,10 @@ describe('IOSHistoryPaging', () => {
     };
     const earlier = {
       ...threadDetail(),
+      thread: {
+        ...threadDetail().thread,
+        title: 'Stale paged title',
+      },
       turns: Array.from({ length: 3 }, (_, index) => ({
         id: `turn-${index + 2}`,
         startedAt: '2026-07-01T00:00:00.000Z',
@@ -161,7 +165,9 @@ describe('IOSHistoryPaging', () => {
       totalTurnCount: 6,
     };
 
-    expect(mergeEarlierThreadHistory(current, earlier).turns.map((turn) => turn.id)).toEqual([
+    const merged = mergeEarlierThreadHistory(current, earlier);
+    expect(merged.thread.title).toBe(current.thread.title);
+    expect(merged.turns.map((turn) => turn.id)).toEqual([
       'turn-2',
       'turn-3',
       'turn-4',

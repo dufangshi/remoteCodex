@@ -1156,7 +1156,7 @@ export interface ThreadAnsweredRequestNoteDto {
 
 export interface ThreadActivityNoteDto {
   id: string;
-  kind: 'fastMode' | 'forkCreated' | 'forkSource';
+  kind: 'fastMode' | 'goal' | 'forkCreated' | 'forkSource';
   createdAt: string;
   text?: string;
   anchorTurnId?: string | null;
@@ -1372,6 +1372,96 @@ export interface ThreadDetailDto {
   goalHistory?: ThreadGoalDto[];
   livePlan?: ThreadLivePlanDto | null;
   liveItems?: ThreadLiveItemsDto | null;
+}
+
+export function prependEarlierThreadTurns(
+  existing: ThreadDetailDto['turns'],
+  earlier: ThreadDetailDto['turns'],
+) {
+  const existingIds = new Set(existing.map((turn) => turn.id));
+  return [...earlier.filter((turn) => !existingIds.has(turn.id)), ...existing];
+}
+
+export function mergeLatestThreadTurns(
+  existing: ThreadDetailDto['turns'],
+  latest: ThreadDetailDto['turns'],
+  activeTurnId: string | null = null,
+) {
+  const seenLatestIds = new Set<string>();
+  const uniqueLatest = latest.reduceRight<ThreadDetailDto['turns']>(
+    (turns, turn) => {
+      if (!seenLatestIds.has(turn.id)) {
+        seenLatestIds.add(turn.id);
+        turns.unshift(turn);
+      }
+      return turns;
+    },
+    [],
+  );
+  const latestById = new Map(uniqueLatest.map((turn) => [turn.id, turn]));
+  const latestReplacements = uniqueLatest.filter((turn) =>
+    turn.items.some((item) => item.kind === 'userMessage'),
+  );
+  const replacedExistingIds = new Set<string>();
+  const seenExistingIds = new Set<string>();
+  const uniqueExisting = existing.reduceRight<ThreadDetailDto['turns']>(
+    (turns, turn) => {
+      if (!seenExistingIds.has(turn.id)) {
+        seenExistingIds.add(turn.id);
+        turns.unshift(turn);
+      }
+      return turns;
+    },
+    [],
+  );
+
+  for (const turn of uniqueExisting) {
+    if (latestById.has(turn.id)) {
+      replacedExistingIds.add(turn.id);
+      continue;
+    }
+    if (turn.status !== 'inProgress') {
+      continue;
+    }
+    const existingPrompt = turn.items.find(
+      (item) => item.kind === 'userMessage',
+    )?.text.trim();
+    const existingStartedAt = turn.startedAt
+      ? Date.parse(turn.startedAt)
+      : Number.NaN;
+    if (!existingPrompt || !Number.isFinite(existingStartedAt)) {
+      continue;
+    }
+    const materializedReplacement = latestReplacements.find((replacement) => {
+      const replacementPrompt = replacement.items.find(
+        (item) => item.kind === 'userMessage',
+      )?.text.trim();
+      const replacementStartedAt = replacement.startedAt
+        ? Date.parse(replacement.startedAt)
+        : Number.NaN;
+      return (
+        replacementPrompt === existingPrompt &&
+        Number.isFinite(replacementStartedAt) &&
+        Math.abs(replacementStartedAt - existingStartedAt) <= 15_000
+      );
+    });
+    if (materializedReplacement) {
+      replacedExistingIds.add(turn.id);
+    }
+  }
+
+  const olderTurns = uniqueExisting.filter(
+    (turn) => !latestById.has(turn.id) && !replacedExistingIds.has(turn.id),
+  );
+  const ordered = [...olderTurns, ...uniqueLatest];
+  if (!activeTurnId) {
+    return ordered;
+  }
+
+  const activeTurn = ordered.find((turn) => turn.id === activeTurnId);
+  return activeTurn
+    ? [...ordered.filter((turn) => turn.id !== activeTurnId), activeTurn]
+    : ordered;
 }
 
 export interface ThreadExportTurnOptionDto {

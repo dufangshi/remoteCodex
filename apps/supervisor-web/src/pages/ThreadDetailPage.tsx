@@ -997,6 +997,14 @@ export function ThreadDetailPage() {
         if (!current) {
           return current;
         }
+        if (
+          current.id.startsWith('optimistic-goal-') &&
+          nextDetailWithLiveTimestamps.activityNotes?.some(
+            (note) => note.kind === 'goal' && note.text === current.prompt,
+          )
+        ) {
+          return null;
+        }
 
         const resolvedTurnId = current.serverTurnId ?? current.id;
         const hasMaterializedTurn = nextDetailWithLiveTimestamps.turns.some(
@@ -2393,6 +2401,11 @@ export function ThreadDetailPage() {
 
     try {
       await handleUpdateGoal(input);
+      await loadThreadDetail({
+        showLoading: false,
+        clearError: false,
+        reportError: false,
+      });
       if (optimisticTurnId) {
         setOptimisticTurn((current) =>
           current && current.id === optimisticTurnId

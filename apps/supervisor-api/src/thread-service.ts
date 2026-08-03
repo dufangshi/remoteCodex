@@ -298,6 +298,11 @@ export class ThreadService {
         this.emitThreadEvent(type, threadId, payload),
       requireProviderSessionId: (record) => this.requireProviderSessionId(record),
       runtimeForProvider: (provider) => this.runtimeForProvider(provider),
+      appendGoalActivityNote: (threadId, objective) =>
+        this.auxiliaryState.appendActivityNote(threadId, {
+          kind: 'goal',
+          text: objective,
+        }),
     });
     this.auxiliaryState = new ThreadAuxiliaryStateStore(db, {
       cachedTurns: (localThreadId) => this.detailAssembler.cachedTurns(localThreadId),
@@ -428,6 +433,8 @@ export class ThreadService {
           this.setThreadContextUsage(localThreadId, usage, emitEvent),
         getThreadContextUsage: (localThreadId) =>
           this.getThreadContextUsage(localThreadId),
+        getThreadGoalAfterRuntimeClear: (record) =>
+          this.goalCoordinator.getThreadGoalForRecord(record),
         toThreadGoalDtoFromAgentGoal: (goal) =>
           this.goalCoordinator.toThreadGoalDtoFromAgentGoal(goal),
         toThreadGoalDtoFromRecord: (record) =>

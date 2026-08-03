@@ -11581,6 +11581,12 @@ describe('supervisor api', () => {
         tokenBudget: 12000,
       })
     ]);
+    expect(detailWithGoalResponse.json().activityNotes).toEqual([
+      expect.objectContaining({
+        kind: 'goal',
+        text: 'Finish the migration and keep tests green.',
+      }),
+    ]);
 
     const clearResponse = await app.inject({
       method: 'DELETE',
@@ -11836,6 +11842,7 @@ describe('supervisor api', () => {
     });
     expect(firstGoalResponse.statusCode).toBe(200);
     const firstGoalId = firstGoalResponse.json().goal.localGoalId;
+    const baselineGoalClearCalls = fakeCodexManager.goalClearCalls.length;
     fakeCodexManager.goals.set(createdThread.providerSessionId, {
       ...fakeCodexManager.goals.get(createdThread.providerSessionId)!,
       tokensUsed: 5_400_000,
@@ -11859,6 +11866,22 @@ describe('supervisor api', () => {
       timeUsedSeconds: 0,
     });
     expect(secondGoalResponse.json().goal.localGoalId).not.toBe(firstGoalId);
+    expect(fakeCodexManager.goalClearCalls).toHaveLength(
+      baselineGoalClearCalls + 1,
+    );
+    expect(fakeCodexManager.goalClearCalls.at(-1)).toBe(
+      createdThread.providerSessionId,
+    );
+
+    // A delayed app-server clear notification from the previous lifecycle
+    // must not terminate the replacement goal.
+    fakeCodexManager.emitServerEvent({
+      method: 'thread/goal/cleared',
+      params: {
+        threadId: createdThread.providerSessionId,
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const detailResponse = await app.inject({
       method: 'GET',
@@ -11877,6 +11900,16 @@ describe('supervisor api', () => {
         status: 'terminated',
       }),
     ]);
+    expect(detailResponse.json().activityNotes).toEqual([
+      expect.objectContaining({
+        kind: 'goal',
+        text: 'Finish the first task.',
+      }),
+      expect.objectContaining({
+        kind: 'goal',
+        text: 'Start a clean follow-up task.',
+      }),
+    ]);
 
     const fetchGoalResponse = await app.inject({
       method: 'GET',
@@ -11889,6 +11922,60 @@ describe('supervisor api', () => {
       tokensUsed: 0,
       timeUsedSeconds: 0,
     });
+  });
+
+  it('refuses to replace a goal while its current turn is still running', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Running Goal Replacement Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Finish the existing task.',
+        status: 'active',
+      }
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Keep this turn running.',
+      }
+    });
+    const baselineGoalClearCalls = fakeCodexManager.goalClearCalls.length;
+
+    const replaceResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Start an unrelated replacement task.',
+        status: 'active',
+      }
+    });
+
+    expect(replaceResponse.statusCode).toBe(409);
+    expect(replaceResponse.json()).toMatchObject({
+      code: 'conflict',
+      message: 'Interrupt the running turn before replacing this goal.',
+    });
+    expect(fakeCodexManager.goalClearCalls).toHaveLength(baselineGoalClearCalls);
   });
 
   it('terminates the active goal locally without inheriting remote completed state', async () => {

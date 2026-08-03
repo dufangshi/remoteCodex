@@ -2043,14 +2043,6 @@ private fun RelayDeviceRow(
                     onClick = onCopySetup,
                 )
                 GraphButton(
-                    label = if (hostedStarting) "Starting…" else if (busy && selected) "Connecting..." else if (device.hostedStatus == "stopped") "Start & connect" else "Connect",
-                    enabled = !busy && (device.connected || device.hostedStatus == "stopped"),
-                    variant = GraphButtonVariant.Default,
-                    size = GraphButtonSize.Small,
-                    contentDescription = "Connect relay device ${device.name}",
-                    onClick = onConnect,
-                )
-                GraphButton(
                     label = "Share",
                     enabled = !busy,
                     variant = GraphButtonVariant.Outline,

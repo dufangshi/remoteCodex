@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  mergeLatestThreadTurns,
+  prependEarlierThreadTurns,
+} from '@remote-codex/shared';
 import type {
   AgentBackendToolboxItemSchemaDto,
   AgentProviderCapabilitiesDto,
   AgentSubscriptionUsageDto,
   ExportThreadPdfInput,
   ModelOptionDto,
+  PromptAttachmentKindDto,
   RelayEffectiveAccessDto,
+  RespondThreadActionRequestInput,
   ThreadDetailDto,
   ThreadDto,
   ThreadExportTurnOptionsDto,
+  ThreadForkTurnOptionDto,
   UpdateThreadGoalInput,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
@@ -97,14 +104,10 @@ function mergeEarlierThreadHistory(
   current: ThreadDetailDto,
   earlier: ThreadDetailDto,
 ) {
-  const existingIds = new Set(current.turns.map((turn) => turn.id));
-  const mergedTurns = [
-    ...earlier.turns.filter((turn) => !existingIds.has(turn.id)),
-    ...current.turns,
-  ];
+  const mergedTurns = prependEarlierThreadTurns(current.turns, earlier.turns);
 
   return {
-    ...earlier,
+    ...current,
     turns: mergedTurns,
     totalTurnCount: Math.max(
       current.totalTurnCount ?? current.turns.length,
@@ -130,11 +133,17 @@ function fileFromNativePick(
 export function AndroidThreadDetailPage({
   bootstrap,
 }: AndroidThreadDetailPageProps) {
+  const activeThreadIdRef = useRef(bootstrap.threadId);
+  activeThreadIdRef.current = bootstrap.threadId;
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const promptSubmissionInFlightRef = useRef(false);
   const projectedEventRevisionRef = useRef(0);
+  const detailRefreshRequestIdRef = useRef(0);
+  const detailMutationInFlightRef = useRef(0);
+  const detailMutationChainRef = useRef<Promise<void>>(Promise.resolve());
+  const detailRefreshPendingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -151,10 +160,20 @@ export function AndroidThreadDetailPage({
   const [historyLimit, setHistoryLimit] = useState(THREAD_HISTORY_INITIAL_LIMIT);
   const historyLimitRef = useRef(THREAD_HISTORY_INITIAL_LIMIT);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(
+    null,
+  );
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const [exportTurnsState, setExportTurnsState] =
     useState<PanelState<ThreadExportTurnOptionsDto>>(idleExportTurnsState);
+  const [forkTurnOptionsState, setForkTurnOptionsState] = useState<
+    PanelState<ThreadForkTurnOptionDto[]>
+  >({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [threadShareState, setThreadShareState] = useState<{
     status: 'idle' | 'loading' | 'ready' | 'failed';
     shares: ThreadShareSummary[];
@@ -202,6 +221,25 @@ export function AndroidThreadDetailPage({
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  const applyDetailResponse = useCallback((loadedDetail: ThreadDetailDto) => {
+    const existingTurns =
+      detailRef.current?.thread.id === loadedDetail.thread.id
+        ? detailRef.current.turns
+        : [];
+    const nextDetail = {
+      ...loadedDetail,
+      turns: mergeLatestThreadTurns(
+        existingTurns,
+        loadedDetail.turns,
+        loadedDetail.thread.activeTurnId,
+      ),
+    };
+    detailRef.current = nextDetail;
+    setDetail(nextDetail);
+    setThreads((current) => replaceThread(current, nextDetail.thread));
+    return nextDetail;
+  }, []);
 
   useEffect(() => {
     const provider = detail?.thread.provider;
@@ -354,20 +392,28 @@ export function AndroidThreadDetailPage({
         setLoading(false);
         return;
       }
+      if (detailMutationInFlightRef.current > 0) {
+        detailRefreshPendingRef.current = true;
+        return;
+      }
       if (showLoading) {
         setLoading(true);
       }
+      const requestId = detailRefreshRequestIdRef.current + 1;
+      detailRefreshRequestIdRef.current = requestId;
       const projectionRevision = projectedEventRevisionRef.current;
       try {
         const loadedDetail = await client.fetchThreadDetail(
           bootstrap.threadId,
           historyLimitRef.current,
         );
+        if (requestId !== detailRefreshRequestIdRef.current) {
+          return;
+        }
         const projectionStillCurrent =
           projectionRevision === projectedEventRevisionRef.current;
         if (projectionStillCurrent) {
-          detailRef.current = loadedDetail;
-          setDetail(loadedDetail);
+          applyDetailResponse(loadedDetail);
         }
         setThreads((current) =>
           replaceThread(
@@ -406,7 +452,40 @@ export function AndroidThreadDetailPage({
         }
       }
     },
-    [bootstrap.threadId, client],
+    [applyDetailResponse, bootstrap.threadId, client],
+  );
+
+  const runDetailMutation = useCallback(
+    <T extends ThreadDetailDto,>(operation: () => Promise<T>) => {
+      const scheduled = detailMutationChainRef.current.then(async () => {
+        detailMutationInFlightRef.current += 1;
+        detailRefreshRequestIdRef.current += 1;
+        try {
+          const updated = await operation();
+          if (updated.thread.id === activeThreadIdRef.current) {
+            applyDetailResponse(updated);
+          }
+          return updated;
+        } finally {
+          detailMutationInFlightRef.current -= 1;
+          window.setTimeout(() => {
+            if (
+              detailMutationInFlightRef.current === 0 &&
+              detailRefreshPendingRef.current
+            ) {
+              detailRefreshPendingRef.current = false;
+              void refreshThreadDetail();
+            }
+          }, 0);
+        }
+      });
+      detailMutationChainRef.current = scheduled.then(
+        () => undefined,
+        () => undefined,
+      );
+      return scheduled;
+    },
+    [applyDetailResponse, refreshThreadDetail],
   );
 
   useEffect(() => {
@@ -441,9 +520,7 @@ export function AndroidThreadDetailPage({
         if (cancelled) {
           return;
         }
-        setThreads((current) => replaceThread(current, loadedDetail.thread));
-        detailRef.current = loadedDetail;
-        setDetail(loadedDetail);
+        applyDetailResponse(loadedDetail);
         setError(null);
         postAndroidMessage({
           type: 'setNavigationTitle',
@@ -476,7 +553,7 @@ export function AndroidThreadDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [bootstrap.threadId, client]);
+  }, [applyDetailResponse, bootstrap.threadId, client]);
 
   useEffect(() => {
     if (!detail || !sceneActive) {
@@ -847,13 +924,9 @@ export function AndroidThreadDetailPage({
   const cancelPendingSteer = useCallback(
     async (threadId: string, pendingSteerId: string) => {
       try {
-        const updatedDetail = await client.cancelPendingSteer(
-          threadId,
-          pendingSteerId,
+        await runDetailMutation(() =>
+          client.cancelPendingSteer(threadId, pendingSteerId),
         );
-        detailRef.current = updatedDetail;
-        setDetail(updatedDetail);
-        setThreads((current) => replaceThread(current, updatedDetail.thread));
         postAndroidMessage({
           type: 'threadWebDebug',
           message: `pending-steer:canceled:${pendingSteerId}`,
@@ -865,19 +938,15 @@ export function AndroidThreadDetailPage({
         throw caught;
       }
     },
-    [client],
+    [client, runDetailMutation],
   );
 
   const steerPendingPrompt = useCallback(
     async (threadId: string, pendingSteerId: string) => {
       try {
-        const updatedDetail = await client.steerPendingPrompt(
-          threadId,
-          pendingSteerId,
+        await runDetailMutation(() =>
+          client.steerPendingPrompt(threadId, pendingSteerId),
         );
-        detailRef.current = updatedDetail;
-        setDetail(updatedDetail);
-        setThreads((current) => replaceThread(current, updatedDetail.thread));
       } catch (caught) {
         const message = errorMessage(caught);
         setError(message);
@@ -885,7 +954,36 @@ export function AndroidThreadDetailPage({
         throw caught;
       }
     },
-    [client],
+    [client, runDetailMutation],
+  );
+
+  const respondToRequest = useCallback(
+    async (requestId: string, input: RespondThreadActionRequestInput) => {
+      const currentDetail = detailRef.current;
+      if (!currentDetail) {
+        return;
+      }
+
+      setRespondingRequestId(requestId);
+      setError(null);
+      try {
+        await runDetailMutation(() =>
+          client.respondToRequest(currentDetail.thread.id, requestId, input),
+        );
+        postAndroidMessage({
+          type: 'threadWebDebug',
+          message: `pendingRequest:${requestId}:resolved`,
+        });
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postAndroidMessage({ type: 'reportFatalError', message });
+        throw caught;
+      } finally {
+        setRespondingRequestId(null);
+      }
+    },
+    [client, runDetailMutation],
   );
 
   const interruptCurrentTurn = useCallback(async () => {
@@ -977,6 +1075,113 @@ export function AndroidThreadDetailPage({
       }
     },
     [client],
+  );
+
+  const loadForkTurnOptions = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail) {
+      return;
+    }
+    setForkTurnOptionsState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+    try {
+      const data = await client.fetchForkTurnOptions(currentDetail.thread.id);
+      setForkTurnOptionsState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setForkTurnOptionsState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error: message,
+      }));
+      setError(message);
+      postAndroidMessage({ type: 'reportFatalError', message });
+      throw caught;
+    }
+  }, [client]);
+
+  const forkLatest = useCallback(async () => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail) {
+      return;
+    }
+    try {
+      const result = await client.forkThread(currentDetail.thread.id, {
+        mode: 'latest',
+      });
+      postAndroidMessage({
+        type: 'openThread',
+        threadId: result.thread.thread.id,
+      });
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      postAndroidMessage({ type: 'reportFatalError', message });
+      throw caught;
+    }
+  }, [client]);
+
+  const forkTurn = useCallback(
+    async (turnId: string) => {
+      const currentDetail = detailRef.current;
+      if (!currentDetail) {
+        return;
+      }
+      try {
+        const result = await client.forkThread(currentDetail.thread.id, {
+          mode: 'turn',
+          turnId,
+        });
+        postAndroidMessage({
+          type: 'openThread',
+          threadId: result.thread.thread.id,
+        });
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        postAndroidMessage({ type: 'reportFatalError', message });
+        throw caught;
+      }
+    },
+    [client],
+  );
+
+  const pickNativeAttachment = useCallback(
+    ({
+      kind,
+      appendAttachments,
+      defaultPick,
+    }: {
+      kind: PromptAttachmentKindDto;
+      appendAttachments: (
+        files: FileList | null,
+        kind?: PromptAttachmentKindDto,
+      ) => boolean;
+      defaultPick: () => void;
+    }) => {
+      if (!hasNativeFilePickerBridge()) {
+        defaultPick();
+        return;
+      }
+      void pickNativeFile()
+        .then((result) => {
+          if (result.cancelled || !result.file) {
+            return;
+          }
+          const transfer = new DataTransfer();
+          transfer.items.add(fileFromNativePick(result.file));
+          appendAttachments(transfer.files, kind);
+        })
+        .catch((caught) => {
+          const message = errorMessage(caught);
+          setError(message);
+          postAndroidMessage({ type: 'reportFatalError', message });
+        });
+    },
+    [],
   );
 
   const loadThreadShares = useCallback(async () => {
@@ -1266,6 +1471,19 @@ export function AndroidThreadDetailPage({
                 path: input.path,
                 ...(input.offset !== undefined ? { offset: input.offset } : {}),
                 ...(input.limit !== undefined ? { limit: input.limit } : {}),
+              });
+            },
+            async writeFile(input) {
+              if (effectiveWorkspaceAccess !== 'write') {
+                throw new Error('This shared workspace is read-only.');
+              }
+              const workspaceId = resolveWorkspaceId(input.workspaceId);
+              if (!workspaceId) {
+                throw new Error('No workspace id is available.');
+              }
+              await client.writeWorkspaceFile(workspaceId, {
+                path: input.path,
+                content: input.content,
               });
             },
             getRawFileUrl(input) {
@@ -1607,6 +1825,7 @@ export function AndroidThreadDetailPage({
                   error: null,
                 },
                 goalHistory: detail.goalHistory ?? [],
+                forkTurnOptionsState,
                 contextUsage: detail.thread.contextUsage ?? null,
                 subscriptionUsage,
                 capabilities,
@@ -1632,6 +1851,7 @@ export function AndroidThreadDetailPage({
                 ...(effectiveThreadCanControl
                   ? { onInterrupt: interruptCurrentTurn }
                   : {}),
+                onPickAttachment: pickNativeAttachment,
                 followTail,
                 onToggleFollow: () => {
                   setFollowTail(true);
@@ -1652,6 +1872,13 @@ export function AndroidThreadDetailPage({
                       onUpdateGoal: updateThreadGoal,
                     }
                   : {}),
+                ...(effectiveThreadIsOwner
+                  ? {
+                      onOpenForkTurns: loadForkTurnOptions,
+                      onForkLatest: forkLatest,
+                      onForkTurn: forkTurn,
+                    }
+                  : {}),
               }
             : undefined
         }
@@ -1665,6 +1892,8 @@ export function AndroidThreadDetailPage({
           onNextTurnAvailabilityChange: setCanJumpToNextTurn,
           loadingEarlier,
           onLoadEarlier: loadEarlierHistory,
+          respondingRequestId,
+          onRespondToRequest: respondToRequest,
         }}
         shellUnavailableContent={
           <div className="android-thread-message">

@@ -1,3 +1,4 @@
+import { prependEarlierThreadTurns } from '@remote-codex/shared';
 import type { ThreadDetailDto } from '@remote-codex/shared';
 
 export const IOS_THREAD_HISTORY_INITIAL_LIMIT = 3;
@@ -14,14 +15,10 @@ export function mergeEarlierThreadHistory(
   current: ThreadDetailDto,
   earlier: ThreadDetailDto,
 ) {
-  const existingIds = new Set(current.turns.map((turn) => turn.id));
-  const mergedTurns = [
-    ...earlier.turns.filter((turn) => !existingIds.has(turn.id)),
-    ...current.turns,
-  ];
+  const mergedTurns = prependEarlierThreadTurns(current.turns, earlier.turns);
 
   return {
-    ...earlier,
+    ...current,
     turns: mergedTurns,
     totalTurnCount: Math.max(
       current.totalTurnCount ?? current.turns.length,

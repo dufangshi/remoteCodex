@@ -101,6 +101,7 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     emitEvent?: boolean,
   ): void;
   getThreadContextUsage(localThreadId: string): ReturnType<typeof buildThreadContextUsageFromPayload>;
+  getThreadGoalAfterRuntimeClear(record: ThreadRecord): Promise<ThreadGoalDto | null>;
   toThreadGoalDtoFromAgentGoal(goal: Extract<AgentRuntimeEvent, { type: 'goal.updated' }>['goal']): ThreadGoalDto;
   toThreadGoalDtoFromRecord(record: unknown): ThreadGoalDto;
 }
@@ -193,6 +194,20 @@ export class ThreadRuntimeEventProjector {
           event.providerSessionId,
         );
         if (!record) {
+          return;
+        }
+
+        // A replacement is implemented as clear -> set. App-server
+        // notifications can arrive after the new goal has already been set,
+        // so verify the provider's current state before terminating the local
+        // active goal. Otherwise a delayed clear for the previous lifecycle
+        // can immediately kill its replacement.
+        const currentGoal = await callbacks.getThreadGoalAfterRuntimeClear(record);
+        if (currentGoal) {
+          callbacks.emitThreadEvent('thread.goal.updated', record.id, {
+            goal: currentGoal,
+            goalHistory: callbacks.listThreadGoalHistory(record.id),
+          });
           return;
         }
 

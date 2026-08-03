@@ -6,13 +6,17 @@ import type {
   CreateRelaySessionShareInput,
   CreateThreadInput,
   ExportThreadPdfInput,
+  ForkThreadInput,
   ModelOptionDto,
   RelayEffectiveAccessDto,
   RelayPortalSummaryDto,
   RelaySessionShareDto,
+  RespondThreadActionRequestInput,
   ThreadDetailDto,
   ThreadDto,
   ThreadExportFormatDto,
+  ThreadForkResultDto,
+  ThreadForkTurnOptionDto,
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
   ThreadGoalDto,
@@ -21,6 +25,7 @@ import type {
   ThreadWorkspaceTreeNodeDto,
   UpdateThreadSettingsInput,
   UpdateThreadGoalInput,
+  WorkspaceFileDto,
   WorkspaceDto,
 } from '@remote-codex/shared';
 
@@ -387,6 +392,37 @@ export class AndroidApiClient {
     );
   }
 
+  respondToRequest(
+    threadId: string,
+    requestId: string,
+    input: RespondThreadActionRequestInput,
+  ) {
+    return this.requestJson<ThreadDetailDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/requests/${encodeURIComponent(requestId)}/respond`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  fetchForkTurnOptions(threadId: string) {
+    return this.requestJson<ThreadForkTurnOptionDto[]>(
+      `/api/threads/${encodeURIComponent(threadId)}/fork-turns`,
+      { cache: 'no-store' },
+    );
+  }
+
+  forkThread(threadId: string, input: ForkThreadInput) {
+    return this.requestJson<ThreadForkResultDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/fork`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
   fetchThreadExportTurns(threadId: string) {
     return this.requestJson<ThreadExportTurnOptionsDto>(
       `/api/threads/${encodeURIComponent(threadId)}/export-turns`,
@@ -567,6 +603,19 @@ export class AndroidApiClient {
       throw new AndroidApiError(response.status, await readError(response));
     }
     return (await response.json()) as ThreadWorkspaceUploadResultDto;
+  }
+
+  writeWorkspaceFile(
+    workspaceId: string,
+    input: { path: string; content: string },
+  ) {
+    return this.requestJson<WorkspaceFileDto>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/files`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      },
+    );
   }
 
   buildThreadImageAssetUrl(threadId: string, input: { path: string }) {

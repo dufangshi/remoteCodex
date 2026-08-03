@@ -38,6 +38,7 @@ interface ThreadGoalCoordinatorCallbacks {
   ): void;
   requireProviderSessionId(record: { providerSessionId?: string | null }): string;
   runtimeForProvider(provider: string | null | undefined): AgentRuntime;
+  appendGoalActivityNote(threadId: string, objective: string): void;
 }
 
 export interface ThreadGoalFeatureManagement {
@@ -85,13 +86,10 @@ export class ThreadGoalCoordinator {
 
     try {
       await this.ensureGoalsFeatureEnabled(record.provider);
-      const activeGoal = this.listThreadGoalHistory(record.id).find((goal) =>
+      const goalHistoryBeforeUpdate = this.listThreadGoalHistory(record.id);
+      const activeGoal = goalHistoryBeforeUpdate.find((goal) =>
         ['active', 'paused', 'budgetLimited'].includes(goal.status),
       ) ?? null;
-      const creatingNewGoal = goalObjectiveChanged(activeGoal, input.objective);
-      if (creatingNewGoal) {
-        markActiveThreadGoalRecordTerminated(this.db, record.id);
-      }
       if (input.status === 'terminated') {
         const terminatedGoal = markActiveThreadGoalRecordTerminated(this.db, record.id);
         const goalHistory = this.listThreadGoalHistory(record.id);
@@ -101,6 +99,26 @@ export class ThreadGoalCoordinator {
           goalHistory,
         });
         return goal;
+      }
+      const startingNewGoal = shouldStartNewGoal(activeGoal, input.objective);
+      if (
+        startingNewGoal &&
+        (record.providerTurnId || record.status === 'running')
+      ) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'Interrupt the running turn before replacing this goal.',
+        });
+      }
+      if (startingNewGoal && goalHistoryBeforeUpdate.length > 0) {
+        if (!runtime.clearGoal) {
+          throw new HttpError(409, {
+            code: 'conflict',
+            message: 'This backend cannot safely replace an existing goal.',
+          });
+        }
+        await runtime.clearGoal(providerSessionId);
+        markActiveThreadGoalRecordTerminated(this.db, record.id);
       }
       const upstreamStatus =
         input.status as UpstreamThreadGoalStatus | null | undefined;
@@ -114,10 +132,17 @@ export class ThreadGoalCoordinator {
         toThreadGoalDtoFromAgentGoal(goal),
         record,
       );
-      const dto = creatingNewGoal ? resetGoalProgress(upstreamDto) : upstreamDto;
+      const dto = startingNewGoal
+        ? startFreshGoalLifecycle(upstreamDto)
+        : upstreamDto;
       const persistedGoal = toThreadGoalDtoFromRecord(
-        this.persistThreadGoalSnapshot(record.id, dto),
+        this.persistThreadGoalSnapshot(record.id, dto, {
+          createNew: startingNewGoal,
+        }),
       );
+      if (startingNewGoal) {
+        this.callbacks.appendGoalActivityNote(record.id, persistedGoal.objective);
+      }
       this.callbacks.emitThreadEvent('thread.goal.updated', record.id, {
         goal: persistedGoal,
         goalHistory: this.listThreadGoalHistory(record.id),
@@ -201,6 +226,7 @@ export class ThreadGoalCoordinator {
   persistThreadGoalSnapshot(
     localThreadId: string,
     goal: ThreadGoalDto | Parameters<typeof toThreadGoalDto>[0],
+    options: { createNew?: boolean } = {},
   ) {
     const dto =
       'createdAt' in goal && typeof goal.createdAt === 'string'
@@ -210,6 +236,7 @@ export class ThreadGoalCoordinator {
       threadId: localThreadId,
       providerSessionId: dto.threadId,
       localGoalId: dto.localGoalId ?? null,
+      createNew: options.createNew ?? false,
       objective: dto.objective,
       status: dto.status,
       tokenBudget: dto.tokenBudget,
@@ -382,23 +409,26 @@ function goalHistoryStatusRank(status: ThreadGoalDto['status']) {
   return ['active', 'paused', 'budgetLimited'].includes(status) ? 0 : 1;
 }
 
-function resetGoalProgress(goal: ThreadGoalDto): ThreadGoalDto {
+function startFreshGoalLifecycle(goal: ThreadGoalDto): ThreadGoalDto {
+  const now = new Date().toISOString();
   return {
     ...goal,
     tokensUsed: 0,
     timeUsedSeconds: 0,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
   };
 }
 
-function goalObjectiveChanged(
+function shouldStartNewGoal(
   existing: ThreadGoalDto | null,
   nextObjective: string | null | undefined,
 ) {
   return (
-    existing !== null &&
     typeof nextObjective === 'string' &&
     nextObjective.trim().length > 0 &&
-    nextObjective !== existing.objective
+    (existing === null || nextObjective !== existing.objective)
   );
 }
 

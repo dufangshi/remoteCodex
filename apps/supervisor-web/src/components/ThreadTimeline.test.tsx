@@ -4722,6 +4722,28 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('Fast mode on')).toBeInTheDocument();
   });
 
+  it('renders a persisted goal objective as a dedicated timeline card', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'goal-activity-1',
+            kind: 'goal',
+            text: 'Review the architecture and document the risks.',
+            createdAt: new Date(Date.UTC(2026, 7, 2, 7, 15, 0)).toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Goal')).toBeInTheDocument();
+    expect(
+      screen.getByText('Review the architecture and document the risks.'),
+    ).toBeInTheDocument();
+  });
+
   it('renders fast mode activity notes before newer turns instead of pinning them to the bottom', () => {
     render(
       <ThreadTimeline

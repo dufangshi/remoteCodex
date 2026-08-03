@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { mergeLatestThreadTurns } from '@remote-codex/shared';
 import type {
   AgentBackendToolboxItemSchemaDto,
   AgentProviderCapabilitiesDto,
@@ -227,6 +228,8 @@ function fileFromNativeAttachment(
 }
 
 export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
+  const activeThreadIdRef = useRef(bootstrap.threadId);
+  activeThreadIdRef.current = bootstrap.threadId;
   const [threads, setThreads] = useState<ThreadDto[]>(
     bootstrap.fixture ? mockThreads : [],
   );
@@ -238,6 +241,10 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   );
   const promptSubmissionInFlightRef = useRef(false);
   const projectedEventRevisionRef = useRef(0);
+  const detailRefreshRequestIdRef = useRef(0);
+  const detailMutationInFlightRef = useRef(0);
+  const detailMutationChainRef = useRef<Promise<void>>(Promise.resolve());
+  const detailRefreshPendingRef = useRef(false);
   const [loading, setLoading] = useState(!bootstrap.fixture);
   const [submitting, setSubmitting] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -625,6 +632,28 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     [pickNativeFiles],
   );
 
+  const applyDetailResponse = useCallback((loadedDetail: ThreadDetailDto) => {
+    const current = detailRef.current;
+    const mergedDetail =
+      current?.thread.id === loadedDetail.thread.id
+        ? {
+            ...loadedDetail,
+            turns: mergeLatestThreadTurns(
+              current.turns,
+              loadedDetail.turns,
+              loadedDetail.thread.activeTurnId,
+            ),
+          }
+        : loadedDetail;
+    detailRef.current = mergedDetail;
+    setDetail((existing) =>
+      threadDetailRevision(existing) === threadDetailRevision(mergedDetail)
+        ? existing
+        : mergedDetail,
+    );
+    setThreads((existing) => replaceThread(existing, mergedDetail.thread));
+  }, []);
+
   const refreshThreadDetail = useCallback(
     async ({
       showLoading = false,
@@ -642,17 +671,26 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         setLoading(false);
         return;
       }
+      if (detailMutationInFlightRef.current > 0) {
+        detailRefreshPendingRef.current = true;
+        return;
+      }
 
       if (showLoading) {
         setLoading(true);
       }
 
+      const requestId = detailRefreshRequestIdRef.current + 1;
+      detailRefreshRequestIdRef.current = requestId;
       const projectionRevision = projectedEventRevisionRef.current;
       try {
         const [loadedThreads, loadedDetail] = await Promise.all([
           client.listThreads(),
           client.fetchThreadDetail(threadId, historyLimitRef.current),
         ]);
+        if (requestId !== detailRefreshRequestIdRef.current) {
+          return;
+        }
         const projectionStillCurrent =
           projectionRevision === projectedEventRevisionRef.current;
         const nextThreads = projectionStillCurrent
@@ -666,15 +704,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
             : nextThreads,
         );
         if (projectionStillCurrent) {
-          setDetail((current) => {
-            if (
-              threadDetailRevision(current) === threadDetailRevision(loadedDetail)
-            ) {
-              return current;
-            }
-            detailRef.current = loadedDetail;
-            return loadedDetail;
-          });
+          applyDetailResponse(loadedDetail);
         }
         setError(null);
         postNativeMessage({
@@ -694,7 +724,40 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         }
       }
     },
-    [bootstrap.fixture, bootstrap.threadId, client],
+    [applyDetailResponse, bootstrap.fixture, bootstrap.threadId, client],
+  );
+
+  const runDetailMutation = useCallback(
+    <T extends ThreadDetailDto,>(operation: () => Promise<T>) => {
+      const scheduled = detailMutationChainRef.current.then(async () => {
+        detailMutationInFlightRef.current += 1;
+        detailRefreshRequestIdRef.current += 1;
+        try {
+          const updated = await operation();
+          if (updated.thread.id === activeThreadIdRef.current) {
+            applyDetailResponse(updated);
+          }
+          return updated;
+        } finally {
+          detailMutationInFlightRef.current -= 1;
+          window.setTimeout(() => {
+            if (
+              detailMutationInFlightRef.current === 0 &&
+              detailRefreshPendingRef.current
+            ) {
+              detailRefreshPendingRef.current = false;
+              void refreshThreadDetail();
+            }
+          }, 0);
+        }
+      });
+      detailMutationChainRef.current = scheduled.then(
+        () => undefined,
+        () => undefined,
+      );
+      return scheduled;
+    },
+    [applyDetailResponse, refreshThreadDetail],
   );
 
   useEffect(() => {
@@ -723,8 +786,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
           return;
         }
         setThreads(loadedThreads);
-        detailRef.current = loadedDetail;
-        setDetail(loadedDetail);
+        applyDetailResponse(loadedDetail);
         postNativeMessage({
           type: 'setNavigationTitle',
           title: loadedDetail.thread.title,
@@ -746,7 +808,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [bootstrap, client]);
+  }, [applyDetailResponse, bootstrap, client]);
 
   const loadEarlierHistory = useCallback(async () => {
     if (bootstrap.fixture || !detail) {
@@ -1337,13 +1399,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       }
 
       try {
-        const updatedDetail = await client.cancelPendingSteer(
-          threadId,
-          pendingSteerId,
+        await runDetailMutation(() =>
+          client.cancelPendingSteer(threadId, pendingSteerId),
         );
-        detailRef.current = updatedDetail;
-        setDetail(updatedDetail);
-        setThreads((current) => replaceThread(current, updatedDetail.thread));
         postNativeMessage({
           type: 'threadWebDebug',
           message: `pending-steer:canceled:${pendingSteerId}`,
@@ -1355,7 +1413,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         throw caught;
       }
     },
-    [bootstrap.fixture, client],
+    [bootstrap.fixture, client, runDetailMutation],
   );
 
   const steerPendingPrompt = useCallback(
@@ -1364,13 +1422,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         return;
       }
       try {
-        const updatedDetail = await client.steerPendingPrompt(
-          threadId,
-          pendingSteerId,
+        await runDetailMutation(() =>
+          client.steerPendingPrompt(threadId, pendingSteerId),
         );
-        detailRef.current = updatedDetail;
-        setDetail(updatedDetail);
-        setThreads((current) => replaceThread(current, updatedDetail.thread));
       } catch (caught) {
         const message = errorMessage(caught);
         setError(message);
@@ -1378,7 +1432,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         throw caught;
       }
     },
-    [bootstrap.fixture, client],
+    [bootstrap.fixture, client, runDetailMutation],
   );
 
   const interruptCurrentTurn = useCallback(async () => {
@@ -1484,18 +1538,13 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
           return;
         }
 
-        const updatedDetail = await client.respondToRequest(
-          detail.thread.id,
-          requestId,
-          input,
+        await runDetailMutation(() =>
+          client.respondToRequest(detail.thread.id, requestId, input),
         );
-        setDetail(updatedDetail);
-        setThreads((current) => replaceThread(current, updatedDetail.thread));
         postNativeMessage({
           type: 'threadWebDebug',
           message: `pendingRequest:${requestId}:resolved`,
         });
-        await refreshThreadDetail({ reportError: true });
       } catch (caught) {
         const message = errorMessage(caught);
         setError(message);
@@ -1505,7 +1554,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         setRespondingRequestId(null);
       }
     },
-    [bootstrap.fixture, client, detail, refreshThreadDetail],
+    [bootstrap.fixture, client, detail, runDetailMutation],
   );
 
   const loadExportTurns = useCallback(async () => {
