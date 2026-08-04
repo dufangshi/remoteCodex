@@ -1,6 +1,17 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const pluginProviderSpy = vi.hoisted(() => vi.fn());
+
+vi.mock('@remote-codex/thread-ui/builtin-plugins', () => ({
+  builtinFrontendPlugins: [
+    {
+      manifest: { id: 'remote-codex.terminal' },
+      threadPanels: [{ id: 'terminal', kind: 'terminal', label: 'Terminal' }],
+    },
+  ],
+}));
+
 vi.mock('@remote-codex/thread-ui', async () => {
   const React = await import('react');
   const AppShellNavContext = React.createContext<unknown>(null);
@@ -44,7 +55,16 @@ vi.mock('@remote-codex/thread-ui', async () => {
     AppShellNavigationMenu: ({ children }: { children?: React.ReactNode }) => (
       <nav>{children}</nav>
     ),
-    PluginProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    PluginProvider: ({
+      builtinPlugins,
+      children,
+    }: {
+      builtinPlugins?: Array<{ manifest: { id: string } }>;
+      children: React.ReactNode;
+    }) => {
+      pluginProviderSpy(builtinPlugins);
+      return <>{children}</>;
+    },
     ThreadDetailSurface: () => (
       <div data-testid="thread-detail-surface">Thread detail</div>
     ),
@@ -63,6 +83,7 @@ import { HOSTED_VM_WAKE_EVENT } from './lib/api';
 
 describe('App', () => {
   beforeEach(() => {
+    pluginProviderSpy.mockClear();
     vi.stubEnv('VITE_CONTROL_PLANE_BASE_URL', '');
     window.history.pushState({}, '', '/');
     window.localStorage.clear();
@@ -108,6 +129,13 @@ describe('App', () => {
       expect(screen.getByText('No workspaces yet')).toBeInTheDocument();
       expect(screen.getByText('/Users/test')).toBeInTheDocument();
     });
+    expect(pluginProviderSpy).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          manifest: expect.objectContaining({ id: 'remote-codex.terminal' }),
+        }),
+      ]),
+    );
   });
 
   it('shows global hosted VM startup progress on every app route', async () => {

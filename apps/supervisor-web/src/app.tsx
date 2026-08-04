@@ -50,6 +50,7 @@ import {
   relayModeActive,
   updatePlugin,
 } from './lib/api';
+import { builtinFrontendPlugins } from './plugins/builtin-plugin-modules';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -67,7 +68,11 @@ function RoutePluginProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  return <PluginProvider adapter={adapter}>{children}</PluginProvider>;
+  return (
+    <PluginProvider adapter={adapter} builtinPlugins={builtinFrontendPlugins}>
+      {children}
+    </PluginProvider>
+  );
 }
 
 function readInitialThemeMode(): ThemeMode {
