@@ -45,6 +45,26 @@ export interface WorkspaceFileResult {
   updatedAt: string;
 }
 
+/**
+ * Compare paths using the target platform's path semantics. This avoids
+ * string-prefix bugs and handles Windows drive-letter casing correctly.
+ */
+export function isPathInside(
+  rootPath: string,
+  candidatePath: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const resolvedRoot = pathApi.resolve(rootPath);
+  const resolvedCandidate = pathApi.resolve(candidatePath);
+  const relative = pathApi.relative(resolvedRoot, resolvedCandidate);
+  return relative === '' || (
+    relative !== '..' &&
+    !relative.startsWith(`..${pathApi.sep}`) &&
+    !pathApi.isAbsolute(relative)
+  );
+}
+
 async function ensureReadableDirectory(absPath: string) {
   try {
     const stats = await fs.stat(absPath);
@@ -214,9 +234,7 @@ export async function assertPathWithinRoot(rootPath: string, candidatePath: stri
     fs.realpath(rootPath),
     resolveComparablePath(candidatePath)
   ]);
-  const normalizedRoot = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`;
-
-  if (resolvedCandidate !== resolvedRoot && !resolvedCandidate.startsWith(normalizedRoot)) {
+  if (!isPathInside(resolvedRoot, resolvedCandidate)) {
     throw new WorkspaceServiceError(
       'path_outside_root',
       'Workspace path must stay within the configured workspace root.',
@@ -284,11 +302,7 @@ export async function validateWorkspacePath(
 
     const resolvedDevHome = await assertPathWithinRoot(rootPath, options.devHome);
     const resolvedTarget = await assertPathWithinRoot(rootPath, resolvedCandidate);
-    const normalizedDevHome = resolvedDevHome.endsWith(path.sep)
-      ? resolvedDevHome
-      : `${resolvedDevHome}${path.sep}`;
-
-    if (resolvedTarget !== resolvedDevHome && !resolvedTarget.startsWith(normalizedDevHome)) {
+    if (!isPathInside(resolvedDevHome, resolvedTarget)) {
       throw new WorkspaceServiceError(
         'path_outside_root',
         'New workspace directories must be created inside the configured dev home.',

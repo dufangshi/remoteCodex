@@ -59,6 +59,22 @@ function normalizeMacTempPath(filePath: string) {
   return filePath.replace(/^\/private\/var\//, '/var/');
 }
 
+async function createVersionCommand(
+  directory: string,
+  name: string,
+  version: string,
+) {
+  const commandPath = path.join(
+    directory,
+    process.platform === 'win32' ? `${name}.cmd` : name,
+  );
+  const content = process.platform === 'win32'
+    ? `@echo off\r\necho ${version}\r\n`
+    : `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)})\n`;
+  await fs.writeFile(commandPath, content, { mode: 0o755 });
+  return commandPath;
+}
+
 class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   readonly provider = 'claude' as const;
   readonly displayName = 'Claude';
@@ -508,6 +524,7 @@ describe('supervisor api', () => {
       claudeRuntime?: FakeClaudeRuntime;
       env?: Record<string, string>;
       relayTunnelClient?: RelayTunnelClient;
+      platform?: NodeJS.Platform;
     } = {},
   ) {
     const runtimes: AgentRuntime[] = [
@@ -543,6 +560,7 @@ describe('supervisor api', () => {
           return { pid: 12345 };
         },
       },
+      ...(options.platform ? { platform: options.platform } : {}),
     };
     if (options.relayTunnelClient) {
       buildOptions.relayTunnelClient = options.relayTunnelClient;
@@ -872,15 +890,14 @@ describe('supervisor api', () => {
     await app.close();
     const binDir = path.join(tempDir, 'bin');
     await fs.mkdir(binDir, { recursive: true });
-    const claudeCommand = path.join(binDir, 'claude-relay-device');
-    await fs.writeFile(
-      claudeCommand,
-      '#!/usr/bin/env node\nconsole.log("2.1.197 (Claude Code)")\n',
-      { mode: 0o755 },
+    const claudeCommand = await createVersionCommand(
+      binDir,
+      'claude-relay-device',
+      '2.1.197 (Claude Code)',
     );
     const installMarker = path.join(tempDir, 'relay-device-install.txt');
     const runtime = new FakeInstallRuntime({
-      installCommand: `node -e "require('fs').writeFileSync(process.argv[1], 'relay-device-install')" ${installMarker}`,
+      installCommand: `node -e "require('fs').writeFileSync(process.argv[1], 'relay-device-install')" ${JSON.stringify(installMarker)}`,
     });
     app = buildTestApp(fakeCodexManager, {
       claudeRuntime: runtime,
@@ -1674,6 +1691,50 @@ describe('supervisor api', () => {
     });
   });
 
+  it('marks the Terminal plugin unavailable on native Windows', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, { platform: 'win32' });
+    await app.ready();
+
+    const listResponse = await app.inject({ method: 'GET', url: '/api/plugins' });
+    const terminal = listResponse.json<Array<{
+      id: string;
+      enabled: boolean;
+      available: boolean;
+      unavailableReasonCode: string | null;
+    }>>().find((plugin) => plugin.id === 'remote-codex.terminal');
+    expect(terminal).toMatchObject({
+      enabled: false,
+      available: false,
+      unavailableReasonCode: 'unsupported_platform',
+    });
+
+    const enableResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/plugins/remote-codex.terminal',
+      payload: { enabled: true },
+    });
+    expect(enableResponse.statusCode).toBe(409);
+    expect(enableResponse.json()).toMatchObject({
+      code: 'conflict',
+      details: { reasonCode: 'unsupported_platform' },
+    });
+
+    const runtimeResponse = await app.inject({
+      method: 'GET',
+      url: '/api/config/runtime',
+    });
+    expect(runtimeResponse.json()).toMatchObject({
+      platform: 'win32',
+      capabilities: {
+        terminal: false,
+        tmux: false,
+        managedSignals: false,
+        windowsTaskScheduler: true,
+      },
+    });
+  });
+
   it('updates shell labels through the shell API', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -2181,11 +2242,10 @@ describe('supervisor api', () => {
     await app.close();
     const binDir = path.join(tempDir, 'bin');
     await fs.mkdir(binDir, { recursive: true });
-    const claudeCommand = path.join(binDir, 'claude-old');
-    await fs.writeFile(
-      claudeCommand,
-      '#!/usr/bin/env node\nconsole.log("2.1.146 (Claude Code)")\n',
-      { mode: 0o755 },
+    const claudeCommand = await createVersionCommand(
+      binDir,
+      'claude-old',
+      '2.1.146 (Claude Code)',
     );
     const runtime = new FakeInstallRuntime({
       updateCommand: 'node -e "process.exit(0)"',

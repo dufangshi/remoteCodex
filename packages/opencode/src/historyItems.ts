@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { isPathInside } from '../../workspace/src/index';
+
 import type {
   AgentHistoryItem,
   AgentTurn,
@@ -163,12 +165,11 @@ function displayPath(pathValue: string | null, options: OpenCodeHistoryItemMappi
 
   const root = path.resolve(options.workspacePath);
   const absolutePath = path.resolve(pathValue);
+  if (!isPathInside(root, absolutePath)) {
+    return pathValue;
+  }
   const relativePath = path.relative(root, absolutePath);
-  if (
-    !relativePath ||
-    relativePath.startsWith('..') ||
-    path.isAbsolute(relativePath)
-  ) {
+  if (!relativePath) {
     return pathValue;
   }
   return relativePath;

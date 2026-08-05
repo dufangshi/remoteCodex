@@ -7,11 +7,37 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   WorkspaceServiceError,
   deleteWorkspaceFile,
+  isPathInside,
   moveWorkspaceFile,
   readWorkspaceTree,
   validateWorkspacePath,
   writeWorkspaceFile
 } from './index';
+
+describe('isPathInside', () => {
+  it('uses case-insensitive drive semantics on Windows', () => {
+    expect(isPathInside('C:\\Dev\\Repo', 'c:\\dev\\repo\\src\\index.ts', 'win32')).toBe(true);
+  });
+
+  it('rejects sibling prefixes and different Windows drives', () => {
+    expect(isPathInside('C:\\dev\\app', 'C:\\dev\\application\\index.ts', 'win32')).toBe(false);
+    expect(isPathInside('C:\\dev\\repo', 'D:\\dev\\repo\\index.ts', 'win32')).toBe(false);
+  });
+
+  it('supports spaces, unicode, and mixed Windows separators', () => {
+    expect(
+      isPathInside(
+        'C:\\Users\\Test User\\开发项目',
+        'c:/users/test user/开发项目/应用/src/a.ts',
+        'win32',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects parent traversal on POSIX', () => {
+    expect(isPathInside('/srv/workspaces/app', '/srv/workspaces/other', 'linux')).toBe(false);
+  });
+});
 
 describe('workspace service', () => {
   let rootDir = '';

@@ -7,6 +7,7 @@ import type {
   UpdatePluginInput,
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
+import { PluginUnavailableError } from '../plugins/plugin-service';
 
 const pluginParamsSchema = z.object({
   pluginId: z.string().min(1),
@@ -92,7 +93,17 @@ export async function registerPluginRoutes(app: FastifyInstance) {
     let plugin: PluginDto;
     try {
       plugin = app.services.pluginService.setPluginEnabled(pluginId, body.enabled);
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginUnavailableError) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: error.reason,
+          details: {
+            pluginId: error.pluginId,
+            reasonCode: 'unsupported_platform',
+          },
+        });
+      }
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Plugin was not found.',

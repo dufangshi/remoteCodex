@@ -1,11 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 
 import type {
   AgentActionQuestion,
@@ -58,8 +56,9 @@ import {
   userMessageHistoryItem,
   userMessageToHistoryItem,
 } from './historyItems';
+import { runProcess } from '../../process-runtime/src/index';
+import { isPathInside } from '../../workspace/src/index';
 
-const execFileAsync = promisify(execFile);
 
 type ClaudePromptInput = string | AsyncIterable<SDKUserMessage>;
 type ClaudeMessageContent =
@@ -378,8 +377,7 @@ function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefine
   const resolvedPath = path.isAbsolute(assetPath)
     ? path.normalize(assetPath)
     : path.resolve(cwd, assetPath);
-  const relativePath = path.relative(cwd, resolvedPath);
-  if (relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))) {
+  if (isPathInside(cwd, resolvedPath)) {
     return resolvedPath;
   }
   return null;
@@ -2495,12 +2493,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
     const relativePath = `./.temp/threads/${input.localThreadId}/claude-history-${safeAssetFilePart(input.messageId)}-${input.blockIndex}.${extension}`;
     const targetPath = path.resolve(input.workspacePath, relativePath);
-    const relativeToWorkspace = path.relative(input.workspacePath, targetPath);
-    if (
-      relativeToWorkspace === '' ||
-      relativeToWorkspace.startsWith('..') ||
-      path.isAbsolute(relativeToWorkspace)
-    ) {
+    if (!isPathInside(input.workspacePath, targetPath)) {
       return null;
     }
 
@@ -2762,12 +2755,10 @@ async function importOptionalPackage(specifier: string) {
 }
 
 async function npmGlobalRoot() {
-  try {
-    const { stdout } = await execFileAsync('npm', ['root', '-g'], {
-      timeout: 3_000,
-    });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
+  const result = await runProcess({
+    command: 'npm',
+    args: ['root', '-g'],
+    timeoutMs: 3_000,
+  });
+  return result.code === 0 ? result.stdout.trim() || null : null;
 }

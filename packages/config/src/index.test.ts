@@ -59,6 +59,24 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.opencode.enabled).toBe(false);
   });
 
+  it('enables only Codex by default on native Windows', () => {
+    const config = loadRuntimeConfig({}, 'win32');
+
+    expect(config.agentProviders.codex.enabled).toBe(true);
+    expect(config.agentProviders.claude.enabled).toBe(false);
+    expect(config.agentProviders.opencode.enabled).toBe(false);
+  });
+
+  it('honors explicit provider overrides on native Windows', () => {
+    const config = loadRuntimeConfig({
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,opencode',
+    }, 'win32');
+
+    expect(config.agentProviders.codex.enabled).toBe(true);
+    expect(config.agentProviders.claude.enabled).toBe(false);
+    expect(config.agentProviders.opencode.enabled).toBe(true);
+  });
+
   it('treats blank optional environment variables as unset', () => {
     const config = loadRuntimeConfig({
       REMOTE_CODEX_MODE: 'local',
@@ -133,8 +151,8 @@ describe('loadRuntimeConfig', () => {
     expect(config.port).toBe(9999);
     expect(config.logLevel).toBe('error');
     expect(config.disableRequestLogging).toBe(true);
-    expect(config.workspaceRoot).toBe('/tmp/workspaces');
-    expect(config.databaseUrl).toBe('/tmp/db.sqlite');
+    expect(config.workspaceRoot).toBe(path.resolve('/tmp/workspaces'));
+    expect(config.databaseUrl).toBe(path.resolve('/tmp/db.sqlite'));
     expect(config.auth).toEqual({
       adminUsername: 'admin',
       adminPassword: 'secret',
@@ -148,20 +166,20 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.codex).toEqual({
       provider: 'codex',
       enabled: true,
-      home: '/tmp/codex-home',
+      home: path.resolve('/tmp/codex-home'),
       command: 'codex-custom',
       appServerStartTimeoutMs: 15_000,
     });
     expect(config.agentProviders.claude).toEqual({
       provider: 'claude',
       enabled: true,
-      home: '/tmp/claude-home',
+      home: path.resolve('/tmp/claude-home'),
       command: 'claude-custom',
     });
     expect(config.agentProviders.opencode).toEqual({
       provider: 'opencode',
       enabled: false,
-      home: '/tmp/opencode-home',
+      home: path.resolve('/tmp/opencode-home'),
       command: 'opencode-custom',
     });
   });

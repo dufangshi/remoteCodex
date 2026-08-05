@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,6 +9,7 @@ import type {
   WorkspaceFileDto,
 } from '../../../packages/shared/src/index';
 import { assertPathWithinRoot } from '../../../packages/workspace/src/index';
+import { spawnProcess } from '../../../packages/process-runtime/src/index';
 import { HttpError } from './app';
 
 const PREVIEW_DEFAULT_LIMIT_BYTES = 50_000;
@@ -443,13 +443,15 @@ async function pathExists(absPath: string) {
 
 function cloneRepository(gitUrl: string, targetPath: string) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn('git', ['clone', gitUrl, targetPath], {
+    const child = spawnProcess({
+      command: 'git',
+      args: ['clone', gitUrl, targetPath],
       stdio: ['ignore', 'ignore', 'pipe']
     });
     let stderr = '';
 
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
       stderr += chunk;
     });
     child.on('error', (error) => {

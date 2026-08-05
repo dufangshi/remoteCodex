@@ -1,5 +1,7 @@
-import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+
+import { spawnProcess as spawnCrossPlatformProcess } from '../../process-runtime/src/index';
 
 import { JsonRpcClient, JsonRpcClientError } from './jsonrpc';
 import {
@@ -250,7 +252,9 @@ export class CodexAppServerManager extends EventEmitter {
     this.spawnProcess =
       options.spawnProcess ??
       ((command: string, args: string[]) =>
-        spawn(command, args, {
+        spawnCrossPlatformProcess({
+          command,
+          args,
           stdio: 'pipe'
         }) as unknown as ChildProcessWithoutNullStreams);
   }

@@ -1,11 +1,9 @@
 import { EventEmitter } from 'node:events';
-import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 
 import type {
   AgentHistoryItem,
@@ -37,8 +35,8 @@ import {
   openCodeMessageToHistoryItems,
   openCodeMessagesToPlanUpdate,
 } from './historyItems';
+import { runProcess } from '../../process-runtime/src/index';
 
-const execFileAsync = promisify(execFile);
 const openCodeWaitTimeoutMs = 1_500;
 const openCodePromptPollIntervalMs = 500;
 const openCodePromptTimeoutMs = 120_000;
@@ -1476,12 +1474,10 @@ function resolveOptionalPackage(
 }
 
 async function npmGlobalRoot() {
-  try {
-    const { stdout } = await execFileAsync('npm', ['root', '-g'], {
-      timeout: 3_000,
-    });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
+  const result = await runProcess({
+    command: 'npm',
+    args: ['root', '-g'],
+    timeoutMs: 3_000,
+  });
+  return result.code === 0 ? result.stdout.trim() || null : null;
 }

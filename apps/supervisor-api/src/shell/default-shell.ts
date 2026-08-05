@@ -2,8 +2,11 @@ import fs from 'node:fs';
 
 const POSIX_SHELL_CANDIDATES = ['/bin/bash', '/usr/bin/bash', '/bin/sh'];
 
-export function resolveDefaultShell(env: NodeJS.ProcessEnv = process.env) {
-  if (process.platform === 'win32') {
+export function resolveDefaultShell(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+) {
+  if (platform === 'win32') {
     return env.COMSPEC ?? 'cmd.exe';
   }
 

@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+import crypto from 'node:crypto';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
@@ -67,6 +68,12 @@ async function startService() {
   await assertTcpPortAvailable(apiHost, apiPort, 'API');
   await assertTcpPortAvailable(serviceHost, servicePort, 'Web');
 
+  const apiInstanceId = crypto.randomUUID();
+  const apiControlToken = crypto.randomBytes(32).toString('base64url');
+  const apiControlEndpoint = process.platform === 'win32'
+    ? `\\\\.\\pipe\\remote-codex-service-${crypto.createHash('sha256').update(serviceDir).digest('hex').slice(0, 24)}`
+    : path.join(serviceDir, 'api-control.sock');
+
   const apiPid = spawnDetached(process.execPath, [apiEntry], apiLogPath, {
     NODE_ENV: 'production',
     HOST: apiHost,
@@ -76,6 +83,9 @@ async function startService() {
     REMOTE_CODEX_PACKAGE_ROOT: repoRoot,
     REMOTE_CODEX_DISABLE_BUILD_RESTART:
       process.env.REMOTE_CODEX_DISABLE_BUILD_RESTART ?? (supportsSourceRestart ? 'false' : 'true'),
+    REMOTE_CODEX_LIFECYCLE_CONTROL_ENDPOINT: apiControlEndpoint,
+    REMOTE_CODEX_LIFECYCLE_CONTROL_TOKEN: apiControlToken,
+    REMOTE_CODEX_LIFECYCLE_INSTANCE_ID: apiInstanceId,
   });
 
   try {
@@ -108,11 +118,14 @@ async function startService() {
     apiHost,
     apiPort,
     apiPid,
+    apiInstanceId,
+    apiControlToken,
+    apiControlEndpoint,
     webPid,
     apiLogPath,
     webLogPath,
   };
-  await fsp.writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  await writePrivateState(state);
 
   console.log(`Started supervisor service.`);
   console.log(`Web: http://${serviceHost}:${servicePort} (pid ${webPid})`);
@@ -305,8 +318,14 @@ async function probeHttp(url) {
 }
 
 async function stopState(state) {
-  for (const pid of [state.webPid, state.apiPid]) {
-    stopPid(pid);
+  stopPid(state.webPid);
+  let apiShutdownRequested = false;
+  if (state.apiControlEndpoint && state.apiControlToken && state.apiInstanceId) {
+    const response = await requestLifecycleControl(state, 'shutdown').catch(() => null);
+    apiShutdownRequested = response?.ok === true && response.instanceId === state.apiInstanceId;
+  }
+  if (!apiShutdownRequested) {
+    stopPid(state.apiPid);
   }
 
   const deadline = Date.now() + 5_000;
@@ -331,12 +350,58 @@ async function readState() {
   }
 }
 
+async function writePrivateState(state) {
+  await fsp.mkdir(serviceDir, { recursive: true, mode: 0o700 });
+  await fsp.chmod(serviceDir, 0o700).catch(() => undefined);
+  const temporaryPath = `${stateFile}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  let handle = null;
+  try {
+    handle = await fsp.open(temporaryPath, 'wx', 0o600);
+    await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fsp.rename(temporaryPath, stateFile);
+    if (process.platform === 'win32') {
+      const username = process.env.USERDOMAIN && process.env.USERNAME
+        ? `${process.env.USERDOMAIN}\\${process.env.USERNAME}`
+        : process.env.USERNAME ?? os.userInfo().username;
+      spawnSync('icacls.exe', [
+        serviceDir,
+        '/inheritance:r',
+        '/grant:r',
+        `${username}:(OI)(CI)F`,
+        'SYSTEM:(OI)(CI)F',
+      ], { windowsHide: true, stdio: 'ignore' });
+      spawnSync('icacls.exe', [
+        stateFile,
+        '/inheritance:r',
+        '/grant:r',
+        `${username}:F`,
+        'SYSTEM:F',
+      ], { windowsHide: true, stdio: 'ignore' });
+    }
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 function serviceStateAlive(state) {
   return [state.apiPid, state.webPid].some((pid) => isProcessAlive(pid));
 }
 
 function stopPid(pid) {
   if (!Number.isInteger(pid) || pid <= 1) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawn('taskkill.exe', ['/PID', String(pid), '/T'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    }).unref();
     return;
   }
 
@@ -356,6 +421,14 @@ function stopPid(pid) {
 
 function forceStopPid(pid) {
   if (!Number.isInteger(pid) || pid <= 1) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    }).unref();
     return;
   }
 
@@ -410,5 +483,40 @@ function parsePort(value, fallback) {
 function sleep(milliseconds) {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
+  });
+}
+
+function requestLifecycleControl(state, action, timeoutMs = 2_000) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(state.apiControlEndpoint);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('Lifecycle control request timed out.'));
+    }, timeoutMs);
+    let output = '';
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.write(`${JSON.stringify({
+        action,
+        token: state.apiControlToken,
+        instanceId: state.apiInstanceId,
+      })}\n`);
+    });
+    socket.on('data', (chunk) => {
+      output += chunk;
+      const newline = output.indexOf('\n');
+      if (newline < 0) return;
+      clearTimeout(timer);
+      socket.end();
+      try {
+        resolve(JSON.parse(output.slice(0, newline)));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }

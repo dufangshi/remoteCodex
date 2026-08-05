@@ -64,6 +64,11 @@ import {
 } from './plugins/terminal-plugin-backend';
 import { AuthService, unauthorizedPayload } from './auth';
 import { RelayTunnelClient } from './relay-tunnel-client';
+import {
+  detectPlatformCapabilities,
+  type PlatformCapabilities,
+} from './platform/capabilities';
+import { TERMINAL_PLUGIN_ID } from '../../../packages/plugin-terminal/src/index';
 
 type WebsocketLike = {
   readyState: number;
@@ -156,6 +161,7 @@ export interface AppServices {
   pluginService: PluginService;
   authService: AuthService;
   relayTunnelClient: RelayTunnelClient | null;
+  platformCapabilities: PlatformCapabilities;
   repoRoot: string;
 }
 
@@ -236,9 +242,11 @@ export function buildApp(
     shellBackend?: ShellBackend;
     serviceLifecycle?: AppServices['serviceLifecycle'];
     relayTunnelClient?: RelayTunnelClient;
+    platform?: NodeJS.Platform;
   } = {},
 ): FastifyInstance {
-  const config = loadRuntimeConfig(options.env);
+  const config = loadRuntimeConfig(options.env, options.platform);
+  const platformCapabilities = detectPlatformCapabilities(options.platform);
   runMigrations(config.databaseUrl);
 
   const database = createDatabase(config.databaseUrl);
@@ -246,7 +254,16 @@ export function buildApp(
   const eventBus = new SupervisorEventBus();
   const pluginRegistry = new PluginRegistry(builtinPlugins);
   const pluginSettingsStore = new PluginSettingsStore(database.db);
-  const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
+  const unavailablePlugins = platformCapabilities.terminal
+    ? new Map<string, string>()
+    : new Map([
+        [TERMINAL_PLUGIN_ID, 'The Terminal plugin is not available on native Windows.'],
+      ]);
+  const pluginService = new PluginService(
+    pluginRegistry,
+    pluginSettingsStore,
+    { unavailablePlugins },
+  );
   const authService = new AuthService(config);
   const runtimeBootstrap =
     options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
@@ -267,7 +284,7 @@ export function buildApp(
     new ShellSessionService(
       database.db,
       eventBus,
-      options.shellBackend ?? createTerminalShellBackend(options.env),
+      options.shellBackend ?? createTerminalShellBackend(options.env, platformCapabilities),
     );
   const providerHostConfigService = new ProviderHostConfigService(
     agentRuntimes,
@@ -377,6 +394,7 @@ export function buildApp(
     pluginService,
     authService,
     relayTunnelClient,
+    platformCapabilities,
     repoRoot,
   });
 

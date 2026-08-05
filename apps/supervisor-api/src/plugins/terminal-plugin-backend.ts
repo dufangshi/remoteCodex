@@ -10,10 +10,20 @@ import type {
 import type { ShellBackend } from '../shell/shell-backend';
 import { PtyShellBackend } from '../shell/pty-shell-backend';
 import { TmuxShellBackend } from '../shell/tmux-shell-backend';
+import { UnsupportedShellBackend } from '../shell/unsupported-shell-backend';
+import type { PlatformCapabilities } from '../platform/capabilities';
 import { ShellServiceError } from '../shell/shell-session-service';
 import { registerShellRoutes } from '../routes/shells';
 
-export function createTerminalShellBackend(env: NodeJS.ProcessEnv = process.env): ShellBackend {
+export function createTerminalShellBackend(
+  env: NodeJS.ProcessEnv = process.env,
+  capabilities?: PlatformCapabilities,
+): ShellBackend {
+  if (capabilities && !capabilities.terminal) {
+    return new UnsupportedShellBackend(
+      'The Terminal plugin is not available on native Windows.',
+    );
+  }
   return env.REMOTE_CODEX_SHELL_BACKEND === 'tmux'
     ? new TmuxShellBackend()
     : new PtyShellBackend();
