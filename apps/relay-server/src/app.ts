@@ -56,6 +56,7 @@ interface SupervisorConnection extends DeviceConnectionStatus {
         close: (code?: number, reason?: string) => void;
       };
       threadId: string | null;
+      attachedShellId: string | null;
       deviceId: string;
       user: RelayUserDto;
       access: EffectiveRelayAccess;
@@ -1242,6 +1243,12 @@ export function buildRelayServer(
               parsed.clientId,
             );
             const eventThreadId = threadIdFromSocketPayload(parsed.payload);
+            const shellEventForClient = clientConnection
+              ? isShellEventForClient(
+                  parsed.payload,
+                  clientConnection.attachedShellId,
+                )
+              : false;
             if (clientConnection) {
               const freshAccess = store.effectiveAccess(
                 clientConnection.user.id,
@@ -1269,6 +1276,7 @@ export function buildRelayServer(
               if (
                 isolation?.enabled &&
                 !connectionControlEvent &&
+                !shellEventForClient &&
                 (!eventThreadId ||
                   !store.ownsHostedThread(
                     isolation.sandboxId,
@@ -1285,6 +1293,7 @@ export function buildRelayServer(
               shouldForwardSocketEvent(
                 parsed.payload,
                 clientConnection.threadId,
+                clientConnection.attachedShellId,
               )
             ) {
               clientConnection.socket.send(JSON.stringify(parsed.payload));
@@ -2020,6 +2029,7 @@ function connectRelayWebsocket(
   supervisor.clientSockets.set(clientId, {
     socket,
     threadId,
+    attachedShellId: null,
     deviceId,
     user,
     access,
@@ -2057,6 +2067,11 @@ function connectRelayWebsocket(
     ) {
       socket.close(1008, 'Shared read-only session cannot control supervisor.');
       return;
+    }
+
+    const attachedShellId = shellAttachIdFromSocketPayload(payload);
+    if (clientConnection && attachedShellId) {
+      clientConnection.attachedShellId = attachedShellId;
     }
 
     sendToSupervisor(supervisor, {
@@ -2948,6 +2963,7 @@ function isAllowedSharedWorkspacePath(
 function shouldForwardSocketEvent(
   event: SupervisorSocketServerEnvelope,
   threadId: string | null,
+  attachedShellId: string | null,
 ) {
   if (!threadId) {
     return true;
@@ -2958,7 +2974,30 @@ function shouldForwardSocketEvent(
   ) {
     return true;
   }
-  return 'threadId' in event && event.threadId === threadId;
+  if ('threadId' in event && event.threadId === threadId) {
+    return true;
+  }
+  return isShellEventForClient(event, attachedShellId);
+}
+
+function shellAttachIdFromSocketPayload(payload: unknown) {
+  return isObject(payload) &&
+    payload.type === 'shell.attach' &&
+    typeof payload.shellId === 'string'
+    ? payload.shellId
+    : null;
+}
+
+function isShellEventForClient(
+  event: SupervisorSocketServerEnvelope,
+  attachedShellId: string | null,
+) {
+  return Boolean(
+    attachedShellId &&
+      event.type.startsWith('shell.') &&
+      'shellId' in event &&
+      event.shellId === attachedShellId,
+  );
 }
 
 export function relayRequestBody(body: unknown): {

@@ -3585,6 +3585,116 @@ describe('relay server', () => {
     }
   });
 
+  it('forwards only the attached shell events to thread-bound relay clients', async () => {
+    const { app, friendToken, deviceId, deviceToken } =
+      await setupSharedRelaySession({
+        threadAccess: 'control',
+        workspaceAccess: 'read',
+      });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const baseUrl = websocketBaseUrl(app);
+    const supervisorSocket = new WebSocket(
+      `${baseUrl}/supervisor/tunnel?deviceToken=${encodeURIComponent(deviceToken)}`,
+    );
+    let clientSocket: WebSocket | null = null;
+    const shellId = '33333333-3333-4333-8333-333333333333';
+
+    try {
+      await waitForSocketOpen(supervisorSocket);
+      const connectedMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.connected',
+      );
+      clientSocket = new WebSocket(
+        `${baseUrl}/relay/devices/${deviceId}/ws?threadId=${encodeURIComponent(SHARED_THREAD_ID)}&relaySession=${encodeURIComponent(friendToken)}`,
+      );
+      await waitForSocketOpen(clientSocket);
+      const connectedMessage = await connectedMessagePromise;
+      const clientId = connectedMessage.clientId as string;
+
+      const attachMessagePromise = waitForSocketMessageMatching(
+        supervisorSocket,
+        (message) => message.type === 'relay.client.message',
+      );
+      clientSocket.send(
+        JSON.stringify({
+          type: 'shell.attach',
+          shellId,
+          cols: 120,
+          rows: 32,
+        }),
+      );
+      await expect(attachMessagePromise).resolves.toMatchObject({
+        type: 'relay.client.message',
+        clientId,
+        payload: {
+          type: 'shell.attach',
+          shellId,
+        },
+      });
+
+      const connectedEventPromise = waitForSocketMessage(clientSocket);
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
+          timestamp: '2026-08-04T00:00:01.000Z',
+          clientId,
+          payload: {
+            type: 'shell.connected',
+            shellId,
+            timestamp: '2026-08-04T00:00:01.000Z',
+            payload: { viewerId: 'viewer-1' },
+          },
+        }),
+      );
+      await expect(connectedEventPromise).resolves.toMatchObject({
+        type: 'shell.connected',
+        shellId,
+        payload: { viewerId: 'viewer-1' },
+      });
+
+      const outputEventPromise = waitForSocketMessage(clientSocket);
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
+          timestamp: '2026-08-04T00:00:02.000Z',
+          clientId,
+          payload: {
+            type: 'shell.output',
+            shellId,
+            timestamp: '2026-08-04T00:00:02.000Z',
+            payload: { data: 'relay shell ready\r\n' },
+          },
+        }),
+      );
+      await expect(outputEventPromise).resolves.toMatchObject({
+        type: 'shell.output',
+        shellId,
+        payload: { data: 'relay shell ready\r\n' },
+      });
+
+      const unrelatedShellEventPromise = expectNoSocketMessage(clientSocket);
+      supervisorSocket.send(
+        JSON.stringify({
+          type: 'relay.server.message',
+          timestamp: '2026-08-04T00:00:03.000Z',
+          clientId,
+          payload: {
+            type: 'shell.output',
+            shellId: '44444444-4444-4444-8444-444444444444',
+            timestamp: '2026-08-04T00:00:03.000Z',
+            payload: { data: 'must not leak\r\n' },
+          },
+        }),
+      );
+      await expect(unrelatedShellEventPromise).resolves.toBeUndefined();
+    } finally {
+      clientSocket?.close();
+      supervisorSocket.close();
+      await app.close();
+    }
+  });
+
   it('closes read-only shared websocket clients that send control messages', async () => {
     const { app, friendToken, deviceId, deviceToken } =
       await setupSharedRelaySession({
