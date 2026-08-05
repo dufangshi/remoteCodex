@@ -1459,6 +1459,7 @@ export function buildRelayServer(
   app.addHook('onClose', () => {
     hostedSandboxService.close();
     hostedSandboxReconciler.close();
+    store.close();
   });
 
   app.setErrorHandler((error, _request, reply) => {

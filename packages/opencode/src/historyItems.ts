@@ -172,7 +172,7 @@ function displayPath(pathValue: string | null, options: OpenCodeHistoryItemMappi
   if (!relativePath) {
     return pathValue;
   }
-  return relativePath;
+  return relativePath.split(path.sep).join('/');
 }
 
 function toolIsLowInformationPatch(

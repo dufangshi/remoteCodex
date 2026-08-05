@@ -6,7 +6,7 @@ import { loadRuntimeConfig, resolveDatabaseUrl } from './index';
 
 describe('loadRuntimeConfig', () => {
   it('uses defaults for development', () => {
-    const config = loadRuntimeConfig({});
+    const config = loadRuntimeConfig({}, 'linux');
 
     expect(config.nodeEnv).toBe('development');
     expect(config.mode).toBe('local');

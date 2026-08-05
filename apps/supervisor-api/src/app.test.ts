@@ -511,6 +511,7 @@ function createTestShellBackend(): ShellBackend {
 }
 
 describe('supervisor api', () => {
+  const platformTerminalIt = it.skipIf(process.platform === 'win32');
   let tempDir = '';
   let codexHome = '';
   let app: ReturnType<typeof buildApp>;
@@ -811,12 +812,16 @@ describe('supervisor api', () => {
       buildTestApp(fakeCodexManager, {
         env: {
           REMOTE_CODEX_MODE: 'relay',
+          DATABASE_URL: path.join(tempDir, 'invalid-relay.sqlite'),
           REMOTE_CODEX_ADMIN_USERNAME: 'admin',
           REMOTE_CODEX_ADMIN_PASSWORD: 'password',
           REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
         },
       }),
     ).toThrow(/REMOTE_CODEX_RELAY_SERVER_URL/);
+    await expect(
+      fs.stat(path.join(tempDir, 'invalid-relay.sqlite')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
 
     app = buildTestApp(fakeCodexManager);
     await app.ready();
@@ -829,11 +834,15 @@ describe('supervisor api', () => {
       buildTestApp(fakeCodexManager, {
         env: {
           REMOTE_CODEX_MODE: 'relay',
+          DATABASE_URL: path.join(tempDir, 'invalid-auth.sqlite'),
           REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
           REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
         },
       }),
     ).toThrow(/REMOTE_CODEX_ADMIN_USERNAME/);
+    await expect(
+      fs.stat(path.join(tempDir, 'invalid-auth.sqlite')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
 
     app = buildTestApp(fakeCodexManager);
     await app.ready();
@@ -1645,7 +1654,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('rejects shell API requests when the Terminal plugin is disabled', async () => {
+  platformTerminalIt('rejects shell API requests when the Terminal plugin is disabled', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
       url: '/api/workspaces',
@@ -1735,7 +1744,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('updates shell labels through the shell API', async () => {
+  platformTerminalIt('updates shell labels through the shell API', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
       url: '/api/workspaces',
@@ -6444,6 +6453,7 @@ describe('supervisor api', () => {
   });
 
   it('imports a Claude runtime session when a provider is selected', async () => {
+    await app.close();
     fakeClaudeRuntime = new FakeClaudeRuntime();
     app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
     const importedWorkspace = path.join(tempDir, 'imported-claude-project');
