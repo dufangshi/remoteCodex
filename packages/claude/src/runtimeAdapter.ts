@@ -176,6 +176,7 @@ interface SDKSessionInfo {
 type SessionMessage = SDKMessage;
 interface ModelInfo {
   value: string;
+  resolvedModel?: string;
   displayName: string;
   description: string;
   supportedEffortLevels?: string[];
@@ -709,7 +710,7 @@ function mapModelInfo(model: ModelInfo, index: number): AgentModel {
   return {
     id: model.value,
     model: model.value,
-    displayName: model.displayName,
+    displayName: versionedClaudeModelDisplayName(model),
     description: model.description,
     isDefault: index === 0,
     hidden: false,
@@ -721,11 +722,52 @@ function mapModelInfo(model: ModelInfo, index: number): AgentModel {
   };
 }
 
+function versionedClaudeModelDisplayName(model: ModelInfo) {
+  const resolved = model.resolvedModel?.match(
+    /^claude-(sonnet|opus|haiku|fable)-(\d+)(?:-(\d+))?(?:-|\[|$)/i,
+  );
+  if (!resolved) {
+    return model.displayName;
+  }
+
+  const family = `${resolved[1]![0]!.toUpperCase()}${resolved[1]!.slice(1).toLowerCase()}`;
+  const version = resolved[3] ? `${resolved[2]}.${resolved[3]}` : resolved[2]!;
+  if (model.value === 'default') {
+    return `Default · ${family} ${version}`;
+  }
+
+  const qualifier = model.displayName.match(/\s*(\([^)]+\))\s*$/)?.[1];
+  return `${family} · ${version}${qualifier ? ` ${qualifier}` : ''}`;
+}
+
+function versionedAlias(
+  alias: AgentModel,
+  discovered: AgentModel | undefined,
+  qualifier?: string,
+) {
+  if (!discovered) {
+    return alias;
+  }
+  return {
+    ...alias,
+    displayName: `${discovered.displayName.replace(/\s+\([^)]+\)\s*$/, '')}${qualifier ?? ''}`,
+    description: discovered.description,
+    supportedReasoningEfforts: discovered.supportedReasoningEfforts,
+    defaultReasoningEffort: discovered.defaultReasoningEffort,
+  };
+}
+
 function withClaudeCodeModelAliases(models: AgentModel[]) {
   const output = [...models];
-  const defaultSonnet = DEFAULT_CLAUDE_MODELS[0]!;
-  const oneMillionSonnet = DEFAULT_CLAUDE_MODELS[1]!;
-  const fable = DEFAULT_CLAUDE_MODELS[2]!;
+  const discoveredSonnet = output.find((model) => /^Sonnet · /.test(model.displayName));
+  const discoveredFable = output.find((model) => /^Fable · /.test(model.displayName));
+  const defaultSonnet = versionedAlias(DEFAULT_CLAUDE_MODELS[0]!, discoveredSonnet);
+  const oneMillionSonnet = versionedAlias(
+    DEFAULT_CLAUDE_MODELS[1]!,
+    discoveredSonnet,
+    ' (1M context)',
+  );
+  const fable = versionedAlias(DEFAULT_CLAUDE_MODELS[2]!, discoveredFable);
   const hasSonnetAlias = output.some((model) => model.model === 'sonnet');
   if (!hasSonnetAlias) {
     output.unshift(defaultSonnet);
@@ -1342,6 +1384,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   >();
   private subscriptionAuthKind: 'subscription' | 'apiKey' | 'unknown' = 'unknown';
   private subscriptionUsageObservedAt: string | null = null;
+  private modelOptionsCache: AgentModel[] | null = null;
   private readonly historicalTurnIdAliases = new Map<string, Map<string, string>>();
   private readonly clientApp: string;
   private sdkLoadError: string | null = null;
@@ -1507,15 +1550,35 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async listModels(): Promise<AgentModel[]> {
     const active = [...this.activeTurns.values()][0];
-    if (!active) {
-      return DEFAULT_CLAUDE_MODELS;
+    if (!active && this.modelOptionsCache) {
+      return this.modelOptionsCache;
     }
 
+    let query = active?.query ?? null;
+
     try {
-      const models = await active.query.supportedModels();
-      return withClaudeCodeModelAliases(models.map(mapModelInfo));
+      query ??= this.queryFactory({
+        prompt: '',
+        options: queryOptionsForRuntime({
+          home: this.options.home,
+          command: this.options.command,
+          clientApp: this.clientApp,
+          approvalMode: 'guarded',
+          includePartialMessages: false,
+          tools: [],
+          maxTurns: 1,
+        }),
+      });
+      const models = await query.supportedModels();
+      const mapped = withClaudeCodeModelAliases(models.map(mapModelInfo));
+      this.modelOptionsCache = mapped;
+      return mapped;
     } catch {
-      return DEFAULT_CLAUDE_MODELS;
+      return this.modelOptionsCache ?? DEFAULT_CLAUDE_MODELS;
+    } finally {
+      if (!active && query) {
+        query.close();
+      }
     }
   }
 

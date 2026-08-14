@@ -88,6 +88,7 @@ class FakeQuery implements Query {
     return [
       {
         value: 'claude-sonnet-4-5',
+        resolvedModel: 'claude-sonnet-4-5-20250929',
         displayName: 'Claude Sonnet 4.5',
         description: 'Test model',
         supportsEffort: true,
@@ -801,14 +802,17 @@ describe('ClaudeRuntimeAdapter', () => {
     await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
   });
 
-  it('exposes Claude Code model aliases and enables the 1M context beta', async () => {
+  it('discovers versioned Claude Code model labels while idle and enables the 1M context beta', async () => {
     const sdkOptions: Record<string, unknown>[] = [];
+    const queries: FakeQuery[] = [];
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
       command: 'claude',
       query: ((params: { prompt: string; options: Record<string, unknown> }) => {
         sdkOptions.push(params.options);
-        return new FakeQuery([systemInit(), result()]);
+        const query = new FakeQuery([systemInit(), result()]);
+        queries.push(query);
+        return query;
       }) as any,
       listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
       getSessionInfo: (async () => null) as any,
@@ -819,12 +823,12 @@ describe('ClaudeRuntimeAdapter', () => {
       expect.arrayContaining([
         expect.objectContaining({
           model: 'sonnet',
-          displayName: 'Claude Sonnet',
+          displayName: 'Sonnet · 4.5',
           isDefault: true,
         }),
         expect.objectContaining({
           model: 'sonnet[1m]',
-          displayName: 'Claude Sonnet 1M',
+          displayName: 'Sonnet · 4.5 (1M context)',
         }),
         expect.objectContaining({
           model: 'fable',
@@ -836,6 +840,9 @@ describe('ClaudeRuntimeAdapter', () => {
         }),
       ]),
     );
+    expect(queries[0]?.closed).toBe(true);
+    await adapter.listModels();
+    expect(queries).toHaveLength(1);
 
     await adapter.startSession({
       cwd: '/tmp/workspace',
@@ -844,7 +851,7 @@ describe('ClaudeRuntimeAdapter', () => {
       sandboxMode: 'workspace-write',
     });
 
-    expect(sdkOptions[0]).toMatchObject({
+    expect(sdkOptions.at(-1)).toMatchObject({
       model: 'sonnet',
       betas: ['context-1m-2025-08-07'],
     });
