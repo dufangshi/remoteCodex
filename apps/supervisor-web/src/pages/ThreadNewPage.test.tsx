@@ -525,7 +525,7 @@ describe('ThreadNewPage', () => {
             {
               id: 'haiku',
               model: 'haiku',
-              displayName: 'Haiku',
+              displayName: 'Haiku · 4.5',
               description: 'Claude Haiku',
               isDefault: true,
               hidden: false,
@@ -583,6 +583,7 @@ describe('ThreadNewPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Model')).toHaveValue('haiku');
     });
+    expect(screen.getByRole('option', { name: 'Haiku · 4.5' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Claude Thread' },

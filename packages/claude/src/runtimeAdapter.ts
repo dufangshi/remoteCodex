@@ -760,9 +760,12 @@ function versionedAlias(
 }
 
 function withClaudeCodeModelAliases(models: AgentModel[]) {
-  const output = [...models];
-  const discoveredSonnet = output.find((model) => /^Sonnet · /.test(model.displayName));
-  const discoveredFable = output.find((model) => /^Fable · /.test(model.displayName));
+  const discoveredSonnet = models.find((model) => /^Sonnet · /.test(model.displayName));
+  const discoveredFable = models.find((model) => /^Fable · /.test(model.displayName));
+  const discoveredOpus = models.find((model) => /^Opus · /.test(model.displayName));
+  const output = models.filter(
+    (model) => model !== discoveredFable || discoveredFable.model === 'fable',
+  );
   const defaultSonnet = versionedAlias(DEFAULT_CLAUDE_MODELS[0]!, discoveredSonnet);
   const oneMillionSonnet = versionedAlias(
     DEFAULT_CLAUDE_MODELS[1]!,
@@ -770,6 +773,7 @@ function withClaudeCodeModelAliases(models: AgentModel[]) {
     ' (1M context)',
   );
   const fable = versionedAlias(DEFAULT_CLAUDE_MODELS[2]!, discoveredFable);
+  const opus = versionedAlias(DEFAULT_CLAUDE_MODELS[3]!, discoveredOpus);
   const hasSonnetAlias = output.some((model) => model.model === 'sonnet');
   if (!hasSonnetAlias) {
     output.unshift(defaultSonnet);
@@ -779,6 +783,10 @@ function withClaudeCodeModelAliases(models: AgentModel[]) {
   }
   if (!output.some((model) => model.model === 'fable')) {
     output.splice(2, 0, fable);
+  }
+  if (!output.some((model) => model.model === 'opus')) {
+    const discoveredOpusIndex = output.findIndex((model) => /^Opus · /.test(model.displayName));
+    output.splice(discoveredOpusIndex >= 0 ? discoveredOpusIndex : output.length, 0, opus);
   }
   return output.map((model, index) => ({
     ...model,

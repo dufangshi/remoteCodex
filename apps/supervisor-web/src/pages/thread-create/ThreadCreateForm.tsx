@@ -385,7 +385,7 @@ export function ThreadCreateForm({
           ) : null}
           {models.map((entry) => (
             <option key={entry.id} value={entry.model}>
-              {entry.displayName} · {entry.model}
+              {entry.displayName}
             </option>
           ))}
         </select>
