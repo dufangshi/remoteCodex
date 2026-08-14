@@ -94,6 +94,22 @@ class FakeQuery implements Query {
         supportsEffort: true,
         supportedEffortLevels: ['low', 'medium', 'high'],
       },
+      {
+        value: 'claude-fable-5[1m]',
+        resolvedModel: 'claude-fable-5',
+        displayName: 'Fable',
+        description: 'Fable 5 test model',
+        supportsEffort: true,
+        supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      {
+        value: 'opus[1m]',
+        resolvedModel: 'claude-opus-5[1m]',
+        displayName: 'Opus (1M context)',
+        description: 'Opus 5 test model',
+        supportsEffort: true,
+        supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
     ];
   }
   async supportedAgents(): Promise<any[]> {
@@ -832,16 +848,28 @@ describe('ClaudeRuntimeAdapter', () => {
         }),
         expect.objectContaining({
           model: 'fable',
-          displayName: 'Claude Fable',
+          displayName: 'Fable · 5',
           defaultReasoningEffort: 'medium',
           supportedReasoningEfforts: expect.arrayContaining([
             expect.objectContaining({ reasoningEffort: 'max' }),
           ]),
         }),
+        expect.objectContaining({
+          model: 'opus',
+          displayName: 'Opus · 5',
+        }),
+        expect.objectContaining({
+          model: 'opus[1m]',
+          displayName: 'Opus · 5 (1M context)',
+        }),
+      ]),
+    );
+    await expect(adapter.listModels()).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ model: 'claude-fable-5[1m]' }),
       ]),
     );
     expect(queries[0]?.closed).toBe(true);
-    await adapter.listModels();
     expect(queries).toHaveLength(1);
 
     await adapter.startSession({
