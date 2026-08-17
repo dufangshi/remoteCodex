@@ -1266,7 +1266,7 @@ describe('ClaudeRuntimeAdapter', () => {
           message: {
             role: 'user',
             content:
-              '<task-notification>\\n<task-id>task-1</task-id>\\n<tool-use-id>toolu_agent_xml</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \"Audit docs\" finished</summary>\\n<result>Found one stale runbook.</result>\\n</task-notification>',
+              '<task-notification>\\n<task-id>task-1</task-id>\\n<tool-use-id>toolu_agent_xml</tool-use-id>\\n<status>completed</status>\\n<summary>Agent "Audit docs" finished</summary>\\n<result>Found one stale runbook.</result>\\n</task-notification>',
           },
           parent_tool_use_id: null,
           uuid: '00000000-0000-4000-8000-000000000042' as any,
@@ -2380,7 +2380,7 @@ describe('ClaudeRuntimeAdapter', () => {
           message: {
             role: 'user',
             content:
-              '<task-notification>\\n<task-id>task-a</task-id>\\n<tool-use-id>toolu_task_a</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \"Audit infra docs\" finished</summary>\\n<result>Infra docs need one migration checklist.</result>\\n</task-notification>',
+              '<task-notification>\\n<task-id>task-a</task-id>\\n<tool-use-id>toolu_task_a</tool-use-id>\\n<status>completed</status>\\n<summary>Agent "Audit infra docs" finished</summary>\\n<result>Infra docs need one migration checklist.</result>\\n</task-notification>',
           },
           parent_tool_use_id: null,
         },

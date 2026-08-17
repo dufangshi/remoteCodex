@@ -224,10 +224,7 @@ describe('workspace service', () => {
         content: 'changed',
       }),
     ).rejects.toMatchObject({
-      code:
-        process.platform === 'win32'
-          ? 'path_outside_root'
-          : 'path_symlink_forbidden',
+      code: 'path_outside_root',
     } satisfies Partial<WorkspaceServiceError>);
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside');
   });
