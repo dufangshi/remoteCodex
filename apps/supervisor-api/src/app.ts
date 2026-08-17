@@ -63,7 +63,10 @@ import {
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
 import { AuthService, unauthorizedPayload } from './auth';
-import { RelayTunnelClient } from './relay-tunnel-client';
+import {
+  RelayTunnelClient,
+  validateRelayTunnelConfig,
+} from './relay-tunnel-client';
 import {
   detectPlatformCapabilities,
   type PlatformCapabilities,
@@ -247,6 +250,10 @@ export function buildApp(
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env, options.platform);
   const platformCapabilities = detectPlatformCapabilities(options.platform);
+  if (config.mode === 'relay') {
+    validateRelayTunnelConfig(config.relay);
+  }
+  const authService = new AuthService(config);
   runMigrations(config.databaseUrl);
 
   const database = createDatabase(config.databaseUrl);
@@ -264,7 +271,6 @@ export function buildApp(
     pluginSettingsStore,
     { unavailablePlugins },
   );
-  const authService = new AuthService(config);
   const runtimeBootstrap =
     options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
   const repoRoot = findRepoRoot();

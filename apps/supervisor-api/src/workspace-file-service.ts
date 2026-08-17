@@ -415,7 +415,7 @@ function inferGitRepoName(gitUrl: string) {
   const trimmed = gitUrl.trim();
   const withoutQuery = trimmed.split(/[?#]/)[0] ?? trimmed;
   const normalized = withoutQuery.replace(/[\\/]+$/, '');
-  const rawName = normalized.split(/[/:]/).filter(Boolean).at(-1) ?? '';
+  const rawName = normalized.split(/[\\/:]/).filter(Boolean).at(-1) ?? '';
   const repoName = rawName.endsWith('.git') ? rawName.slice(0, -4) : rawName;
 
   if (!repoName || repoName === '.' || repoName === '..' || repoName.includes(path.sep)) {

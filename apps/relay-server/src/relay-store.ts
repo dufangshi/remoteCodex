@@ -162,6 +162,10 @@ export class RelayStore {
     );
   }
 
+  close() {
+    this.sqlite.close();
+  }
+
   seedAdmin(input: { username: string; email?: string; password: string }) {
     const existing = this.getUsers().find((user) => user.role === 'admin');
     if (existing) {

@@ -206,19 +206,28 @@ describe('workspace service', () => {
 
   it('rejects workspace file operations through symlinks', async () => {
     const workspacePath = path.join(rootDir, 'project');
-    const outsideFile = path.join(rootDir, 'outside.txt');
-    const linkPath = path.join(workspacePath, 'src', 'linked.txt');
+    const outsideDir = path.join(rootDir, 'outside');
+    const outsideFile = path.join(outsideDir, 'outside.txt');
+    const linkPath = path.join(workspacePath, 'src', 'linked');
+    await fs.mkdir(outsideDir);
     await fs.writeFile(outsideFile, 'outside');
-    await fs.symlink(outsideFile, linkPath);
+    await fs.symlink(
+      outsideDir,
+      linkPath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     await expect(
       writeWorkspaceFile({
         workspacePath,
-        relativePath: 'src/linked.txt',
+        relativePath: 'src/linked/outside.txt',
         content: 'changed',
       }),
     ).rejects.toMatchObject({
-      code: 'path_symlink_forbidden',
+      code:
+        process.platform === 'win32'
+          ? 'path_outside_root'
+          : 'path_symlink_forbidden',
     } satisfies Partial<WorkspaceServiceError>);
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside');
   });
