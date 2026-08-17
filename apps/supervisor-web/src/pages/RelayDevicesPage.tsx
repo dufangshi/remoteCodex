@@ -38,6 +38,7 @@ import { threadHref, workspacesHref } from '../lib/relayRoutes';
 import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
+type SupervisorPlatform = 'unix' | 'windows';
 
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof ApiError
@@ -422,7 +423,10 @@ export function RelayDevicesPage() {
     }
   }
 
-  async function copySupervisorSetup(device: RelayDeviceDto) {
+  async function copySupervisorSetup(
+    device: RelayDeviceDto,
+    platform: SupervisorPlatform,
+  ) {
     const token = device.token;
     if (!token) {
       setError(
@@ -432,7 +436,9 @@ export function RelayDevicesPage() {
     }
 
     try {
-      await navigator.clipboard?.writeText(relaySupervisorCommand(token));
+      await navigator.clipboard?.writeText(
+        relaySupervisorCommand(token, platform),
+      );
       setCopiedDeviceId(device.id);
       window.setTimeout(() => {
         setCopiedDeviceId((current) =>
@@ -512,7 +518,9 @@ export function RelayDevicesPage() {
                     device={device}
                     key={device.id}
                     onConnect={() => connectDevice(device)}
-                    onCopySetup={() => void copySupervisorSetup(device)}
+                    onCopySetup={(platform) =>
+                      void copySupervisorSetup(device, platform)
+                    }
                     onDelete={() => void removeDevice(device)}
                     onShare={() => setSharingDevice(device)}
                     setupTokenAvailable={Boolean(device.token)}
@@ -1590,11 +1598,13 @@ function DeviceRow({
   busy: boolean;
   copiedSetup: boolean;
   onConnect: () => void;
-  onCopySetup: () => void;
+  onCopySetup: (platform: SupervisorPlatform) => void;
   onDelete: () => void;
   onShare: () => void;
   setupTokenAvailable: boolean;
 }) {
+  const [setupMenuOpen, setSetupMenuOpen] = useState(false);
+  const setupMenuRef = useRef<HTMLDivElement>(null);
   const hostedStatus = device.hostedStatus ?? null;
   const canConnect = device.connected || hostedStatus === 'stopped';
   const statusText = hostedStatus
@@ -1602,6 +1612,33 @@ function DeviceRow({
     : device.connected
       ? 'Online'
       : 'Offline';
+
+  useEffect(() => {
+    if (!setupMenuOpen) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!setupMenuRef.current?.contains(event.target as Node)) {
+        setSetupMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setSetupMenuOpen(false);
+    }
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [setupMenuOpen]);
+
+  function copySetup(platform: SupervisorPlatform) {
+    setSetupMenuOpen(false);
+    onCopySetup(platform);
+  }
+
   return (
     <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1637,20 +1674,49 @@ function DeviceRow({
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
-          <button
-            className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
-            onClick={onCopySetup}
-            title={
-              setupTokenAvailable
-                ? 'Copy relay supervisor setup command'
-                : 'Device token is not available. Create a new device token for devices created before token storage was enabled.'
-            }
-            disabled={!setupTokenAvailable || Boolean(hostedStatus)}
-            type="button"
-          >
-            <Copy className="h-4 w-4" />
-            {copiedSetup ? 'Copied' : 'Copy setup'}
-          </button>
+          <div className="relative" ref={setupMenuRef}>
+            <button
+              aria-expanded={setupMenuOpen}
+              aria-haspopup="menu"
+              className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
+              onClick={() => setSetupMenuOpen((current) => !current)}
+              title={
+                setupTokenAvailable
+                  ? 'Choose a platform and copy the relay supervisor setup command'
+                  : 'Device token is not available. Create a new device token for devices created before token storage was enabled.'
+              }
+              disabled={!setupTokenAvailable || Boolean(hostedStatus)}
+              type="button"
+            >
+              <Copy className="h-4 w-4" />
+              {copiedSetup ? 'Copied' : 'Copy setup'}
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+            {setupMenuOpen ? (
+              <div
+                aria-label={`Setup platform for ${device.name}`}
+                className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)] sm:left-auto sm:right-0"
+                role="menu"
+              >
+                <button
+                  className="flex min-h-10 w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+                  onClick={() => copySetup('unix')}
+                  role="menuitem"
+                  type="button"
+                >
+                  macOS &amp; Linux
+                </button>
+                <button
+                  className="flex min-h-10 w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+                  onClick={() => copySetup('windows')}
+                  role="menuitem"
+                  type="button"
+                >
+                  Windows (PowerShell)
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button
             className="relay-button-primary inline-flex h-10 items-center gap-2 whitespace-nowrap"
             disabled={!canConnect}
@@ -1695,7 +1761,8 @@ function DeviceRow({
 }
 
 function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
-  const command = relaySupervisorCommand(result.token);
+  const [platform, setPlatform] = useState<SupervisorPlatform>('unix');
+  const command = relaySupervisorCommand(result.token, platform);
   return (
     <section className="rounded-lg border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] p-4">
       <h2 className="text-base font-semibold text-[var(--theme-fg)]">
@@ -1705,12 +1772,77 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
         Store this token now. It will not be shown again.
       </p>
       <CodeBlock label="Device token" value={result.token} />
-      <CodeBlock label="Supervisor command" value={command} />
+      <div className="mt-3">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+            Supervisor command
+          </p>
+          <div
+            aria-label="Supervisor command platform"
+            className="inline-flex rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-0.5"
+            role="group"
+          >
+            <PlatformButton
+              active={platform === 'unix'}
+              onClick={() => setPlatform('unix')}
+            >
+              macOS &amp; Linux
+            </PlatformButton>
+            <PlatformButton
+              active={platform === 'windows'}
+              onClick={() => setPlatform('windows')}
+            >
+              Windows
+            </PlatformButton>
+          </div>
+        </div>
+        <CodeBlock
+          copyLabel={`Copy ${platform === 'windows' ? 'Windows PowerShell' : 'macOS and Linux'} supervisor command`}
+          label={platform === 'windows' ? 'PowerShell' : 'Shell'}
+          nested
+          value={command}
+        />
+      </div>
     </section>
   );
 }
 
-function CodeBlock({ label, value }: { label: string; value: string }) {
+function PlatformButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={`min-h-8 rounded-md px-2.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)] ${
+        active
+          ? 'bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] shadow-sm'
+          : 'text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function CodeBlock({
+  copyLabel = 'Copy',
+  label,
+  nested = false,
+  value,
+}: {
+  copyLabel?: string;
+  label: string;
+  nested?: boolean;
+  value: string;
+}) {
   async function copy() {
     try {
       await navigator.clipboard?.writeText(value);
@@ -1720,12 +1852,13 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
   }
 
   return (
-    <div className="mt-3">
+    <div className={nested ? '' : 'mt-3'}>
       <div className="mb-1 flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
           {label}
         </p>
         <button
+          aria-label={copyLabel}
           className="relay-button-secondary inline-flex items-center gap-1 px-2 py-1 text-xs"
           onClick={() => void copy()}
           type="button"
@@ -1755,14 +1888,31 @@ function Notice({
   );
 }
 
-function relaySupervisorCommand(token: string) {
+function relaySupervisorCommand(
+  token: string,
+  platform: SupervisorPlatform = 'unix',
+) {
   const relayUrl = relayWebsocketBaseUrl();
+  if (platform === 'windows') {
+    return [
+      'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
+      `$env:REMOTE_CODEX_RELAY_SERVER_URL=${powershellQuote(relayUrl)}`,
+      `$env:REMOTE_CODEX_RELAY_AGENT_TOKEN=${powershellQuote(token)}`,
+      "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45679'",
+      'remote-codex relay-supervisor',
+    ].join('\n');
+  }
+
   return [
     `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
     `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\`,
     'REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\',
     'remote-codex relay-supervisor',
   ].join('\n');
+}
+
+function powershellQuote(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function shellQuote(value: string) {

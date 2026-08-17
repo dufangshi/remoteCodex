@@ -288,6 +288,8 @@ const WEBVIEW_CORS_ALLOW_METHODS = [
   'DELETE',
   'OPTIONS',
 ].join(', ');
+const RELAY_HTTP_BODY_LIMIT_MB = 50;
+const RELAY_HTTP_BODY_LIMIT_BYTES = RELAY_HTTP_BODY_LIMIT_MB * 1024 * 1024;
 const RELAY_REQUEST_HEADER_BLOCKLIST = new Set([
   'authorization',
   'connection',
@@ -345,7 +347,10 @@ export function buildRelayServer(
   config: RelayServerConfig,
   options: RelayServerBuildOptions = {},
 ): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: RELAY_HTTP_BODY_LIMIT_BYTES,
+  });
   app.addContentTypeParser(
     '*',
     { parseAs: 'buffer' },
@@ -1466,6 +1471,16 @@ export function buildRelayServer(
       reply.status(error.statusCode).send({
         code: error.code,
         message: error.message,
+      } satisfies ApiErrorShape);
+      return;
+    }
+    if (
+      isObject(error) &&
+      error.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
+    ) {
+      reply.status(413).send({
+        code: 'bad_request',
+        message: `Relay uploads must be ${RELAY_HTTP_BODY_LIMIT_MB} MB or smaller.`,
       } satisfies ApiErrorShape);
       return;
     }

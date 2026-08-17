@@ -221,7 +221,7 @@ describe('RelayDevicesPage', () => {
     });
   });
 
-  it('copies a real supervisor command when the relay returns the device token', async () => {
+  it('offers platform-specific setup commands when the relay returns the device token', async () => {
     renderPage([
       device({
         id: 'device-1',
@@ -233,16 +233,34 @@ describe('RelayDevicesPage', () => {
     await screen.findByText('MacBook Pro');
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy setup' }));
+    const setupMenu = screen.getByRole('menu', {
+      name: 'Setup platform for MacBook Pro',
+    });
+    expect(
+      within(setupMenu).getByRole('menuitem', { name: 'macOS & Linux' }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(setupMenu).getByRole('menuitem', {
+        name: 'Windows (PowerShell)',
+      }),
+    );
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
         expect.stringContaining(
-          'REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_real_device_token',
+          "$env:REMOTE_CODEX_RELAY_AGENT_TOKEN='rcd_real_device_token'",
         ),
       );
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679'),
+      expect.stringContaining(
+        'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
+      ),
+    );
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45679'",
+      ),
     );
     expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(
       expect.stringContaining('<device-token>'),
@@ -335,6 +353,9 @@ describe('RelayDevicesPage', () => {
 
     await screen.findByText('Token created for Studio Mac');
     fireEvent.click(screen.getByRole('button', { name: 'Copy setup' }));
+    fireEvent.click(
+      screen.getByRole('menuitem', { name: 'macOS & Linux' }),
+    );
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -346,6 +367,94 @@ describe('RelayDevicesPage', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679'),
     );
+  });
+
+  it('switches the newly created token panel between shell and PowerShell commands', async () => {
+    const devices: ReturnType<typeof device>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/relay/portal') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              user: baseUser,
+              devices,
+              sharedWithMe: [],
+              sharedByMe: [],
+            }),
+          });
+        }
+        if (url === '/relay/devices' && init?.method === 'POST') {
+          const created = device({
+            id: 'device-created',
+            name: 'Windows PC',
+            token: 'rcd_windows_token',
+          });
+          devices.push(created);
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ device: created, token: 'rcd_windows_token' }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({ code: 'not_found', message: 'Not found' }),
+        });
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/relay-devices']}>
+        <Routes>
+          <Route path="/relay-devices" element={<RelayDevicesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
+    fireEvent.change(screen.getByLabelText('Device name'), {
+      target: { value: 'Windows PC' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create device token' }),
+    );
+
+    await screen.findByText('Token created for Windows PC');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Windows', pressed: false }),
+    );
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' &&
+          element.textContent?.includes(
+            "$env:REMOTE_CODEX_RELAY_AGENT_TOKEN='rcd_windows_token'",
+          ) === true,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' &&
+          element.textContent?.startsWith(
+            'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
+          ) === true,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Copy Windows PowerShell supervisor command',
+      }),
+    );
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining('remote-codex relay-supervisor'),
+      );
+    });
   });
 
   it('does not copy a placeholder command when a legacy device has no stored token', async () => {

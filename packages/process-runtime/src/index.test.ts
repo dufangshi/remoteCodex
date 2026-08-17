@@ -16,6 +16,8 @@ afterEach(async () => {
 });
 
 describe('runProcess', () => {
+  const windowsIt = it.runIf(process.platform === 'win32');
+
   it('preserves argv values without shell interpretation', async () => {
     const argument = 'space & (parentheses) 中文';
     const result = await runProcess({
@@ -66,6 +68,25 @@ describe('runProcess', () => {
 
     expect(result.stdout).toBe('x'.repeat(10));
     expect(result.outputTruncated).toBe(true);
+  });
+
+  windowsIt('executes an npm-style command shim from a path with spaces', async () => {
+    const directory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'remote-codex command shim '),
+    );
+    temporaryDirectories.push(directory);
+    const shimPath = path.join(directory, 'fake-codex.cmd');
+    await fs.writeFile(shimPath, '@echo off\r\necho %~1\r\n');
+
+    const result = await runProcess({
+      command: shimPath,
+      args: ['shim executed'],
+      timeoutMs: 3_000,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('shim executed');
+    expect(result.spawnError).toBeNull();
   });
 });
 
