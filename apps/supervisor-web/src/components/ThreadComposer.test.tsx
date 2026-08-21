@@ -179,7 +179,7 @@ describe('ThreadComposer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'gpt-5-mini' }));
+    fireEvent.click(screen.getByRole('button', { name: 'GPT-5 Mini' }));
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({
@@ -249,9 +249,9 @@ describe('ThreadComposer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
-    expect(screen.getByRole('button', { name: 'gpt-5-mini' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'GPT-5 Mini' })).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole('button', { name: 'gpt-5-mini' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'GPT-5 Mini' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'medium' }));
     expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
@@ -319,6 +319,7 @@ describe('ThreadComposer', () => {
             ...modelOptions[0]!,
             id: 'model-long',
             model: 'gpt-5.4-super-long-mobile-label',
+            displayName: 'gpt-5.4-super-long-mobile-label',
           },
         ]}
         capabilities={codexCapabilities}
