@@ -36,6 +36,19 @@ import {
   themeOptions,
 } from './appShellNavigationModel';
 
+function unavailablePluginReason(plugin: unknown) {
+  if (!plugin || typeof plugin !== 'object') {
+    return null;
+  }
+  const availability = plugin as {
+    available?: unknown;
+    unavailableReason?: unknown;
+  };
+  return availability.available === false && typeof availability.unavailableReason === 'string'
+    ? availability.unavailableReason
+    : null;
+}
+
 export function AppShellSettingsDialog({
   embedded = false,
 }: {
@@ -816,17 +829,24 @@ export function AppShellSettingsDialog({
                   ? 'Imported manifest'
                   : 'Built-in module'}
               </span>
+              {unavailablePluginReason(plugin) ? (
+                <span className="mt-1 block text-xs leading-5 text-amber-300">
+                  {unavailablePluginReason(plugin)}
+                </span>
+              ) : null}
             </span>
             <input
               type="checkbox"
               checked={plugin.enabled}
+              disabled={unavailablePluginReason(plugin) !== null}
+              aria-label={`${plugin.name} enabled`}
               onChange={(event) =>
                 void plugins.setPluginEnabled(
                   plugin.id,
                   event.currentTarget.checked,
                 )
               }
-              className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)] disabled:cursor-not-allowed disabled:opacity-50"
             />
           </label>
         ))}

@@ -25,6 +25,11 @@ home or office workstation through an inbound port.
 - iOS IPA: [RemoteCodex.ipa](https://github.com/dufangshi/remoteCodex/releases/latest/download/RemoteCodex.ipa)
 - npm CLI: `npm install -g remote-codex`
 
+Native Windows Relay Supervisor support targets Windows 11 x64 with Node.js 22
+and Codex. The Terminal plugin is not available on Windows. See
+[Native Windows support](docs/windows.md) for setup, background management, and
+the current compatibility boundary.
+
 ### Why Remote Codex
 
 | Capability | What it means in practice |
@@ -278,6 +283,10 @@ Remote Codex 支持本机、Tailscale/LAN 和公网 Relay 三种访问方式。R
 - Android APK: [remote-codex-android.apk](https://github.com/dufangshi/remoteCodex/releases/latest/download/remote-codex-android.apk)
 - iOS IPA: [RemoteCodex.ipa](https://github.com/dufangshi/remoteCodex/releases/latest/download/RemoteCodex.ipa)
 - npm CLI: `npm install -g remote-codex`
+
+原生 Windows Relay Supervisor 首版支持 Windows 11 x64、Node.js 22 和 Codex；
+Windows 暂不提供 Terminal 插件。安装、后台运行方法和兼容范围见
+[原生 Windows 支持说明](docs/windows.md)。
 
 ### 为什么使用 Remote Codex
 

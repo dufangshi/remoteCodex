@@ -10,7 +10,7 @@ describe('resolveDefaultShell', () => {
       return filePath === '/custom/shell';
     });
 
-    expect(resolveDefaultShell({ SHELL: '/custom/shell' })).toBe('/custom/shell');
+    expect(resolveDefaultShell({ SHELL: '/custom/shell' }, 'linux')).toBe('/custom/shell');
     expect(existsSpy).toHaveBeenCalledWith('/custom/shell');
   });
 
@@ -19,6 +19,14 @@ describe('resolveDefaultShell', () => {
       return filePath === '/bin/sh';
     });
 
-    expect(resolveDefaultShell({ SHELL: '/missing/zsh' })).toBe('/bin/sh');
+    expect(resolveDefaultShell({ SHELL: '/missing/zsh' }, 'linux')).toBe('/bin/sh');
+  });
+
+  it('uses COMSPEC on Windows without probing POSIX shells', () => {
+    const existsSpy = vi.spyOn(fs, 'existsSync');
+
+    expect(resolveDefaultShell({ COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'win32'))
+      .toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(existsSpy).not.toHaveBeenCalled();
   });
 });

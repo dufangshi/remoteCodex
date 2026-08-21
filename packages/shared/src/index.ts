@@ -64,6 +64,15 @@ export interface RuntimeConfigDto {
   port: number;
   workspaceRoot: string;
   environment: string;
+  platform?: string;
+  architecture?: string;
+  nodeVersion?: string;
+  capabilities?: {
+    terminal: boolean;
+    tmux: boolean;
+    managedSignals: boolean;
+    windowsTaskScheduler: boolean;
+  };
 }
 
 export interface AuthSessionDto {
@@ -1066,6 +1075,9 @@ export interface PluginManifestDto {
 export interface PluginDto extends PluginManifestDto {
   enabled: boolean;
   source?: 'builtin' | 'imported' | null;
+  available?: boolean;
+  unavailableReasonCode?: 'unsupported_platform' | null;
+  unavailableReason?: string | null;
 }
 
 export interface UpdatePluginInput {

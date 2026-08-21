@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -120,7 +121,10 @@ describe('CodexRuntimeAdapter', () => {
         { type: 'text', text: 'Inspect this ', text_elements: [] },
         {
           type: 'localImage',
-          path: '/tmp/workspace/.temp/threads/thread-1/photo.png',
+          path: path.join(
+            path.resolve('/tmp/workspace'),
+            '.temp/threads/thread-1/photo.png',
+          ),
         },
         { type: 'text', text: ' then summarize.', text_elements: [] },
       ],
@@ -141,7 +145,10 @@ describe('CodexRuntimeAdapter', () => {
       { type: 'text', text: 'Inspect ', text_elements: [] },
       {
         type: 'localImage',
-        path: '/tmp/workspace/.temp/threads/thread-1/photo.heic',
+        path: path.join(
+          path.resolve('/tmp/workspace'),
+          '.temp/threads/thread-1/photo.heic',
+        ),
       },
       { type: 'text', text: '.', text_elements: [] },
     ]);

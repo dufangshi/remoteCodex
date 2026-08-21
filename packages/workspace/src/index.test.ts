@@ -7,11 +7,37 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   WorkspaceServiceError,
   deleteWorkspaceFile,
+  isPathInside,
   moveWorkspaceFile,
   readWorkspaceTree,
   validateWorkspacePath,
   writeWorkspaceFile
 } from './index';
+
+describe('isPathInside', () => {
+  it('uses case-insensitive drive semantics on Windows', () => {
+    expect(isPathInside('C:\\Dev\\Repo', 'c:\\dev\\repo\\src\\index.ts', 'win32')).toBe(true);
+  });
+
+  it('rejects sibling prefixes and different Windows drives', () => {
+    expect(isPathInside('C:\\dev\\app', 'C:\\dev\\application\\index.ts', 'win32')).toBe(false);
+    expect(isPathInside('C:\\dev\\repo', 'D:\\dev\\repo\\index.ts', 'win32')).toBe(false);
+  });
+
+  it('supports spaces, unicode, and mixed Windows separators', () => {
+    expect(
+      isPathInside(
+        'C:\\Users\\Test User\\开发项目',
+        'c:/users/test user/开发项目/应用/src/a.ts',
+        'win32',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects parent traversal on POSIX', () => {
+    expect(isPathInside('/srv/workspaces/app', '/srv/workspaces/other', 'linux')).toBe(false);
+  });
+});
 
 describe('workspace service', () => {
   let rootDir = '';
@@ -180,19 +206,25 @@ describe('workspace service', () => {
 
   it('rejects workspace file operations through symlinks', async () => {
     const workspacePath = path.join(rootDir, 'project');
-    const outsideFile = path.join(rootDir, 'outside.txt');
-    const linkPath = path.join(workspacePath, 'src', 'linked.txt');
+    const outsideDir = path.join(rootDir, 'outside');
+    const outsideFile = path.join(outsideDir, 'outside.txt');
+    const linkPath = path.join(workspacePath, 'src', 'linked');
+    await fs.mkdir(outsideDir);
     await fs.writeFile(outsideFile, 'outside');
-    await fs.symlink(outsideFile, linkPath);
+    await fs.symlink(
+      outsideDir,
+      linkPath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     await expect(
       writeWorkspaceFile({
         workspacePath,
-        relativePath: 'src/linked.txt',
+        relativePath: 'src/linked/outside.txt',
         content: 'changed',
       }),
     ).rejects.toMatchObject({
-      code: 'path_symlink_forbidden',
+      code: 'path_outside_root',
     } satisfies Partial<WorkspaceServiceError>);
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside');
   });

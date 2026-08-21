@@ -1,6 +1,10 @@
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { spawn, type IPty, type IDisposable } from '@homebridge/node-pty-prebuilt-multiarch';
+import type {
+  IPty,
+  IDisposable,
+} from '@homebridge/node-pty-prebuilt-multiarch';
 
 import type {
   ShellBackend,
@@ -26,6 +30,12 @@ interface PtySession {
 
 const MAX_SCROLLBACK_BYTES = 512 * 1024;
 const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*[@-~]`, 'g');
+const require = createRequire(import.meta.url);
+
+function spawnPty(...args: Parameters<typeof import('@homebridge/node-pty-prebuilt-multiarch').spawn>) {
+  const nodePty = require('@homebridge/node-pty-prebuilt-multiarch') as typeof import('@homebridge/node-pty-prebuilt-multiarch');
+  return nodePty.spawn(...args);
+}
 
 function shellArgs(shell: string) {
   const shellName = path.basename(shell).toLowerCase();
@@ -88,7 +98,7 @@ export class PtyShellBackend implements ShellBackend {
       return;
     }
 
-    const pty = spawn(this.shell, shellArgs(this.shell), {
+    const pty = spawnPty(this.shell, shellArgs(this.shell), {
       name: 'xterm-256color',
       cwd: input.cwd,
       cols: input.cols ?? 120,

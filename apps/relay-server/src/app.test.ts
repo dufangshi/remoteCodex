@@ -546,6 +546,47 @@ describe('relay server', () => {
     });
   });
 
+  it('accepts relay request bodies larger than Fastify\'s 1 MiB default', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${crypto.randomUUID()}/api/threads/${SHARED_THREAD_ID}/prompt`,
+      headers: {
+        'content-type': 'multipart/form-data; boundary=relay-upload-test',
+      },
+      payload: Buffer.alloc(2 * 1024 * 1024, 1),
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ code: 'unauthorized' });
+
+    await app.close();
+  });
+
+  it('returns a specific 413 error when a relay upload exceeds 50 MiB', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/relay/devices/${crypto.randomUUID()}/api/threads/${SHARED_THREAD_ID}/prompt`,
+      headers: {
+        'content-type': 'multipart/form-data; boundary=relay-upload-test',
+      },
+      payload: Buffer.alloc(50 * 1024 * 1024 + 1, 1),
+    });
+
+    expect(response.statusCode).toBe(413);
+    expect(response.json()).toEqual({
+      code: 'bad_request',
+      message: 'Relay uploads must be 50 MB or smaller.',
+    });
+
+    await app.close();
+  });
+
   it('registers users and lets them create relay devices', async () => {
     const app = buildRelayServer(testConfig());
     await app.ready();

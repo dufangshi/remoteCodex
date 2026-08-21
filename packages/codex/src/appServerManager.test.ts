@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
@@ -80,6 +83,8 @@ class ScriptedChild extends EventEmitter {
 }
 
 describe('CodexAppServerManager', () => {
+  const windowsIt = it.runIf(process.platform === 'win32');
+
   it('starts against a newline-delimited JSON-RPC process', async () => {
     const script = [
       "const readline=require('node:readline');",
@@ -115,6 +120,48 @@ describe('CodexAppServerManager', () => {
     expect(models[0]?.model).toBe('gpt-5');
 
     await manager.stop();
+  });
+
+  windowsIt('starts an npm-style Codex command shim from a path with spaces', async () => {
+    const directory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'remote-codex app server shim '),
+    );
+    const scriptPath = path.join(directory, 'fake-codex.cjs');
+    const shimPath = path.join(directory, 'fake-codex.cmd');
+    const script = [
+      "const readline = require('node:readline');",
+      'const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });',
+      "rl.on('line', (line) => {",
+      ' const message = JSON.parse(line);',
+      " if (message.method === 'initialize') {",
+      "  process.stdout.write(JSON.stringify({ id: message.id, result: { userAgent: 'fake-cmd', codexHome: 'C:/tmp', platformFamily: 'windows', platformOs: 'windows' } }) + '\\n');",
+      ' }',
+      '});',
+    ].join('\n');
+
+    await fs.writeFile(scriptPath, script);
+    await fs.writeFile(
+      shimPath,
+      `@echo off\r\n"${process.execPath}" "%~dp0fake-codex.cjs" %*\r\n`,
+    );
+
+    const manager = new CodexAppServerManager({
+      command: shimPath,
+      startupTimeoutMs: 3_000,
+      clientInfo: {
+        name: 'test',
+        title: 'test',
+        version: '0.1.0',
+      },
+    });
+
+    try {
+      await manager.start();
+      expect(manager.getStatus().state).toBe('ready');
+    } finally {
+      await manager.stop();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('surfaces spawn failures as a failed status instead of crashing', async () => {

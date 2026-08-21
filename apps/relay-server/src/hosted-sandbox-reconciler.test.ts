@@ -12,6 +12,7 @@ import { HostedSandboxReconciler } from './hosted-sandbox-reconciler';
 import { RelayStore, RelayStoreError } from './relay-store';
 
 const dataDirs: string[] = [];
+const stores: RelayStore[] = [];
 
 function config(): RelayServerConfig['hostedSandbox'] {
   return {
@@ -29,6 +30,7 @@ function setup() {
   const dataDir = `/tmp/rcd-hosted-reconcile-${crypto.randomUUID()}`;
   dataDirs.push(dataDir);
   const store = RelayStore.fromDataDir(dataDir, 'reconcile-secret', true);
+  stores.push(store);
   const admin = store.seedAdmin({ username: 'admin', password: 'password123' });
   const user = store.register({
     email: 'reconcile@example.test',
@@ -57,6 +59,7 @@ function provider(inventory: HostedSandboxProviderInventory) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  stores.splice(0).forEach((store) => store.close());
   await Promise.all(
     dataDirs
       .splice(0)

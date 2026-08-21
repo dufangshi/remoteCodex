@@ -25,6 +25,7 @@ import {
   UpdateThreadSettingsInput,
   UpdateThreadInput,
 } from '../../../../packages/shared/src/index';
+import { assertPathWithinRoot } from '../../../../packages/workspace/src/index';
 import { HttpError } from '../app';
 import { agentBackendIdSchema } from '../provider-schemas';
 
@@ -534,14 +535,9 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const resolvedWorkspaceRoot = await fs
       .realpath(app.services.config.workspaceRoot)
       .catch(() => path.resolve(app.services.config.workspaceRoot));
-    const workspacePrefix = resolvedWorkspaceRoot.endsWith(path.sep)
-      ? resolvedWorkspaceRoot
-      : `${resolvedWorkspaceRoot}${path.sep}`;
-
-    if (
-      requestedPath !== resolvedWorkspaceRoot &&
-      !requestedPath.startsWith(workspacePrefix)
-    ) {
+    try {
+      await assertPathWithinRoot(resolvedWorkspaceRoot, requestedPath);
+    } catch {
       throw new HttpError(403, {
         code: 'forbidden',
         message: 'Image path must stay within the configured workspace root.'

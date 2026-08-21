@@ -101,7 +101,16 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       host: app.services.config.host,
       port: app.services.config.port,
       workspaceRoot: app.services.config.workspaceRoot,
-      environment: app.services.config.nodeEnv
+      environment: app.services.config.nodeEnv,
+      platform: app.services.platformCapabilities.platform,
+      architecture: process.arch,
+      nodeVersion: process.version,
+      capabilities: {
+        terminal: app.services.platformCapabilities.terminal,
+        tmux: app.services.platformCapabilities.tmux,
+        managedSignals: app.services.platformCapabilities.managedSignals,
+        windowsTaskScheduler: app.services.platformCapabilities.windowsTaskScheduler,
+      },
     } satisfies RuntimeConfigDto;
   });
 

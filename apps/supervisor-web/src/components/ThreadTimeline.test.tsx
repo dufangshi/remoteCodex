@@ -303,7 +303,7 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Turn 29')).not.toBeInTheDocument();
   });
 
-  it('auto-loads one page of older remote history after the user scrolls to the loaded top', () => {
+  it('auto-loads one page of older remote history after a second upward gesture at the loaded top', () => {
     const onLoadEarlier = vi.fn();
     const latestTurns = Array.from({ length: 3 }, (_, index) => makeTurn(index + 13));
 
@@ -318,14 +318,14 @@ describe('ThreadTimeline', () => {
 
     expect(screen.getByText(/Showing 3 of 15 turns/)).toBeInTheDocument();
 
-    FakeIntersectionObserver.triggerAll();
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    fireEvent.wheel(scrollContainer, { deltaY: -24 });
     expect(onLoadEarlier).not.toHaveBeenCalled();
 
-    fireEvent.scroll(screen.getByTestId('thread-scroll-container'));
-    FakeIntersectionObserver.triggerAll();
+    fireEvent.wheel(scrollContainer, { deltaY: -24 });
     expect(onLoadEarlier).toHaveBeenCalledTimes(1);
 
-    FakeIntersectionObserver.triggerAll();
+    fireEvent.wheel(scrollContainer, { deltaY: -24 });
     expect(onLoadEarlier).toHaveBeenCalledTimes(1);
   });
 
@@ -408,7 +408,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
   });
 
-  it('attaches reasoning to the following agent message behind an expander', async () => {
+  it('renders reasoning as a separate timeline message before the following agent reply', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -439,14 +439,11 @@ describe('ThreadTimeline', () => {
 
     await screen.findByText('The failing command is npm test.');
     expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
-    expect(screen.queryByText('I should inspect the failing command first.')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
-
     expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Thought Process/i })).not.toBeInTheDocument();
   });
 
-  it('attaches trailing live reasoning to a completed agent message before the turn ends', async () => {
+  it('renders trailing live reasoning separately before the turn ends', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -488,15 +485,11 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('The direct answer is ready.');
-    expect(screen.queryByText('I checked the context and selected the concise answer.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
-
     expect(screen.getByText('I checked the context and selected the concise answer.')).toBeInTheDocument();
+    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
   });
 
-  it('attaches Claude reasoning to the eventual agent message even when tool items intervene', async () => {
+  it('keeps Claude reasoning visible when tool items intervene before the agent reply', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -538,10 +531,6 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('Here is the plan.');
-    expect(screen.queryByText('I should produce a plan and avoid code edits.')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Thought Process/i }));
-
     expect(screen.getByText('I should produce a plan and avoid code edits.')).toBeInTheDocument();
     expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
   });

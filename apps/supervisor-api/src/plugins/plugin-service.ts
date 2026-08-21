@@ -27,6 +27,19 @@ const MANAGED_CODEX_MCP_END =
 const REMOTE_CODEX_MOLECULE_MCP_TOOL_NAME = 'remote_codex_render_molecule';
 const MAX_REMOTE_MANIFEST_BYTES = 1024 * 1024;
 
+export class PluginUnavailableError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly reason: string,
+  ) {
+    super(reason);
+  }
+}
+
+export interface PluginServiceOptions {
+  unavailablePlugins?: ReadonlyMap<string, string>;
+}
+
 function jsonString(value: string) {
   return JSON.stringify(value);
 }
@@ -177,23 +190,34 @@ export class PluginService {
   constructor(
     private readonly registry: PluginRegistry,
     private readonly settingsStore?: PluginSettingsStore,
+    private readonly options: PluginServiceOptions = {},
   ) {
     this.loadPersistedSettings();
+    for (const pluginId of this.options.unavailablePlugins?.keys() ?? []) {
+      if (this.registry.get(pluginId)) {
+        this.registry.setEnabled(pluginId, false);
+      }
+    }
   }
 
   listPlugins(): PluginDto[] {
-    return this.registry.list();
+    return this.registry.list().map((plugin) => this.withAvailability(plugin));
   }
 
   getPlugin(pluginId: string): PluginDto | null {
-    return this.registry.get(pluginId);
+    const plugin = this.registry.get(pluginId);
+    return plugin ? this.withAvailability(plugin) : null;
   }
 
   setPluginEnabled(pluginId: string, enabled: boolean): PluginDto {
+    const unavailableReason = this.options.unavailablePlugins?.get(pluginId);
+    if (unavailableReason) {
+      throw new PluginUnavailableError(pluginId, unavailableReason);
+    }
     const plugin = this.registry.setEnabled(pluginId, enabled);
     this.settings.enabled[pluginId] = enabled;
     this.persistSettings();
-    return plugin;
+    return this.withAvailability(plugin);
   }
 
   modelContextPrompt(): string | null {
@@ -310,7 +334,7 @@ export class PluginService {
     if (!plugin) {
       throw new Error(`Plugin import failed: ${manifest.id}`);
     }
-    return plugin;
+    return this.withAvailability(plugin);
   }
 
   uninstallPlugin(pluginId: string): PluginDto {
@@ -402,6 +426,25 @@ export class PluginService {
 
   private persistSettings() {
     this.settingsStore?.save(this.settings);
+  }
+
+  private withAvailability(plugin: PluginDto): PluginDto {
+    const reason = this.options.unavailablePlugins?.get(plugin.id);
+    if (!reason) {
+      return {
+        ...plugin,
+        available: true,
+        unavailableReasonCode: null,
+        unavailableReason: null,
+      };
+    }
+    return {
+      ...plugin,
+      enabled: false,
+      available: false,
+      unavailableReasonCode: 'unsupported_platform',
+      unavailableReason: reason,
+    };
   }
 
   private parseManifestJson(manifestJson: string | undefined) {

@@ -11,6 +11,7 @@ import { HostedSandboxService } from './hosted-sandbox-service';
 import { RelayStore } from './relay-store';
 
 const dataDirs: string[] = [];
+const stores: RelayStore[] = [];
 
 function lifecycleConfig(): RelayServerConfig['hostedSandbox'] {
   return {
@@ -45,6 +46,7 @@ function setup() {
   const dataDir = `/tmp/rcd-hosted-idle-${crypto.randomUUID()}`;
   dataDirs.push(dataDir);
   const store = RelayStore.fromDataDir(dataDir, 'idle-session-secret', true);
+  stores.push(store);
   const admin = store.seedAdmin({ username: 'admin', password: 'password123' });
   const registration = store.register({
     email: 'idle-user@example.test',
@@ -68,6 +70,7 @@ function setup() {
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  stores.splice(0).forEach((store) => store.close());
   await Promise.all(
     dataDirs
       .splice(0)

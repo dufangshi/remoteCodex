@@ -1,6 +1,5 @@
 import { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -16,6 +15,11 @@ import {
   ModelOptionDto,
   ReasoningEffortDto,
 } from '../../../../packages/shared/src/index';
+import {
+  parseCommandLine,
+  resolveExecutable,
+  runProcess,
+} from '../../../../packages/process-runtime/src/index';
 import { agentBackendIdSchema } from '../provider-schemas';
 import { HttpError } from '../app';
 
@@ -135,7 +139,7 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
       const beforeUpdate = action === 'update'
         ? await activeCommandSnapshot(app, runtime)
         : null;
-      const result = await runShellCommand(command);
+      const result = await runProcess(parseCommandLine(command));
       if (result.code !== 0) {
         runtime.installation.lastError = commandFailureMessage(command, result);
         const error = new Error(runtime.installation.lastError);
@@ -342,7 +346,7 @@ async function updatePathWarning(
     return null;
   }
 
-  const npmBin = await npmGlobalBin();
+  const npmBin = await npmGlobalBin(app.services.platformCapabilities.platform);
   const managedPackages = npmManagedPackageNames[runtime.provider] ?? [];
   return [
     `${runtime.displayName} update command completed, but the active command still reports ${after.version}.`,
@@ -386,52 +390,57 @@ async function packageVersionFromPath(packageJsonPath: string) {
 }
 
 async function latestPackageVersion(packageName: string) {
-  const result = await runShellCommand(`npm view ${shellQuote(packageName)} version`, 4_000);
+  const result = await runProcess({
+    command: 'npm',
+    args: ['view', packageName, 'version'],
+    timeoutMs: 4_000,
+  });
   return result.code === 0 ? firstLine(result.stdout) : null;
 }
 
 async function npmGlobalRoot() {
-  const result = await runShellCommand('npm root -g', 3_000);
+  const result = await runProcess({
+    command: 'npm',
+    args: ['root', '-g'],
+    timeoutMs: 3_000,
+  });
   return result.code === 0 ? firstLine(result.stdout) : null;
 }
 
-async function npmGlobalBin() {
-  const result = await runShellCommand('npm bin -g', 3_000);
+async function npmGlobalBin(platform: NodeJS.Platform = process.platform) {
+  const result = await runProcess({
+    command: 'npm',
+    args: ['bin', '-g'],
+    timeoutMs: 3_000,
+  });
   if (result.code === 0) {
     return firstLine(result.stdout);
   }
 
   const prefix = await npmGlobalPrefix();
-  return prefix ? path.join(prefix, 'bin') : null;
+  return prefix ? (platform === 'win32' ? prefix : path.join(prefix, 'bin')) : null;
 }
 
 async function npmGlobalPrefix() {
-  const result = await runShellCommand('npm prefix -g', 3_000);
+  const result = await runProcess({
+    command: 'npm',
+    args: ['prefix', '-g'],
+    timeoutMs: 3_000,
+  });
   return result.code === 0 ? firstLine(result.stdout) : null;
 }
 
 async function commandPathFor(command: string) {
-  if (path.isAbsolute(command)) {
-    return command;
-  }
-  const result = await runShellCommand(`command -v ${shellQuote(command)}`, 3_000);
-  return result.code === 0 ? firstLine(result.stdout) : null;
+  return resolveExecutable(command);
 }
 
 async function commandVersion(command: string, args: string[]) {
-  const result = await runShellCommand(
-    [shellQuote(command), ...args.map(shellQuote)].join(' '),
-    3_000,
-  );
+  const result = await runProcess({ command, args, timeoutMs: 3_000 });
   return result.code === 0 ? firstLine(result.stdout || result.stderr) : null;
 }
 
 function firstLine(value: string) {
   return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
-}
-
-function shellQuote(value: string) {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function commandFailureMessage(
@@ -442,60 +451,4 @@ function commandFailureMessage(
   return output
     ? `${command} failed: ${output}`
     : `${command} failed with exit code ${result.code ?? 'unknown'}.`;
-}
-
-function runShellCommand(command: string): Promise<{
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}>;
-function runShellCommand(command: string, timeoutMs: number): Promise<{
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}>;
-function runShellCommand(command: string, timeoutMs = 0): Promise<{
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}> {
-  return new Promise((resolve) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const finish = (code: number | null) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      resolve({ code, stdout, stderr });
-    };
-    const timer = timeoutMs > 0
-      ? setTimeout(() => {
-          stderr = stderr || `${command} timed out.`;
-          child.kill('SIGTERM');
-          finish(124);
-        }, timeoutMs)
-      : null;
-    child.stdout.on('data', (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on('close', (code) => {
-      finish(code);
-    });
-    child.on('error', (error) => {
-      stderr = error.message;
-      finish(1);
-    });
-  });
 }

@@ -149,7 +149,10 @@ export function resolveDatabaseUrl(
   return path.resolve('.local', 'supervisor-dev.sqlite');
 }
 
-export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
+export function loadRuntimeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): RuntimeConfig {
   const parsed = envSchema.parse(normalizeOptionalEnv(env));
   const nodeEnv = parsed.NODE_ENV ?? 'development';
   const mode = parsed.REMOTE_CODEX_MODE ?? 'local';
@@ -161,7 +164,8 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     nodeEnv === 'production',
   );
   const enabledProviders = new Set(
-    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? agentBackendIds.join(','))
+    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ??
+      (platform === 'win32' ? 'codex' : agentBackendIds.join(',')))
       .split(',')
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)

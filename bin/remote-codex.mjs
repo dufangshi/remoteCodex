@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import net from 'node:net';
 
 const binDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(binDir, '..');
@@ -19,6 +20,13 @@ const supervisorSourceEntry = path.join(packageRoot, 'apps', 'supervisor-api', '
 const relaySupervisorConfigPath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG
   ? path.resolve(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG)
   : path.join(os.homedir(), '.remote-codex', 'relay-supervisor.json');
+const relaySupervisorStatePath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_STATE
+  ? path.resolve(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_STATE)
+  : path.join(os.homedir(), '.remote-codex', 'relay-supervisor-state.json');
+const relaySupervisorStartLockPath = `${relaySupervisorStatePath}.start.lock`;
+const relaySupervisorLogPath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG
+  ? path.resolve(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG)
+  : path.join(os.homedir(), '.remote-codex', 'logs', 'relay-supervisor.log');
 const relaySupervisorTmuxSession = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION?.trim()
   || 'remote-codex-relay-supervisor';
 const relaySupervisorConfigKeys = [
@@ -204,11 +212,19 @@ async function runRelaySupervisor() {
     return;
   }
   if (action === 'status') {
-    relaySupervisorStatus();
+    if (process.platform === 'win32') {
+      await relaySupervisorWindowsStatus();
+    } else {
+      relaySupervisorStatus();
+    }
     return;
   }
   if (action === 'stop') {
-    stopRelaySupervisorTmux();
+    if (process.platform === 'win32') {
+      await stopRelaySupervisorWindows();
+    } else {
+      stopRelaySupervisorTmux();
+    }
     return;
   }
   if (action !== 'start' && action !== 'run') {
@@ -217,6 +233,10 @@ async function runRelaySupervisor() {
     process.exit(1);
   }
   await ensureRelaySupervisorConfig();
+  if (action === 'start' && process.platform === 'win32') {
+    await startRelaySupervisorWindows();
+    return;
+  }
   if (action === 'start' && shouldStartRelaySupervisorInTmux()) {
     startRelaySupervisorTmux();
     return;
@@ -274,37 +294,11 @@ function runRelaySupervisorForeground() {
   validateRequiredEnv(guidance);
   printEnvSummary(guidance);
 
-  const supervisorEntry = fs.existsSync(supervisorDistEntry)
-    ? supervisorDistEntry
-    : supervisorSourceEntry;
-  let commandToRun = process.execPath;
-  let args = [supervisorEntry];
-
-  if (!fs.existsSync(supervisorEntry)) {
-    console.error('Supervisor API build artifacts are missing. Run `pnpm build` before using `remote-codex relay-supervisor`.');
-    console.error(`Missing: ${path.relative(packageRoot, supervisorDistEntry)}`);
-    process.exit(1);
-  }
-
-  if (supervisorEntry === supervisorSourceEntry) {
-    const tsxEntry = path.join(packageRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-    if (!fs.existsSync(tsxEntry)) {
-      console.error('Supervisor API build artifacts are missing and tsx is not installed for source execution.');
-      console.error('Run `pnpm build` or install dependencies with `pnpm install`.');
-      process.exit(1);
-    }
-    args = [tsxEntry, supervisorSourceEntry];
-  }
+  const { commandToRun, args } = resolveSupervisorLaunch();
 
   const supervisor = spawn(commandToRun, args, {
     cwd: packageRoot,
-    env: {
-      ...process.env,
-      REMOTE_CODEX_MODE: 'relay',
-      REMOTE_CODEX_PACKAGE_ROOT: process.env.REMOTE_CODEX_PACKAGE_ROOT ?? packageRoot,
-      REMOTE_CODEX_DISABLE_BUILD_RESTART:
-        process.env.REMOTE_CODEX_DISABLE_BUILD_RESTART ?? (sourceCheckout ? 'false' : 'true'),
-    },
+    env: relaySupervisorProcessEnv(),
     stdio: 'inherit',
   });
 
@@ -324,6 +318,351 @@ function runRelaySupervisorForeground() {
     console.error(`Failed to run remote-codex relay-supervisor: ${error.message}`);
     process.exit(1);
   });
+}
+
+function resolveSupervisorLaunch() {
+  const supervisorEntry = fs.existsSync(supervisorDistEntry)
+    ? supervisorDistEntry
+    : supervisorSourceEntry;
+  let args = [supervisorEntry];
+
+  if (!fs.existsSync(supervisorEntry)) {
+    console.error('Supervisor API build artifacts are missing. Run `pnpm build` before using `remote-codex relay-supervisor`.');
+    console.error(`Missing: ${path.relative(packageRoot, supervisorDistEntry)}`);
+    process.exit(1);
+  }
+
+  if (supervisorEntry === supervisorSourceEntry) {
+    const tsxEntry = path.join(packageRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    if (!fs.existsSync(tsxEntry)) {
+      console.error('Supervisor API build artifacts are missing and tsx is not installed for source execution.');
+      console.error('Run `pnpm build` or install dependencies with `pnpm install`.');
+      process.exit(1);
+    }
+    args = [tsxEntry, supervisorSourceEntry];
+  }
+  return { commandToRun: process.execPath, args };
+}
+
+function relaySupervisorProcessEnv(extra = {}) {
+  return {
+    ...process.env,
+    REMOTE_CODEX_MODE: 'relay',
+    REMOTE_CODEX_PACKAGE_ROOT: process.env.REMOTE_CODEX_PACKAGE_ROOT ?? packageRoot,
+    REMOTE_CODEX_DISABLE_BUILD_RESTART:
+      process.env.REMOTE_CODEX_DISABLE_BUILD_RESTART ?? (sourceCheckout ? 'false' : 'true'),
+    ...extra,
+  };
+}
+
+async function startRelaySupervisorWindows() {
+  const releaseStartLock = acquireRelaySupervisorStartLock();
+  if (!releaseStartLock) {
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    await startRelaySupervisorWindowsUnlocked();
+  } finally {
+    releaseStartLock();
+  }
+}
+
+async function startRelaySupervisorWindowsUnlocked() {
+  persistRelaySupervisorRuntimeConfig();
+  const existing = readRelaySupervisorState();
+  if (existing) {
+    const response = await requestRelaySupervisorLifecycle(existing, 'status').catch(() => null);
+    if (response?.ok === true && response.instanceId === existing.instanceId) {
+      console.log(`remote-codex relay-supervisor is already running (pid ${existing.pid}).`);
+      console.log(`Logs: ${existing.logPath ?? relaySupervisorLogPath}`);
+      return;
+    }
+    if (isPidAlive(existing.pid)) {
+      console.error('A relay-supervisor state file exists for a live process, but its identity could not be verified.');
+      console.error(`Refusing to replace or terminate pid ${existing.pid}. Inspect ${relaySupervisorStatePath}.`);
+      process.exitCode = 1;
+      return;
+    }
+    removeRelaySupervisorState();
+  }
+
+  const { commandToRun, args } = resolveSupervisorLaunch();
+  const instanceId = crypto.randomUUID();
+  const controlToken = randomSecret(32);
+  const identityHash = crypto
+    .createHash('sha256')
+    .update(`${relaySupervisorConfigPath}\0${os.userInfo().username}`)
+    .digest('hex')
+    .slice(0, 24);
+  const controlEndpoint = `\\\\.\\pipe\\remote-codex-relay-supervisor-${identityHash}`;
+  fs.mkdirSync(path.dirname(relaySupervisorLogPath), { recursive: true });
+  rotateRelaySupervisorLog();
+  const logFd = fs.openSync(relaySupervisorLogPath, 'a');
+  const child = spawn(commandToRun, args, {
+    cwd: packageRoot,
+    detached: true,
+    windowsHide: true,
+    env: relaySupervisorProcessEnv({
+      REMOTE_CODEX_LIFECYCLE_CONTROL_ENDPOINT: controlEndpoint,
+      REMOTE_CODEX_LIFECYCLE_CONTROL_TOKEN: controlToken,
+      REMOTE_CODEX_LIFECYCLE_INSTANCE_ID: instanceId,
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS:
+        process.env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex',
+    }),
+    stdio: ['ignore', logFd, logFd],
+  });
+  child.unref();
+  fs.closeSync(logFd);
+  if (!child.pid) {
+    console.error('Failed to start relay-supervisor in the background.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const state = {
+    schemaVersion: 1,
+    pid: child.pid,
+    instanceId,
+    controlToken,
+    controlEndpoint,
+    startedAt: new Date().toISOString(),
+    host: envValue(['REMOTE_CODEX_RELAY_SUPERVISOR_HOST', 'HOST'], '127.0.0.1'),
+    port: Number(envValue(['REMOTE_CODEX_RELAY_SUPERVISOR_PORT', 'PORT'], '8787')),
+    logPath: relaySupervisorLogPath,
+    version: readPackageVersion(),
+  };
+  writeRelaySupervisorState(state);
+
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(child.pid)) {
+      console.error(`relay-supervisor exited before becoming ready. Logs: ${relaySupervisorLogPath}`);
+      removeRelaySupervisorState();
+      process.exitCode = 1;
+      return;
+    }
+    const response = await requestRelaySupervisorLifecycle(state, 'status').catch(() => null);
+    if (response?.ok === true && response.instanceId === instanceId) {
+      console.log(`Started remote-codex relay-supervisor (pid ${child.pid}).`);
+      console.log(`Logs: ${relaySupervisorLogPath}`);
+      console.log('Status: remote-codex relay-supervisor status');
+      console.log('Stop:   remote-codex relay-supervisor stop');
+      return;
+    }
+    await sleep(250);
+  }
+  console.error(`Timed out waiting for relay-supervisor lifecycle control. Logs: ${relaySupervisorLogPath}`);
+  if (isPidAlive(child.pid)) {
+    spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+  }
+  removeRelaySupervisorState();
+  process.exitCode = 1;
+}
+
+function acquireRelaySupervisorStartLock() {
+  fs.mkdirSync(path.dirname(relaySupervisorStartLockPath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = fs.openSync(relaySupervisorStartLockPath, 'wx', 0o600);
+      fs.writeFileSync(descriptor, `${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
+      fs.fsyncSync(descriptor);
+      fs.closeSync(descriptor);
+      restrictWindowsPathAcl(relaySupervisorStartLockPath, false);
+      return () => {
+        try { fs.unlinkSync(relaySupervisorStartLockPath); } catch { /* Best-effort lock cleanup. */ }
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      const owner = readStartLockOwner();
+      if (attempt === 0 && isRelaySupervisorStartLockStale(owner)) {
+        try { fs.unlinkSync(relaySupervisorStartLockPath); } catch { /* Retry reports contention. */ }
+        continue;
+      }
+      console.error(`Another relay-supervisor start operation is active${owner?.pid ? ` (pid ${owner.pid})` : ''}.`);
+      return null;
+    }
+  }
+  return null;
+}
+
+function isRelaySupervisorStartLockStale(owner) {
+  if (owner) return !isPidAlive(owner.pid);
+  try {
+    return Date.now() - fs.statSync(relaySupervisorStartLockPath).mtimeMs > 30_000;
+  } catch {
+    return true;
+  }
+}
+
+function readStartLockOwner() {
+  try {
+    const value = JSON.parse(fs.readFileSync(relaySupervisorStartLockPath, 'utf8'));
+    return Number.isInteger(value?.pid) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function relaySupervisorWindowsStatus() {
+  const state = readRelaySupervisorState();
+  if (!state) {
+    console.log('remote-codex relay-supervisor is not running.');
+    process.exitCode = 1;
+    return;
+  }
+  const response = await requestRelaySupervisorLifecycle(state, 'status').catch(() => null);
+  if (response?.ok !== true || response.instanceId !== state.instanceId) {
+    if (!isPidAlive(state.pid)) {
+      removeRelaySupervisorState();
+      console.log('remote-codex relay-supervisor is not running; stale state was removed.');
+    } else {
+      console.log(`remote-codex relay-supervisor state is unverified for live pid ${state.pid}.`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+  console.log('State: running');
+  console.log(`PID: ${state.pid}`);
+  console.log(`Started: ${state.startedAt}`);
+  console.log(`API: http://${state.host}:${state.port}`);
+  console.log(`Logs: ${state.logPath}`);
+}
+
+async function stopRelaySupervisorWindows() {
+  const state = readRelaySupervisorState();
+  if (!state) {
+    console.log('remote-codex relay-supervisor is not running.');
+    return;
+  }
+  const status = await requestRelaySupervisorLifecycle(state, 'status').catch(() => null);
+  if (status?.ok !== true || status.instanceId !== state.instanceId) {
+    if (!isPidAlive(state.pid)) {
+      removeRelaySupervisorState();
+      console.log('remote-codex relay-supervisor was not running; stale state was removed.');
+      return;
+    }
+    console.error(`Refusing to stop unverified live pid ${state.pid}.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const shutdown = await requestRelaySupervisorLifecycle(state, 'shutdown').catch(() => null);
+  if (shutdown?.ok !== true || shutdown.instanceId !== state.instanceId) {
+    console.error('relay-supervisor rejected the authenticated shutdown request.');
+    process.exitCode = 1;
+    return;
+  }
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && isPidAlive(state.pid)) {
+    await sleep(250);
+  }
+  if (isPidAlive(state.pid)) {
+    const finalIdentity = await requestRelaySupervisorLifecycle(state, 'status').catch(() => null);
+    if (finalIdentity?.instanceId === state.instanceId) {
+      spawnSync('taskkill.exe', ['/PID', String(state.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    }
+  }
+  if (isPidAlive(state.pid)) {
+    console.error(`relay-supervisor pid ${state.pid} did not stop. State was preserved.`);
+    process.exitCode = 1;
+    return;
+  }
+  removeRelaySupervisorState();
+  console.log('Stopped remote-codex relay-supervisor.');
+}
+
+function requestRelaySupervisorLifecycle(state, action, timeoutMs = 2_000) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(state.controlEndpoint);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('Lifecycle control request timed out.'));
+    }, timeoutMs);
+    let output = '';
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.write(`${JSON.stringify({
+        action,
+        token: state.controlToken,
+        instanceId: state.instanceId,
+      })}\n`);
+    });
+    socket.on('data', (chunk) => {
+      output += chunk;
+      const newline = output.indexOf('\n');
+      if (newline < 0) return;
+      clearTimeout(timer);
+      socket.end();
+      try {
+        resolve(JSON.parse(output.slice(0, newline)));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+function readRelaySupervisorState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(relaySupervisorStatePath, 'utf8'));
+    if (
+      state?.schemaVersion !== 1 ||
+      !Number.isInteger(state.pid) ||
+      typeof state.instanceId !== 'string' ||
+      typeof state.controlToken !== 'string' ||
+      typeof state.controlEndpoint !== 'string'
+    ) {
+      return null;
+    }
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function writeRelaySupervisorState(state) {
+  writePrivateJsonFile(relaySupervisorStatePath, state);
+}
+
+function removeRelaySupervisorState() {
+  try {
+    fs.unlinkSync(relaySupervisorStatePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.error(`Failed to remove relay-supervisor state: ${error.message}`);
+    }
+  }
+}
+
+function rotateRelaySupervisorLog() {
+  const rotatedPath = `${relaySupervisorLogPath}.1`;
+  if (fs.existsSync(rotatedPath)) fs.rmSync(rotatedPath, { force: true });
+  if (fs.existsSync(relaySupervisorLogPath)) fs.renameSync(relaySupervisorLogPath, rotatedPath);
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function shouldStartRelaySupervisorInTmux() {
@@ -520,12 +859,59 @@ function readRelaySupervisorConfig() {
 }
 
 function writeRelaySupervisorConfig(config) {
-  fs.mkdirSync(path.dirname(relaySupervisorConfigPath), { recursive: true });
-  fs.writeFileSync(relaySupervisorConfigPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  writePrivateJsonFile(relaySupervisorConfigPath, config);
+}
+
+function writePrivateJsonFile(filePath, value) {
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  let descriptor = null;
   try {
-    fs.chmodSync(relaySupervisorConfigPath, 0o600);
-  } catch {
-    // Best-effort on filesystems that do not support chmod.
+    descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    try {
+      fs.chmodSync(temporaryPath, 0o600);
+      fs.chmodSync(directory, 0o700);
+    } catch {
+      // ACLs are applied separately on Windows.
+    }
+    if (process.platform === 'win32') {
+      restrictWindowsPathAcl(directory, true);
+      restrictWindowsPathAcl(temporaryPath, false);
+    }
+    fs.renameSync(temporaryPath, filePath);
+    if (process.platform === 'win32') {
+      restrictWindowsPathAcl(filePath, false);
+    }
+  } catch (error) {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch { /* Preserve the original write failure. */ }
+    }
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch {
+      // Preserve the original write failure.
+    }
+    throw error;
+  }
+}
+
+function restrictWindowsPathAcl(targetPath, directory) {
+  const username = process.env.USERDOMAIN && process.env.USERNAME
+    ? `${process.env.USERDOMAIN}\\${process.env.USERNAME}`
+    : process.env.USERNAME ?? os.userInfo().username;
+  const permission = directory ? '(OI)(CI)F' : 'F';
+  const result = spawnSync(
+    'icacls.exe',
+    [targetPath, '/inheritance:r', '/grant:r', `${username}:${permission}`, `SYSTEM:${permission}`],
+    { windowsHide: true, encoding: 'utf8' },
+  );
+  if (result.status !== 0) {
+    console.error(`Warning: unable to restrict Windows ACL for ${targetPath}.`);
   }
 }
 
@@ -980,6 +1366,14 @@ Typical flow:
 }
 
 function printRelaySupervisorHelp() {
+  const processManagement = process.platform === 'win32'
+    ? `On Windows, "start" launches a detached supervisor managed through an
+  authenticated local named pipe. "status" verifies the instance identity and
+  "stop" requests a clean shutdown before any process-tree fallback.`
+    : `By default, this command tries to start the supervisor in a detached tmux
+  session named "${relaySupervisorTmuxSession}" so the device stays online
+  after the launching terminal closes. If tmux is not installed, or if
+  REMOTE_CODEX_RELAY_SUPERVISOR_TMUX=0 is set, it runs in the foreground.`;
   console.log(`remote-codex relay-supervisor
 
 Run the private-machine supervisor backend in relay mode. This is the process
@@ -997,14 +1391,11 @@ This command automatically sets for the child supervisor:
   REMOTE_CODEX_MODE=relay
 
 Default process management:
-  By default, this command tries to start the supervisor in a detached tmux
-  session named "${relaySupervisorTmuxSession}" so the device stays online
-  after the launching terminal closes. If tmux is not installed, or if
-  REMOTE_CODEX_RELAY_SUPERVISOR_TMUX=0 is set, it runs in the foreground.
+  ${processManagement}
 
   Use "remote-codex relay-supervisor run" for explicit foreground/debug mode.
-  Use "remote-codex relay-supervisor status" to inspect the tmux session.
-  Use "remote-codex relay-supervisor stop" to stop the tmux session.
+  Use "remote-codex relay-supervisor status" to inspect the managed instance.
+  Use "remote-codex relay-supervisor stop" to stop the managed instance.
 
 Interactive setup:
   When REMOTE_CODEX_RELAY_SERVER_URL or REMOTE_CODEX_RELAY_AGENT_TOKEN is
@@ -1013,8 +1404,8 @@ Interactive setup:
     ${relaySupervisorConfigPath}
 
   The saved config also includes generated local supervisor auth/session values
-  and copied setup values such as REMOTE_CODEX_RELAY_SUPERVISOR_PORT, so the
-  tmux child process can start with the same effective configuration.
+  and copied setup values such as REMOTE_CODEX_RELAY_SUPERVISOR_PORT, so a
+  managed child process can start with the same effective configuration.
 
   Use "remote-codex relay-supervisor reset" to delete the saved config.
 

@@ -2919,7 +2919,7 @@ describe('ThreadDetailPage', () => {
             status: 413,
             json: async () => ({
               code: 'bad_request',
-              message: 'Each attachment must be 25 MB or smaller.',
+              message: 'Relay uploads must be 50 MB or smaller.',
             }),
           });
         }
@@ -3005,7 +3005,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText('Each attachment must be 25 MB or smaller.').length,
+        screen.getAllByText('Relay uploads must be 50 MB or smaller.').length,
       ).toBeGreaterThan(0);
     });
   });

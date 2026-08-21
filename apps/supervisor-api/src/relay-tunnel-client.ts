@@ -24,6 +24,14 @@ export type RelayClientMessageHandler = (
   send: (message: SupervisorSocketServerEnvelope) => void,
 ) => Promise<void> | void;
 
+export function validateRelayTunnelConfig(config: RuntimeConfig['relay']) {
+  if (!config.serverUrl || !config.agentToken) {
+    throw new Error(
+      'Relay mode requires REMOTE_CODEX_RELAY_SERVER_URL and REMOTE_CODEX_RELAY_AGENT_TOKEN.',
+    );
+  }
+}
+
 export class RelayTunnelClient {
   private socket: WebSocket | null = null;
   private heartbeatHandle: NodeJS.Timeout | null = null;
@@ -49,11 +57,7 @@ export class RelayTunnelClient {
   ) {}
 
   validateConfig() {
-    if (!this.config.serverUrl || !this.config.agentToken) {
-      throw new Error(
-        'Relay mode requires REMOTE_CODEX_RELAY_SERVER_URL and REMOTE_CODEX_RELAY_AGENT_TOKEN.',
-      );
-    }
+    validateRelayTunnelConfig(this.config);
   }
 
   start() {
