@@ -39,6 +39,10 @@ import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
 type SupervisorPlatform = 'unix' | 'windows';
+const RELAY_SUPERVISOR_PORT_BY_PLATFORM: Record<SupervisorPlatform, number> = {
+  unix: 45679,
+  windows: 45680,
+};
 
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof ApiError
@@ -1893,12 +1897,13 @@ function relaySupervisorCommand(
   platform: SupervisorPlatform = 'unix',
 ) {
   const relayUrl = relayWebsocketBaseUrl();
+  const supervisorPort = RELAY_SUPERVISOR_PORT_BY_PLATFORM[platform];
   if (platform === 'windows') {
     return [
       'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
       `$env:REMOTE_CODEX_RELAY_SERVER_URL=${powershellQuote(relayUrl)}`,
       `$env:REMOTE_CODEX_RELAY_AGENT_TOKEN=${powershellQuote(token)}`,
-      "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45679'",
+      `$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT=${powershellQuote(String(supervisorPort))}`,
       'remote-codex relay-supervisor',
     ].join('\n');
   }
@@ -1906,7 +1911,7 @@ function relaySupervisorCommand(
   return [
     `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
     `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\`,
-    'REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\',
+    `REMOTE_CODEX_RELAY_SUPERVISOR_PORT=${supervisorPort} \\`,
     'remote-codex relay-supervisor',
   ].join('\n');
 }

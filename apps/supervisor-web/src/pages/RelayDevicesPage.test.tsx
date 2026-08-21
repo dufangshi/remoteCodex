@@ -259,12 +259,20 @@ describe('RelayDevicesPage', () => {
     );
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining(
-        "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45679'",
+        "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45680'",
       ),
     );
     expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(
       expect.stringContaining('<device-token>'),
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copied' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'macOS & Linux' }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+        expect.stringContaining('REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679'),
+      );
+    });
   });
 
   it('labels a stopped hosted VM and allows connect to trigger wake navigation', async () => {
@@ -423,6 +431,15 @@ describe('RelayDevicesPage', () => {
     );
 
     await screen.findByText('Token created for Windows PC');
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' &&
+          element.textContent?.includes(
+            'REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679',
+          ) === true,
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Windows', pressed: false }),
     );
@@ -441,6 +458,15 @@ describe('RelayDevicesPage', () => {
           element?.tagName === 'CODE' &&
           element.textContent?.startsWith(
             'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
+          ) === true,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' &&
+          element.textContent?.includes(
+            "$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45680'",
           ) === true,
       ),
     ).toBeInTheDocument();

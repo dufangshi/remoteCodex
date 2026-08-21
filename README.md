@@ -200,8 +200,10 @@ REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \
 remote-codex relay-supervisor
 ```
 
-`45679` is used by default in copied setup commands to avoid common local
-`8787` port conflicts. You can change it if needed.
+Copied setup commands use `45679` for macOS/Linux and `45680` for Windows by
+default. The distinct ports allow a Windows host and WSL to run supervisors at
+the same time, while both avoid common local `8787` port conflicts. You can
+change either port if needed.
 
 By default, `remote-codex relay-supervisor` starts itself inside a detached
 `tmux` session so closing the terminal does not take the device offline. Manage
@@ -447,7 +449,9 @@ REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \
 remote-codex relay-supervisor
 ```
 
-复制命令默认使用 `45679`，用于避开本机常见的 `8787` 端口冲突；需要时可以手动换。
+复制命令默认在 macOS/Linux 使用 `45679`，在 Windows 使用 `45680`。两个端口互不
+相同，因此 Windows 主机和 WSL 可以同时运行 supervisor，并且都能避开本机常见的
+`8787` 端口冲突；需要时可以手动修改。
 
 默认情况下，`remote-codex relay-supervisor` 会尝试启动到 detached `tmux`
 session 里，这样关闭终端窗口不会让设备下线。可以用下面命令管理：
