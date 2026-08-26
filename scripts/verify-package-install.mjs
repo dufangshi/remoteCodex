@@ -40,6 +40,9 @@ try {
   const cliEntry = path.join(installedRoot, 'bin', 'remote-codex.mjs');
   await Promise.all([
     assertPackagedFile(path.join(installedRoot, 'docs', 'windows.md')),
+    assertPackagedFile(path.join(installedRoot, 'docs', 'windows-device-setup.zh.md')),
+    assertPackagedFile(path.join(installedRoot, 'docs', 'windows-device-manager.zh.md')),
+    assertPackagedFile(path.join(installedRoot, 'docs', 'windows-one-click-installer-research.zh.md')),
     assertPackagedFile(path.join(installedRoot, 'scripts', 'windows', 'install-relay-supervisor-task.ps1')),
     assertPackagedFile(path.join(installedRoot, 'scripts', 'windows', 'relay-smoke.ps1')),
     assertPackagedFile(path.join(installedRoot, 'packages', 'process-runtime', 'src', 'index.ts')),

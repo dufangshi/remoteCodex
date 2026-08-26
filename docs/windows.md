@@ -1,5 +1,11 @@
 # Native Windows support
 
+Additional documentation:
+
+- [Windows device setup guide (Chinese)](windows-device-setup.zh.md)
+- [Windows Device Manager EXE (Chinese)](windows-device-manager.zh.md)
+- [One-click Windows installer research and implementation plan (Chinese)](windows-one-click-installer-research.zh.md)
+
 Remote Codex Relay Supervisor contains a native Windows implementation with the following initial contract. Until the Windows CI and Windows 11 release checklist pass, treat it as a release candidate rather than a verified production support claim:
 
 - Windows 11 x64;

@@ -33,3 +33,5 @@ apps/ios/**/xcuserdata/
 apps/ios/**/*.xcuserstate
 apps/ios/DerivedData/
 apps/.local-does-not-exist
+apps/windows-device-manager/bin/
+apps/windows-device-manager/obj/

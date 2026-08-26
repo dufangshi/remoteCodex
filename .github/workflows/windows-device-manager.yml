@@ -1,0 +1,81 @@
+name: Windows device manager
+
+on:
+  pull_request:
+    paths:
+      - 'apps/windows-device-manager/**'
+      - 'scripts/windows/build-device-manager.ps1'
+      - '.github/workflows/windows-device-manager.yml'
+  push:
+    paths:
+      - 'apps/windows-device-manager/**'
+      - 'scripts/windows/build-device-manager.ps1'
+      - '.github/workflows/windows-device-manager.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-win-x64:
+    name: Publish self-contained win-x64 EXE
+    runs-on: windows-2022
+    timeout-minutes: 25
+    env:
+      WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build and run self-test
+        shell: pwsh
+        run: ./scripts/windows/build-device-manager.ps1
+
+      - name: Sign executable
+        if: env.WINDOWS_SIGNING_CERTIFICATE_BASE64 != ''
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'remote-codex-signing.pfx'
+          [IO.File]::WriteAllBytes(
+            $certificatePath,
+            [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
+          )
+          $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate `
+            -FilePath $certificatePath `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -Password $password
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) { throw 'signtool.exe was not found.' }
+          $executable = 'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe'
+          & $signTool.FullName sign `
+            /sha1 $certificate.Thumbprint `
+            /fd SHA256 `
+            /tr http://timestamp.digicert.com `
+            /td SHA256 `
+            $executable
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE." }
+          & $signTool.FullName verify /pa /v $executable
+          if ($LASTEXITCODE -ne 0) { throw "Signature verification failed with exit code $LASTEXITCODE." }
+          $hash = Get-FileHash -LiteralPath $executable -Algorithm SHA256
+          '{0}  RemoteCodex.DeviceManager.exe' -f $hash.Hash.ToLowerInvariant() |
+            Set-Content 'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe.sha256' -Encoding ascii
+          Remove-Item -LiteralPath $certificatePath -Force
+          Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-codex-device-manager-win-x64
+          path: artifacts/windows-device-manager/win-x64/
+          if-no-files-found: error
+          retention-days: 14
