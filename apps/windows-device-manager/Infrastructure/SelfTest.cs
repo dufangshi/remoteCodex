@@ -83,12 +83,33 @@ internal static class SelfTest
                 new RelaySupervisorService(runner, logger),
                 new StartupRegistrationService());
             using var form = new MainForm(controller);
-            form.CreateControl();
+            form.StartPosition = FormStartPosition.Manual;
+            form.Location = new Point(-20_000, -20_000);
+            form.ShowInTaskbar = false;
+            form.Show();
+            Application.DoEvents();
+            form.PerformLayout();
+            form.Refresh();
+            Application.DoEvents();
             using var bitmap = new Bitmap(form.Width, form.Height);
             form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
             bitmap.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
-            return 0;
+            form.Hide();
+
+            var accentPixelCount = 0;
+            for (var y = 30; y < bitmap.Height; y += 2)
+            {
+                for (var x = 0; x < bitmap.Width; x += 2)
+                {
+                    var pixel = bitmap.GetPixel(x, y);
+                    if (pixel.R is >= 150 and <= 210 && pixel.G is >= 45 and <= 115 && pixel.B <= 45)
+                    {
+                        accentPixelCount += 1;
+                    }
+                }
+            }
+            return accentPixelCount >= 100 ? 0 : 1;
         }
         catch
         {

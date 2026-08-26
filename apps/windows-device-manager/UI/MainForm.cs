@@ -42,6 +42,7 @@ internal sealed class MainForm : Form
         ForeColor = TextColor;
         Font = new Font("Segoe UI", 10F);
         AutoScaleMode = AutoScaleMode.Dpi;
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
 
         var root = new TableLayoutPanel
         {

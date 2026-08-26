@@ -67,8 +67,12 @@ jobs:
           & $signTool.FullName verify /pa /v $executable
           if ($LASTEXITCODE -ne 0) { throw "Signature verification failed with exit code $LASTEXITCODE." }
           $hash = Get-FileHash -LiteralPath $executable -Algorithm SHA256
-          '{0}  RemoteCodex.DeviceManager.exe' -f $hash.Hash.ToLowerInvariant() |
-            Set-Content 'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe.sha256' -Encoding ascii
+          $hashLine = '{0}  RemoteCodex.DeviceManager.exe' -f $hash.Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText(
+            'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe.sha256',
+            "$hashLine`n",
+            [Text.UTF8Encoding]::new($false)
+          )
           Remove-Item -LiteralPath $certificatePath -Force
           Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force
 

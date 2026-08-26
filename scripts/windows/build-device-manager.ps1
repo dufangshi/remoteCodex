@@ -57,7 +57,8 @@ if ($previewTest.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $previewPath -P
 
 $hash = Get-FileHash -LiteralPath $executable -Algorithm SHA256
 $hashLine = '{0}  {1}' -f $hash.Hash.ToLowerInvariant(), (Split-Path -Leaf $executable)
-Set-Content -LiteralPath (Join-Path $OutputPath 'RemoteCodex.DeviceManager.exe.sha256') -Value $hashLine -Encoding ascii
+$hashPath = Join-Path $OutputPath 'RemoteCodex.DeviceManager.exe.sha256'
+[IO.File]::WriteAllText($hashPath, "$hashLine`n", [Text.UTF8Encoding]::new($false))
 
 Write-Host "Built: $executable"
 Write-Host "SHA-256: $($hash.Hash.ToLowerInvariant())"
