@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text.Json;
 using RemoteCodex.DeviceManager.Infrastructure;
 using RemoteCodex.DeviceManager.Models;
 
@@ -7,6 +8,8 @@ namespace RemoteCodex.DeviceManager.Services;
 
 internal sealed class RuntimeProvisioner
 {
+    private sealed record RemoteCodexRuntime(string EntryPath, string Version);
+
     private readonly AppLogger _logger;
     private readonly ProcessRunner _runner;
     private readonly HttpClient _httpClient;
@@ -28,12 +31,65 @@ internal sealed class RuntimeProvisioner
         var nodePath = await EnsureNodeAsync(progress, cancellationToken);
         var codexPath = await EnsureCodexAsync(progress, cancellationToken);
         await EnsureCodexLoginAsync(codexPath, progress, confirmCodexLogin, cancellationToken);
-        var remoteCodexEntry = await EnsureRemoteCodexAsync(nodePath, progress, cancellationToken);
+        var remoteCodex = await EnsureRemoteCodexAsync(nodePath, progress, cancellationToken);
 
-        var state = new RuntimeState(nodePath, remoteCodexEntry, codexPath, DateTimeOffset.UtcNow);
+        var state = new RuntimeState(
+            nodePath,
+            remoteCodex.EntryPath,
+            codexPath,
+            DateTimeOffset.UtcNow,
+            remoteCodex.Version);
         state.Save();
         progress.Report(new("Ready", "All runtime checks passed.", ProvisioningStepState.Complete, 100));
         return state;
+    }
+
+    public async Task<string> GetLatestRemoteCodexVersionAsync(CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(ProductManifest.RemoteCodexLatestMetadataUri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var metadata = await JsonDocument.ParseAsync(content, cancellationToken: cancellationToken);
+        if (!metadata.RootElement.TryGetProperty("version", out var versionElement)
+            || versionElement.GetString() is not { Length: > 0 } version
+            || !TryParseVersion(version, out _))
+        {
+            throw new InvalidOperationException("The npm registry returned an invalid Remote Codex version.");
+        }
+        return version;
+    }
+
+    public async Task<RuntimeState> UpdateRemoteCodexAsync(
+        RuntimeState runtime,
+        string version,
+        IProgress<ProvisioningProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseVersion(version, out _))
+        {
+            throw new ArgumentException("The requested Remote Codex version is invalid.", nameof(version));
+        }
+
+        var remoteCodex = await EnsureRemoteCodexVersionAsync(
+            runtime.NodePath,
+            version,
+            progress,
+            cancellationToken);
+        var updated = runtime with
+        {
+            RemoteCodexEntryPath = remoteCodex.EntryPath,
+            RemoteCodexVersion = remoteCodex.Version,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        updated.Save();
+        return updated;
+    }
+
+    public static bool IsNewerVersion(string candidate, string current)
+    {
+        return TryParseVersion(candidate, out var candidateVersion)
+            && TryParseVersion(current, out var currentVersion)
+            && candidateVersion > currentVersion;
     }
 
     private async Task<string> EnsureNodeAsync(
@@ -277,21 +333,52 @@ internal sealed class RuntimeProvisioner
         progress.Report(new("Codex account", "Codex sign-in completed.", ProvisioningStepState.Complete, 48));
     }
 
-    private async Task<string> EnsureRemoteCodexAsync(
+    private async Task<RemoteCodexRuntime> EnsureRemoteCodexAsync(
         string nodePath,
         IProgress<ProvisioningProgress> progress,
         CancellationToken cancellationToken)
     {
         progress.Report(new("Remote Codex", "Checking the managed Remote Codex runtime...", ProvisioningStepState.Running, 56));
-        var prefix = Path.Combine(AppPaths.AppRoot, $"remote-codex-{ProductManifest.RemoteCodexVersion}");
-        var entryPath = Path.Combine(prefix, "node_modules", "remote-codex", "bin", "remote-codex.mjs");
-        if (await IsExpectedRemoteCodexAsync(nodePath, entryPath, cancellationToken))
+        var savedState = RuntimeState.Load(_logger);
+        if (savedState?.IsUsable == true
+            && !string.IsNullOrWhiteSpace(savedState.RemoteCodexVersion)
+            && !IsNewerVersion(ProductManifest.RemoteCodexVersion, savedState.RemoteCodexVersion)
+            && await IsExpectedRemoteCodexAsync(
+                nodePath,
+                savedState.RemoteCodexEntryPath,
+                savedState.RemoteCodexVersion,
+                cancellationToken))
         {
-            progress.Report(new("Remote Codex", $"Remote Codex {ProductManifest.RemoteCodexVersion} is ready.", ProvisioningStepState.Complete, 76));
-            return entryPath;
+            progress.Report(new(
+                "Remote Codex",
+                $"Remote Codex {savedState.RemoteCodexVersion} is ready.",
+                ProvisioningStepState.Complete,
+                76));
+            return new RemoteCodexRuntime(savedState.RemoteCodexEntryPath, savedState.RemoteCodexVersion);
         }
 
-        progress.Report(new("Remote Codex", $"Installing Remote Codex {ProductManifest.RemoteCodexVersion} privately...", ProvisioningStepState.Running, 62));
+        return await EnsureRemoteCodexVersionAsync(
+            nodePath,
+            ProductManifest.RemoteCodexVersion,
+            progress,
+            cancellationToken);
+    }
+
+    private async Task<RemoteCodexRuntime> EnsureRemoteCodexVersionAsync(
+        string nodePath,
+        string version,
+        IProgress<ProvisioningProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        var prefix = Path.Combine(AppPaths.AppRoot, $"remote-codex-{version}");
+        var entryPath = Path.Combine(prefix, "node_modules", "remote-codex", "bin", "remote-codex.mjs");
+        if (await IsExpectedRemoteCodexAsync(nodePath, entryPath, version, cancellationToken))
+        {
+            progress.Report(new("Remote Codex", $"Remote Codex {version} is ready.", ProvisioningStepState.Complete, 76));
+            return new RemoteCodexRuntime(entryPath, version);
+        }
+
+        progress.Report(new("Remote Codex", $"Installing Remote Codex {version} privately...", ProvisioningStepState.Running, 62));
         var npmCliPath = NpmCliPathFor(nodePath);
         if (!File.Exists(npmCliPath))
         {
@@ -315,15 +402,16 @@ internal sealed class RuntimeProvisioner
                     "--global",
                     "--prefix",
                     stagingPrefix,
-                    $"remote-codex@{ProductManifest.RemoteCodexVersion}",
+                    $"remote-codex@{version}",
                     "--no-audit",
                     "--no-fund",
                     "--loglevel=error",
                 ],
                 TimeSpan.FromMinutes(15),
+                environment: BuildNodeEnvironment(nodePath),
                 cancellationToken: cancellationToken);
             var stagedEntry = Path.Combine(stagingPrefix, "node_modules", "remote-codex", "bin", "remote-codex.mjs");
-            if (!install.Success || !await IsExpectedRemoteCodexAsync(nodePath, stagedEntry, cancellationToken))
+            if (!install.Success || !await IsExpectedRemoteCodexAsync(nodePath, stagedEntry, version, cancellationToken))
             {
                 throw new InvalidOperationException($"Remote Codex installation failed. {install.CombinedOutput}".Trim());
             }
@@ -342,18 +430,19 @@ internal sealed class RuntimeProvisioner
             }
         }
 
-        if (!await IsExpectedRemoteCodexAsync(nodePath, entryPath, cancellationToken))
+        if (!await IsExpectedRemoteCodexAsync(nodePath, entryPath, version, cancellationToken))
         {
             throw new InvalidOperationException("Remote Codex failed verification after installation.");
         }
 
-        progress.Report(new("Remote Codex", $"Remote Codex {ProductManifest.RemoteCodexVersion} installed.", ProvisioningStepState.Complete, 76));
-        return entryPath;
+        progress.Report(new("Remote Codex", $"Remote Codex {version} installed.", ProvisioningStepState.Complete, 76));
+        return new RemoteCodexRuntime(entryPath, version);
     }
 
     private async Task<bool> IsExpectedRemoteCodexAsync(
         string nodePath,
         string entryPath,
+        string expectedVersion,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(entryPath))
@@ -368,12 +457,53 @@ internal sealed class RuntimeProvisioner
                 [entryPath, "--version"],
                 TimeSpan.FromSeconds(30),
                 cancellationToken: cancellationToken);
-            return version.Success && version.StandardOutput.Trim().Equals(ProductManifest.RemoteCodexVersion, StringComparison.Ordinal);
+            if (!version.Success || !version.StandardOutput.Trim().Equals(expectedVersion, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var packageRoot = Directory.GetParent(Path.GetDirectoryName(entryPath)!)?.FullName;
+            if (packageRoot is null)
+            {
+                return false;
+            }
+
+            var sqliteModulePath = Path.Combine(packageRoot, "node_modules", "better-sqlite3");
+            var nativeDependency = await _runner.RunAsync(
+                nodePath,
+                [
+                    "-e",
+                    "const Database=require(process.argv[1]);const database=new Database(':memory:');database.close()",
+                    sqliteModulePath,
+                ],
+                TimeSpan.FromSeconds(30),
+                environment: BuildNodeEnvironment(nodePath),
+                cancellationToken: cancellationToken);
+            return nativeDependency.Success;
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool TryParseVersion(string value, out Version version)
+    {
+        var coreVersion = value.Split('-', 2, StringSplitOptions.TrimEntries)[0];
+        return Version.TryParse(coreVersion, out version!);
+    }
+
+    private static IReadOnlyDictionary<string, string?> BuildNodeEnvironment(string nodePath)
+    {
+        var nodeDirectory = Path.GetDirectoryName(nodePath)
+            ?? throw new InvalidOperationException("The selected Node.js path has no parent directory.");
+        var currentPath = Environment.GetEnvironmentVariable("PATH");
+        return new Dictionary<string, string?>
+        {
+            ["PATH"] = string.IsNullOrWhiteSpace(currentPath)
+                ? nodeDirectory
+                : $"{nodeDirectory}{Path.PathSeparator}{currentPath}",
+        };
     }
 
     private async Task<IReadOnlyList<string>> LocateCommandsAsync(

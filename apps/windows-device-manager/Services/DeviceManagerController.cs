@@ -37,6 +37,10 @@ internal sealed class DeviceManagerController
     public string? LastError { get; private set; }
     public bool IsBusy { get; private set; }
     public bool HasSavedToken => RelayConfiguration.HasToken;
+    public string? AvailableRemoteCodexVersion { get; private set; }
+    public string RuntimeUpdateMessage { get; private set; } = "Check npm for a newer Remote Codex release.";
+    public string CurrentRemoteCodexVersion => Runtime?.RemoteCodexVersion
+        ?? ProductManifest.RemoteCodexVersion;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -48,6 +52,17 @@ internal sealed class DeviceManagerController
         {
             State = SupervisorState.Stopped;
         }
+        Progress = State == SupervisorState.Running
+            ? new ProvisioningProgress(
+                "Running",
+                "Relay Supervisor is running and maintaining the outbound tunnel.",
+                ProvisioningStepState.Complete,
+                100)
+            : new ProvisioningProgress(
+                "Ready",
+                "Waiting for a device setup command.",
+                ProvisioningStepState.Pending,
+                0);
         OnChanged();
 
         if (Settings.KeepOnline && HasSavedToken && Runtime?.IsUsable == true && State != SupervisorState.Running)
@@ -159,6 +174,117 @@ internal sealed class DeviceManagerController
         }
     }
 
+    public async Task CheckRemoteCodexUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        await _operationLock.WaitAsync(cancellationToken);
+        try
+        {
+            SetBusy(true);
+            AvailableRemoteCodexVersion = null;
+            RuntimeUpdateMessage = "Checking npm for updates...";
+            OnChanged();
+
+            var latestVersion = await _provisioner.GetLatestRemoteCodexVersionAsync(cancellationToken);
+            if (RuntimeProvisioner.IsNewerVersion(latestVersion, CurrentRemoteCodexVersion))
+            {
+                AvailableRemoteCodexVersion = latestVersion;
+                RuntimeUpdateMessage = $"Remote Codex {latestVersion} is available.";
+            }
+            else
+            {
+                RuntimeUpdateMessage = $"Remote Codex {CurrentRemoteCodexVersion} is up to date.";
+            }
+            _logger.Info("Remote Codex update check completed.");
+            OnChanged();
+        }
+        catch (Exception exception)
+        {
+            RuntimeUpdateMessage = $"Update check failed: {AppLogger.Redact(exception.Message)}";
+            _logger.Error("Remote Codex update check failed", exception);
+            OnChanged();
+            throw;
+        }
+        finally
+        {
+            SetBusy(false);
+            _operationLock.Release();
+        }
+    }
+
+    public async Task UpdateRemoteCodexAsync(CancellationToken cancellationToken = default)
+    {
+        if (Runtime?.IsUsable != true || string.IsNullOrWhiteSpace(AvailableRemoteCodexVersion))
+        {
+            throw new InvalidOperationException("Check for an available Remote Codex update first.");
+        }
+
+        await _operationLock.WaitAsync(cancellationToken);
+        var originalRuntime = Runtime;
+        var wasRunning = false;
+        try
+        {
+            SetBusy(true);
+            LastError = null;
+            wasRunning = await _supervisor.GetStateAsync(originalRuntime, cancellationToken) == SupervisorState.Running;
+            if (wasRunning)
+            {
+                State = SupervisorState.Starting;
+                Report(new("Remote Codex", "Stopping the Supervisor before updating...", ProvisioningStepState.Running, 10));
+                await _supervisor.StopAsync(originalRuntime, cancellationToken);
+            }
+
+            var targetVersion = AvailableRemoteCodexVersion;
+            Runtime = await _provisioner.UpdateRemoteCodexAsync(
+                originalRuntime,
+                targetVersion,
+                new Progress<ProvisioningProgress>(Report),
+                cancellationToken);
+
+            if (wasRunning)
+            {
+                Report(new("Remote Codex", "Restarting the Supervisor with the updated runtime...", ProvisioningStepState.Running, 90));
+                await _supervisor.StartAsync(Runtime, ConfigurationFromSettings(), cancellationToken);
+                State = SupervisorState.Running;
+            }
+            else
+            {
+                State = SupervisorState.Stopped;
+            }
+
+            AvailableRemoteCodexVersion = null;
+            RuntimeUpdateMessage = $"Remote Codex {Runtime.RemoteCodexVersion} is installed.";
+            Report(new("Ready", RuntimeUpdateMessage, ProvisioningStepState.Complete, 100));
+            _logger.Info("Remote Codex update completed successfully.");
+        }
+        catch (Exception exception)
+        {
+            Runtime = originalRuntime;
+            RuntimeUpdateMessage = $"Update failed: {AppLogger.Redact(exception.Message)}";
+            LastError = AppLogger.Redact(exception.Message);
+            if (wasRunning)
+            {
+                try
+                {
+                    await _supervisor.StartAsync(originalRuntime, ConfigurationFromSettings(), cancellationToken);
+                    State = SupervisorState.Running;
+                }
+                catch (Exception restartException)
+                {
+                    State = SupervisorState.Error;
+                    _logger.Error("Unable to restore the previous Supervisor after an update failure", restartException);
+                }
+            }
+            _logger.Error("Remote Codex update failed", exception);
+            OnChanged();
+            throw;
+        }
+        finally
+        {
+            SetBusy(false);
+            _operationLock.Release();
+        }
+    }
+
     public async Task MaintainConnectionAsync(CancellationToken cancellationToken = default)
     {
         if (IsBusy || !Settings.KeepOnline || !HasSavedToken || Runtime?.IsUsable != true)
@@ -256,6 +382,12 @@ internal sealed class DeviceManagerController
             KeepOnline = relay.HasToken,
         };
     }
+
+    private DeviceConfiguration ConfigurationFromSettings() => new(
+        Settings.RelayUrl,
+        string.Empty,
+        Settings.WorkspaceRoot,
+        Settings.SupervisorPort);
 
     private static void EnsureWorkspaceIsWritable(string workspaceRoot)
     {

@@ -8,7 +8,8 @@ internal sealed record RuntimeState(
     string NodePath,
     string RemoteCodexEntryPath,
     string CodexCommandPath,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    string? RemoteCodexVersion = null)
 {
     public bool IsUsable => File.Exists(NodePath)
         && File.Exists(RemoteCodexEntryPath)

@@ -17,10 +17,35 @@ internal static class SelfTest
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ProductManifest.DefaultSupervisorPort).Validate(hasSavedToken: false);
             var redacted = AppLogger.Redact("TOKEN=secret rcd_self_test Authorization bearer-value");
+            var powershellConfiguration = """
+                Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                $env:REMOTE_CODEX_RELAY_SERVER_URL='wss://relay.example.test'
+                $env:REMOTE_CODEX_RELAY_AGENT_TOKEN='rcd_self_test_token'
+                $env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT='45680'
+                remote-codex relay-supervisor
+                """;
+            var bashConfiguration = """
+                REMOTE\_CODEX\_RELAY\_SERVER\_URL=wss\://relay.example.test \
+                REMOTE\_CODEX\_RELAY\_AGENT\_TOKEN=rcd\_self_test_token \
+                REMOTE\_CODEX\_RELAY\_SUPERVISOR\_PORT=45679 \
+                remote-codex relay-supervisor
+                """;
+            var parsedPowerShell = RelayConfigurationParser.TryParse(
+                powershellConfiguration,
+                out var powerShellResult,
+                out _);
+            var parsedBash = RelayConfigurationParser.TryParse(
+                bashConfiguration,
+                out var bashResult,
+                out _);
             var passed = errors.Count == 0
                 && !redacted.Contains("secret", StringComparison.Ordinal)
                 && !redacted.Contains("rcd_self_test", StringComparison.Ordinal)
                 && !redacted.Contains("bearer-value", StringComparison.Ordinal)
+                && parsedPowerShell
+                && powerShellResult is { RelayUrl: "wss://relay.example.test", DeviceToken: "rcd_self_test_token", SupervisorPort: 45680 }
+                && parsedBash
+                && bashResult is { RelayUrl: "wss://relay.example.test", DeviceToken: "rcd_self_test_token", SupervisorPort: 45679 }
                 && Path.IsPathFullyQualified(AppPaths.InstalledExecutablePath);
             if (!passed)
             {
