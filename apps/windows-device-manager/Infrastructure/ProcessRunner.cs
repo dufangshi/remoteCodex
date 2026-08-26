@@ -103,10 +103,7 @@ internal sealed class ProcessRunner(AppLogger logger)
 
         if (isScriptShim)
         {
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildCmdCommandLine(command, arguments));
+            startInfo.Arguments = $"/d /s /c \"{BuildCmdCommandLine(command, arguments)}\"";
         }
         else
         {

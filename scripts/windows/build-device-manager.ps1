@@ -37,6 +37,11 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
 
 $selfTest = Start-Process -FilePath $executable -ArgumentList '--self-test' -Wait -PassThru
 if ($selfTest.ExitCode -ne 0) {
+  $selfTestLog = Join-Path $env:LOCALAPPDATA 'RemoteCodex\logs\device-manager.log'
+  if (Test-Path -LiteralPath $selfTestLog -PathType Leaf) {
+    Write-Host 'Self-test diagnostics:'
+    Get-Content -LiteralPath $selfTestLog -Tail 50
+  }
   throw "Remote Codex Device self-test failed with exit code $($selfTest.ExitCode)."
 }
 

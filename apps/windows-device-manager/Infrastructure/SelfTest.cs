@@ -40,14 +40,25 @@ internal static class SelfTest
                 "where.exe",
                 ["cmd.exe"],
                 TimeSpan.FromSeconds(10));
-            return shim.Success
+            var processChecksPassed = shim.Success
                 && shim.StandardOutput.Contains("shim:value with spaces", StringComparison.Ordinal)
-                && where.Success
-                ? 0
-                : 1;
+                && where.Success;
+            if (!processChecksPassed)
+            {
+                logger.Error($"Self-test process check failed. shim={shim.ExitCode}:{shim.CombinedOutput}; where={where.ExitCode}:{where.CombinedOutput}");
+            }
+            return processChecksPassed ? 0 : 1;
         }
-        catch
+        catch (Exception exception)
         {
+            try
+            {
+                new AppLogger().Error("Self-test failed", exception);
+            }
+            catch
+            {
+                // Preserve the original self-test result when logging is unavailable.
+            }
             return 1;
         }
         finally
