@@ -44,6 +44,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install thread-ui workspace dependencies
+        shell: bash
+        run: pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
+
       - name: Build
         run: pnpm build
 
@@ -87,6 +91,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install thread-ui workspace dependencies
+        shell: bash
+        run: pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
 
       - name: Verify packed installation and graceful shutdown
         run: pnpm verify:package
