@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.11.48",
+  "version": "0.11.49",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
@@ -56,7 +56,7 @@
     "service:restart": "node scripts/service-restart.mjs launch",
     "prepack": "pnpm build:package",
     "build": "pnpm -r --if-present build",
-    "build:package": "pnpm --filter @remote-codex/supervisor-api build && pnpm --filter @remote-codex/relay-server build && pnpm --filter @remote-codex/supervisor-web build",
+    "build:package": "pnpm --filter @remote-codex/shared build && pnpm --filter @remote-codex/plugin-runtime build && pnpm --filter @remote-codex/plugin-terminal build && pnpm --filter @remote-codex/supervisor-api build && pnpm --filter @remote-codex/relay-server build && pnpm --filter @remote-codex/supervisor-web build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "cross-env NODE_ENV=test pnpm -r --if-present test",
