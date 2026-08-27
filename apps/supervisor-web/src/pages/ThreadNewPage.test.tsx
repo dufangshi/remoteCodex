@@ -126,6 +126,31 @@ const opencodeBackend: AgentBackendDto = {
   },
 };
 
+const acpBackend: AgentBackendDto = {
+  ...codexBackend,
+  provider: 'acp',
+  displayName: 'ACP Agent',
+  description: 'Choose an ACP agent.',
+  isDefault: false,
+  capabilities: {
+    ...capabilities,
+    management: {
+      ...capabilities.management,
+      models: false,
+    },
+  },
+  installation: {
+    packageName: null,
+    installed: true,
+    installedVersion: '2 ACP agents ready',
+    latestVersion: null,
+    installCommand: null,
+    updateCommand: null,
+    busy: false,
+    lastError: null,
+  },
+};
+
 function Harness({
   defaultBackend: initialDefaultBackend = 'claude',
 }: {
@@ -702,5 +727,226 @@ describe('ThreadNewPage', () => {
     expect(screen.getByRole('option', { name: 'No models available' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /GPT-5/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create Thread' })).toBeDisabled();
+  });
+
+  it('shows concrete ACP agents and installs an adapter only when the base agent exists', async () => {
+    const fetchMock = vi.mocked(fetch);
+    let codexAdapterInstalled = false;
+    const acpAgents = () => [
+      {
+        id: 'grok',
+        model: 'grok',
+        displayName: 'Grok Build',
+        description: 'Native ACP',
+        isDefault: true,
+        hidden: false,
+        supportedReasoningEfforts: [],
+        defaultReasoningEffort: null,
+        selectionKind: 'agent',
+        acpAgent: {
+          transport: 'native',
+          availability: 'ready',
+          baseCommand: 'grok',
+          baseProbeCommand: 'grok --version',
+          serverCommand: 'grok agent stdio',
+          serverProbeCommand: 'grok agent stdio --help',
+          baseVersion: 'grok 1.0.5',
+          serverVersion: 'grok 1.0.5',
+          installCommand: null,
+          busy: false,
+          statusMessage: 'Ready. ACP command: grok agent stdio',
+        },
+      },
+      {
+        id: 'codex',
+        model: 'codex',
+        displayName: 'OpenAI Codex',
+        description: 'ACP adapter',
+        isDefault: false,
+        hidden: false,
+        supportedReasoningEfforts: [],
+        defaultReasoningEffort: null,
+        selectionKind: 'agent',
+        acpAgent: {
+          transport: 'adapter',
+          availability: codexAdapterInstalled ? 'ready' : 'adapter_missing',
+          baseCommand: 'codex',
+          baseProbeCommand: 'codex --version',
+          serverCommand: 'codex-acp',
+          serverProbeCommand: 'codex-acp --version',
+          baseVersion: 'codex-cli 0.149.1',
+          serverVersion: codexAdapterInstalled ? 'codex-acp 1.6.2' : null,
+          installCommand: 'npm install -g @agentclientprotocol/codex-acp@latest',
+          busy: false,
+          statusMessage: codexAdapterInstalled
+            ? 'Ready. ACP command: codex-acp'
+            : 'Base agent detected. Install its ACP adapter.',
+        },
+      },
+      {
+        id: 'gemini',
+        model: 'gemini',
+        displayName: 'Gemini CLI',
+        description: 'Native ACP',
+        isDefault: false,
+        hidden: false,
+        supportedReasoningEfforts: [],
+        defaultReasoningEffort: null,
+        selectionKind: 'agent',
+        acpAgent: {
+          transport: 'native',
+          availability: 'base_missing',
+          baseCommand: 'gemini',
+          baseProbeCommand: 'gemini --version',
+          serverCommand: 'gemini --acp',
+          serverProbeCommand: 'gemini --acp --help',
+          baseVersion: null,
+          serverVersion: null,
+          installCommand: null,
+          busy: false,
+          statusMessage: 'Install the base agent first. Probe: gemini --version',
+        },
+      },
+    ];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/workspaces' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            id: 'workspace-1',
+            hostId: 'host-1',
+            label: 'Demo Workspace',
+            absPath: '/tmp/demo',
+            isFavorite: false,
+            createdAt: '2026-04-11T00:00:00.000Z',
+            lastOpenedAt: null,
+          }],
+        } satisfies Partial<Response> as Response);
+      }
+      if (url === '/api/agent-runtimes' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [acpBackend],
+        } satisfies Partial<Response> as Response);
+      }
+      if (url === '/api/agent-runtimes/acp/agents' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => acpAgents(),
+        } satisfies Partial<Response> as Response);
+      }
+      if (url.startsWith('/api/agent-runtimes/acp/models?') && !init?.method) {
+        const agentId = new URL(url, 'http://local').searchParams.get('agentId');
+        const model = agentId === 'codex'
+          ? {
+              id: 'gpt-5.6-sol',
+              model: 'gpt-5.6-sol',
+              displayName: 'GPT-5.6 Sol',
+              description: 'Codex ACP model',
+              isDefault: true,
+              hidden: false,
+              supportedReasoningEfforts: [
+                { reasoningEffort: 'high', description: '' },
+                { reasoningEffort: 'xhigh', description: '' },
+              ],
+              defaultReasoningEffort: 'xhigh',
+            }
+          : {
+              id: 'grok-code-fast-1',
+              model: 'grok-code-fast-1',
+              displayName: 'grok-code-fast-1',
+              description: 'Grok model',
+              isDefault: true,
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+            };
+        return Promise.resolve({
+          ok: true,
+          json: async () => [model],
+        } satisfies Partial<Response> as Response);
+      }
+      if (url === '/api/agent-runtimes/acp/install' && init?.method === 'POST') {
+        codexAdapterInstalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: async () => acpBackend,
+        } satisfies Partial<Response> as Response);
+      }
+      if (url === '/api/threads/start' && init?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: 'thread-acp',
+            workspaceId: 'workspace-1',
+            provider: 'acp',
+            agentId: 'codex',
+            providerSessionId: 'codex::session-1',
+            source: 'supervisor',
+            title: 'ACP Thread',
+            model: 'gpt-5.6-sol',
+            reasoningEffort: 'xhigh',
+            approvalMode: 'yolo',
+            status: 'idle',
+            summaryText: null,
+            lastError: null,
+            activeTurnId: null,
+            isLoaded: true,
+            isPinned: false,
+            createdAt: '2026-04-11T00:00:00.000Z',
+            updatedAt: '2026-04-11T00:00:00.000Z',
+            lastTurnStartedAt: null,
+            lastTurnCompletedAt: null,
+          }),
+        } satisfies Partial<Response> as Response);
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/threads/new']}>
+        <Harness defaultBackend="acp" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('radio', { name: /Grok Build/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Gemini CLI/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(
+      screen.queryByRole('button', { name: /Install ACP adapter for Gemini CLI/ }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Install ACP adapter for OpenAI Codex',
+    }));
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /OpenAI Codex/ })).toBeChecked();
+      expect(screen.getByLabelText('Model')).toHaveValue('gpt-5.6-sol');
+      expect(screen.getByLabelText('Reasoning effort')).toHaveValue('xhigh');
+    });
+    const installCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === '/api/agent-runtimes/acp/install' && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(installCall?.[1]?.body))).toEqual({
+      action: 'install',
+      modelId: 'codex',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Thread' }));
+    await waitFor(() => {
+      expect(screen.getByText('thread detail')).toBeInTheDocument();
+    });
+    const createCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === '/api/threads/start' && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      provider: 'acp',
+      agentId: 'codex',
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'xhigh',
+    });
   });
 });

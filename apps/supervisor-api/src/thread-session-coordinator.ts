@@ -135,6 +135,18 @@ export class ThreadSessionCoordinator {
     private readonly localSessionLookup: ThreadLocalSessionLookup,
   ) {}
 
+  private async listSessionModels(input: {
+    provider: string | null | undefined;
+    agentId?: string | null | undefined;
+    workspacePath?: string | null | undefined;
+  }) {
+    const runtime = this.providerRuntime.runtimeForProvider(input.provider);
+    if (input.agentId && input.workspacePath && runtime.listModelsForAgent) {
+      return runtime.listModelsForAgent(input.agentId, input.workspacePath);
+    }
+    return runtime.listModels();
+  }
+
   async startThreadSession(input: {
     workspacePath: string;
     threadInput: CreateThreadInput;
@@ -143,7 +155,11 @@ export class ThreadSessionCoordinator {
     const provider = this.providerRuntime.normalizeProvider(input.threadInput.provider);
     const normalizedTitle = input.threadInput.title?.trim() || input.defaultTitle;
     const runtime = this.providerRuntime.runtimeForProvider(provider);
-    const modelRecords = await runtime.listModels().catch(() => []);
+    const modelRecords = await this.listSessionModels({
+      provider,
+      agentId: input.threadInput.agentId,
+      workspacePath: input.workspacePath,
+    }).catch(() => []);
     const reasoningEffort = this.providerRuntime.normalizeReasoningForModel(
       modelRecords,
       input.threadInput.model,
@@ -158,6 +174,7 @@ export class ThreadSessionCoordinator {
     }
     const response = await runtime.startSession({
       cwd: input.workspacePath,
+      ...(input.threadInput.agentId ? { agentId: input.threadInput.agentId } : {}),
       model: input.threadInput.model,
       reasoningEffort,
       approvalMode: input.threadInput.approvalMode,
@@ -273,6 +290,8 @@ export class ThreadSessionCoordinator {
 
   async resumeThreadSession(input: {
     provider: string | null | undefined;
+    agentId?: string | null;
+    workspacePath?: string | null;
     providerSessionId: string;
     resumeInput: ResumeThreadInput;
     currentModel: string | null | undefined;
@@ -287,7 +306,11 @@ export class ThreadSessionCoordinator {
       normalizeSandboxMode(input.currentSandboxMode) ??
       defaultSandboxModeForApprovalMode(input.approvalMode);
     const fastMode = this.providerRuntime.fastModeForProvider(input.provider, input.fastMode);
-    const modelRecords = await runtime.listModels().catch(() => []);
+    const modelRecords = await this.listSessionModels({
+      provider: input.provider,
+      agentId: input.agentId,
+      workspacePath: input.workspacePath,
+    }).catch(() => []);
     let response: StartAgentSessionResult;
     try {
       ensureFastModeSupported(
@@ -427,6 +450,8 @@ export class ThreadSessionCoordinator {
 
   async resolveThreadSettings(input: {
     provider: string | null | undefined;
+    agentId?: string | null;
+    workspacePath?: string | null;
     currentModel: string | null | undefined;
     currentReasoningEffort: string | null | undefined;
     currentFastMode: unknown;
@@ -434,7 +459,11 @@ export class ThreadSessionCoordinator {
     currentSandboxMode: string | null | undefined;
     settings: UpdateThreadSettingsInput;
   }): Promise<ResolvedThreadSettings> {
-    const modelRecords = await this.providerRuntime.listProviderModels(input.provider);
+    const modelRecords = await this.listSessionModels({
+      provider: input.provider,
+      agentId: input.agentId,
+      workspacePath: input.workspacePath,
+    });
     const fallbackModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
     const supportsFastMode = this.providerRuntime.runtimeSupportsFastMode(input.provider);
     const currentFastMode = this.providerRuntime.fastModeForProvider(
@@ -484,6 +513,8 @@ export class ThreadSessionCoordinator {
 
   async resolvePromptTurnConfig(input: {
     provider: string | null | undefined;
+    agentId?: string | null;
+    workspacePath?: string | null;
     currentModel: string | null | undefined;
     currentReasoningEffort: string | null | undefined;
     currentFastMode: unknown;
@@ -496,7 +527,11 @@ export class ThreadSessionCoordinator {
     >;
   }): Promise<ResolvedPromptTurnConfig> {
     const runtime = this.providerRuntime.runtimeForProvider(input.provider);
-    const modelRecords = await runtime.listModels().catch(() => []);
+    const modelRecords = await this.listSessionModels({
+      provider: input.provider,
+      agentId: input.agentId,
+      workspacePath: input.workspacePath,
+    }).catch(() => []);
     const defaultModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
     const effectiveModel =
       input.promptInput?.model ?? input.currentModel ?? defaultModel?.model ?? null;

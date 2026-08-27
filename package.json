@@ -18,6 +18,7 @@
     "apps/supervisor-web/dist/",
     "config/codex-model-pricing.json",
     "packages/agent-runtime/src/",
+    "packages/acp/src/",
     "packages/claude/src/",
     "packages/codex/src/",
     "packages/opencode/src/",

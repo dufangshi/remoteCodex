@@ -178,7 +178,8 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort: GPT-5\.4/ }));
+    fireEvent.click(screen.getByText('Model').closest('button')!);
     fireEvent.click(screen.getByRole('button', { name: 'GPT-5 Mini' }));
 
     await waitFor(() => {
@@ -206,7 +207,8 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort:.*medium/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Effort/ }));
 
     expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'low' })).not.toBeInTheDocument();
@@ -248,12 +250,14 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort: GPT-5\.4/ }));
+    fireEvent.click(screen.getByText('Model').closest('button')!);
     expect(screen.getByRole('button', { name: 'GPT-5 Mini' })).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('button', { name: 'GPT-5 Mini' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort:.*medium/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Effort/ }));
     expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('button', { name: 'high' })).not.toBeInTheDocument();
@@ -278,7 +282,7 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'gpt-5.4' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /Model and effort: GPT-5\.4/ })).toHaveAttribute(
       'title',
       'gpt-5.4 · 165.2k used / 258.4k · 93.2k left · 38% context left',
     );
@@ -301,7 +305,7 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'gpt-5.4' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /Model and effort: GPT-5\.4/ })).toHaveAttribute(
       'title',
       'gpt-5.4 · context unavailable',
     );
@@ -328,16 +332,15 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('button', { name: 'gpt-5.4-super-long-mobile-label' }),
-    ).toHaveClass('max-w-[8.75rem]');
-    expect(
-      screen.getByText('gpt-5.4-super-long-mobile-label'),
-    ).toHaveClass('truncate', 'whitespace-nowrap', '[direction:rtl]');
+    const modelAndEffort = screen.getByRole('button', {
+      name: /Model and effort: gpt-5\.4-super-long-mobile-label/,
+    });
+    expect(modelAndEffort).toHaveClass('max-w-[10rem]');
+    expect(modelAndEffort.querySelector('span')).toHaveClass('truncate', 'whitespace-nowrap');
     expect(screen.getByRole('button', { name: 'Open slash toolbox' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add attachment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Switch to shell' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+    expect(modelAndEffort).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plan' })).toBeInTheDocument();
   });
 
@@ -1306,8 +1309,9 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'gpt-5-mini' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'low' })).toBeEnabled();
+    expect(screen.getByRole('button', {
+      name: /Model and effort: GPT-5 Mini, low/,
+    })).toBeEnabled();
   });
 
   it('submits on ctrl or command enter while plain enter stays as newline behavior', async () => {

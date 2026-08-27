@@ -2,7 +2,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import {
-  agentBackendIds,
   agentBackendMetadata,
   type AgentBackendIdDto,
 } from '../../shared/src/index';
@@ -32,11 +31,24 @@ export interface OpenCodeProviderConfig {
   command: string;
 }
 
-export type AgentProviderConfig = CodexProviderConfig | ClaudeProviderConfig | OpenCodeProviderConfig;
+export interface AcpProviderConfig {
+  provider: 'acp';
+  enabled: boolean;
+  home: string;
+  command: string;
+  startupTimeoutMs: number;
+}
+
+export type AgentProviderConfig =
+  | CodexProviderConfig
+  | ClaudeProviderConfig
+  | OpenCodeProviderConfig
+  | AcpProviderConfig;
 export interface AgentProviderConfigMap {
   codex: CodexProviderConfig;
   claude: ClaudeProviderConfig;
   opencode: OpenCodeProviderConfig;
+  acp: AcpProviderConfig;
 }
 
 export interface RuntimeConfig {
@@ -93,6 +105,9 @@ const envSchema = z.object({
   CLAUDE_COMMAND: z.string().min(1).optional(),
   OPENCODE_HOME: z.string().optional(),
   OPENCODE_COMMAND: z.string().min(1).optional(),
+  ACP_HOME: z.string().optional(),
+  ACP_COMMAND: z.string().min(1).optional(),
+  ACP_STARTUP_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: z.string().optional()
 });
 
@@ -128,6 +143,8 @@ function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     CLAUDE_COMMAND: optionalNonEmpty(env.CLAUDE_COMMAND),
     OPENCODE_HOME: optionalNonEmpty(env.OPENCODE_HOME),
     OPENCODE_COMMAND: optionalNonEmpty(env.OPENCODE_COMMAND),
+    ACP_HOME: optionalNonEmpty(env.ACP_HOME),
+    ACP_COMMAND: optionalNonEmpty(env.ACP_COMMAND),
     REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: optionalNonEmpty(
       env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS,
     ),
@@ -165,7 +182,7 @@ export function loadRuntimeConfig(
   );
   const enabledProviders = new Set(
     (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ??
-      (platform === 'win32' ? 'codex' : agentBackendIds.join(',')))
+      (platform === 'win32' ? 'codex' : 'codex,claude,opencode'))
       .split(',')
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)
@@ -180,6 +197,9 @@ export function loadRuntimeConfig(
   const opencodeHome = parsed.OPENCODE_HOME?.trim()
     ? path.resolve(parsed.OPENCODE_HOME)
     : path.join(defaultAgentHomeRoot, agentBackendMetadata.opencode.defaultHomeDir);
+  const acpHome = parsed.ACP_HOME?.trim()
+    ? path.resolve(parsed.ACP_HOME)
+    : path.join(defaultAgentHomeRoot, agentBackendMetadata.acp.defaultHomeDir);
 
   return {
     nodeEnv,
@@ -231,6 +251,13 @@ export function loadRuntimeConfig(
         enabled: enabledProviders.has('opencode'),
         home: opencodeHome,
         command: parsed.OPENCODE_COMMAND ?? agentBackendMetadata.opencode.defaultCommand,
+      },
+      acp: {
+        provider: 'acp',
+        enabled: enabledProviders.has('acp'),
+        home: acpHome,
+        command: parsed.ACP_COMMAND ?? agentBackendMetadata.acp.defaultCommand,
+        startupTimeoutMs: parsed.ACP_STARTUP_TIMEOUT_MS ?? 10_000,
       },
     },
   };

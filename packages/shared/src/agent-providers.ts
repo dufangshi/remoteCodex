@@ -1,4 +1,4 @@
-export const agentBackendIds = ['codex', 'claude', 'opencode'] as const;
+export const agentBackendIds = ['codex', 'claude', 'opencode', 'acp'] as const;
 
 export type AgentBackendIdDto = (typeof agentBackendIds)[number];
 
@@ -41,6 +41,15 @@ export const agentBackendMetadata: Record<AgentBackendIdDto, AgentBackendMetadat
     commandEnvVar: 'OPENCODE_COMMAND',
     defaultHomeDir: '.opencode',
     defaultCommand: 'opencode',
+  },
+  acp: {
+    displayName: 'ACP Agent',
+    description: 'Agent Client Protocol runtime over stdio.',
+    defaultTransport: 'stdio',
+    homeEnvVar: 'ACP_HOME',
+    commandEnvVar: 'ACP_COMMAND',
+    defaultHomeDir: '.acp',
+    defaultCommand: 'grok agent stdio',
   },
 };
 

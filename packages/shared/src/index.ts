@@ -716,6 +716,28 @@ export interface ModelOptionDto {
   supportsPerformanceMode?: boolean;
   supportedReasoningEfforts: ReasoningEffortOptionDto[];
   defaultReasoningEffort: ReasoningEffortDto | null;
+  selectionKind?: 'model' | 'agent';
+  acpAgent?: AcpAgentOptionMetadataDto | null;
+}
+
+export type AcpAgentAvailabilityDto =
+  | 'ready'
+  | 'base_missing'
+  | 'adapter_missing'
+  | 'server_unavailable';
+
+export interface AcpAgentOptionMetadataDto {
+  transport: 'native' | 'adapter' | 'custom';
+  availability: AcpAgentAvailabilityDto;
+  baseCommand: string;
+  baseProbeCommand: string;
+  serverCommand: string;
+  serverProbeCommand: string;
+  baseVersion: string | null;
+  serverVersion: string | null;
+  installCommand: string | null;
+  busy: boolean;
+  statusMessage: string;
 }
 
 export interface VersionDto {
@@ -929,6 +951,7 @@ export interface ThreadDto {
   id: string;
   workspaceId: string;
   provider: AgentBackendIdDto;
+  agentId?: string | null;
   providerSessionId: string | null;
   source: ThreadSourceDto;
   title: string;
@@ -1594,6 +1617,7 @@ export interface CreateThreadInput {
   workspaceId: string;
   title?: string;
   provider?: AgentBackendIdDto;
+  agentId?: string;
   model: string;
   reasoningEffort?: ReasoningEffortDto | null;
   approvalMode: ApprovalMode;

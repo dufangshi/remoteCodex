@@ -29,6 +29,7 @@ export interface CreateThreadRecordInput {
   workspaceId: string;
   title: string;
   provider?: string;
+  agentId?: string | null;
   providerSessionId: string | null;
   providerTurnId?: string | null;
   model?: string | null;
@@ -47,6 +48,7 @@ export interface CreateThreadRecordInput {
 
 export interface UpdateThreadRecordInput {
   provider?: string;
+  agentId?: string | null;
   providerSessionId?: string | null;
   providerTurnId?: string | null;
   title?: string;
@@ -278,6 +280,7 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     id: randomUUID(),
     workspaceId: input.workspaceId,
     provider: input.provider ?? 'codex',
+    agentId: input.agentId ?? null,
     providerSessionId: input.providerSessionId,
     providerTurnId: input.providerTurnId ?? null,
     source: input.source ?? 'supervisor',

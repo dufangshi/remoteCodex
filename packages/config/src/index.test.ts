@@ -90,6 +90,8 @@ describe('loadRuntimeConfig', () => {
       CLAUDE_COMMAND: '',
       OPENCODE_HOME: '',
       OPENCODE_COMMAND: '',
+      ACP_HOME: '',
+      ACP_COMMAND: '',
     });
 
     expect(config.mode).toBe('local');
@@ -102,6 +104,13 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.codex.command).toBe('codex');
     expect(config.agentProviders.claude.command).toBe('claude');
     expect(config.agentProviders.opencode.command).toBe('opencode');
+    expect(config.agentProviders.acp).toEqual({
+      provider: 'acp',
+      enabled: false,
+      home: path.join(os.homedir(), '.acp'),
+      command: 'grok agent stdio',
+      startupTimeoutMs: 10_000,
+    });
   });
 
   it('resolves production database to user home', () => {
@@ -135,6 +144,9 @@ describe('loadRuntimeConfig', () => {
       CLAUDE_COMMAND: 'claude-custom',
       OPENCODE_HOME: '/tmp/opencode-home',
       OPENCODE_COMMAND: 'opencode-custom',
+      ACP_HOME: '/tmp/acp-home',
+      ACP_COMMAND: 'custom-acp --stdio',
+      ACP_STARTUP_TIMEOUT_MS: '25000',
       REMOTE_CODEX_MODE: 'server',
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',
       REMOTE_CODEX_ADMIN_PASSWORD: 'secret',
@@ -142,7 +154,7 @@ describe('loadRuntimeConfig', () => {
       REMOTE_CODEX_SESSION_TTL_SECONDS: '3600',
       REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
       REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
-      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,claude'
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,claude,acp'
     });
 
     expect(config.nodeEnv).toBe('test');
@@ -181,6 +193,13 @@ describe('loadRuntimeConfig', () => {
       enabled: false,
       home: path.resolve('/tmp/opencode-home'),
       command: 'opencode-custom',
+    });
+    expect(config.agentProviders.acp).toEqual({
+      provider: 'acp',
+      enabled: true,
+      home: path.resolve('/tmp/acp-home'),
+      command: 'custom-acp --stdio',
+      startupTimeoutMs: 25_000,
     });
   });
 

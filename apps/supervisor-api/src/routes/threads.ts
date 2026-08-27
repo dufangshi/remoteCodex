@@ -62,6 +62,7 @@ const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
   title: z.string().optional(),
   provider: agentBackendIdSchema.optional(),
+  agentId: z.string().min(1).optional(),
   model: z.string().min(1),
   reasoningEffort: z.enum(reasoningEffortValues).nullable().optional(),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
@@ -91,6 +92,7 @@ const updateThreadSettingsSchema = z.object({
   reasoningEffort: z.enum(reasoningEffortValues).nullable().optional(),
   fastMode: z.boolean().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional(),
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).nullable().optional(),
 }).refine((body) => Object.keys(body).length > 0, {
   message: 'At least one thread setting must be provided.'
 });
@@ -405,6 +407,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
       ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
       approvalMode: body.approvalMode,
       ...(body.provider !== undefined ? { provider: body.provider } : {}),
+      ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
       ...(body.title ? { title: body.title } : {}),
     };
     return app.services.threadService.createThread(input);
@@ -597,6 +600,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
       ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
       ...(body.fastMode !== undefined ? { fastMode: body.fastMode } : {}),
       ...(body.collaborationMode !== undefined ? { collaborationMode: body.collaborationMode } : {}),
+      ...(body.sandboxMode !== undefined ? { sandboxMode: body.sandboxMode } : {}),
     };
     return app.services.threadService.updateThreadSettings(params.id, input);
   });

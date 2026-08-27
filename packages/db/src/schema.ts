@@ -23,6 +23,7 @@ export const threads = sqliteTable('threads', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull(),
   provider: text('provider').notNull().default('codex'),
+  agentId: text('agent_id'),
   providerSessionId: text('provider_session_id'),
   providerTurnId: text('provider_turn_id'),
   source: text('source').notNull().default('supervisor'),

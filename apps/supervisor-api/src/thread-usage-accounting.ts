@@ -1,4 +1,6 @@
 import {
+  getLatestThreadTurnMetadataByThreadId,
+  getThreadRecordById,
   getThreadTurnMetadataByThreadAndTurnId,
   listThreadTurnMetadataByThreadId,
   upsertThreadTurnMetadata,
@@ -15,8 +17,6 @@ import {
   contextWindowForModel,
   estimateTurnPrice,
 } from '../../../packages/agent-runtime/src/index';
-
-const CONTEXT_BASELINE_TOKENS = 12_000;
 
 export interface ThreadContextTokenUsagePayload {
   total?: Record<string, unknown> | null;
@@ -37,6 +37,7 @@ export interface ThreadTurnTokenUsageBreakdown {
 interface StoredThreadTurnTokenUsageState {
   baselineTotal: ThreadTurnTokenUsageBreakdown | null;
   usage: ThreadTurnTokenUsageDto | null;
+  modelContextWindow: number | null;
 }
 
 export interface ThreadUsageUpdateResult {
@@ -112,14 +113,12 @@ function computeContextRemainingPercent(
   tokensInContextWindow: number,
   contextWindow: number,
 ) {
-  if (contextWindow <= CONTEXT_BASELINE_TOKENS) {
+  if (contextWindow <= 0) {
     return 0;
   }
 
-  const effectiveWindow = contextWindow - CONTEXT_BASELINE_TOKENS;
-  const used = Math.max(tokensInContextWindow - CONTEXT_BASELINE_TOKENS, 0);
-  const remaining = Math.max(effectiveWindow - used, 0);
-  return clampPercentage(Math.round((remaining / effectiveWindow) * 100));
+  const remaining = Math.max(contextWindow - tokensInContextWindow, 0);
+  return clampPercentage(Math.round((remaining / contextWindow) * 100));
 }
 
 export function buildThreadContextUsageFromPayload(
@@ -165,6 +164,26 @@ export function mergeThreadContextUsageFromPayload(
   timestamp = new Date().toISOString(),
 ): ThreadContextUsageDto {
   const next = buildThreadContextUsageFromPayload(payload, model, timestamp);
+  const payloadRecord = isRecord(payload) ? payload : null;
+  const reportedModelContextWindow = numberOrNull(
+    payloadRecord?.modelContextWindow ?? payloadRecord?.model_context_window,
+  );
+  if (
+    current?.availability === 'available' &&
+    next.availability === 'available' &&
+    reportedModelContextWindow === null &&
+    current.modelContextWindow !== null &&
+    next.tokensInContextWindow !== null
+  ) {
+    return {
+      ...next,
+      remainingPercent: computeContextRemainingPercent(
+        next.tokensInContextWindow,
+        current.modelContextWindow,
+      ),
+      modelContextWindow: current.modelContextWindow,
+    };
+  }
   if (next.availability === 'available') {
     return next;
   }
@@ -304,6 +323,7 @@ export function parseStoredThreadTurnTokenUsageState(
     return {
       baselineTotal: null,
       usage: null,
+      modelContextWindow: null,
     };
   }
 
@@ -313,14 +333,21 @@ export function parseStoredThreadTurnTokenUsageState(
       isRecord(parsed?.baselineTotal) ? parsed.baselineTotal : null,
     );
 
+    const usage = parseThreadTurnTokenUsage(parsed);
+    const modelContextWindow =
+      usage?.modelContextWindow ??
+      numberOrNull(parsed?.modelContextWindow ?? parsed?.model_context_window);
+
     return {
       baselineTotal,
-      usage: parseThreadTurnTokenUsage(parsed),
+      usage,
+      modelContextWindow,
     };
   } catch {
     return {
       baselineTotal: null,
       usage: null,
+      modelContextWindow: null,
     };
   }
 }
@@ -367,7 +394,8 @@ export function stringifyStoredThreadTurnTokenUsageState(
     baselineTotal: state.baselineTotal,
     total: state.usage?.total ?? null,
     last: state.usage?.last ?? null,
-    modelContextWindow: state.usage?.modelContextWindow ?? null,
+    modelContextWindow:
+      state.usage?.modelContextWindow ?? state.modelContextWindow ?? null,
   });
 }
 
@@ -375,6 +403,7 @@ function buildThreadTurnTokenUsage(
   payload: ThreadContextTokenUsagePayload | null | undefined,
   baselineTotal: ThreadTurnTokenUsageBreakdown,
   previous: ThreadTurnTokenUsageDto | null = null,
+  fallbackModelContextWindow: number | null = null,
 ): ThreadTurnTokenUsageDto | null {
   const tokenUsage = isRecord(payload) ? payload : null;
   const cumulativeTotal = buildTurnTokenBreakdown(
@@ -399,7 +428,9 @@ function buildThreadTurnTokenUsage(
         : previous?.total ?? last,
     last,
     modelContextWindow:
-      modelContextWindow ?? previous?.modelContextWindow ?? null,
+      modelContextWindow ??
+      previous?.modelContextWindow ??
+      fallbackModelContextWindow,
   };
 }
 
@@ -418,10 +449,32 @@ export class ThreadUsageAccounting {
   }
 
   getThreadContextUsage(localThreadId: string): ThreadContextUsageDto {
-    return (
-      this.threadContextUsage.get(localThreadId) ??
-      createUnavailableThreadContextUsage(null)
+    const current = this.threadContextUsage.get(localThreadId);
+    if (current) {
+      return current;
+    }
+
+    const latestMetadata = getLatestThreadTurnMetadataByThreadId(
+      this.db,
+      localThreadId,
     );
+    const storedUsage = parseThreadTurnTokenUsageJson(
+      latestMetadata?.tokenUsageJson,
+    );
+    const thread = getThreadRecordById(this.db, localThreadId);
+    const hydrated = storedUsage
+      ? buildThreadContextUsageFromPayload(
+          {
+            total: { ...storedUsage.total },
+            last: { ...storedUsage.last },
+            modelContextWindow: storedUsage.modelContextWindow,
+          },
+          thread?.model,
+          latestMetadata?.updatedAt ?? new Date().toISOString(),
+        )
+      : createUnavailableThreadContextUsage(null);
+    this.threadContextUsage.set(localThreadId, hydrated);
+    return hydrated;
   }
 
   setThreadContextUsage(localThreadId: string, usage: ThreadContextUsageDto) {
@@ -501,12 +554,27 @@ export class ThreadUsageAccounting {
         excludeTurnId: input.turnId,
       }) ??
       zeroTurnTokenBreakdown();
+    const incomingModelContextWindow = numberOrNull(
+      input.tokenUsage?.modelContextWindow ?? input.tokenUsage?.model_context_window,
+    );
     const turnTokenUsage = buildThreadTurnTokenUsage(
       input.tokenUsage,
       baselineTotal,
       previousState.usage,
+      previousState.modelContextWindow,
     );
     if (!turnTokenUsage) {
+      if (incomingModelContextWindow !== null) {
+        upsertThreadTurnMetadata(this.db, {
+          threadId: input.localThreadId,
+          turnId: input.turnId,
+          tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
+            baselineTotal,
+            usage: previousState.usage,
+            modelContextWindow: incomingModelContextWindow,
+          }),
+        });
+      }
       return null;
     }
 
@@ -516,6 +584,8 @@ export class ThreadUsageAccounting {
       tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
         baselineTotal,
         usage: turnTokenUsage,
+        modelContextWindow:
+          turnTokenUsage.modelContextWindow ?? previousState.modelContextWindow,
       }),
     });
 

@@ -40,9 +40,12 @@ export class ThreadSessionLifecycleCoordinator {
       });
     }
     const providerSessionId = this.callbacks.requireProviderSessionId(record);
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
 
     const resumed = await this.sessionCoordinator.resumeThreadSession({
       provider: record.provider,
+      agentId: record.agentId,
+      workspacePath: workspace?.absPath ?? null,
       providerSessionId,
       resumeInput: input,
       currentModel: record.model,
@@ -55,7 +58,6 @@ export class ThreadSessionLifecycleCoordinator {
       if (!this.canRecreateUnmaterializedThread(record, resumed.error)) {
         return;
       }
-      const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
       const model = input.model ?? record.model;
       if (!workspace || !model) {
         return;
@@ -66,6 +68,7 @@ export class ThreadSessionLifecycleCoordinator {
           workspaceId: workspace.id,
           title: record.title,
           provider: record.provider as AgentBackendIdDto,
+          ...(record.agentId ? { agentId: record.agentId } : {}),
           model,
           reasoningEffort: record.reasoningEffort as ReasoningEffortDto | null,
           approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,

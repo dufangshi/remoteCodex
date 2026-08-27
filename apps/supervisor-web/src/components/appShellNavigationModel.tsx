@@ -99,6 +99,11 @@ const backendInstallationFallbacks: Record<
     installCommand: 'npm install -g opencode-ai @opencode-ai/sdk',
     updateCommand: 'npm install -g opencode-ai@latest @opencode-ai/sdk@latest',
   },
+  acp: {
+    packageName: null,
+    installCommand: null,
+    updateCommand: null,
+  },
 };
 
 function unavailableInstallation(

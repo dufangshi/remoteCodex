@@ -71,7 +71,8 @@ client to load the latest transcript and continue from the current state.
   approvals or structured questions remotely.
 - Select agent backend, model, reasoning effort, collaboration mode, and
   approval policy when starting work.
-- Work with Codex, Claude, and OpenCode backends through one supervisor surface.
+- Work with Codex, Claude, OpenCode, and any ACP-compatible agent through one
+  supervisor surface.
 - Upload attachments and export transcripts as PDF or HTML.
 
 #### Workspaces and files
@@ -237,6 +238,39 @@ use it only on a trusted LAN/VPN. Set `SERVICE_HOST=127.0.0.1` and
 
 Override with `SERVICE_PORT` and `SERVICE_API_PORT`.
 
+### ACP Agents
+
+Enable the generic ACP backend, then choose the concrete agent when creating a
+thread:
+
+```bash
+REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=acp \
+remote-codex start
+```
+
+The supervisor detects the base agent first. Missing base agents remain disabled
+and show their probe command. When a base agent exists but its ACP adapter is
+missing, the create-thread form offers an adapter install action.
+
+| Agent | ACP transport | Base probe | ACP command |
+| --- | --- | --- | --- |
+| Grok Build | Native | `grok --version` | `grok agent stdio` |
+| Cursor Agent | Native | `cursor-agent --version` | `cursor-agent acp` |
+| OpenAI Codex | Adapter | `codex --version` | `codex-acp` |
+| Claude Agent | Adapter | `claude --version` | `claude-agent-acp` |
+| Gemini CLI | Native | `gemini --version` | `gemini --acp` |
+| GitHub Copilot CLI | Native | `copilot --version` | `copilot --acp` |
+| OpenCode | Native | `opencode --version` | `opencode acp` |
+| DeepSeek Harness | Adapter | `dsh --version` | `dsh-acp` |
+
+`ACP_COMMAND` remains available for an additional custom ACP stdio server.
+
+`ACP_STARTUP_TIMEOUT_MS` controls initialize timeout. ACP agents may support
+`session/load`, `session/resume`, both, or neither. Remote Codex persists every
+normalized turn item in its supervisor SQLite database, so transcript history
+remains available even when an ACP agent resumes context without replaying old
+turns.
+
 ### Development
 
 ```bash
@@ -327,7 +361,7 @@ flowchart LR
 - 查看流式回答、reasoning 摘要、工具调用、运行状态、token 使用和完成状态。
 - Agent 运行期间继续发送指令，并远程处理授权请求或结构化问题。
 - 创建任务时选择 Agent backend、模型、reasoning effort、协作模式和授权策略。
-- 在同一个 Supervisor 界面使用 Codex、Claude 和 OpenCode backend。
+- 在同一个 Supervisor 界面使用 Codex、Claude、OpenCode 和任意 ACP 兼容 Agent。
 - 上传附件，并将 transcript 导出为 PDF 或 HTML。
 
 #### Workspace 与文件
@@ -483,6 +517,36 @@ npm CLI 默认端口：
 `SERVICE_API_HOST=127.0.0.1`。
 
 可用 `SERVICE_PORT` 和 `SERVICE_API_PORT` 覆盖。
+
+### ACP Agent
+
+启用通用 ACP backend，然后在创建 thread 时选择具体 Agent：
+
+```bash
+REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=acp \
+remote-codex start
+```
+
+Supervisor 会先探测基础 Agent。基础 Agent 不存在时选项保持灰色并显示探测命令；
+基础 Agent 已存在但缺少 ACP adapter 时，创建 thread 界面会提供 adapter 安装按钮。
+
+| Agent | ACP 接入方式 | 基础探测 | ACP 命令 |
+| --- | --- | --- | --- |
+| Grok Build | 原生 | `grok --version` | `grok agent stdio` |
+| Cursor Agent | 原生 | `cursor-agent --version` | `cursor-agent acp` |
+| OpenAI Codex | Adapter | `codex --version` | `codex-acp` |
+| Claude Agent | Adapter | `claude --version` | `claude-agent-acp` |
+| Gemini CLI | 原生 | `gemini --version` | `gemini --acp` |
+| GitHub Copilot CLI | 原生 | `copilot --version` | `copilot --acp` |
+| OpenCode | 原生 | `opencode --version` | `opencode acp` |
+| DeepSeek Harness | Adapter | `dsh --version` | `dsh-acp` |
+
+`ACP_COMMAND` 仍可用于额外配置一个自定义 ACP stdio server。
+
+`ACP_STARTUP_TIMEOUT_MS` 用于控制 initialize 超时。ACP Agent 可能支持
+`session/load`、`session/resume`、同时支持两者，或都不支持。Remote Codex 会把
+所有规范化后的 turn item 持久化到 supervisor SQLite，因此即使 Agent 恢复上下文时
+不回放旧 turn，前端 transcript 历史仍然可用。
 
 ### 开发
 
