@@ -326,6 +326,19 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
 
+  packages/acp:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^1.4.0
+        version: 1.4.0(zod@4.4.3)
+      smol-toml:
+        specifier: ^1.8.0
+        version: 1.8.0
+    devDependencies:
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.20)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(tsx@4.22.4)
+
   packages/agent-runtime: {}
 
   packages/claude:
@@ -426,6 +439,11 @@ packages:
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
+
+  '@agentclientprotocol/sdk@1.4.0':
+    resolution: {integrity: sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
@@ -3048,6 +3066,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -4507,6 +4526,10 @@ packages:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
 
+  smol-toml@1.8.0:
+    resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
+    engines: {node: '>= 18'}
+
   socks-proxy-agent@8.0.5:
     resolution: {integrity: sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw==}
     engines: {node: '>= 14'}
@@ -5087,6 +5110,10 @@ snapshots:
       upng-js: 2.1.0
 
   '@adobe/css-tools@4.5.0': {}
+
+  '@agentclientprotocol/sdk@1.4.0(zod@4.4.3)':
+    dependencies:
+      zod: 4.4.3
 
   '@antfu/install-pkg@1.1.0':
     dependencies:
@@ -9454,6 +9481,8 @@ snapshots:
       simple-concat: 1.0.1
 
   smart-buffer@4.2.0: {}
+
+  smol-toml@1.8.0: {}
 
   socks-proxy-agent@8.0.5:
     dependencies:

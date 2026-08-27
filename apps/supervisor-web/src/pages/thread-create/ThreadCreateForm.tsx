@@ -6,6 +6,7 @@ import {
   AgentBackendIdDto,
   defaultAgentBackendId,
   ModelOptionDto,
+  ReasoningEffortDto,
   ThreadDto,
   WorkspaceDto,
 } from '@remote-codex/shared';
@@ -13,8 +14,10 @@ import { useAppShellNav } from '../../components/AppShellNavContext';
 import {
   ApiError,
   createThread,
+  fetchAgentBackendAgents,
   fetchAgentBackends,
   fetchAgentBackendModels,
+  fetchAgentBackendModelsFor,
   fetchWorkspaces,
   installOrUpdateAgentBackend,
 } from '../../lib/api';
@@ -51,20 +54,31 @@ export function ThreadCreateForm({
   const formId = useId();
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [backends, setBackends] = useState<AgentBackendDto[]>([]);
+  const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
   const [models, setModels] = useState<ModelOptionDto[]>([]);
   const [provider, setProvider] = useState<AgentBackendIdDto>(
     shellNav?.defaultBackend ?? defaultAgentBackendId,
   );
   const [workspaceId, setWorkspaceId] = useState('');
+  const [agentId, setAgentId] = useState('');
   const [model, setModel] = useState('');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
   const [title, setTitle] = useState(() => initialTitle ?? '');
   const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
+  const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
   const selectedBackend = backends.find((backend) => backend.provider === provider);
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+  const selectedModel = models.find((entry) => entry.model === model) ?? null;
+  const isAcpAgentSelection = provider === 'acp' && agentOptions.some(
+    (entry) => entry.selectionKind === 'agent',
+  );
+  const selectedAgent = agentOptions.find((entry) => entry.model === agentId) ?? null;
+  const selectedModelAvailable = Boolean(selectedModel);
   const compact = variant === 'dialog';
   const controlClassName = compact
     ? 'host-form-control mt-1.5 h-10 w-full rounded-lg border px-3 text-sm outline-none transition'
@@ -83,7 +97,7 @@ export function ThreadCreateForm({
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchWorkspaces(), fetchAgentBackends()])
-      .then(async ([workspaceRecords, backendRecords]) => {
+      .then(([workspaceRecords, backendRecords]) => {
         if (cancelled) {
           return;
         }
@@ -93,19 +107,13 @@ export function ThreadCreateForm({
         );
         setProvider(initialProvider);
         setBackends(backendRecords);
-        const modelRecords = await fetchAgentBackendModels(initialProvider);
-        if (cancelled) {
-          return;
-        }
         setWorkspaces(workspaceRecords);
-        setModels(modelRecords);
         const normalizedInitialWorkspaceId = initialWorkspaceId ?? null;
         const nextWorkspaceId =
           workspaceRecords.some((workspace) => workspace.id === normalizedInitialWorkspaceId)
             ? normalizedInitialWorkspaceId!
             : workspaceRecords[0]?.id ?? '';
         setWorkspaceId(nextWorkspaceId);
-        setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
       })
       .catch((caught) => {
         if (cancelled) {
@@ -131,16 +139,53 @@ export function ThreadCreateForm({
     }
 
     let cancelled = false;
+    if (!workspaceId) {
+      return;
+    }
     setModels([]);
     setModel('');
+    setReasoningEffort(null);
     setError(null);
+    if (provider === 'acp') {
+      fetchAgentBackendAgents(provider)
+        .then((agents) => {
+          if (cancelled) {
+            return;
+          }
+          setAgentOptions(agents);
+          setAgentId((currentAgentId) => {
+            const current = agents.find(
+              (entry) =>
+                entry.model === currentAgentId && entry.acpAgent?.availability === 'ready',
+            );
+            const next = current ?? agents.find(
+              (entry) => entry.isDefault && entry.acpAgent?.availability === 'ready',
+            ) ?? agents.find((entry) => entry.acpAgent?.availability === 'ready') ?? null;
+            return next?.model ?? '';
+          });
+        })
+        .catch((caught) => {
+          if (!cancelled) {
+            setAgentOptions([]);
+            setAgentId('');
+            setError(caught instanceof Error ? caught.message : 'Unable to load ACP agents.');
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setAgentOptions([]);
+    setAgentId('');
     fetchAgentBackendModels(provider)
       .then((modelRecords) => {
         if (cancelled) {
           return;
         }
         setModels(modelRecords);
-        setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
+        const next = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+        setModel(next?.model ?? '');
+        setReasoningEffort(next?.defaultReasoningEffort ?? null);
       })
       .catch((caught) => {
         if (cancelled) {
@@ -154,7 +199,36 @@ export function ThreadCreateForm({
     return () => {
       cancelled = true;
     };
-  }, [provider]);
+  }, [provider, workspaceId]);
+
+  useEffect(() => {
+    if (provider !== 'acp' || !agentId || !selectedWorkspace) {
+      return;
+    }
+    let cancelled = false;
+    setModels([]);
+    setModel('');
+    setReasoningEffort(null);
+    fetchAgentBackendModelsFor('acp', {
+      agentId,
+      cwd: selectedWorkspace.absPath,
+    }).then((modelRecords) => {
+      if (cancelled) {
+        return;
+      }
+      setModels(modelRecords);
+      const next = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+      setModel(next?.model ?? '');
+      setReasoningEffort(next?.defaultReasoningEffort ?? null);
+    }).catch((caught) => {
+      if (!cancelled) {
+        setError(caught instanceof Error ? caught.message : 'Unable to load agent models.');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, provider, selectedWorkspace]);
 
   async function reloadBackendsAndModels(nextProvider: AgentBackendIdDto = provider) {
     const backendRecords = await fetchAgentBackends();
@@ -164,9 +238,20 @@ export function ThreadCreateForm({
       ? nextProvider
       : chooseInitialProvider(backendRecords, defaultBackend);
     setProvider(selectableProvider);
+    if (selectableProvider === 'acp') {
+      const agents = await fetchAgentBackendAgents('acp');
+      setAgentOptions(agents);
+      const next = agents.find(
+        (entry) => entry.isDefault && entry.acpAgent?.availability === 'ready',
+      ) ?? agents.find((entry) => entry.acpAgent?.availability === 'ready') ?? null;
+      setAgentId(next?.model ?? '');
+      return;
+    }
     const modelRecords = await fetchAgentBackendModels(selectableProvider);
     setModels(modelRecords);
-    setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
+    const next = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+    setModel(next?.model ?? '');
+    setReasoningEffort(next?.defaultReasoningEffort ?? null);
   }
 
   async function handleRuntimeAction(backend: AgentBackendDto) {
@@ -192,6 +277,25 @@ export function ThreadCreateForm({
     }
   }
 
+  async function handleAcpAgentInstall(entry: ModelOptionDto) {
+    setInstallingAgentId(entry.id);
+    setError(null);
+    try {
+      await installOrUpdateAgentBackend('acp', 'install', entry.id);
+      const agents = await fetchAgentBackendAgents('acp');
+      setAgentOptions(agents);
+      const installed = agents.find((candidate) => candidate.id === entry.id);
+      if (installed?.acpAgent?.availability === 'ready') {
+        setAgentId(installed.model);
+      }
+      setBackends(await fetchAgentBackends());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Unable to install ${entry.displayName}.`);
+    } finally {
+      setInstallingAgentId(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -203,14 +307,18 @@ export function ThreadCreateForm({
           ? {
               workspaceId,
               provider,
+              ...(provider === 'acp' ? { agentId } : {}),
               model,
+              ...(reasoningEffort ? { reasoningEffort } : {}),
               approvalMode,
               title: title.trim(),
             }
           : {
               workspaceId,
               provider,
+              ...(provider === 'acp' ? { agentId } : {}),
               model,
+              ...(reasoningEffort ? { reasoningEffort } : {}),
               approvalMode,
             },
       );
@@ -245,7 +353,7 @@ export function ThreadCreateForm({
             Create New Chat
           </h2>
           <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Choose the workspace, model, and approval mode for this thread.
+            Choose the workspace, agent, and approval mode for this thread.
           </p>
         </div>
       ) : null}
@@ -369,6 +477,105 @@ export function ThreadCreateForm({
           ))}
         </select>
       </div>
+      {isAcpAgentSelection ? (
+        <fieldset>
+          <legend className="host-form-label text-xs font-medium">Agent</legend>
+          <div
+            className="mt-2 max-h-64 divide-y divide-[var(--theme-border)] overflow-y-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]"
+            role="radiogroup"
+            aria-label="Agent"
+          >
+            {agentOptions.map((entry) => {
+              const metadata = entry.acpAgent;
+              const ready = metadata?.availability === 'ready';
+              const adapterMissing = metadata?.availability === 'adapter_missing';
+              const installing = installingAgentId === entry.id || metadata?.busy === true;
+              const selected = entry.model === agentId;
+              const statusLabel = metadata?.availability === 'base_missing'
+                ? 'Base agent missing'
+                : adapterMissing
+                  ? 'Adapter needed'
+                  : metadata?.availability === 'server_unavailable'
+                    ? 'ACP unavailable'
+                    : 'Ready';
+              const transportLabel = metadata?.transport === 'native'
+                ? 'Native ACP'
+                : metadata?.transport === 'adapter'
+                  ? 'ACP adapter'
+                  : 'Custom ACP';
+              const tooltipId = `${formId}-acp-agent-${entry.id}-tooltip`;
+
+              return (
+                <div
+                  key={entry.id}
+                  className="group/agent relative flex min-w-0 items-stretch gap-2 px-2 py-2"
+                  title={metadata?.statusMessage}
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-disabled={!ready || busy || installingAgentId !== null}
+                    aria-describedby={tooltipId}
+                    onClick={() => {
+                      if (ready && !busy && installingAgentId === null) {
+                        setAgentId(entry.model);
+                      }
+                    }}
+                    className={`min-w-0 flex-1 rounded-md px-2.5 py-2 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-solid)] ${
+                      selected
+                        ? 'bg-[var(--theme-surface-strong)] text-[var(--theme-fg)]'
+                        : ready
+                          ? 'text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
+                          : 'cursor-not-allowed text-[var(--theme-fg-muted)] opacity-70'
+                    }`}
+                  >
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="truncate font-medium">{entry.displayName}</span>
+                      <span className="host-pill rounded-full px-2 py-0.5 text-[0.68rem]">
+                        {statusLabel}
+                      </span>
+                      <span className="text-[0.68rem] text-[var(--theme-fg-muted)]">
+                        {transportLabel}
+                      </span>
+                    </span>
+                    <span className="mt-1 block truncate font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
+                      Probe: {metadata?.baseProbeCommand ?? 'Unavailable'}
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
+                      ACP: {metadata?.serverCommand ?? 'Unavailable'}
+                    </span>
+                  </button>
+                  {adapterMissing && metadata?.installCommand ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleAcpAgentInstall(entry)}
+                      disabled={busy || installing || installingAgentId !== null}
+                      className="host-secondary-button my-auto shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-label={`Install ACP adapter for ${entry.displayName}`}
+                    >
+                      {installing ? 'Installing...' : 'Install adapter'}
+                    </button>
+                  ) : null}
+                  <span
+                    id={tooltipId}
+                    role="tooltip"
+                    className="pointer-events-none absolute inset-x-2 bottom-[calc(100%-0.2rem)] z-20 invisible rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-xs leading-5 text-[var(--theme-fg)] opacity-0 shadow-[var(--theme-shadow)] transition group-hover/agent:visible group-hover/agent:opacity-100 group-focus-within/agent:visible group-focus-within/agent:opacity-100"
+                  >
+                    {metadata?.statusMessage}
+                    <span className="mt-1 block font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
+                      Base probe: {metadata?.baseProbeCommand}
+                    </span>
+                    <span className="block font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
+                      ACP probe: {metadata?.serverProbeCommand}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </fieldset>
+      ) : null}
       <div>
         <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-model`}>
           Model
@@ -376,7 +583,17 @@ export function ThreadCreateForm({
         <select
           id={`${formId}-thread-model`}
           value={model}
-          onChange={(event) => setModel(event.target.value)}
+          onChange={(event) => {
+            const nextModel = models.find((entry) => entry.model === event.target.value) ?? null;
+            setModel(event.target.value);
+            setReasoningEffort((current) =>
+              current && nextModel?.supportedReasoningEfforts.some(
+                (entry) => entry.reasoningEffort === current,
+              )
+                ? current
+                : nextModel?.defaultReasoningEffort ?? null,
+            );
+          }}
           disabled={models.length === 0}
           className={controlClassName}
         >
@@ -390,6 +607,27 @@ export function ThreadCreateForm({
           ))}
         </select>
       </div>
+      {selectedModel && selectedModel.supportedReasoningEfforts.length > 0 ? (
+        <div>
+          <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-effort`}>
+            Reasoning effort
+          </label>
+          <select
+            id={`${formId}-thread-effort`}
+            value={reasoningEffort ?? ''}
+            onChange={(event) =>
+              setReasoningEffort((event.target.value || null) as ReasoningEffortDto | null)
+            }
+            className={controlClassName}
+          >
+            {selectedModel.supportedReasoningEfforts.map((entry) => (
+              <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
+                {entry.reasoningEffort}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <div>
         <label className="host-form-label text-xs font-medium" htmlFor={`${formId}-thread-title`}>
           Title
@@ -424,7 +662,13 @@ export function ThreadCreateForm({
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <button
           type="submit"
-          disabled={busy || !workspaceId || !model}
+          disabled={
+            busy ||
+            !workspaceId ||
+            !model ||
+            !selectedModelAvailable ||
+            (provider === 'acp' && selectedAgent?.acpAgent?.availability !== 'ready')
+          }
           className={primaryButtonClassName}
         >
           {busy ? 'Creating...' : 'Create Thread'}

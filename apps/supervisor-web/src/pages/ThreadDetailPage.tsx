@@ -51,6 +51,8 @@ import {
   disconnectThread,
   deleteThread,
   fetchAgentBackendModels,
+  fetchAgentBackendAgents,
+  fetchAgentBackendModelsFor,
   fetchAgentBackendStatus,
   fetchAgentSubscriptionUsage,
   fetchProviderHostFile,
@@ -217,7 +219,7 @@ interface WorkspaceFocusPathRequest {
 type PendingThreadSettings = Partial<
   Pick<
     ThreadDto,
-    'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode'
+    'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode' | 'sandboxMode'
   >
 >;
 
@@ -377,6 +379,7 @@ export function ThreadDetailPage() {
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
+  const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
   const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [backendCapabilities, setBackendCapabilities] = useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
@@ -1152,11 +1155,20 @@ export function ThreadDetailPage() {
       pageContextRequestIdRef.current = requestId;
       const provider =
         seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex';
+      const agentId = seedThread?.agentId ?? detailRef.current?.thread.agentId ?? null;
+      const cwd = detailRef.current?.workspace.absPath ?? null;
+      const modelRequest = provider === 'acp' && agentId && cwd
+        ? fetchAgentBackendModelsFor(provider, { agentId, cwd })
+        : fetchAgentBackendModels(provider);
+      const agentRequest = provider === 'acp'
+        ? fetchAgentBackendAgents(provider)
+        : Promise.resolve([] as ModelOptionDto[]);
 
-      const [threadResult, statusResult, modelResult] = await Promise.allSettled([
+      const [threadResult, statusResult, modelResult, agentResult] = await Promise.allSettled([
         fetchThreads(),
         fetchAgentBackendStatus(provider),
-        fetchAgentBackendModels(provider),
+        modelRequest,
+        agentRequest,
       ]);
 
       if (pageContextRequestIdRef.current !== requestId) {
@@ -1183,6 +1195,9 @@ export function ThreadDetailPage() {
       if (modelResult.status === 'fulfilled') {
         pageContextProviderRef.current = provider;
         setModelOptions(modelResult.value);
+      }
+      if (agentResult.status === 'fulfilled') {
+        setAgentOptions(agentResult.value);
       }
     },
     [],
@@ -2562,6 +2577,7 @@ export function ThreadDetailPage() {
     reasoningEffort?: ThreadDto['reasoningEffort'];
     fastMode?: boolean;
     collaborationMode?: ThreadDto['collaborationMode'];
+    sandboxMode?: ThreadDto['sandboxMode'];
   }) {
     if (!detail) {
       return;
@@ -2578,6 +2594,7 @@ export function ThreadDetailPage() {
       ...(input.collaborationMode !== undefined
         ? { collaborationMode: input.collaborationMode }
         : {}),
+      ...(input.sandboxMode !== undefined ? { sandboxMode: input.sandboxMode } : {}),
     };
     const optimisticThread = {
       ...detail.thread,
@@ -2614,6 +2631,7 @@ export function ThreadDetailPage() {
         ...(input.collaborationMode !== undefined
           ? { collaborationMode: input.collaborationMode }
           : {}),
+        ...(input.sandboxMode !== undefined ? { sandboxMode: input.sandboxMode } : {}),
       });
       pendingThreadSettingsRef.current = null;
       detailRef.current = previousDetail
@@ -3191,10 +3209,13 @@ export function ThreadDetailPage() {
         settingsBusy,
         error: null,
         model: detail.thread.model,
+        agentLabel:
+          agentOptions.find((entry) => entry.model === detail.thread.agentId)?.displayName ??
+          detail.thread.agentId ?? null,
         reasoningEffort: detail.thread.reasoningEffort,
         fastMode: detail.thread.fastMode ?? false,
         collaborationMode: detail.thread.collaborationMode,
-        sandboxMode: null,
+        sandboxMode: detail.thread.sandboxMode ?? null,
         modelOptions,
         contextUsage: detail.thread.contextUsage,
         subscriptionUsage,

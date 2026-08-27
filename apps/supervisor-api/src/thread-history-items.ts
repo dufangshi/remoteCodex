@@ -266,7 +266,11 @@ export function deferLargeHistoryItemDetails(
 
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
+    item.kind === 'userMessage' ||
     (item.kind === 'agentMessage' && !isTransientAgentHistoryItem(item)) ||
+    item.kind === 'image' ||
+    item.kind === 'plan' ||
+    item.kind === 'contextCompaction' ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
     item.kind === 'fileRead' ||
@@ -275,7 +279,8 @@ export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
     item.kind === 'skillToolCall' ||
     item.kind === 'toolCall' ||
     item.kind === 'reasoning' ||
-    item.kind === 'webSearch'
+    item.kind === 'webSearch' ||
+    item.kind === 'other'
   );
 }
 

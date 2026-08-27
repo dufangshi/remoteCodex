@@ -35,15 +35,19 @@ export function toWorkspaceDto(record: {
 }
 
 export function defaultSandboxModeForApprovalMode(
-  _approvalMode: ApprovalMode | null | undefined,
+  approvalMode: ApprovalMode | null | undefined,
 ): SandboxModeDto {
-  return 'danger-full-access';
+  return approvalMode === 'guarded' ? 'workspace-write' : 'danger-full-access';
 }
 
 export function normalizeSandboxMode(
-  _value: string | null | undefined,
+  value: string | null | undefined,
 ): SandboxModeDto | null {
-  return 'danger-full-access';
+  return value === 'read-only' ||
+    value === 'workspace-write' ||
+    value === 'danger-full-access'
+    ? value
+    : null;
 }
 
 export function normalizeCollaborationMode(
@@ -85,6 +89,7 @@ export function toThreadDto(
     id: string;
     workspaceId: string;
     provider?: string | null;
+    agentId?: string | null;
     providerSessionId?: string | null;
     source?: string | null;
     title: string;
@@ -112,14 +117,23 @@ export function toThreadDto(
   },
 ): ThreadDto {
   const status = (record.status ?? 'idle') as ThreadStatusDto;
+  const provider = (record.provider ?? 'codex') as ThreadDto['provider'];
+  const scopedAgentId = provider === 'acp'
+    ? record.providerSessionId?.split('::', 1)[0] || null
+    : null;
+  const agentId = record.agentId ?? scopedAgentId;
+  const model = provider === 'acp' && scopedAgentId && record.model === scopedAgentId
+    ? null
+    : record.model ?? null;
   return {
     id: record.id,
     workspaceId: record.workspaceId,
-    provider: (record.provider ?? 'codex') as ThreadDto['provider'],
+    provider,
+    agentId,
     providerSessionId: record.providerSessionId ?? null,
     source: (record.source ?? 'supervisor') as ThreadSourceDto,
     title: record.title,
-    model: record.model ?? null,
+    model,
     reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
     fastMode: callbacks.fastModeForProvider(record.provider, record.fastMode),
     collaborationMode: normalizeCollaborationMode(record.collaborationMode),

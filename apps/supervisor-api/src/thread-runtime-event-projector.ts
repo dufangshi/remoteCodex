@@ -306,6 +306,7 @@ export class ThreadRuntimeEventProjector {
           tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
             baselineTotal: usageAccounting.turnStartBaseline(record.id, turnId),
             usage: null,
+            modelContextWindow: null,
           }),
         });
         callbacks.invalidateThreadDetailCache(record.id);

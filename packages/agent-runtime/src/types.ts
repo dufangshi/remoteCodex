@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type {
+  AcpAgentOptionMetadataDto,
   AgentBackendIdDto,
   AgentBackendInstallationDto,
   ThreadHistoryItemDto,
@@ -159,6 +160,8 @@ export interface AgentModel {
     description: string;
   }>;
   defaultReasoningEffort: string | null;
+  selectionKind?: 'model' | 'agent';
+  acpAgent?: AcpAgentOptionMetadataDto | null;
 }
 
 export type AgentSessionStatus =
@@ -228,6 +231,7 @@ export interface ReadAgentSessionOptions {
 
 export interface StartAgentSessionInput {
   cwd: string;
+  agentId?: string | null;
   model: string;
   reasoningEffort?: string | null;
   approvalMode: 'yolo' | 'guarded';
@@ -237,6 +241,7 @@ export interface StartAgentSessionInput {
 
 export interface StartAgentSessionResult {
   provider: AgentProviderId;
+  agentId?: string | null;
   providerSessionId: string;
   model: string | null;
   reasoningEffort?: string | null;
@@ -549,6 +554,8 @@ export interface AgentRuntime extends EventEmitter {
   stop(): Promise<void>;
 
   listModels(): Promise<AgentModel[]>;
+  listAgentOptions?(): Promise<AgentModel[]>;
+  listModelsForAgent?(agentId: string, cwd: string): Promise<AgentModel[]>;
   listSessions(): Promise<AgentSessionSummary[]>;
   listLoadedSessions(): Promise<string[]>;
   readSession(
@@ -582,6 +589,7 @@ export interface AgentRuntime extends EventEmitter {
   getGoal?(providerSessionId: string): Promise<AgentGoal | null>;
   setGoal?(input: SetAgentGoalInput): Promise<AgentGoal>;
   clearGoal?(providerSessionId: string): Promise<boolean>;
+  installModel?(modelId: string): Promise<void>;
   getSubscriptionUsage?(): Promise<{
     provider: 'codex' | 'claude';
     authKind: 'subscription' | 'apiKey' | 'unknown';

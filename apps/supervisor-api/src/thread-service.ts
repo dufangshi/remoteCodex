@@ -636,9 +636,10 @@ export class ThreadService {
     const created = createThreadRecord(this.db, {
       workspaceId: workspace.id,
       provider: session.provider,
+      agentId: session.response.agentId ?? input.agentId ?? null,
       providerSessionId: session.response.providerSessionId,
       title: session.normalizedTitle,
-      model: input.model,
+      model: session.response.model ?? input.model,
       reasoningEffort: session.reasoningEffort,
       collaborationMode: 'default',
       approvalMode: input.approvalMode,
@@ -978,6 +979,8 @@ export class ThreadService {
     }
     const turnConfig = await this.sessionCoordinator.resolvePromptTurnConfig({
       provider: record.provider,
+      agentId: record.agentId,
+      workspacePath: workspace.absPath,
       currentModel: record.model,
       currentReasoningEffort: record.reasoningEffort,
       currentFastMode: record.fastMode,
@@ -1035,9 +1038,12 @@ export class ThreadService {
     input: UpdateThreadSettingsInput
   ): Promise<ThreadDto> {
     const record = this.requireThreadRecord(localThreadId);
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
 
     const nextSettings = await this.sessionCoordinator.resolveThreadSettings({
       provider: record.provider,
+      agentId: record.agentId,
+      workspacePath: workspace?.absPath ?? null,
       currentModel: record.model,
       currentReasoningEffort: record.reasoningEffort,
       currentFastMode: record.fastMode,
@@ -1408,6 +1414,8 @@ export class ThreadService {
         }
         const turnConfig = await this.sessionCoordinator.resolvePromptTurnConfig({
           provider: record.provider,
+          agentId: record.agentId,
+          workspacePath: workspace.absPath,
           currentModel: record.model,
           currentReasoningEffort: record.reasoningEffort,
           currentFastMode: record.fastMode,
@@ -1539,6 +1547,8 @@ export class ThreadService {
     const queuedConfig = parseQueuedTurnConfig(pending.turnConfigJson);
     const turnConfig = queuedConfig ?? await this.sessionCoordinator.resolvePromptTurnConfig({
         provider: record.provider,
+        agentId: record.agentId,
+        workspacePath: workspace.absPath,
         currentModel: record.model,
         currentReasoningEffort: record.reasoningEffort,
         currentFastMode: record.fastMode,

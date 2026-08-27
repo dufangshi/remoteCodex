@@ -32,7 +32,7 @@ export function ThreadNewPage() {
     <FloatingRoutePanel
       eyebrow="New Thread"
       title="Start a backend session"
-      description="Choose the workspace, model, and approval mode that should back the new thread."
+      description="Choose the workspace, agent or model, and approval mode for the new thread."
       maxWidthClassName="max-w-3xl"
     >
       <ThreadCreateForm

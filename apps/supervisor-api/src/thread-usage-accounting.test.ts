@@ -1,9 +1,24 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+  createDatabase,
+  createThreadRecord,
+  createWorkspaceRecord,
+  getThreadTurnMetadataByThreadAndTurnId,
+  runMigrations,
+  seedDefaults,
+} from '../../../packages/db/src/index';
+
+import {
+  ThreadUsageAccounting,
   buildThreadContextUsageFromPayload,
   buildTurnTokenBreakdown,
   mergeThreadContextUsageFromPayload,
+  parseThreadTurnTokenUsageJson,
   shouldResetThreadContextUsageForTurnStart,
 } from './thread-usage-accounting';
 
@@ -30,6 +45,90 @@ describe('buildThreadContextUsageFromPayload', () => {
     });
   });
 
+  it('persists an upstream context window that arrives before complete token usage', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-usage-'));
+    const databasePath = path.join(tempDir, 'usage.sqlite');
+    runMigrations(databasePath);
+    const context = createDatabase(databasePath);
+
+    try {
+      seedDefaults(context.db);
+      const workspace = createWorkspaceRecord(context.db, {
+        absPath: path.join(tempDir, 'workspace'),
+        label: 'Usage workspace',
+      });
+      const thread = createThreadRecord(context.db, {
+        workspaceId: workspace.id,
+        provider: 'acp',
+        agentId: 'codex',
+        providerSessionId: 'codex::context-session',
+        title: 'Context window persistence',
+        model: 'gpt-5.6-sol',
+        approvalMode: 'yolo',
+      });
+      const accounting = new ThreadUsageAccounting(context.db);
+
+      expect(accounting.updateTurnUsage({
+        localThreadId: thread.id,
+        turnId: 'turn-1',
+        tokenUsage: {
+          last: { totalTokens: 21_346 },
+          modelContextWindow: 258_400,
+        },
+      })).toBeNull();
+
+      const partialRecord = getThreadTurnMetadataByThreadAndTurnId(
+        context.db,
+        thread.id,
+        'turn-1',
+      );
+      expect(JSON.parse(partialRecord?.tokenUsageJson ?? '{}')).toMatchObject({
+        modelContextWindow: 258_400,
+      });
+
+      accounting.updateTurnUsage({
+        localThreadId: thread.id,
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 21_346,
+            inputTokens: 17_497,
+            cachedInputTokens: 3_840,
+            outputTokens: 9,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 21_346,
+            inputTokens: 17_497,
+            cachedInputTokens: 3_840,
+            outputTokens: 9,
+            reasoningOutputTokens: 0,
+          },
+        },
+      });
+
+      const completedRecord = getThreadTurnMetadataByThreadAndTurnId(
+        context.db,
+        thread.id,
+        'turn-1',
+      );
+      expect(parseThreadTurnTokenUsageJson(completedRecord?.tokenUsageJson)).toMatchObject({
+        modelContextWindow: 258_400,
+        last: { totalTokens: 21_346 },
+      });
+
+      const reloadedAccounting = new ThreadUsageAccounting(context.db);
+      expect(reloadedAccounting.getThreadContextUsage(thread.id)).toMatchObject({
+        availability: 'available',
+        tokensInContextWindow: 21_346,
+        modelContextWindow: 258_400,
+      });
+    } finally {
+      context.sqlite.close();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('prefers the runtime context window over local model pricing metadata', () => {
     const usage = buildThreadContextUsageFromPayload(
       {
@@ -48,7 +147,7 @@ describe('buildThreadContextUsageFromPayload', () => {
 
     expect(usage).toEqual({
       availability: 'available',
-      remainingPercent: 51,
+      remainingPercent: 50,
       tokensInContextWindow: 500000,
       modelContextWindow: 1000000,
       updatedAt: '2026-05-22T00:00:00.000Z',
@@ -72,7 +171,7 @@ describe('buildThreadContextUsageFromPayload', () => {
 
     expect(usage).toEqual({
       availability: 'available',
-      remainingPercent: 50,
+      remainingPercent: 48,
       tokensInContextWindow: 182_700,
       modelContextWindow: 353_400,
       updatedAt: '2026-07-09T00:00:00.000Z',
@@ -104,6 +203,46 @@ describe('buildThreadContextUsageFromPayload', () => {
         '2026-05-22T00:01:00.000Z',
       ),
     ).toEqual(current);
+  });
+
+  it('keeps an upstream window when final token usage omits the window size', () => {
+    const current = {
+      availability: 'available' as const,
+      remainingPercent: 96,
+      tokensInContextWindow: 20_000,
+      modelContextWindow: 258_400,
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    };
+
+    expect(
+      mergeThreadContextUsageFromPayload(
+        current,
+        {
+          total: {
+            totalTokens: 20_542,
+            inputTokens: 16_693,
+            cachedInputTokens: 3_840,
+            outputTokens: 9,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 20_542,
+            inputTokens: 16_693,
+            cachedInputTokens: 3_840,
+            outputTokens: 9,
+            reasoningOutputTokens: 0,
+          },
+        },
+        'gpt-5.6-sol',
+        '2026-08-27T00:01:00.000Z',
+      ),
+    ).toEqual({
+      availability: 'available',
+      remainingPercent: 92,
+      tokensInContextWindow: 20_542,
+      modelContextWindow: 258_400,
+      updatedAt: '2026-08-27T00:01:00.000Z',
+    });
   });
 
   it('only resets context display on turn start when no available estimate exists', () => {

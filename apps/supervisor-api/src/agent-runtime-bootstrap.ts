@@ -11,6 +11,7 @@ import {
 } from '../../../packages/codex/src/index';
 import { ClaudeRuntimeAdapter } from '../../../packages/claude/src/index';
 import { OpenCodeRuntimeAdapter } from '../../../packages/opencode/src/index';
+import { AcpCatalogRuntimeAdapter } from '../../../packages/acp/src/index';
 import type { RuntimeConfig } from '../../../packages/config/src/index';
 import { E2EFakeRuntime, isE2EFakeRuntimeEnabled } from './e2e-fake-runtime';
 
@@ -56,6 +57,21 @@ export function createAgentRuntimeBootstrap(config: RuntimeConfig): AgentRuntime
   if (opencodeConfig.enabled) {
     runtimes.push(createOpenCodeRuntime(config));
     providerHostHomes.opencode = opencodeConfig.home;
+  }
+
+  const acpConfig = config.agentProviders.acp;
+  if (acpConfig.enabled) {
+    runtimes.push(new AcpCatalogRuntimeAdapter({
+      customCommand: acpConfig.command,
+      codexHome: codexConfig.home,
+      startupTimeoutMs: acpConfig.startupTimeoutMs,
+      clientInfo: {
+        name: 'remote-codex-supervisor',
+        title: config.appName,
+        version: config.appVersion,
+      },
+    }));
+    providerHostHomes.acp = acpConfig.home;
   }
 
   if (isE2EFakeRuntimeEnabled()) {

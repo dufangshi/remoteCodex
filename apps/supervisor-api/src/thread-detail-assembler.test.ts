@@ -397,6 +397,109 @@ describe('ThreadDetailAssembler', () => {
     );
   });
 
+  it('fills missing ACP turns from supervisor-persisted history', async () => {
+    const persistedItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'acp-turn-1:user',
+        kind: 'userMessage',
+        text: 'Previous ACP prompt',
+        createdAt: '2026-06-06T23:59:00.000Z',
+        sequence: 0,
+      },
+      {
+        id: 'acp-turn-1:agent',
+        kind: 'agentMessage',
+        text: 'Previous ACP response',
+        createdAt: '2026-06-06T23:59:01.000Z',
+        sequence: 1,
+        sourceTurnId: 'acp-turn-1',
+        status: 'completed',
+      },
+    ];
+    const latestTurn = turn('acp-turn-2');
+    const { assembler, callbacks } = createAssembler(session([latestTurn], 2));
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['acp-turn-1', persistedItems]]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: { ...record, provider: 'acp' },
+      turnMetadataById: new Map([
+        ['acp-turn-1', {
+          model: null,
+          reasoningEffort: null,
+          reasoningEffortAvailable: null,
+          pricingModelKey: null,
+          pricingTierKey: null,
+          tokenUsageJson: null,
+          createdAt: '2026-06-06T23:59:00.000Z',
+        }],
+      ]),
+      options: { limit: 10 },
+    });
+
+    expect(entry.turns.map((candidate) => candidate.id)).toEqual([
+      'acp-turn-1',
+      'acp-turn-2',
+    ]);
+    expect(entry.turns[0]).toMatchObject({
+      id: 'acp-turn-1',
+      status: 'completed',
+      items: [
+        { kind: 'userMessage', text: 'Previous ACP prompt' },
+        { kind: 'agentMessage', text: 'Previous ACP response' },
+      ],
+    });
+  });
+
+  it('does not turn a completed ACP turn into a failure because one tool failed', async () => {
+    const persistedItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'acp-turn-1:user',
+        kind: 'userMessage',
+        text: 'Run checks',
+        status: 'completed',
+      },
+      {
+        id: 'acp-turn-1:command',
+        kind: 'commandExecution',
+        text: 'optional check',
+        status: 'failed',
+      },
+      {
+        id: 'acp-turn-1:agent',
+        kind: 'agentMessage',
+        text: 'Recovered and completed.',
+        status: 'completed',
+        sourceTurnId: 'acp-turn-1',
+      },
+    ];
+    const { assembler, callbacks } = createAssembler(session([]));
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['acp-turn-1', persistedItems]]),
+    );
+    callbacks.buildThreadPatch.mockReturnValue({ status: 'idle' });
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: { ...record, provider: 'acp' },
+      turnMetadataById: new Map(),
+      options: { limit: 10 },
+    });
+
+    expect(entry.totalTurnCount).toBe(1);
+    expect(entry.turns[0]).toMatchObject({
+      id: 'acp-turn-1',
+      status: 'completed',
+      error: null,
+    });
+    expect(callbacks.updateThreadRecord).toHaveBeenCalledWith(
+      record.id,
+      expect.not.objectContaining({ status: 'failed' }),
+    );
+  });
+
   it('does not promote failed items from completed remote turns to thread failure', async () => {
     const failedAt = '2026-06-07T00:00:30.000Z';
     const persistedFailureItems: ThreadHistoryItemDto[] = [

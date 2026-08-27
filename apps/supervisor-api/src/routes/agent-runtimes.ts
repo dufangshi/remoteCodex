@@ -28,6 +28,11 @@ const providerParamSchema = z.object({
 });
 const installActionSchema = z.object({
   action: z.enum(['install', 'update']),
+  modelId: z.string().min(1).optional(),
+});
+const modelQuerySchema = z.object({
+  agentId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 });
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -66,6 +71,27 @@ function runtimeDto(app: FastifyInstance, provider: AgentBackendIdDto): AgentBac
     capabilities: runtime.capabilities,
     managementSchema: runtime.managementSchema,
     installation,
+  };
+}
+
+function modelDto(
+  model: Awaited<ReturnType<AgentRuntime['listModels']>>[number],
+): ModelOptionDto {
+  return {
+    id: model.id,
+    model: model.model,
+    displayName: model.displayName,
+    description: model.description,
+    isDefault: model.isDefault,
+    hidden: model.hidden,
+    supportsPerformanceMode: model.supportsPerformanceMode === true,
+    supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => ({
+      reasoningEffort: entry.reasoningEffort as ReasoningEffortDto,
+      description: entry.description,
+    })),
+    defaultReasoningEffort: model.defaultReasoningEffort as ReasoningEffortDto | null,
+    ...(model.selectionKind ? { selectionKind: model.selectionKind } : {}),
+    ...(model.acpAgent !== undefined ? { acpAgent: model.acpAgent } : {}),
   };
 }
 
@@ -120,10 +146,21 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
       });
     }
     const { provider } = providerParamSchema.parse(request.params);
-    const { action } = installActionSchema.parse(request.body ?? {});
+    const { action, modelId } = installActionSchema.parse(request.body ?? {});
     const runtime = app.services.agentRuntimes.getOptional(provider);
     if (!runtime) {
       throw providerNotConfigured(provider);
+    }
+    if (modelId !== undefined) {
+      if (!runtime.installModel) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: `${runtime.displayName} does not support per-agent installation.`,
+        });
+      }
+      await runtime.installModel(modelId);
+      await refreshBackendInstallation(app, runtime);
+      return runtimeDto(app, provider);
     }
     const command = action === 'install'
       ? runtime.installation.installCommand
@@ -170,24 +207,27 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
 
   app.get('/api/agent-runtimes/:provider/models', async (request) => {
     const { provider } = providerParamSchema.parse(request.params);
+    const query = modelQuerySchema.parse(request.query);
     const runtime = app.services.agentRuntimes.getOptional(provider);
     if (!runtime) {
       throw providerNotConfigured(provider);
     }
-    return (await runtime.listModels()).map((model) => ({
-      id: model.id,
-      model: model.model,
-      displayName: model.displayName,
-      description: model.description,
-      isDefault: model.isDefault,
-      hidden: model.hidden,
-      supportsPerformanceMode: model.supportsPerformanceMode === true,
-      supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => ({
-        reasoningEffort: entry.reasoningEffort as ReasoningEffortDto,
-        description: entry.description,
-      })),
-      defaultReasoningEffort: model.defaultReasoningEffort as ReasoningEffortDto | null,
-    })) satisfies ModelOptionDto[];
+    const models = runtime.listModelsForAgent && query.agentId && query.cwd
+      ? await runtime.listModelsForAgent(query.agentId, query.cwd)
+      : await runtime.listModels();
+    return models.map(modelDto);
+  });
+
+  app.get('/api/agent-runtimes/:provider/agents', async (request) => {
+    const { provider } = providerParamSchema.parse(request.params);
+    const runtime = app.services.agentRuntimes.getOptional(provider);
+    if (!runtime) {
+      throw providerNotConfigured(provider);
+    }
+    if (!runtime.listAgentOptions) {
+      return [] satisfies ModelOptionDto[];
+    }
+    return (await runtime.listAgentOptions()).map(modelDto);
   });
 
   app.post('/api/agent-runtimes/:provider/build-restart', async (request) => {
@@ -297,6 +337,11 @@ async function refreshBackendInstallation(
           cliVersion ? null : `OpenCode command is not available: ${command}`,
           sdkVersion ? null : 'OpenCode SDK is not installed.',
         ].filter(Boolean).join(' ');
+    return;
+  }
+
+  if (runtime.provider === 'acp') {
+    await runtime.listModels();
   }
 }
 
@@ -367,6 +412,8 @@ function runtimeCommand(app: FastifyInstance, provider: AgentBackendIdDto) {
       return app.services.config.agentProviders.claude.command;
     case 'opencode':
       return app.services.config.agentProviders.opencode.command;
+    case 'acp':
+      return app.services.config.agentProviders.acp.command;
   }
 }
 

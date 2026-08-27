@@ -27,6 +27,24 @@ describe('agentTurnToThreadTurnDto', () => {
     ).toBe(false);
   });
 
+  it.each([
+    'userMessage',
+    'plan',
+    'contextCompaction',
+    'reasoning',
+    'commandExecution',
+    'fileRead',
+    'fileChange',
+    'toolCall',
+    'other',
+  ] as const)('persists %s items for provider-independent history', (kind) => {
+    expect(shouldPersistLiveHistoryItem({
+      id: `item-${kind}`,
+      kind,
+      text: kind,
+    })).toBe(true);
+  });
+
   it('normalizes item timestamps without overwriting explicit createdAt values', () => {
     const turnStartedAt = '2026-04-09T06:01:00.000Z';
     const explicitItemCreatedAt = '2026-04-09T06:01:05.000Z';

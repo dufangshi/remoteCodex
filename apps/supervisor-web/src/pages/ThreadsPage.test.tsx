@@ -42,6 +42,19 @@ const codexBackendResponse = {
   },
 };
 
+const acpBackendResponse = {
+  ...codexBackendResponse,
+  provider: 'acp',
+  displayName: 'ACP Agent',
+  isDefault: false,
+  status: {
+    ...codexBackendResponse.status,
+    transport: 'stdio',
+  },
+};
+
+let codexStatusAvailable = true;
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   listeners = new Map<string, ((event: MessageEvent) => void)[]>();
@@ -60,6 +73,7 @@ class FakeWebSocket {
 
 describe('ThreadsPage', () => {
   beforeEach(() => {
+    codexStatusAvailable = true;
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     Object.defineProperty(navigator, 'clipboard', {
@@ -73,22 +87,30 @@ describe('ThreadsPage', () => {
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.includes('/api/agent-runtimes/codex/status')) {
+          if (!codexStatusAvailable) {
+            return Promise.resolve(new Response(
+              JSON.stringify({
+                code: 'not_found',
+                message: 'Agent runtime provider is not configured: codex',
+              }),
+              {
+                status: 404,
+                headers: { 'Content-Type': 'application/json' },
+              },
+            ));
+          }
           return Promise.resolve({
             ok: true,
             json: async () => codexBackendResponse,
           });
         }
 
-        if (url.includes('/api/agent-runtimes/codex/status')) {
+        if (url.endsWith('/api/agent-runtimes')) {
           return Promise.resolve({
             ok: true,
-            json: async () => ({
-              state: 'ready',
-              transport: 'stdio',
-              lastStartedAt: new Date().toISOString(),
-              lastError: null,
-              restartCount: 0,
-            }),
+            json: async () => codexStatusAvailable
+              ? [codexBackendResponse]
+              : [acpBackendResponse],
           });
         }
 
@@ -295,6 +317,19 @@ describe('ThreadsPage', () => {
       ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'PATCH',
     );
     expect(patchCall?.[1]?.body).toBe(JSON.stringify({ title: 'Renamed Thread' }));
+  });
+
+  it('falls back to an available ACP runtime when the saved backend is not configured', async () => {
+    codexStatusAvailable = false;
+    renderPage('/threads?workspaceId=workspace-1');
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Agent runtime provider is not configured: codex/),
+    ).not.toBeInTheDocument();
   });
 
   it('copies the backend session id and deletes a recent thread after confirmation', async () => {

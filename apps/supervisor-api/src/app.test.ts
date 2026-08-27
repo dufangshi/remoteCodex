@@ -523,6 +523,7 @@ describe('supervisor api', () => {
     manager: FakeCodexManager,
     options: {
       claudeRuntime?: FakeClaudeRuntime;
+      additionalRuntimes?: AgentRuntime[];
       env?: Record<string, string>;
       relayTunnelClient?: RelayTunnelClient;
       platform?: NodeJS.Platform;
@@ -534,6 +535,7 @@ describe('supervisor api', () => {
     if (options.claudeRuntime) {
       runtimes.push(options.claudeRuntime);
     }
+    runtimes.push(...(options.additionalRuntimes ?? []));
     const buildOptions: BuildAppOptions = {
       env: {
         NODE_ENV: 'test',
@@ -2245,6 +2247,44 @@ describe('supervisor api', () => {
     });
     expect(failingRuntime.installation.busy).toBe(false);
     expect(failingRuntime.installation.lastError).toContain('install failed');
+  });
+
+  it('installs a selected ACP adapter through the per-agent model id', async () => {
+    await app.close();
+    const runtime = new FakeClaudeRuntime() as unknown as AgentRuntime;
+    const installModel = vi.fn(async () => {});
+    Object.defineProperties(runtime, {
+      provider: { value: 'acp' },
+      displayName: { value: 'ACP Agent' },
+      installModel: { value: installModel },
+    });
+    runtime.listModels = vi.fn(async () => [{
+      id: 'codex',
+      model: 'codex',
+      displayName: 'OpenAI Codex',
+      description: 'Codex ACP adapter',
+      isDefault: true,
+      hidden: false,
+      supportedReasoningEfforts: [],
+      defaultReasoningEffort: null,
+      selectionKind: 'agent' as const,
+    }]);
+    app = buildTestApp(fakeCodexManager, {
+      additionalRuntimes: [runtime],
+    });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/acp/install',
+      payload: {
+        action: 'install',
+        modelId: 'codex',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(installModel).toHaveBeenCalledWith('codex');
   });
 
   it('reports when a backend update succeeds but the active command still resolves to the old version', async () => {
@@ -4700,7 +4740,7 @@ describe('supervisor api', () => {
     expect(detailResponse.statusCode).toBe(200);
     expect(detailResponse.json().thread.contextUsage).toMatchObject({
       availability: 'available',
-      remainingPercent: 38,
+      remainingPercent: 36,
       tokensInContextWindow: 165200,
       modelContextWindow: 258400,
     });
@@ -4760,7 +4800,7 @@ describe('supervisor api', () => {
     });
     expect(baselineDetailResponse.json().thread.contextUsage).toMatchObject({
       availability: 'available',
-      remainingPercent: 38,
+      remainingPercent: 36,
       tokensInContextWindow: 165200,
       modelContextWindow: 258400,
     });
@@ -4776,7 +4816,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
     expect(promptResponse.json().contextUsage).toMatchObject({
       availability: 'available',
-      remainingPercent: 38,
+      remainingPercent: 36,
       tokensInContextWindow: 165200,
       modelContextWindow: 258400,
     });
@@ -4808,7 +4848,7 @@ describe('supervisor api', () => {
 
     expect(runningDetailResponse.json().thread.contextUsage).toMatchObject({
       availability: 'available',
-      remainingPercent: 38,
+      remainingPercent: 36,
       tokensInContextWindow: 165200,
       modelContextWindow: 258400,
     });
@@ -6578,6 +6618,54 @@ describe('supervisor api', () => {
     } finally {
       await fs.rm(externalRoot, { recursive: true, force: true });
     }
+  });
+
+  it('accepts and persists sandbox mode thread settings', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'sandbox-settings-workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Sandbox Settings Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const settingsResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/settings`,
+      payload: {
+        sandboxMode: 'read-only',
+      },
+    });
+
+    expect(settingsResponse.statusCode).toBe(200);
+    expect(settingsResponse.json()).toMatchObject({
+      id: createdThread.id,
+      sandboxMode: 'read-only',
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        sandboxMode: 'read-only',
+      },
+    });
   });
 
   it('persists fast mode via config service_tier and records a timeline activity note', async () => {

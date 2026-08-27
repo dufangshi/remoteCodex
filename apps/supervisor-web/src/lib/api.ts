@@ -1080,22 +1080,48 @@ export function restartAgentBackend(provider: AgentBackendIdDto) {
 export function installOrUpdateAgentBackend(
   provider: AgentBackendIdDto,
   action: 'install' | 'update',
+  modelId?: string,
 ) {
   return request<AgentBackendDto>(
     `/api/agent-runtimes/${encodeURIComponent(provider)}/install`,
     {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({
+        action,
+        ...(modelId ? { modelId } : {}),
+      }),
     },
   );
 }
 
 export function fetchAgentBackendModels(provider: AgentBackendIdDto) {
+  return fetchAgentBackendModelsFor(provider);
+}
+
+export function fetchAgentBackendModelsFor(
+  provider: AgentBackendIdDto,
+  options: { agentId?: string | null; cwd?: string | null } = {},
+) {
+  const query = new URLSearchParams();
+  if (options.agentId) {
+    query.set('agentId', options.agentId);
+  }
+  if (options.cwd) {
+    query.set('cwd', options.cwd);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
   return request<ModelOptionDto[]>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/models`,
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/models${suffix}`,
     {
       cache: 'no-store',
     },
+  );
+}
+
+export function fetchAgentBackendAgents(provider: AgentBackendIdDto) {
+  return request<ModelOptionDto[]>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/agents`,
+    { cache: 'no-store' },
   );
 }
 

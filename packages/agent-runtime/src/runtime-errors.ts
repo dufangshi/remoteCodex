@@ -73,6 +73,7 @@ export function isRemoteThreadBootstrapError(error: unknown) {
   }
 
   return (
+    (isRecord(error.details) && error.details.historyUnavailable === true) ||
     error.message.includes('includeTurns is unavailable before first user message') ||
     error.message.includes('is not materialized yet') ||
     error.message.includes('no rollout found for thread id') ||

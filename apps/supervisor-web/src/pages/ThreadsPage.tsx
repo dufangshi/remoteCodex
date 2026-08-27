@@ -18,6 +18,7 @@ import { RenameDialog } from '../components/RenameDialog';
 import {
   connectSupervisorEvents,
   deleteThread,
+  fetchAgentBackends,
   fetchAgentBackendStatus,
   fetchThreads,
   fetchWorkspaces,
@@ -47,6 +48,24 @@ export function ThreadsPage() {
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
 
+  const fetchRuntimeStatus = useCallback(async () => {
+    try {
+      return (await fetchAgentBackendStatus(defaultBackend)).status;
+    } catch (error) {
+      const backends = await fetchAgentBackends();
+      const fallback = backends.find(
+        (backend) =>
+          backend.enabled &&
+          backend.capabilities.sessions.resume &&
+          backend.capabilities.turns.start,
+      );
+      if (fallback) {
+        return fallback.status;
+      }
+      throw error;
+    }
+  }, [defaultBackend]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -54,9 +73,7 @@ export function ThreadsPage() {
     try {
       const [statusResponse, threadResponse, workspaceResponse] =
         await Promise.all([
-          fetchAgentBackendStatus(defaultBackend).then(
-            (backend) => backend.status,
-          ),
+          fetchRuntimeStatus(),
           fetchThreads(),
           fetchWorkspaces(),
         ]);
@@ -70,7 +87,7 @@ export function ThreadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [defaultBackend]);
+  }, [fetchRuntimeStatus]);
 
   useEffect(() => {
     if (selectedWorkspaceId === null) {

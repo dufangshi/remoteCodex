@@ -2403,14 +2403,15 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Prompt')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Model and effort:.*medium/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort:.*medium/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Effort/ }));
     fireEvent.click(screen.getByRole('button', { name: 'high' }));
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: /Model and effort:.*high/ })).toBeInTheDocument();
     });
 
     const pollCallback = Array.from(intervalCallbacks.values())[0];
@@ -2428,7 +2429,7 @@ describe('ThreadDetailPage', () => {
     });
 
     expect(promptBodies[0]?.reasoningEffort).toBe('high');
-    expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Model and effort:.*high/ })).toBeInTheDocument();
 
     resolveSettingsUpdate({
       ok: true,
@@ -2651,14 +2652,15 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Prompt')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Model and effort:.*medium/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: /Model and effort:.*medium/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Effort/ }));
     fireEvent.click(screen.getByRole('button', { name: 'high' }));
 
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: /Model and effort:.*high/ })).toBeInTheDocument();
     });
 
     const editor = screen.getByLabelText('Prompt');

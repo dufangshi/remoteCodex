@@ -252,6 +252,7 @@ export class ThreadDetailAssembler {
       input.turnMetadataById,
       newestRemoteTurnStartedAt(remoteSession.turns),
       new Set(remoteSession.turns.map((turn) => turn.providerTurnId)),
+      input.record.provider === 'acp',
     );
     if (threadPatch.status !== 'running' && latestPersistedFailure) {
       threadPatch.status = 'failed';
@@ -288,15 +289,21 @@ export class ThreadDetailAssembler {
       this.input.liveState,
       input.turnMetadataById,
     );
-    const visibleTurnsWithPersistedFailures = appendPersistedFailureTurnsIfMissing(
-      visibleTurnsWithActiveLiveTurn,
-      persistedItemsByTurnId,
-      input.turnMetadataById,
-      {
-        includeAllMissing: shouldCacheFullDetail,
-        includeLatestMissing: options.beforeTurnId === undefined,
-      },
-    );
+    const visibleTurnsWithPersistedFailures = input.record.provider === 'acp'
+      ? appendPersistedTurnsIfMissing(
+          visibleTurnsWithActiveLiveTurn,
+          persistedItemsByTurnId,
+          input.turnMetadataById,
+        )
+      : appendPersistedFailureTurnsIfMissing(
+          visibleTurnsWithActiveLiveTurn,
+          persistedItemsByTurnId,
+          input.turnMetadataById,
+          {
+            includeAllMissing: shouldCacheFullDetail,
+            includeLatestMissing: options.beforeTurnId === undefined,
+          },
+        );
     const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
       visibleTurnsWithPersistedFailures,
       input.localThreadId,
@@ -321,7 +328,7 @@ export class ThreadDetailAssembler {
       turns,
       totalTurnCount: shouldCacheFullDetail
         ? turns.length
-        : remoteSession.totalTurnCount ?? turns.length,
+        : Math.max(remoteSession.totalTurnCount ?? turns.length, turns.length),
       deferredDetails,
       isPaged,
     };
@@ -551,6 +558,55 @@ function appendPersistedFailureTurnsIfMissing(
   return sortTurnsByStartedAt([...turns, ...missingFailureTurns]);
 }
 
+function appendPersistedTurnsIfMissing(
+  turns: ThreadTurnDto[],
+  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+) {
+  if (persistedItemsByTurnId.size === 0) {
+    return turns;
+  }
+
+  const existingTurnIds = new Set(turns.map((turn) => turn.id));
+  const missingTurns: ThreadTurnDto[] = [];
+  for (const [turnId, items] of persistedItemsByTurnId.entries()) {
+    if (existingTurnIds.has(turnId)) {
+      continue;
+    }
+    const status = persistedAcpTurnStatus(items);
+    const error = status === 'failed' ? persistedTurnError(items) : null;
+    missingTurns.push({
+      id: turnId,
+      startedAt: metadataById.get(turnId)?.createdAt ?? earliestItemCreatedAt(items),
+      status,
+      error,
+      items: [],
+    });
+  }
+
+  return missingTurns.length > 0
+    ? sortTurnsByStartedAt([...turns, ...missingTurns])
+    : turns;
+}
+
+function persistedAcpTurnStatus(items: ThreadHistoryItemDto[]): ThreadTurnDto['status'] {
+  const conversationItems = items.filter((item) =>
+    item.kind === 'userMessage' ||
+    item.kind === 'agentMessage' ||
+    item.kind === 'reasoning',
+  );
+  if (conversationItems.some((item) => item.status === 'interrupted')) {
+    return 'interrupted';
+  }
+  if (
+    conversationItems.some((item) => item.status === 'failed' || item.status === 'error') ||
+    items.some((item) => item.id.endsWith(':runtime-error'))
+  ) {
+    return 'failed';
+  }
+  return 'completed';
+}
+
 function persistedTurnError(items: ThreadHistoryItemDto[]) {
   const failedItem = [...items].reverse().find((item) =>
     item.status === 'failed' || item.status === 'error',
@@ -586,10 +642,14 @@ function latestPersistedFailureAfter(
   metadataById: Map<string, ThreadTurnMetadataRecord>,
   timestamp: string | null,
   remoteTurnIds: Set<string>,
+  acpHistory = false,
 ) {
   let latest: { error: string; startedAt: string | null } | null = null;
   for (const [turnId, items] of persistedItemsByTurnId.entries()) {
     if (persistedItemsBelongToRemoteTurn(turnId, items, remoteTurnIds)) {
+      continue;
+    }
+    if (acpHistory && persistedAcpTurnStatus(items) !== 'failed') {
       continue;
     }
     const error = persistedTurnError(items);
