@@ -96,5 +96,9 @@ jobs:
         shell: bash
         run: pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
 
+      - name: Build thread-ui workspace packages
+        shell: bash
+        run: pnpm --dir ../remote-codex-thread-ui build
+
       - name: Verify packed installation and graceful shutdown
         run: pnpm verify:package

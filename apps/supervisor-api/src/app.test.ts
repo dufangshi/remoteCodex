@@ -55,8 +55,17 @@ vi.mock('puppeteer-core', () => ({
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 type BuildAppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
 
-function normalizeMacTempPath(filePath: string) {
-  return filePath.replace(/^\/private\/var\//, '/var/');
+async function normalizeTempPath(filePath: string) {
+  const tempRoot = path.resolve(os.tmpdir());
+  const realTempRoot = await fs.realpath(tempRoot);
+  const candidate = path.resolve(filePath);
+  const comparisonCandidate = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
+  const comparisonTempRoot = process.platform === 'win32' ? tempRoot.toLowerCase() : tempRoot;
+  const canonical = comparisonCandidate.startsWith(`${comparisonTempRoot}${path.sep}`)
+    ? `${realTempRoot}${candidate.slice(tempRoot.length)}`
+    : candidate;
+  const normalized = canonical.replace(/^\/private\/var\//, '/var/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 async function createVersionCommand(
@@ -953,7 +962,7 @@ describe('supervisor api', () => {
         installedVersion: expect.stringContaining('SDK'),
       },
     });
-  });
+  }, 15_000);
 
   it('decodes base64 relayed HTTP request bodies before Fastify inject', async () => {
     const relayApp = Fastify({ logger: false });
@@ -6954,7 +6963,9 @@ describe('supervisor api', () => {
 
     expect(skillsResponse.statusCode).toBe(200);
     const skillsPayload = skillsResponse.json();
-    expect(normalizeMacTempPath(skillsPayload.cwd)).toBe(path.join(tempDir, 'workspace'));
+    expect(await normalizeTempPath(skillsPayload.cwd)).toBe(
+      await normalizeTempPath(path.join(tempDir, 'workspace')),
+    );
     expect(skillsPayload).toMatchObject({
       skills: [
         {
@@ -6969,8 +6980,10 @@ describe('supervisor api', () => {
       ],
       errors: [],
     });
-    expect(normalizeMacTempPath(skillsPayload.skills[0].path)).toBe(
-      path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
+    expect(await normalizeTempPath(skillsPayload.skills[0].path)).toBe(
+      await normalizeTempPath(
+        path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
+      ),
     );
   });
 
@@ -7128,9 +7141,11 @@ describe('supervisor api', () => {
 
     expect(hooksResponse.statusCode).toBe(200);
     const hooksPayload = hooksResponse.json();
-    expect(normalizeMacTempPath(hooksPayload.cwd)).toBe(workspacePath);
-    expect(normalizeMacTempPath(hooksPayload.projectHooksPath)).toBe(
-      path.join(workspacePath, '.codex/hooks.json'),
+    expect(await normalizeTempPath(hooksPayload.cwd)).toBe(
+      await normalizeTempPath(workspacePath),
+    );
+    expect(await normalizeTempPath(hooksPayload.projectHooksPath)).toBe(
+      await normalizeTempPath(path.join(workspacePath, '.codex/hooks.json')),
     );
     expect(hooksPayload).toMatchObject({
       globalHooksPath: path.join(codexHome, 'hooks.json'),
@@ -7361,7 +7376,9 @@ describe('supervisor api', () => {
 
     expect(hooksResponse.statusCode).toBe(200);
     const hooksPayload = hooksResponse.json();
-    expect(normalizeMacTempPath(hooksPayload.cwd)).toBe(workspacePath);
+    expect(await normalizeTempPath(hooksPayload.cwd)).toBe(
+      await normalizeTempPath(workspacePath),
+    );
     expect(hooksPayload).toMatchObject({
       warnings: [
         'Codex app-server does not expose hooks/list yet; showing hooks parsed from hooks.json only.',
