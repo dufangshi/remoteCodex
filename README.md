@@ -26,9 +26,10 @@ home or office workstation through an inbound port.
 - npm CLI: `npm install -g remote-codex`
 
 Native Windows Relay Supervisor support targets Windows 11 x64 with Node.js 22
-and Codex. The Terminal plugin is not available on Windows. See
-[Native Windows support](docs/windows.md) for setup, background management, and
-the current compatibility boundary.
+and Codex. The self-contained [Windows Device Manager](docs/windows-device-manager.zh.md)
+installs missing runtime components and keeps the device available from the system
+tray. The Terminal plugin is not available on Windows. See
+[Native Windows support](docs/windows.md) for the current compatibility boundary.
 
 ### Why Remote Codex
 
@@ -287,8 +288,9 @@ Remote Codex 支持本机、Tailscale/LAN 和公网 Relay 三种访问方式。R
 - npm CLI: `npm install -g remote-codex`
 
 原生 Windows Relay Supervisor 首版支持 Windows 11 x64、Node.js 22 和 Codex；
-Windows 暂不提供 Terminal 插件。安装、后台运行方法和兼容范围见
-[原生 Windows 支持说明](docs/windows.md)。
+自包含的 [Windows Device Manager](docs/windows-device-manager.zh.md) 可以探测并
+补齐运行环境，通过系统托盘维持 Device 在线。Windows 暂不提供 Terminal 插件，
+兼容范围见 [原生 Windows 支持说明](docs/windows.md)。
 
 ### 为什么使用 Remote Codex
 
