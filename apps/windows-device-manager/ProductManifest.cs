@@ -11,7 +11,7 @@ internal static class ProductManifest
     public const string NodeArchiveSha256 = "1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97";
     public static readonly Uri NodeArchiveUri = new($"https://nodejs.org/dist/v{NodeVersion}/{NodeArchiveName}");
 
-    public const string RemoteCodexVersion = "0.11.45";
+    public const string RemoteCodexVersion = "0.11.46";
     public static readonly Uri RemoteCodexLatestMetadataUri = new("https://registry.npmjs.org/remote-codex/latest");
     public static readonly Uri CodexInstallerUri = new("https://chatgpt.com/codex/install.ps1");
     public static readonly Uri RelayPortalUri = new("https://remote-codex.lnz-study.com/relay-portal");
