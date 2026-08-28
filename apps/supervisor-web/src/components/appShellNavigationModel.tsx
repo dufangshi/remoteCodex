@@ -126,6 +126,9 @@ function unavailableBackend(
   provider: AgentBackendIdDto,
   displayName: string,
 ): AgentBackendDto {
+  const descriptorUnavailable = provider === 'acp'
+    ? 'This device supervisor does not advertise ACP. Update and restart Remote Codex, or add acp to REMOTE_CODEX_ENABLED_AGENT_PROVIDERS.'
+    : 'Backend descriptor is not available.';
   return {
     provider,
     displayName,
@@ -136,7 +139,7 @@ function unavailableBackend(
       state: 'stopped',
       transport: agentBackendMetadata[provider].defaultTransport,
       lastStartedAt: null,
-      lastError: 'Backend descriptor is not available.',
+      lastError: descriptorUnavailable,
       restartCount: 0,
     },
     capabilities: {

@@ -47,6 +47,7 @@ describe('loadRuntimeConfig', () => {
       home: path.join(os.homedir(), '.opencode'),
       command: 'opencode',
     });
+    expect(config.agentProviders.acp.enabled).toBe(true);
   });
 
   it('allows optional providers to be explicitly disabled', () => {
@@ -57,14 +58,16 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.codex.enabled).toBe(true);
     expect(config.agentProviders.claude.enabled).toBe(false);
     expect(config.agentProviders.opencode.enabled).toBe(false);
+    expect(config.agentProviders.acp.enabled).toBe(false);
   });
 
-  it('enables only Codex by default on native Windows', () => {
+  it('enables Codex and its built-in ACP catalog by default on native Windows', () => {
     const config = loadRuntimeConfig({}, 'win32');
 
     expect(config.agentProviders.codex.enabled).toBe(true);
     expect(config.agentProviders.claude.enabled).toBe(false);
     expect(config.agentProviders.opencode.enabled).toBe(false);
+    expect(config.agentProviders.acp.enabled).toBe(true);
   });
 
   it('honors explicit provider overrides on native Windows', () => {
@@ -75,6 +78,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.codex.enabled).toBe(true);
     expect(config.agentProviders.claude.enabled).toBe(false);
     expect(config.agentProviders.opencode.enabled).toBe(true);
+    expect(config.agentProviders.acp.enabled).toBe(false);
   });
 
   it('treats blank optional environment variables as unset', () => {
@@ -106,7 +110,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.opencode.command).toBe('opencode');
     expect(config.agentProviders.acp).toEqual({
       provider: 'acp',
-      enabled: false,
+      enabled: true,
       home: path.join(os.homedir(), '.acp'),
       command: 'grok agent stdio',
       startupTimeoutMs: 10_000,

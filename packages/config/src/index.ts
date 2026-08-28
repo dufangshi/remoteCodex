@@ -182,7 +182,7 @@ export function loadRuntimeConfig(
   );
   const enabledProviders = new Set(
     (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ??
-      (platform === 'win32' ? 'codex' : 'codex,claude,opencode'))
+      (platform === 'win32' ? 'codex,acp' : 'codex,claude,opencode,acp'))
       .split(',')
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)
