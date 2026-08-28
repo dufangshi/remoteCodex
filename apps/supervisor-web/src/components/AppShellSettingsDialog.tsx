@@ -1188,7 +1188,9 @@ export function AppShellSettingsDialog({
                           }`}
                         >
                           {backend.enabled
-                            ? 'Ready'
+                            ? backend.provider === 'acp' && backend.status.state !== 'ready'
+                              ? 'Needs agent'
+                              : 'Ready'
                             : installation.installed
                               ? backend.status.state
                               : 'Not installed'}

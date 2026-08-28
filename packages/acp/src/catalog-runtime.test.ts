@@ -19,6 +19,41 @@ afterEach(async () => {
 });
 
 describe('AcpCatalogRuntimeAdapter', () => {
+  it('keeps the built-in ACP runtime selectable when every base agent is missing', async () => {
+    const runtime = new AcpCatalogRuntimeAdapter({
+      catalog: new AcpAgentCatalog({
+        definitions: [{
+          id: 'missing-agent',
+          displayName: 'Missing Agent',
+          description: 'Missing ACP fixture',
+          transport: 'native',
+          baseCommand: 'remote-codex-missing-acp-agent',
+          baseProbeCommand: 'remote-codex-missing-acp-agent --version',
+          serverCommand: 'remote-codex-missing-acp-agent acp',
+          serverProbeCommand: 'remote-codex-missing-acp-agent acp --help',
+          installCommand: null,
+        }],
+      }),
+    });
+    runtimes.push(runtime);
+
+    const agents = await runtime.listModels();
+
+    expect(agents).toMatchObject([{
+      id: 'missing-agent',
+      acpAgent: { availability: 'base_missing' },
+    }]);
+    expect(runtime.installation).toMatchObject({
+      installed: true,
+      installedVersion: 'Built in · 0 ACP agents ready',
+      lastError: 'No supported base agent was detected.',
+    });
+    expect(runtime.getStatus()).toMatchObject({
+      state: 'degraded',
+      lastError: 'No supported base agent was detected.',
+    });
+  });
+
   it('selects a concrete agent and scopes its provider session id', async () => {
     const fixture = path.resolve(
       'node_modules/@agentclientprotocol/sdk/dist/examples/agent.js',

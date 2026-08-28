@@ -142,8 +142,8 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
   readonly managementSchema = catalogManagementSchema;
   readonly installation: AgentBackendInstallationDto = {
     packageName: null,
-    installed: false,
-    installedVersion: null,
+    installed: true,
+    installedVersion: 'Built in · 0 ACP agents ready',
     latestVersion: null,
     installCommand: null,
     updateCommand: null,
@@ -393,10 +393,9 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     const entries = await this.catalog.list({ force });
     const ready = entries.filter((entry) => entry.availability === 'ready');
     const baseInstalled = entries.filter((entry) => entry.availability !== 'base_missing');
-    this.installation.installed = baseInstalled.length > 0;
-    this.installation.installedVersion = ready.length > 0
-      ? `${ready.length} ACP agent${ready.length === 1 ? '' : 's'} ready`
-      : null;
+    this.installation.installed = true;
+    this.installation.installedVersion =
+      `Built in · ${ready.length} ACP agent${ready.length === 1 ? '' : 's'} ready`;
     this.installation.lastError = ready.length > 0
       ? null
       : baseInstalled.length > 0

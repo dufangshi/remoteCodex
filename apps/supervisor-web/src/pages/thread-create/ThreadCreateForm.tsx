@@ -72,6 +72,7 @@ export function ThreadCreateForm({
   const [error, setError] = useState<string | null>(null);
   const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
   const selectedBackend = backends.find((backend) => backend.provider === provider);
+  const acpBackendAdvertised = backends.some((backend) => backend.provider === 'acp');
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
   const selectedModel = models.find((entry) => entry.model === model) ?? null;
   const isAcpAgentSelection = provider === 'acp' && agentOptions.some(
@@ -380,7 +381,19 @@ export function ThreadCreateForm({
               {backendCanStartSession(backend) ? '' : ' (not available)'}
             </option>
           ))}
+          {!acpBackendAdvertised ? (
+            <option value="acp" disabled>
+              ACP Agent (enable on device)
+            </option>
+          ) : null}
         </select>
+        {!acpBackendAdvertised ? (
+          <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+            ACP is not enabled by this device supervisor. Update and restart Remote Codex, or add
+            <code className="mx-1 font-mono">acp</code>
+            to <code className="font-mono">REMOTE_CODEX_ENABLED_AGENT_PROVIDERS</code>.
+          </p>
+        ) : null}
         {!compact ? (
         <div className="mt-3 space-y-2">
           {backends.map((backend) => {

@@ -21,6 +21,7 @@ const stateFile = path.join(serviceDir, 'service-state.json');
 const apiEntry = path.join(repoRoot, 'apps', 'supervisor-api', 'dist', 'index.js');
 const webEntry = path.join(repoRoot, 'scripts', 'run-web-service.mjs');
 const webIndex = path.join(repoRoot, 'apps', 'supervisor-web', 'dist', 'index.html');
+const packageVersion = readPackageVersion();
 const defaultServicePort = supportsSourceRestart ? 4173 : 45673;
 const defaultApiPort = supportsSourceRestart ? 8787 : 45674;
 
@@ -76,6 +77,7 @@ async function startService() {
 
   const apiPid = spawnDetached(process.execPath, [apiEntry], apiLogPath, {
     NODE_ENV: 'production',
+    APP_VERSION: process.env.APP_VERSION ?? packageVersion,
     HOST: apiHost,
     PORT: String(apiPort),
     LOG_LEVEL: process.env.LOG_LEVEL ?? 'warn',
@@ -184,6 +186,17 @@ function ensureBuildArtifacts() {
     console.error(`Missing: ${path.relative(repoRoot, filePath)}`);
   }
   process.exit(1);
+}
+
+function readPackageVersion() {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+    );
+    return typeof parsed.version === 'string' ? parsed.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }
 
 function spawnDetached(commandToRun, args, logPath, env) {

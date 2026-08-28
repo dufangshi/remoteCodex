@@ -347,6 +347,7 @@ function resolveSupervisorLaunch() {
 function relaySupervisorProcessEnv(extra = {}) {
   return {
     ...process.env,
+    APP_VERSION: process.env.APP_VERSION ?? readPackageVersion(),
     REMOTE_CODEX_MODE: 'relay',
     REMOTE_CODEX_PACKAGE_ROOT: process.env.REMOTE_CODEX_PACKAGE_ROOT ?? packageRoot,
     REMOTE_CODEX_DISABLE_BUILD_RESTART:
@@ -408,7 +409,7 @@ async function startRelaySupervisorWindowsUnlocked() {
       REMOTE_CODEX_LIFECYCLE_CONTROL_TOKEN: controlToken,
       REMOTE_CODEX_LIFECYCLE_INSTANCE_ID: instanceId,
       REMOTE_CODEX_ENABLED_AGENT_PROVIDERS:
-        process.env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex',
+        process.env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex,acp',
     }),
     stdio: ['ignore', logFd, logFd],
   });
@@ -1437,7 +1438,8 @@ Recommended environment:
   CODEX_COMMAND
     Codex executable. Default codex.
   REMOTE_CODEX_ENABLED_AGENT_PROVIDERS
-    Comma-separated provider ids, for example codex,claude.
+    Comma-separated provider ids. Defaults to codex,claude,opencode,acp on Unix
+    and codex,acp on Windows.
   REMOTE_CODEX_RELAY_SUPERVISOR_TMUX
     Set to 0/false/no/off to disable default tmux management.
   REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION

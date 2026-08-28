@@ -241,11 +241,12 @@ Override with `SERVICE_PORT` and `SERVICE_API_PORT`.
 
 ### ACP Agents
 
-Enable the generic ACP backend, then choose the concrete agent when creating a
-thread:
+The generic ACP backend is enabled by default. Choose the concrete agent when
+creating a thread. To customize the enabled backend set explicitly, include
+`acp` in the list:
 
 ```bash
-REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=acp \
+REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,claude,opencode,acp \
 remote-codex start
 ```
 
@@ -522,10 +523,11 @@ npm CLI 默认端口：
 
 ### ACP Agent
 
-启用通用 ACP backend，然后在创建 thread 时选择具体 Agent：
+通用 ACP backend 默认启用，创建 thread 时直接选择具体 Agent。若要显式定制
+启用的 backend 集合，请在列表中保留 `acp`：
 
 ```bash
-REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=acp \
+REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,claude,opencode,acp \
 remote-codex start
 ```
 

@@ -290,6 +290,11 @@ describe('ThreadNewPage', () => {
       name: 'Claude (not available)',
     }) as HTMLOptionElement;
     expect(claudeOption.disabled).toBe(true);
+    const acpUpgradeOption = screen.getByRole('option', {
+      name: 'ACP Agent (enable on device)',
+    }) as HTMLOptionElement;
+    expect(acpUpgradeOption.disabled).toBe(true);
+    expect(screen.getByText(/ACP is not enabled by this device supervisor/)).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByLabelText('Model')).toHaveValue('gpt-5');
