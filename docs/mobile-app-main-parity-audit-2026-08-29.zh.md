@@ -1,6 +1,6 @@
 # Android / iOS 对齐 `main` 差异审计与回测门禁
 
-> - 状态：功能实现、Android AOSP 与 iOS Simulator 全量回测已完成；等待 clean parity gate 最终确认
+> - 状态：Complete；功能实现、Android AOSP 与 iOS Simulator 全量回测及 clean parity gate 均通过
 > - 审计日期：2026-08-29
 > - 主仓库基线：`remoteCodex` `origin/main` @ `2c760e4e`，版本 `0.11.50`
 > - 共享 UI 固定输入：`remote-codex-thread-ui` @ `f9e957fbd08fb7f8284e6c1d4ab068541610d426`
@@ -136,7 +136,7 @@
 
 ### Phase 6：最终产物回装和发布验收
 
-- 从 clean worktree 构建最终 APK/IPA，不复用开发期旧产物。
+- 从 clean worktree 构建 signed Android APK 与 iOS Release Simulator app，不复用开发期旧产物；真机 IPA 属于可选 publication gate。
 - 在两个已清数据的模拟器中安装最终产物，重跑关键全链路和升级/重载场景。
 - 所有门禁为绿后才可上传 Release，并在上传后下载公开资产再做版本/checksum 一致性校验。
 
@@ -190,7 +190,7 @@
 - shared、Android Web、iOS Web、Android native、iOS native 的 build/typecheck/unit/component tests 全绿。
 - Android AOSP 与 iOS Simulator 的 Local/Server/Relay 六组 E2E 全绿，required tests 为 **0 skip**。
 - Codex、Claude、OpenCode、ACP 至少各完成一条真实线程闭环；不可用 runtime 的失败路径也通过。
-- 最终 release APK/IPA 从 clean worktree 生成并回装；二进制内版本、id、commit metadata 和 checksum 一致。
+- 最终 signed Android APK 与 iOS Release Simulator app 从 clean worktree 生成并回装；二进制内版本、id、commit metadata 和 checksum 一致。真机 IPA 仅在执行公开发布时要求。
 - 无未解释 app crash、uncaught JS error、Swift fatal、Android exception、API `lastError` 或 relay disconnect。
 - 每次修复后重跑受影响单测、对应模式 E2E，最后再完整重跑六组矩阵；不得只重跑最初失败的单点后结束。
 - 最终报告列出设备/OS、app 版本、主仓库 commit、thread-ui commit、服务模式、workspace、thread id、model/effort/agent、sentinel、截图/日志路径和所有命令结果。
@@ -306,6 +306,8 @@ pnpm verify:mobile:parity-gate
 ```
 
 它验证所有 JUnit/xcresult、真实 provider、signed Android APK 和 iOS Release Simulator `.app`，并写入 `.local/mobile-parity/verification.json`。
+
+最终结果：`status=passed`、`verificationKind=simulator-parity`、六格矩阵全部 `passed`、`requiredTestsSkipped=0`。Android APK SHA-256 为 `24f36705342cbdb53539c9519d73b74a2c3a1bcfafdd838d69b5dd2f0b39f409`；iOS Release Simulator app directory SHA-256 为 `323c7ba0b3924b7223877c595c506772765dd193a6e09d9e07ed42ca5a909eb7`。
 
 正式发布前必须运行：
 
