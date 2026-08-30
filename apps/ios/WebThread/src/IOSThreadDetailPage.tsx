@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mergeLatestThreadTurns } from '@remote-codex/shared';
 import type {
   AgentBackendToolboxItemSchemaDto,
+  AgentBackendManagementSchemaDto,
   AgentProviderCapabilitiesDto,
+  AgentRuntimeStatusDto,
   AgentSubscriptionUsageDto,
   ExportThreadPdfInput,
   ModelOptionDto,
@@ -13,14 +15,21 @@ import type {
   ThreadDto,
   ThreadExportTurnOptionsDto,
   ThreadForkTurnOptionDto,
+  ThreadHooksDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
   ThreadHistoryItemDto,
   UpdateThreadGoalInput,
+  CreateThreadHookInput,
+  UpdateThreadHookInput,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
   CreateThreadShareInput,
   ThreadDetailUiAdapter,
   ThreadShareSummary,
+  ThreadShellAdapter,
+  ThreadShellControlState,
   ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import { Share2 } from 'lucide-react';
@@ -29,8 +38,10 @@ import {
   PluginProvider,
   ThreadActionsDialog,
   ThreadDetailSurface,
+  ThreadShellPanel,
   threadStatusLabel,
 } from '@remote-codex/thread-ui';
+import { builtinFrontendPlugins } from '@remote-codex/thread-ui/builtin-plugins';
 
 import {
   applyIOSTheme,
@@ -38,6 +49,7 @@ import {
   type IOSThemeMode,
 } from './IOSBootstrap';
 import { IOSApiClient } from './IOSApiClient';
+import { connectIOSShellSocket } from './IOSShellSocket';
 import {
   canLoadEarlierThreadHistory,
   IOS_THREAD_HISTORY_INITIAL_LIMIT,
@@ -260,6 +272,19 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const historyLimitRef = useRef(IOS_THREAD_HISTORY_INITIAL_LIMIT);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [followTail, setFollowTail] = useState(true);
+  const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] = useState<{
+    path: string;
+    line?: number;
+    requestId: number;
+  } | null>(() =>
+    bootstrap.uiTestFocusWorkspacePath
+      ? { path: bootstrap.uiTestFocusWorkspacePath, requestId: 1 }
+      : null,
+  );
+  const workspaceFocusRequestIdRef = useRef(bootstrap.uiTestFocusWorkspacePath ? 1 : 0);
+  const [shellControlState, setShellControlState] = useState<ThreadShellControlState | null>(null);
+  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
   const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
@@ -290,9 +315,22 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       idleForkTurnOptionsState,
     );
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
+  const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [toolboxItems, setToolboxItems] = useState<
     AgentBackendToolboxItemSchemaDto[]
   >([]);
+  const [managementSchema, setManagementSchema] =
+    useState<AgentBackendManagementSchemaDto | null>(null);
+  const [skillsState, setSkillsState] = useState<PanelState<ThreadSkillsDto>>({
+    status: 'idle', data: null, error: null,
+  });
+  const [mcpState, setMcpState] = useState<PanelState<ThreadMcpServersDto>>({
+    status: 'idle', data: null, error: null,
+  });
+  const [hooksState, setHooksState] = useState<PanelState<ThreadHooksDto>>({
+    status: 'idle', data: null, error: null,
+  });
   const [capabilities, setCapabilities] =
     useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
@@ -335,6 +373,24 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     new Map<string, (result: NativeAttachmentPickerResult) => void | Promise<void>>(),
   );
   const client = useMemo(() => new IOSApiClient(bootstrap), [bootstrap]);
+  const pluginAdapter = useMemo(
+    () => ({
+      fetchPlugins: () => client.listPlugins(),
+      updatePlugin: (pluginId: string, input: { enabled: boolean }) =>
+        client.updatePlugin(pluginId, input),
+    }),
+    [client],
+  );
+  const shellAdapter = useMemo<ThreadShellAdapter>(
+    () => ({
+      fetchState: (threadId) => client.fetchThreadShellState(threadId),
+      createShell: (threadId, input) => client.createThreadShell(threadId, input),
+      terminateShell: (shellId) => client.terminateShell(shellId),
+      updateShell: (shellId, input) => client.updateShell(shellId, input),
+      connectSocket: (handlers) => connectIOSShellSocket(bootstrap, handlers),
+    }),
+    [bootstrap, client],
+  );
   const relayDeviceId =
     bootstrap.mode === 'relay' ? bootstrap.relayDeviceId : null;
   const relayShareAvailable = Boolean(relayDeviceId);
@@ -351,6 +407,91 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listPlugins()
+      .then((plugins) => {
+        if (!cancelled) {
+          setTerminalPluginEnabled(
+            plugins.find((plugin) => plugin.id === 'remote-codex.terminal')?.enabled ?? true,
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTerminalPluginEnabled(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const loadSkills = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setSkillsState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadSkills(threadId);
+      setSkillsState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setSkillsState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const loadMcp = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setMcpState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadMcpServers(threadId);
+      setMcpState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setMcpState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const loadHooks = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setHooksState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadHooks(threadId);
+      setHooksState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setHooksState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const createHook = useCallback(async (input: CreateThreadHookInput) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.createThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const updateHook = useCallback(async (input: UpdateThreadHookInput) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.updateThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const trustHook = useCallback(async (input: { key: string; currentHash: string }) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.trustThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const untrustHook = useCallback(async (input: { key: string }) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.untrustThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
 
   useEffect(() => {
     const provider = detail?.thread.provider;
@@ -961,24 +1102,38 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     }
 
     const provider = detail.thread.provider;
+    const agentId = detail.thread.agentId ?? null;
     let cancelled = false;
+    const modelRequest =
+      provider === 'acp' && agentId
+        ? client.listModels(provider, { agentId, cwd: detail.workspace.absPath })
+        : client.listModels(provider);
+    const agentRequest =
+      provider === 'acp' ? client.listAgents(provider) : Promise.resolve([] as ModelOptionDto[]);
     Promise.all([
-      client.listModels(provider),
+      modelRequest,
       client.listAgentRuntimes(),
+      agentRequest,
     ])
-      .then(([loadedModelOptions, runtimes]) => {
+      .then(([loadedModelOptions, runtimes, loadedAgentOptions]) => {
         if (cancelled) {
           return;
         }
         setModelOptions(loadedModelOptions);
+        setAgentOptions(loadedAgentOptions);
         const runtime = runtimes.find((entry) => entry.provider === provider);
+        setRuntimeStatus(runtime?.status ?? null);
         setCapabilities(runtime?.capabilities ?? null);
+        setManagementSchema(runtime?.managementSchema ?? null);
         setToolboxItems(runtime?.managementSchema.toolboxItems ?? []);
       })
       .catch((caught) => {
         if (!cancelled) {
           console.warn('Unable to load iOS WebView thread settings metadata.', caught);
           setModelOptions([]);
+          setAgentOptions([]);
+          setRuntimeStatus(null);
+          setManagementSchema(null);
           setCapabilities(null);
           setToolboxItems([]);
         }
@@ -987,7 +1142,13 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [bootstrap.fixture, client, detail?.thread.provider]);
+  }, [
+    bootstrap.fixture,
+    client,
+    detail?.thread.agentId,
+    detail?.thread.provider,
+    detail?.workspace.absPath,
+  ]);
 
   useEffect(() => {
     if (!detail) {
@@ -2971,17 +3132,15 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
           return client.buildThreadImageAssetUrl(currentDetail.thread.id, { path });
         },
         openWorkspaceFile(input) {
-          const currentDetail = detailRef.current;
-          if (currentDetail) {
-            postNativeMessage({
-              type: 'openWorkspace',
-              workspaceId: currentDetail.workspace.id,
-            });
-            console.info('Requested workspace file', input);
-          }
+          workspaceFocusRequestIdRef.current += 1;
+          setWorkspaceFocusPathRequest({
+            path: input.path,
+            ...(input.line !== undefined ? { line: input.line } : {}),
+            requestId: workspaceFocusRequestIdRef.current,
+          });
         },
         workspace: workspaceAdapter,
-        shell: null,
+        shell: terminalPluginEnabled ? shellAdapter : null,
       };
     },
     [
@@ -2999,17 +3158,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       renameThread,
       renderNewThreadDialogContent,
       resolveWorkspaceId,
+      shellAdapter,
       submitPromptText,
+      terminalPluginEnabled,
     ],
   );
   const currentThreadId = detail?.thread.id ?? bootstrap.threadId ?? null;
-  const workspaceFocusPathRequest = bootstrap.uiTestFocusWorkspacePath
-    ? {
-        path: bootstrap.uiTestFocusWorkspacePath,
-        requestId: 1,
-      }
-    : null;
-
   useEffect(() => {
     if (
       bootstrap.fixture ||
@@ -3770,16 +3924,29 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   ) : null;
 
   const settingsContent = null;
+  const mcpProviderConfigFileName =
+    managementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))?.name ?? null;
 
   return (
-    <PluginProvider>
+    <PluginProvider adapter={pluginAdapter} builtinPlugins={builtinFrontendPlugins}>
       <ThreadDetailSurface
         threads={threads}
         detail={detail}
         loading={loading}
         error={error}
-        status={mockStatus}
+        status={bootstrap.fixture ? mockStatus : runtimeStatus}
         adapter={adapter}
+        activeView={activeView}
+        workspaceFeatures={{
+          workspace: true,
+          toolUsage: false,
+          guide: false,
+          threadGraph: false,
+          extensions: false,
+          defaultTab: 'workspace',
+        }}
+        shellPanelComponent={ThreadShellPanel}
+        onShellStateChange={setShellControlState}
         shellEffectiveTheme={effectiveThemeValue}
         shellThemeMode={themeMode}
         onShellThemeModeChange={handleShellThemeModeChange}
@@ -3831,14 +3998,18 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                 busy: submitting,
                 settingsBusy,
                 model: detail.thread.model,
+                agentLabel:
+                  agentOptions.find((entry) => entry.model === detail.thread.agentId)
+                    ?.displayName ?? detail.thread.agentId ?? null,
                 reasoningEffort: detail.thread.reasoningEffort,
                 fastMode: detail.thread.fastMode ?? false,
                 collaborationMode: detail.thread.collaborationMode,
-                sandboxMode: null,
-                hideSandboxModeControl: true,
+                sandboxMode: detail.thread.sandboxMode ?? null,
                 followTail,
                 modelOptions,
                 toolboxItems,
+                hookCommandTemplates: managementSchema?.hookCommandTemplates ?? [],
+                mcpConfigFormat: managementSchema?.mcpConfigFormat ?? 'none',
                 goalState: {
                   status: 'ready',
                   data: detail.goal,
@@ -3857,7 +4028,10 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                         'This shared session is view-only.',
                     }
                   : {}),
-                shellAvailable: false,
+                shellAvailable: terminalPluginEnabled,
+                shellControlState,
+                onToggleView: () =>
+                  setActiveView((current) => (current === 'chat' ? 'shell' : 'chat')),
                 canInterrupt: Boolean(
                   detail.thread.activeTurnId && effectiveThreadCanControl,
                 ),
@@ -3872,8 +4046,33 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
                   ? {
                       onOpenGoal: openThreadGoals,
                       onUpdateGoal: updateThreadGoal,
+                      onOpenSkills: loadSkills,
+                      onOpenMcp: loadMcp,
+                      onOpenHooks: loadHooks,
+                      onCreateHook: createHook,
+                      onUpdateHook: updateHook,
+                      onTrustHook: trustHook,
+                      onUntrustHook: untrustHook,
                     }
                   : {}),
+                ...(mcpProviderConfigFileName && effectiveThreadIsOwner
+                  ? {
+                      onReadProviderConfig: () =>
+                        client.fetchProviderHostFile(
+                          detail.thread.provider,
+                          mcpProviderConfigFileName,
+                        ),
+                      onWriteProviderConfig: (content: string) =>
+                        client.updateProviderHostFile(
+                          detail.thread.provider,
+                          mcpProviderConfigFileName,
+                          { content },
+                        ),
+                    }
+                  : {}),
+                skillsState,
+                mcpState,
+                hooksState,
                 onToggleFollow: () => {
                   setScrollRequestKey((current) => current + 1);
                 },
@@ -3894,7 +4093,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
             }
           : {})}
         timelineProps={{
-          autoCollapseCompletedTurns: true,
+          autoCollapseCompletedTurns: !bootstrap.uiTestAutoVerifyImageAsset,
           scrollRequestKey,
           previousTurnScrollRequestKey,
           nextTurnScrollRequestKey,

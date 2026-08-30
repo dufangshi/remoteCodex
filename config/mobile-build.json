@@ -1,0 +1,6 @@
+{
+  "threadUiRepository": "https://github.com/dufangshi/remote-codex-thread-ui.git",
+  "threadUiCommit": "f9e957fbd08fb7f8284e6c1d4ab068541610d426",
+  "androidApplicationId": "com.remotecodex.android",
+  "iosBundleId": "com.fonsh.remotecodex.ios"
+}

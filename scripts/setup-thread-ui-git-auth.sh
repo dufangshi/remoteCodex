@@ -6,6 +6,8 @@ key="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY:-}"
 ssh_dir="${HOME}/.ssh"
 key_path="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_PATH:-${ssh_dir}/remote_codex_thread_ui_deploy_key}"
 key_file="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE:-}"
+git_token_file="${REMOTE_CODEX_THREAD_UI_GIT_TOKEN_FILE:-}"
+credential_file="${HOME}/.git-credentials-remote-codex-thread-ui"
 repo_url="${REMOTE_CODEX_THREAD_UI_REPO_URL:-${REMOTE_CODEX_THREAD_UI_REPO:-https://github.com/dufangshi/remote-codex-thread-ui.git}}"
 repo_ref="${REMOTE_CODEX_THREAD_UI_REF:-}"
 repo_root="${GITHUB_WORKSPACE:-}"
@@ -30,7 +32,20 @@ if [[ "${1:-}" == "--cleanup" ]]; then
     url."ssh://git@github.com/dufangshi/remote-codex-thread-ui.git".insteadOf \
     2>/dev/null || true
   rm -f "${key_path}"
+  git config --global --unset-all credential.helper "store --file=${credential_file}" 2>/dev/null || true
+  rm -f "${credential_file}"
   exit 0
+fi
+
+if [[ -n "${git_token_file}" && -f "${git_token_file}" ]]; then
+  git_token="$(cat "${git_token_file}")"
+  if [[ -z "${git_token}" ]]; then
+    echo "REMOTE_CODEX_THREAD_UI_GIT_TOKEN_FILE is empty." >&2
+    exit 1
+  fi
+  printf 'https://x-access-token:%s@github.com\n' "${git_token}" > "${credential_file}"
+  chmod 600 "${credential_file}"
+  git config --global credential.helper "store --file=${credential_file}"
 fi
 
 if [[ -z "${key_b64}" && -z "${key}" && -z "${key_file}" ]]; then

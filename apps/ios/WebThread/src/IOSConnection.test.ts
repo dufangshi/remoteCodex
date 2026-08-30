@@ -73,7 +73,7 @@ describe('iOS supervisor connection paths', () => {
         }),
       ),
     ).toBe(
-      'wss://remote-codex.example.test/relay/ws?relaySession=relay%20token',
+      'wss://remote-codex.example.test/relay/devices/device-a/ws?relaySession=relay%20token',
     );
   });
 
@@ -88,7 +88,7 @@ describe('iOS supervisor connection paths', () => {
         { threadId: 'thread-a' },
       ),
     ).toBe(
-      'wss://remote-codex.example.test/relay/ws?relaySession=relay%20token&threadId=thread-a',
+      'wss://remote-codex.example.test/relay/devices/device-a/ws?relaySession=relay%20token&threadId=thread-a',
     );
   });
 

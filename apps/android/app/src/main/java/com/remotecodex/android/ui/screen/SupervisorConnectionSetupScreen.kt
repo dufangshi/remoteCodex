@@ -1892,12 +1892,12 @@ private fun RelayDevicesPanel(
                 style = MaterialTheme.typography.bodySmall,
             )
         } else {
-            sharedDevicesWithMe.forEach { grant ->
-                RelaySharedGrantRow(
-                    grant = grant,
+            groupRelayGrantsByDevice(sharedDevicesWithMe).forEach { group ->
+                RelaySharedGrantDeviceCard(
+                    grants = group.grants,
                     busy = busy,
                     mode = RelayShareRowMode.Incoming,
-                    onOpen = { onOpenSharedGrant(grant) },
+                    onOpen = onOpenSharedGrant,
                 )
             }
         }
@@ -1939,16 +1939,16 @@ private fun RelayDevicesPanel(
                 style = MaterialTheme.typography.bodySmall,
             )
         } else {
-            grantsByMe.forEach { grant ->
-                RelaySharedGrantRow(
-                    grant = grant,
+            groupRelayGrantsByDevice(grantsByMe).forEach { group ->
+                RelaySharedGrantDeviceCard(
+                    grants = group.grants,
                     busy = busy,
-                    expanded = expandedGrantId == grant.id,
+                    expandedGrantId = expandedGrantId,
                     mode = RelayShareRowMode.Outgoing,
-                    onOpen = { onOpenSharedGrant(grant) },
-                    onToggleAccess = { onToggleGrantAccess(grant) },
-                    onEdit = { onEditGrant(grant) },
-                    onRevoke = { onRevokeGrant(grant) },
+                    onOpen = onOpenSharedGrant,
+                    onToggleAccess = onToggleGrantAccess,
+                    onEdit = onEditGrant,
+                    onRevoke = onRevokeGrant,
                 )
             }
         }
@@ -1978,6 +1978,76 @@ private fun RelayDevicesPanel(
                     onRevoke = { onRevokeShare(share) },
                 )
             }
+        }
+    }
+}
+
+private data class RelayGrantDeviceGroup(
+    val deviceId: String,
+    val grants: List<RelayAccessGrantSummary>,
+)
+
+private fun groupRelayGrantsByDevice(grants: List<RelayAccessGrantSummary>): List<RelayGrantDeviceGroup> {
+    val scopeOrder = mapOf("device" to 0, "workspace" to 1, "thread" to 2)
+    return grants
+        .groupBy { it.deviceId }
+        .map { (deviceId, deviceGrants) ->
+            RelayGrantDeviceGroup(
+                deviceId = deviceId,
+                grants = deviceGrants.sortedWith(
+                    compareBy<RelayAccessGrantSummary> { scopeOrder[it.scope] ?: 3 }
+                        .thenBy { it.workspaceLabel.orEmpty() }
+                        .thenBy { it.threadTitle.orEmpty() },
+                ),
+            )
+        }
+}
+
+@Composable
+private fun RelaySharedGrantDeviceCard(
+    grants: List<RelayAccessGrantSummary>,
+    busy: Boolean,
+    mode: RelayShareRowMode,
+    expandedGrantId: String? = null,
+    onOpen: (RelayAccessGrantSummary) -> Unit,
+    onToggleAccess: (RelayAccessGrantSummary) -> Unit = {},
+    onEdit: (RelayAccessGrantSummary) -> Unit = {},
+    onRevoke: (RelayAccessGrantSummary) -> Unit = {},
+) {
+    val firstGrant = grants.firstOrNull() ?: return
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = grantTitle(firstGrant),
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            GraphBadge(
+                label = "${grants.size} ${if (grants.size == 1) "share" else "shares"}",
+                variant = GraphBadgeVariant.Secondary,
+            )
+        }
+        grants.forEach { grant ->
+            RelaySharedGrantRow(
+                grant = grant,
+                busy = busy,
+                expanded = expandedGrantId == grant.id,
+                mode = mode,
+                onOpen = { onOpen(grant) },
+                onToggleAccess = { onToggleAccess(grant) },
+                onEdit = { onEdit(grant) },
+                onRevoke = { onRevoke(grant) },
+            )
         }
     }
 }
@@ -2282,21 +2352,12 @@ private fun RelaySharedGrantRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Device: ${grant.deviceName}",
+                text = "Scope: ${grantScopeDescription(grant)}",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            grant.workspaceLabel?.takeIf { it.isNotBlank() }?.let { workspace ->
-                Text(
-                    text = "Workspace: $workspace",
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 GraphBadge(
                     label = grantScopeLabel(grant.scope),
@@ -2356,12 +2417,28 @@ private fun RelaySharedGrantRow(
 }
 
 private fun grantTitle(grant: RelayAccessGrantSummary): String {
-    val label = grant.label?.trim()?.takeIf { it.isNotBlank() }
-    return label
-        ?: grant.threadTitle?.trim()?.takeIf { it.isNotBlank() }
-        ?: grant.workspaceLabel?.trim()?.takeIf { it.isNotBlank() }
-        ?: grant.deviceName.trim().takeIf { it.isNotBlank() }
+    return grant.deviceName.trim().takeIf { it.isNotBlank() }
         ?: "Shared device"
+}
+
+private fun grantScopeDescription(grant: RelayAccessGrantSummary): String {
+    return when (grant.scope) {
+        "thread" -> {
+            val workspace = grant.workspaceLabel?.trim()?.takeIf { it.isNotBlank() } ?: "workspace unavailable"
+            val thread = grant.threadTitle?.trim()?.takeIf { it.isNotBlank() } ?: "thread unavailable"
+            "$workspace / $thread"
+        }
+        "workspace" -> {
+            val workspace = grant.workspaceLabel?.trim()?.takeIf { it.isNotBlank() } ?: "workspace unavailable"
+            "$workspace / entire workspace"
+        }
+        else -> if (grant.workspaceScope == "selected") {
+            grant.workspaceLabel?.trim()?.takeIf { it.isNotBlank() }?.let { "selected workspace: $it" }
+                ?: "${grant.workspaceIds.size} selected workspace${if (grant.workspaceIds.size == 1) "" else "s"}"
+        } else {
+            "entire device"
+        }
+    }
 }
 
 private fun grantScopeLabel(scope: String): String {
@@ -2834,7 +2911,7 @@ private fun RevokeRelayGrantDialog(
     GraphDialogOverlay(onDismiss = onClose) {
         GraphDialogFrame(
             title = "Revoke shared device",
-            subtitle = "Remove ${grant.targetUsername}'s access to this device.",
+            subtitle = "Revoke ${grant.targetUsername}'s access to ${grantTitle(grant)}?",
             onClose = onClose,
             footer = {
                 GraphDialogFooter(
@@ -2855,8 +2932,9 @@ private fun RevokeRelayGrantDialog(
                 overflow = TextOverflow.Ellipsis,
             )
             ConnectionSettingText(label = "Device", value = grant.deviceName)
+            ConnectionSettingText(label = "Scope", value = grantScopeDescription(grant))
             Text(
-                text = "The recipient will lose access granted by this device share.",
+                text = "Access to this scope will stop immediately.",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
             )

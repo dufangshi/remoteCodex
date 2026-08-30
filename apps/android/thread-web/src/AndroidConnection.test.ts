@@ -50,7 +50,7 @@ describe('AndroidConnection', () => {
 
   it('adds relay session tokens to relay websocket URLs', () => {
     expect(supervisorWebSocketUrl(relayBootstrap, { threadId: 'thread-123' })).toBe(
-      'wss://remote-codex.example/relay/ws?relaySession=relay-token&threadId=thread-123',
+      'wss://remote-codex.example/relay/devices/device-123/ws?relaySession=relay-token&threadId=thread-123',
     );
   });
 

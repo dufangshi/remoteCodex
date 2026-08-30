@@ -9,6 +9,7 @@ final class WorkspaceDetailViewModel: ObservableObject {
     @Published var threads: [SupervisorThreadSummary] = []
     @Published var tree: SupervisorWorkspaceTreeNode?
     @Published var selectedPath: String?
+    @Published var expandedDirectoryPaths = Set<String>()
     @Published var preview: SupervisorWorkspaceFilePreview?
     @Published var editableContent = ""
     @Published var loading = false
@@ -19,11 +20,15 @@ final class WorkspaceDetailViewModel: ObservableObject {
     @Published var previewFile: WorkspaceLocalFile?
     @Published var newThreadTitle = ""
     @Published var newThreadProvider = ""
+    @Published var newThreadAgentId = ""
     @Published var newThreadModel = ""
+    @Published var newThreadReasoningEffort: String?
     @Published var newThreadBackends: [SupervisorAgentBackend] = []
+    @Published var newThreadAgents: [SupervisorModelOption] = []
     @Published var newThreadModels: [SupervisorModelOption] = []
     @Published var newThreadOptionsLoading = false
     @Published var newThreadRuntimeBusyProvider: String?
+    @Published var newThreadBusyAgentId: String?
     @Published var newThreadOptionsError: String?
     @Published var relayAccess: RelayEffectiveAccessSummary?
     @Published var relayAccessLoading = false
@@ -52,13 +57,25 @@ final class WorkspaceDetailViewModel: ObservableObject {
         return visible.isEmpty ? newThreadModels : visible
     }
 
+    var visibleNewThreadAgents: [SupervisorModelOption] {
+        let visible = newThreadAgents.filter { !$0.hidden }
+        return visible.isEmpty ? newThreadAgents : visible
+    }
+
+    var selectedNewThreadModel: SupervisorModelOption? {
+        visibleNewThreadModels.first { $0.model == newThreadModel }
+    }
+
     var canStartNewThread: Bool {
         canCreateThreadForRelay &&
             !newThreadProvider.isEmpty &&
             !newThreadModel.isEmpty &&
             !loading &&
             !newThreadOptionsLoading &&
-            newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true
+            newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true &&
+            (newThreadProvider != "acp" || visibleNewThreadAgents.first {
+                $0.model == newThreadAgentId
+            }?.acpAgent?.availability == "ready")
     }
 
     var canCreateThreadForRelay: Bool {
@@ -151,8 +168,9 @@ final class WorkspaceDetailViewModel: ObservableObject {
                     workspaceId: workspaceId,
                     title: newThreadTitle.trimmedNonEmpty,
                     provider: newThreadProvider.trimmedNonEmpty,
+                    agentId: newThreadProvider == "acp" ? newThreadAgentId.trimmedNonEmpty : nil,
                     model: newThreadModel,
-                    reasoningEffort: nil,
+                    reasoningEffort: newThreadReasoningEffort,
                     approvalMode: "yolo"
                 )
             )
@@ -216,7 +234,7 @@ final class WorkspaceDetailViewModel: ObservableObject {
                 ?? backends[0].provider
             newThreadProvider = provider
             if selectable.contains(where: { $0.provider == provider }) {
-                try await loadNewThreadModels(provider: provider)
+                try await loadNewThreadProvider(provider)
             } else {
                 newThreadModels = []
                 newThreadModel = ""
@@ -231,6 +249,8 @@ final class WorkspaceDetailViewModel: ObservableObject {
         guard provider != newThreadProvider else { return }
         guard newThreadBackends.first(where: { $0.provider == provider })?.canStartSession == true else {
             newThreadProvider = provider
+            newThreadAgents = []
+            newThreadAgentId = ""
             newThreadModels = []
             newThreadModel = ""
             newThreadOptionsError = "Install this runtime before creating a thread."
@@ -243,7 +263,7 @@ final class WorkspaceDetailViewModel: ObservableObject {
         newThreadOptionsLoading = true
         defer { newThreadOptionsLoading = false }
         do {
-            try await loadNewThreadModels(provider: provider)
+            try await loadNewThreadProvider(provider)
         } catch {
             newThreadOptionsError = error.localizedDescription
         }
@@ -268,29 +288,126 @@ final class WorkspaceDetailViewModel: ObservableObject {
         }
     }
 
+    func selectNewThreadAgent(_ agentId: String) async {
+        guard newThreadProvider == "acp" else { return }
+        guard visibleNewThreadAgents.first(where: { $0.model == agentId })?.acpAgent?.availability == "ready" else {
+            return
+        }
+        newThreadAgentId = agentId
+        newThreadOptionsLoading = true
+        newThreadOptionsError = nil
+        defer { newThreadOptionsLoading = false }
+        do {
+            try await loadNewThreadModels(provider: "acp", agentId: agentId)
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func installNewThreadAgentAdapter(_ agent: SupervisorModelOption) async {
+        newThreadBusyAgentId = agent.id
+        newThreadOptionsError = nil
+        defer { newThreadBusyAgentId = nil }
+        do {
+            _ = try await client.installOrUpdateAgentBackend(
+                provider: "acp",
+                action: "install",
+                modelId: agent.id
+            )
+            try await loadNewThreadProvider("acp")
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func selectNewThreadModel(_ model: String) {
+        newThreadModel = model
+        let option = visibleNewThreadModels.first { $0.model == model }
+        let efforts = option?.supportedReasoningEfforts.map(\.reasoningEffort) ?? []
+        if let current = newThreadReasoningEffort, efforts.contains(current) {
+            return
+        }
+        newThreadReasoningEffort = option?.defaultReasoningEffort ?? efforts.first
+    }
+
     private func selectableBackends(from backends: [SupervisorAgentBackend]) -> [SupervisorAgentBackend] {
         let selectable = backends.filter(\.canStartSession)
         return selectable.isEmpty ? [] : selectable
     }
 
-    private func loadNewThreadModels(provider: String) async throws {
-        let models = try await client.listAgentModels(provider: provider)
+    private func loadNewThreadProvider(_ provider: String) async throws {
+        if provider == "acp" {
+            newThreadAgents = try await client.listAgentAgents(provider: provider)
+            let candidates = visibleNewThreadAgents.filter { $0.acpAgent?.availability == "ready" }
+            newThreadAgentId = candidates.first { $0.model == newThreadAgentId }?.model
+                ?? candidates.first { $0.isDefault }?.model
+                ?? candidates.first?.model
+                ?? ""
+            guard !newThreadAgentId.isEmpty else {
+                newThreadModels = []
+                newThreadModel = ""
+                newThreadReasoningEffort = nil
+                newThreadOptionsError = "No ready ACP agents are available."
+                return
+            }
+        } else {
+            newThreadAgents = []
+            newThreadAgentId = ""
+        }
+        try await loadNewThreadModels(
+            provider: provider,
+            agentId: provider == "acp" ? newThreadAgentId : nil
+        )
+    }
+
+    private func loadNewThreadModels(provider: String, agentId: String? = nil) async throws {
+        let models = try await client.listAgentModels(
+            provider: provider,
+            agentId: agentId,
+            cwd: workspace?.absPath
+        )
         newThreadModels = models
         let selectableModels = models.filter { !$0.hidden }
         let candidates = selectableModels.isEmpty ? models : selectableModels
         guard !candidates.isEmpty else {
             newThreadModel = ""
             newThreadOptionsError = "No models are available for this provider."
+            newThreadReasoningEffort = nil
             return
         }
-        newThreadModel = candidates.first { $0.model == newThreadModel }?.model
-            ?? candidates.first { $0.isDefault }?.model
-            ?? candidates[0].model
+        let nextModel = candidates.first { $0.model == newThreadModel }
+            ?? candidates.first { $0.isDefault }
+            ?? candidates[0]
+        selectNewThreadModel(nextModel.model)
     }
 
     func selectFile(_ path: String) async {
         do {
             try await loadPreview(path: path)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func selectNode(_ node: WorkspaceFlatNode) async {
+        if node.kind == "directory" {
+            await toggleDirectory(node.path)
+        } else {
+            await selectFile(node.path)
+        }
+    }
+
+    func toggleDirectory(_ path: String) async {
+        if expandedDirectoryPaths.contains(path) {
+            expandedDirectoryPaths.remove(path)
+            return
+        }
+        do {
+            let subtree = try await client.fetchWorkspaceTree(workspaceId: workspaceId, path: path)
+            if let tree {
+                self.tree = replacingSubtree(in: tree, path: path, replacement: subtree)
+            }
+            expandedDirectoryPaths.insert(path)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -418,6 +535,21 @@ final class WorkspaceDetailViewModel: ObservableObject {
         editableContent = loaded.content
     }
 
+    private func replacingSubtree(
+        in node: SupervisorWorkspaceTreeNode,
+        path: String,
+        replacement: SupervisorWorkspaceTreeNode
+    ) -> SupervisorWorkspaceTreeNode {
+        if node.path == path {
+            return replacement
+        }
+        var updated = node
+        updated.children = node.children?.map {
+            replacingSubtree(in: $0, path: path, replacement: replacement)
+        }
+        return updated
+    }
+
     private func runAction(_ operation: () async throws -> Void) async {
         loading = true
         errorMessage = nil
@@ -491,6 +623,7 @@ struct WorkspaceDetailScreen: View {
     @State private var showingNewThread = false
     @State private var showingSettings = false
     @State private var showingAccounts = false
+    @State private var showingFileImporter = false
 
     init(
         environment: AppEnvironment,
@@ -520,6 +653,8 @@ struct WorkspaceDetailScreen: View {
         List {
             workspaceSection
             threadsSection
+            filesSection
+            previewSection
         }
         .navigationTitle(model.workspace?.label ?? "Workspace")
         .navigationBarTitleDisplayMode(.inline)
@@ -552,6 +687,14 @@ struct WorkspaceDetailScreen: View {
         .sheet(item: $model.previewFile) { file in
             QuickLookPreview(url: file.url)
         }
+        .fileImporter(
+            isPresented: $showingFileImporter,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case let .success(urls) = result, let url = urls.first else { return }
+            Task { await model.uploadFile(from: url) }
+        }
     }
 
     private var workspaceMenu: some View {
@@ -581,7 +724,9 @@ struct WorkspaceDetailScreen: View {
                 ProgressView("Loading...")
             }
             if let message = model.message {
-                Text(message).remoteCodexStatusText()
+                Text(message)
+                    .remoteCodexStatusText()
+                    .accessibilityIdentifier("workspace-file-message")
             }
             if let error = model.errorMessage {
                 Text(error).remoteCodexErrorText()
@@ -616,6 +761,83 @@ struct WorkspaceDetailScreen: View {
             }
         }
         .remoteCodexListRow()
+    }
+
+    private var filesSection: some View {
+        Section {
+            if model.flatNodes.filter({ !$0.path.isEmpty }).isEmpty {
+                ContentUnavailableView("No Files", systemImage: "folder")
+            }
+            ForEach(model.flatNodes.filter { !$0.path.isEmpty }) { node in
+                Button {
+                    Task { await model.selectNode(node) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: CGFloat(max(0, node.depth - 1)) * 14, height: 1)
+                        Image(systemName: node.kind == "directory" ? "folder" : "doc.text")
+                        Text(node.name)
+                            .foregroundStyle(RemoteCodexTheme.foreground)
+                        Spacer()
+                        if node.kind == "directory" {
+                            Image(
+                                systemName: model.expandedDirectoryPaths.contains(node.path)
+                                    ? "chevron.down"
+                                    : "chevron.right"
+                            )
+                        }
+                    }
+                }
+                .accessibilityIdentifier("workspace-file-row-\(workspaceFileIdentifierToken(node.path))")
+            }
+        } header: {
+            HStack {
+                Text("Files")
+                Spacer()
+                Button {
+                    showingFileImporter = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Upload file")
+            }
+        }
+        .remoteCodexListRow()
+    }
+
+    @ViewBuilder
+    private var previewSection: some View {
+        if let preview = model.preview {
+            Section("Preview") {
+                Text(preview.path)
+                    .font(.caption.monospaced())
+                    .remoteCodexStatusText()
+                    .accessibilityIdentifier("workspace-file-preview-path")
+                if preview.truncated {
+                    Button("Load more") {
+                        Task { await model.loadMorePreview() }
+                    }
+                    .accessibilityIdentifier("workspace-file-load-more")
+                }
+                HStack {
+                    Button("Copy raw") { Task { await model.copyRawFile() } }
+                        .accessibilityIdentifier("workspace-file-copy-raw")
+                    Button("Open") { Task { await model.openRawFile() } }
+                    Button("Download") { Task { await model.downloadCurrentFile() } }
+                        .accessibilityIdentifier("workspace-file-download")
+                }
+                .buttonStyle(.borderless)
+                if let message = model.message {
+                    Text(message)
+                        .remoteCodexStatusText()
+                        .accessibilityIdentifier("workspace-file-preview-message")
+                }
+                TextEditor(text: $model.editableContent)
+                    .frame(minHeight: 140)
+                    .font(.caption.monospaced())
+                Button("Save changes") { Task { await model.saveCurrentFile() } }
+            }
+            .remoteCodexListRow()
+        }
     }
 
     private var newThreadSheet: some View {
@@ -677,13 +899,48 @@ struct WorkspaceDetailScreen: View {
                         }
                     }
                 }
+                if model.newThreadProvider == "acp" {
+                    Section("Agent") {
+                        ForEach(model.visibleNewThreadAgents) { agent in
+                            let ready = agent.acpAgent?.availability == "ready"
+                            HStack {
+                                Button {
+                                    Task { await model.selectNewThreadAgent(agent.model) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(agent.displayName)
+                                            .foregroundStyle(ready ? RemoteCodexTheme.foreground : RemoteCodexTheme.foregroundMuted)
+                                        Text(agent.acpAgent?.statusMessage ?? "Agent is unavailable.")
+                                            .font(.caption2)
+                                            .remoteCodexStatusText()
+                                    }
+                                }
+                                .disabled(!ready || model.newThreadBusyAgentId != nil)
+                                Spacer()
+                                if agent.acpAgent?.availability == "adapter_missing",
+                                   agent.acpAgent?.installCommand != nil
+                                {
+                                    Button("Install") {
+                                        Task { await model.installNewThreadAgentAdapter(agent) }
+                                    }
+                                    .disabled(model.newThreadBusyAgentId != nil || agent.acpAgent?.busy == true)
+                                    .buttonStyle(RemoteCodexSecondaryButtonStyle())
+                                }
+                                if agent.model == model.newThreadAgentId {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                            .accessibilityIdentifier("new-thread-agent-\(workspaceFileIdentifierToken(agent.model))")
+                        }
+                    }
+                }
                 Section("Model") {
                     if model.newThreadOptionsLoading, model.visibleNewThreadModels.isEmpty {
                         ProgressView()
                     } else {
                         ForEach(model.visibleNewThreadModels) { option in
                             Button {
-                                model.newThreadModel = option.model
+                                model.selectNewThreadModel(option.model)
                             } label: {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 3) {
@@ -700,6 +957,25 @@ struct WorkspaceDetailScreen: View {
                                 }
                             }
                             .accessibilityIdentifier("new-thread-model-\(workspaceFileIdentifierToken(option.model))")
+                        }
+                    }
+                }
+                if let selectedModel = model.selectedNewThreadModel,
+                   !selectedModel.supportedReasoningEfforts.isEmpty
+                {
+                    Section("Reasoning") {
+                        ForEach(selectedModel.supportedReasoningEfforts, id: \.reasoningEffort) { effort in
+                            Button {
+                                model.newThreadReasoningEffort = effort.reasoningEffort
+                            } label: {
+                                HStack {
+                                    Text(effort.reasoningEffort)
+                                    Spacer()
+                                    if effort.reasoningEffort == model.newThreadReasoningEffort {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
                         }
                     }
                 }

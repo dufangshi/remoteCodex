@@ -1406,15 +1406,18 @@ final class RemoteCodexUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["iOS Workspace Files E2E"].waitForExistence(timeout: 8))
-        let fileRow = app.descendants(matching: .any)["workspace-file-row-Sources-Long-txt"]
+        let sourceDirectory = app.buttons["workspace-file-row-Sources"]
+        XCTAssertTrue(tapElement(sourceDirectory, in: app, maxSwipes: 10))
+        let fileRow = app.buttons["workspace-file-row-Sources-Long-txt"]
         XCTAssertTrue(tapElement(fileRow, in: app, maxSwipes: 10))
-        let loadMore = app.buttons["workspace-file-load-more"]
+        XCTAssertTrue(scrollUntilExists(app.staticTexts["Sources/Long.txt"], in: app, maxSwipes: 10))
+        let loadMore = app.descendants(matching: .any)["workspace-file-load-more"]
         XCTAssertTrue(tapElement(loadMore, in: app, maxSwipes: 10))
-        let copyRaw = app.buttons["workspace-file-copy-raw"]
+        let copyRaw = app.descendants(matching: .any)["workspace-file-copy-raw"]
         XCTAssertTrue(tapElement(copyRaw, in: app, maxSwipes: 4))
-        XCTAssertTrue(waitForElement(app.staticTexts["workspace-file-message"], containing: "Copied Sources/Long.txt raw text"))
-        XCTAssertTrue(tapElement(app.buttons["workspace-file-download"], in: app, maxSwipes: 4))
-        XCTAssertTrue(waitForElement(app.staticTexts["workspace-file-message"], containing: "Downloaded"))
+        XCTAssertTrue(waitForElement(app.descendants(matching: .any)["workspace-file-preview-message"], containing: "Copied Sources/Long.txt raw text"))
+        XCTAssertTrue(tapElement(app.descendants(matching: .any)["workspace-file-download"], in: app, maxSwipes: 4))
+        XCTAssertTrue(waitForElement(app.descendants(matching: .any)["workspace-file-preview-message"], containing: "Downloaded"))
     }
 
     @MainActor
@@ -1578,6 +1581,7 @@ final class RemoteCodexUITests: XCTestCase {
 
         let workspaceButton = app.buttons["workspace-open-\(workspace.id)"]
         XCTAssertTrue(scrollUntilExists(workspaceButton, in: app))
+        workspaceButton.tap()
         let threadButton = app.buttons["thread-open-\(thread.id)"]
         XCTAssertTrue(scrollUntilExists(threadButton, in: app))
         threadButton.tap()
@@ -1591,10 +1595,56 @@ final class RemoteCodexUITests: XCTestCase {
             threadId: thread.id,
             text: "IOS_STREAM_COMPLETED"
         )
-        app.buttons["Actions"].tap()
-        app.buttons["Refresh"].tap()
         XCTAssertTrue(scrollUntilElement(containing: "IOS_STREAM_COMPLETED", in: app, timeout: 30))
         XCTAssertTrue(scrollUntilElement(containing: prompt, in: app))
+    }
+
+    @MainActor
+    func testLiveLocalAcpThreadShowsAgentAndSubmitsPrompt() async throws {
+        let baseURL = try await Self.liveLocalBaseURL()
+        let workspacePath = try Self.makeLiveWorkspaceDirectory()
+        let workspace = try await Self.createLiveWorkspace(
+            baseURL: baseURL,
+            path: workspacePath,
+            label: "iOS ACP E2E"
+        )
+        let thread = try await Self.createLiveThread(
+            baseURL: baseURL,
+            workspaceId: workspace.id,
+            title: "iOS ACP Grok Thread",
+            provider: "acp",
+            agentId: "grok",
+            model: "grok-4.6"
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-live-local-connection",
+            "--use-ios-thread-webview",
+        ]
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        app.launchEnvironment["REMOTE_CODEX_IOS_E2E_THREAD_ID"] = thread.id
+        app.launch()
+
+        assertThreadWebViewReady(app, title: thread.title, timeout: 25)
+        XCTAssertTrue(scrollUntilElement(containing: "Grok Build", in: app, timeout: 20))
+        XCTAssertTrue(scrollUntilElement(containing: "grok-4.6", in: app, timeout: 20))
+
+        let prompt = "Reply with IOS_ACP_PARITY_OK only."
+        XCTAssertTrue(typeIntoWebPrompt(prompt, in: app))
+        let sendButton = webElement("Send Prompt", in: app).firstMatch
+        if sendButton.waitForExistence(timeout: 3) {
+            sendButton.tap()
+        } else {
+            tapWebComposerSend(in: app)
+        }
+        try await Self.waitForLiveThreadText(
+            baseURL: baseURL,
+            threadId: thread.id,
+            text: "IOS_ACP_PARITY_OK"
+        )
+        XCTAssertTrue(scrollUntilElement(containing: "IOS_ACP_PARITY_OK", in: app, timeout: 40))
     }
 
     @MainActor
@@ -1661,6 +1711,7 @@ final class RemoteCodexUITests: XCTestCase {
 
         let workspaceButton = app.buttons["workspace-open-\(workspace.id)"]
         XCTAssertTrue(scrollUntilExists(workspaceButton, in: app))
+        workspaceButton.tap()
         let threadButton = app.buttons["thread-open-\(thread.id)"]
         XCTAssertTrue(scrollUntilExists(threadButton, in: app))
         threadButton.tap()
@@ -1804,6 +1855,7 @@ final class RemoteCodexUITests: XCTestCase {
 
         let workspaceButton = app.buttons["workspace-open-\(workspace.id)"]
         XCTAssertTrue(scrollUntilExists(workspaceButton, in: app))
+        workspaceButton.tap()
         let threadButton = app.buttons["thread-open-\(thread.id)"]
         XCTAssertTrue(scrollUntilExists(threadButton, in: app))
         threadButton.tap()
@@ -2662,6 +2714,7 @@ extension RemoteCodexUITests {
         bearerToken: String? = nil,
         title: String = "iOS Live Local Thread",
         provider: String? = nil,
+        agentId: String? = nil,
         model: String = "gpt-5.4",
         approvalMode: String = "yolo"
     ) async throws -> LiveThread {
@@ -2673,6 +2726,9 @@ extension RemoteCodexUITests {
         ]
         if let provider {
             body["provider"] = provider
+        }
+        if let agentId {
+            body["agentId"] = agentId
         }
         return try await postJSON(
             baseURL: baseURL,

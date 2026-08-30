@@ -25,7 +25,14 @@ extension RemoteCodexUITests {
 
     static func assertLiveWorkspaceFilesRoundTrip(baseURL: URL, workspaceId: String) async throws {
         let tree = try await liveWorkspaceJSON(baseURL: baseURL, workspaceId: workspaceId, endpoint: "tree")
-        XCTAssertTrue(String(describing: tree).contains("Long.txt"))
+        XCTAssertTrue(String(describing: tree).contains("Sources"))
+        let sourcesTree = try await liveWorkspaceJSON(
+            baseURL: baseURL,
+            workspaceId: workspaceId,
+            endpoint: "tree",
+            query: ["path": "Sources"]
+        )
+        XCTAssertTrue(String(describing: sourcesTree).contains("Long.txt"))
 
         let firstPreview = try await liveWorkspaceJSON(
             baseURL: baseURL,

@@ -13,9 +13,14 @@ export default defineConfig(({ mode }) => {
     process.env.NODE_ENV = 'test';
   }
 
-  const threadUiRoot = path.resolve(__dirname, '../../../../remote-codex-thread-ui');
+  const threadUiRoot = path.resolve(
+    process.env.REMOTE_CODEX_THREAD_UI_DIR ??
+      path.resolve(__dirname, '../../../../remote-codex-thread-ui'),
+  );
   const xyzViewerRoot = path.join(threadUiRoot, 'packages/plugin-xyz-viewer');
   const xyzViewerEntry = path.join(xyzViewerRoot, 'src/index.ts');
+  const xyzViewerFrontend = path.join(xyzViewerRoot, 'src/frontend.ts');
+  const xyzViewerManifest = path.join(xyzViewerRoot, 'src/manifest.ts');
   const xyzViewerStyles = path.join(xyzViewerRoot, 'src/styles.css');
   const lucideReactEntry = require.resolve('lucide-react', { paths: [__dirname] });
   const threeDmolEntry = require.resolve('3dmol', { paths: [__dirname] });
@@ -45,6 +50,8 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@remote-codex/plugin-xyz-viewer/styles.css': xyzViewerStyles,
+        '@remote-codex/plugin-xyz-viewer/frontend': xyzViewerFrontend,
+        '@remote-codex/plugin-xyz-viewer/manifest': xyzViewerManifest,
         '@remote-codex/plugin-xyz-viewer': xyzViewerEntry,
         '3dmol': threeDmolEntry,
         'lucide-react': lucideReactEntry,

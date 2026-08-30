@@ -156,6 +156,7 @@ class SupervisorApiClient(
             .put("approvalMode", request.approvalMode)
         request.title?.takeIf { it.isNotBlank() }?.let { body.put("title", it) }
         request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        request.agentId?.takeIf { it.isNotBlank() }?.let { body.put("agentId", it) }
         request.reasoningEffort?.takeIf { it.isNotBlank() }?.let { body.put("reasoningEffort", it) }
         return requestJson(
             config.restPath("/api/threads/start"),
@@ -209,20 +210,35 @@ class SupervisorApiClient(
         }
     }
 
-    fun listAgentModels(provider: String): List<SupervisorModelOption> {
+    fun listAgentModels(
+        provider: String,
+        agentId: String? = null,
+        cwd: String? = null,
+    ): List<SupervisorModelOption> {
+        val query = buildQuery("agentId" to agentId, "cwd" to cwd)
         return requestArray(
-            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/models"),
+            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/models$query"),
         ).map { item -> item.toModelOption() }
     }
 
-    fun installOrUpdateAgentBackend(provider: String, action: String): SupervisorAgentBackend {
+    fun listAgentAgents(provider: String): List<SupervisorModelOption> {
+        return requestArray(
+            config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/agents"),
+        ).map { item -> item.toModelOption() }
+    }
+
+    fun installOrUpdateAgentBackend(
+        provider: String,
+        action: String,
+        modelId: String? = null,
+    ): SupervisorAgentBackend {
         val body = JSONObject()
             .put("action", action)
-            .toString()
+        modelId?.takeIf { it.isNotBlank() }?.let { body.put("modelId", it) }
         return requestJson(
             config.restPath("/api/agent-runtimes/${urlEncodePathSegment(provider)}/install"),
             method = "POST",
-            body = body,
+            body = body.toString(),
         ).toAgentBackend()
     }
 
@@ -952,12 +968,15 @@ private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
     val status = optJSONObject("status")
     val installation = optJSONObject("installation")
     val managementSchema = optJSONObject("managementSchema")
+    val capabilities = optJSONObject("capabilities")
     return SupervisorAgentBackend(
         provider = optString("provider"),
         displayName = optString("displayName"),
         description = optString("description"),
         enabled = optBoolean("enabled", false),
         isDefault = optBoolean("isDefault", false),
+        canResumeSessions = capabilities?.optJSONObject("sessions")?.optBoolean("resume", false) ?: false,
+        canStartTurns = capabilities?.optJSONObject("turns")?.optBoolean("start", false) ?: false,
         statusState = status?.optString("state").orEmpty(),
         statusDetail = status?.optNullableString("detail")
             ?: status?.optNullableString("message")
@@ -976,6 +995,7 @@ private fun JSONObject.toAgentBackend(): SupervisorAgentBackend {
 
 private fun JSONObject.toModelOption(): SupervisorModelOption {
     val effortsJson = optJSONArray("supportedReasoningEfforts") ?: org.json.JSONArray()
+    val acpAgentJson = optJSONObject("acpAgent")
     return SupervisorModelOption(
         id = optString("id"),
         model = optString("model"),
@@ -991,6 +1011,16 @@ private fun JSONObject.toModelOption(): SupervisorModelOption {
             )
         },
         defaultReasoningEffort = optNullableString("defaultReasoningEffort"),
+        selectionKind = optNullableString("selectionKind"),
+        acpAgent = acpAgentJson?.let { metadata ->
+            SupervisorAcpAgentOption(
+                transport = metadata.optString("transport"),
+                availability = metadata.optString("availability"),
+                installCommand = metadata.optNullableString("installCommand"),
+                busy = metadata.optBoolean("busy", false),
+                statusMessage = metadata.optString("statusMessage"),
+            )
+        },
     )
 }
 
@@ -1247,6 +1277,7 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
         id = optString("id"),
         workspaceId = optString("workspaceId"),
         provider = optString("provider", "codex"),
+        agentId = optNullableString("agentId"),
         title = optString("title"),
         status = optString("status"),
         model = optNullableString("model"),

@@ -57,12 +57,14 @@
     "prepack": "pnpm build:package",
     "build": "pnpm -r --if-present build",
     "build:package": "pnpm --filter @remote-codex/shared build && pnpm --filter @remote-codex/plugin-runtime build && pnpm --filter @remote-codex/plugin-terminal build && pnpm --filter @remote-codex/supervisor-api build && pnpm --filter @remote-codex/relay-server build && pnpm --filter @remote-codex/supervisor-web build",
+    "build:mobile-web-deps": "pnpm --filter @remote-codex/shared build && pnpm --filter @remote-codex/plugin-runtime build && pnpm --filter @remote-codex/plugin-terminal build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "cross-env NODE_ENV=test pnpm -r --if-present test",
     "test:e2e": "playwright test",
     "verify:package": "node scripts/verify-package-install.mjs",
     "verify:relay": "node scripts/verify-relay-supervisor-smoke.mjs",
+    "verify:mobile:inputs": "node scripts/verify-mobile-build-inputs.mjs",
     "build:windows-device-manager": "dotnet publish apps/windows-device-manager/RemoteCodex.DeviceManager.csproj -c Release -r win-x64 --self-contained true -o artifacts/windows-device-manager/win-x64",
     "db:migrate": "pnpm --filter @remote-codex/db db:migrate",
     "release:mobile": "node scripts/publish-mobile-release-assets.mjs",
@@ -113,6 +115,7 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.29.1",
+    "yaml": "^2.8.1",
     "vite": "^6.3.2",
     "vitest": "^3.1.1"
   }

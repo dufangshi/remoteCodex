@@ -700,7 +700,11 @@ struct ConnectionScreen: View {
                 }
             }
         } message: {
-            Text("Remove \(revokeGrant?.targetUsername ?? "this user's") access to \(revokeGrant.map(grantTitle) ?? "this device").")
+            Text(
+                revokeGrant.map {
+                    "Revoke \($0.targetUsername)'s access to \(grantTitle($0))? Scope: \(grantScopeDescription($0)). Access will stop immediately."
+                } ?? "Revoke this shared device access?"
+            )
         }
     }
 
@@ -982,11 +986,11 @@ struct ConnectionScreen: View {
             } else if sharedDevices.isEmpty {
                 ContentUnavailableView("No Shared Devices", systemImage: "person.2.slash")
             } else {
-                ForEach(sharedDevices) { grant in
-                    RelaySharedGrantRow(
-                        grant: grant,
+                ForEach(groupRelayGrantsByDevice(sharedDevices)) { group in
+                    RelaySharedGrantDeviceGroupView(
+                        grants: group.grants,
                         mode: .incoming,
-                        onOpen: { model.openSharedGrant(grant) }
+                        onOpen: model.openSharedGrant
                     )
                 }
             }
@@ -1016,15 +1020,15 @@ struct ConnectionScreen: View {
             } else if grants.isEmpty {
                 ContentUnavailableView("No Shared Devices", systemImage: "person.2")
             } else {
-                ForEach(grants) { grant in
-                    RelaySharedGrantRow(
-                        grant: grant,
+                ForEach(groupRelayGrantsByDevice(grants)) { group in
+                    RelaySharedGrantDeviceGroupView(
+                        grants: group.grants,
                         mode: .outgoing,
-                        expanded: expandedGrantId == grant.id,
-                        onOpen: { model.openSharedGrant(grant) },
-                        onEdit: { editingGrant = grant },
-                        onRevoke: { revokeGrant = grant },
-                        onToggleAccess: {
+                        expandedGrantId: expandedGrantId,
+                        onOpen: model.openSharedGrant,
+                        onEdit: { editingGrant = $0 },
+                        onRevoke: { revokeGrant = $0 },
+                        onToggleAccess: { grant in
                             expandedGrantId = expandedGrantId == grant.id ? nil : grant.id
                         }
                     )
@@ -1333,10 +1337,7 @@ private struct RelaySharedGrantRow: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(mode == .incoming ? "From \(grant.ownerUsername)" : "To \(grant.targetUsername)")
-                Text("Device: \(grant.deviceName)")
-                if let workspace = grant.workspaceLabel?.trimmedNonEmpty {
-                    Text("Workspace: \(workspace)")
-                }
+                Text("Scope: \(grantScopeDescription(grant))")
             }
             .font(.caption)
             .remoteCodexStatusText()
@@ -1354,6 +1355,67 @@ private struct RelaySharedGrantRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct RelayGrantDeviceGroup: Identifiable {
+    let id: String
+    let grants: [RelayAccessGrantSummary]
+}
+
+private func groupRelayGrantsByDevice(_ grants: [RelayAccessGrantSummary]) -> [RelayGrantDeviceGroup] {
+    let scopeOrder = ["device": 0, "workspace": 1, "thread": 2]
+    return Dictionary(grouping: grants, by: \.deviceId)
+        .map { deviceId, deviceGrants in
+            RelayGrantDeviceGroup(
+                id: deviceId,
+                grants: deviceGrants.sorted {
+                    let leftScope = scopeOrder[$0.scope] ?? 3
+                    let rightScope = scopeOrder[$1.scope] ?? 3
+                    if leftScope != rightScope { return leftScope < rightScope }
+                    let leftWorkspace = $0.workspaceLabel ?? ""
+                    let rightWorkspace = $1.workspaceLabel ?? ""
+                    if leftWorkspace != rightWorkspace { return leftWorkspace < rightWorkspace }
+                    return ($0.threadTitle ?? "") < ($1.threadTitle ?? "")
+                }
+            )
+        }
+}
+
+private struct RelaySharedGrantDeviceGroupView: View {
+    let grants: [RelayAccessGrantSummary]
+    let mode: RelayShareRowMode
+    var expandedGrantId: String? = nil
+    let onOpen: (RelayAccessGrantSummary) -> Void
+    var onEdit: (RelayAccessGrantSummary) -> Void = { _ in }
+    var onRevoke: (RelayAccessGrantSummary) -> Void = { _ in }
+    var onToggleAccess: (RelayAccessGrantSummary) -> Void = { _ in }
+
+    var body: some View {
+        if let firstGrant = grants.first {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(grantTitle(firstGrant))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    GraphBadge(
+                        text: "\(grants.count) \(grants.count == 1 ? "share" : "shares")",
+                        tone: .neutral
+                    )
+                }
+                ForEach(grants) { grant in
+                    RelaySharedGrantRow(
+                        grant: grant,
+                        mode: mode,
+                        expanded: expandedGrantId == grant.id,
+                        onOpen: { onOpen(grant) },
+                        onEdit: { onEdit(grant) },
+                        onRevoke: { onRevoke(grant) },
+                        onToggleAccess: { onToggleAccess(grant) }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1600,11 +1662,28 @@ private func shareTitle(_ share: RelaySessionShareSummary) -> String {
 }
 
 private func grantTitle(_ grant: RelayAccessGrantSummary) -> String {
-    grant.label?.trimmedNonEmpty
-        ?? grant.threadTitle?.trimmedNonEmpty
-        ?? grant.workspaceLabel?.trimmedNonEmpty
-        ?? grant.deviceName.trimmedNonEmpty
+    grant.deviceName.trimmedNonEmpty
         ?? "Shared device"
+}
+
+private func grantScopeDescription(_ grant: RelayAccessGrantSummary) -> String {
+    switch grant.scope {
+    case "thread":
+        let workspace = grant.workspaceLabel?.trimmedNonEmpty ?? "workspace unavailable"
+        let thread = grant.threadTitle?.trimmedNonEmpty ?? "thread unavailable"
+        return "\(workspace) / \(thread)"
+    case "workspace":
+        return "\(grant.workspaceLabel?.trimmedNonEmpty ?? "workspace unavailable") / entire workspace"
+    default:
+        if grant.workspaceScope == "selected" {
+            if let workspace = grant.workspaceLabel?.trimmedNonEmpty {
+                return "selected workspace: \(workspace)"
+            }
+            let count = grant.workspaceIds.count
+            return "\(count) selected workspace\(count == 1 ? "" : "s")"
+        }
+        return "entire device"
+    }
 }
 
 private func grantScopeLabel(_ scope: String) -> String {

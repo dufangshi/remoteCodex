@@ -144,6 +144,7 @@ data class SupervisorThreadSummary(
     val id: String,
     val workspaceId: String,
     val provider: String = "codex",
+    val agentId: String? = null,
     val title: String,
     val status: String,
     val model: String?,
@@ -190,6 +191,8 @@ data class SupervisorAgentBackend(
     val description: String,
     val enabled: Boolean,
     val isDefault: Boolean,
+    val canResumeSessions: Boolean = true,
+    val canStartTurns: Boolean = true,
     val statusState: String,
     val statusDetail: String?,
     val installed: Boolean,
@@ -204,7 +207,7 @@ data class SupervisorAgentBackend(
 )
 
 val SupervisorAgentBackend.canStartSession: Boolean
-    get() = enabled
+    get() = enabled && canResumeSessions && canStartTurns
 
 val SupervisorAgentBackend.runtimeActionLabel: String?
     get() = when {
@@ -222,6 +225,16 @@ data class SupervisorModelOption(
     val hidden: Boolean,
     val supportedReasoningEfforts: List<SupervisorReasoningEffortOption>,
     val defaultReasoningEffort: String?,
+    val selectionKind: String? = null,
+    val acpAgent: SupervisorAcpAgentOption? = null,
+)
+
+data class SupervisorAcpAgentOption(
+    val transport: String,
+    val availability: String,
+    val installCommand: String?,
+    val busy: Boolean,
+    val statusMessage: String,
 )
 
 data class SupervisorReasoningEffortOption(
@@ -324,6 +337,7 @@ data class StartSupervisorThreadRequest(
     val model: String,
     val approvalMode: String = "yolo",
     val provider: String? = null,
+    val agentId: String? = null,
     val reasoningEffort: String? = null,
 )
 

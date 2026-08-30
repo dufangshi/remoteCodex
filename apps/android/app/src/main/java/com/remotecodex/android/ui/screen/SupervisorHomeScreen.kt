@@ -321,6 +321,7 @@ fun SupervisorHomeScreen(
 	                            workspaceId = workspaceId,
 	                            title = draft.title?.takeIf { it.isNotBlank() },
 	                            provider = draft.provider,
+	                            agentId = draft.agentId,
 	                            model = draft.model,
                                 reasoningEffort = draft.reasoningEffort,
 	                            approvalMode = "yolo",
@@ -546,7 +547,11 @@ fun SupervisorHomeScreen(
                 backends = agentBackends.orEmpty(),
                 backendsLoading = backendSettingsLoading,
                 backendsError = backendSettingsError,
-                loadModels = { provider -> client.listAgentModels(provider) },
+                loadModels = { provider, agentId, cwd -> client.listAgentModels(provider, agentId, cwd) },
+                loadAgents = { provider -> client.listAgentAgents(provider) },
+                installAgentAdapter = { agent ->
+                    client.installOrUpdateAgentBackend("acp", "install", agent.id)
+                },
                 installOrUpdateBackend = { backend ->
                     val action = if (backend.installed) "update" else "install"
                     client.installOrUpdateAgentBackend(backend.provider, action)
@@ -1018,6 +1023,7 @@ private const val ImportThreadBusyId = "__import_thread__"
 private data class StartThreadDraft(
     val title: String?,
     val provider: String,
+    val agentId: String?,
     val model: String,
     val reasoningEffort: String?,
 )
@@ -1049,7 +1055,9 @@ private fun WorkspaceActionDialogOverlay(
     backends: List<SupervisorAgentBackend>,
     backendsLoading: Boolean,
     backendsError: String?,
-    loadModels: suspend (String) -> List<SupervisorModelOption>,
+    loadModels: suspend (String, String?, String?) -> List<SupervisorModelOption>,
+    loadAgents: suspend (String) -> List<SupervisorModelOption>,
+    installAgentAdapter: suspend (SupervisorModelOption) -> Unit,
     installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
     error: String?,
@@ -1089,6 +1097,8 @@ private fun WorkspaceActionDialogOverlay(
                 backendsLoading = backendsLoading,
                 backendsError = backendsError,
                 loadModels = loadModels,
+                loadAgents = loadAgents,
+                installAgentAdapter = installAgentAdapter,
                 installOrUpdateBackend = installOrUpdateBackend,
                 busy = busy,
                 error = error,
@@ -1177,7 +1187,9 @@ private fun StartThreadDialog(
     backends: List<SupervisorAgentBackend>,
     backendsLoading: Boolean,
     backendsError: String?,
-    loadModels: suspend (String) -> List<SupervisorModelOption>,
+    loadModels: suspend (String, String?, String?) -> List<SupervisorModelOption>,
+    loadAgents: suspend (String) -> List<SupervisorModelOption>,
+    installAgentAdapter: suspend (SupervisorModelOption) -> Unit,
     installOrUpdateBackend: suspend (SupervisorAgentBackend) -> Unit,
     busy: Boolean,
     error: String?,
@@ -1189,6 +1201,12 @@ private fun StartThreadDialog(
     var provider by rememberSaveable(workspace.id, backends.map { it.provider }.joinToString(",")) {
         mutableStateOf(selectableBackends.firstOrNull { it.isDefault }?.provider ?: selectableBackends.firstOrNull()?.provider ?: backends.firstOrNull()?.provider ?: "codex")
     }
+    var agents by remember(provider) { mutableStateOf<List<SupervisorModelOption>>(emptyList()) }
+    var agentsLoading by remember(provider) { mutableStateOf(false) }
+    var agentsError by remember(provider) { mutableStateOf<String?>(null) }
+    var agentId by rememberSaveable(workspace.id, provider) { mutableStateOf<String?>(null) }
+    var installingAgentId by remember { mutableStateOf<String?>(null) }
+    var agentRefreshKey by remember { mutableStateOf(0) }
     var models by remember(provider) { mutableStateOf<List<SupervisorModelOption>>(emptyList()) }
     var modelsLoading by remember(provider) { mutableStateOf(false) }
     var modelsError by remember(provider) { mutableStateOf<String?>(null) }
@@ -1196,19 +1214,67 @@ private fun StartThreadDialog(
     var reasoningEffort by rememberSaveable(workspace.id, provider, model) { mutableStateOf<String?>(null) }
     var runtimeBusyProvider by remember { mutableStateOf<String?>(null) }
     val dialogScope = rememberCoroutineScope()
-    LaunchedEffect(provider, backends) {
+    LaunchedEffect(provider, backends, agentRefreshKey) {
         val backend = backends.firstOrNull { it.provider == provider }
         if (backend?.canStartSession != true) {
+            agents = emptyList()
+            agentId = null
             models = emptyList()
             model = ""
             reasoningEffort = null
             modelsError = "Install this runtime before creating a thread."
             return@LaunchedEffect
         }
+        if (provider != "acp") {
+            agents = emptyList()
+            agentId = null
+            agentsError = null
+            return@LaunchedEffect
+        }
+        agentsLoading = true
+        agentsError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadAgents(provider) }
+        }
+        agentsLoading = false
+        result
+            .onSuccess { loaded ->
+                agents = loaded.filterNot { it.hidden }
+                agentId = agents.firstOrNull {
+                    it.model == agentId && it.acpAgent?.availability == "ready"
+                }?.model
+                    ?: agents.firstOrNull {
+                        it.isDefault && it.acpAgent?.availability == "ready"
+                    }?.model
+                    ?: agents.firstOrNull { it.acpAgent?.availability == "ready" }?.model
+            }
+            .onFailure { throwable ->
+                agents = emptyList()
+                agentId = null
+                agentsError = throwable.message ?: "ACP agent options failed."
+            }
+    }
+    LaunchedEffect(provider, agentId, backends, workspace.absPath) {
+        val backend = backends.firstOrNull { it.provider == provider }
+        if (backend?.canStartSession != true || (provider == "acp" && agentId.isNullOrBlank())) {
+            models = emptyList()
+            model = ""
+            reasoningEffort = null
+            if (backend?.canStartSession == true) {
+                modelsError = null
+            }
+            return@LaunchedEffect
+        }
         modelsLoading = true
         modelsError = null
         val result = withContext(Dispatchers.IO) {
-            runCatching { loadModels(provider) }
+            runCatching {
+                loadModels(
+                    provider,
+                    agentId.takeIf { provider == "acp" },
+                    workspace.absPath,
+                )
+            }
         }
         modelsLoading = false
         result
@@ -1228,6 +1294,7 @@ private fun StartThreadDialog(
                 modelsError = throwable.message ?: "Model options failed."
             }
     }
+    val selectedAgent = agents.firstOrNull { it.model == agentId }
     val selectedModel = models.firstOrNull { it.model == model }
     val reasoningOptions = selectedModel?.supportedReasoningEfforts.orEmpty()
     val normalizedTitle = title.trim()
@@ -1240,13 +1307,17 @@ private fun StartThreadDialog(
             GraphDialogFooter(
                 primaryLabel = if (busy) "Starting" else "Start",
                 primaryTone = GraphDialogActionTone.Success,
-                    primaryEnabled = !busy && normalizedModel.isNotBlank() && backends.firstOrNull { it.provider == provider }?.canStartSession == true,
+                    primaryEnabled = !busy &&
+                        normalizedModel.isNotBlank() &&
+                        backends.firstOrNull { it.provider == provider }?.canStartSession == true &&
+                        (provider != "acp" || selectedAgent?.acpAgent?.availability == "ready"),
                 onCancel = onClose,
                 onPrimary = {
                     onStartThread(
                         StartThreadDraft(
                             title = normalizedTitle.takeIf { it.isNotBlank() },
                             provider = provider,
+                            agentId = agentId.takeIf { provider == "acp" },
                             model = normalizedModel,
                             reasoningEffort = reasoningEffort,
                         ),
@@ -1286,6 +1357,77 @@ private fun StartThreadDialog(
                 color = ThreadColors.Warning,
                 style = MaterialTheme.typography.labelSmall,
             )
+        }
+        if (provider == "acp") {
+            val readyAgents = agents.filter { it.acpAgent?.availability == "ready" }
+            if (readyAgents.isNotEmpty()) {
+                OptionSelector(
+                    label = "Agent",
+                    options = readyAgents.map { agent ->
+                        agent.model to agent.displayName.ifBlank { agent.model }
+                    },
+                    selected = agentId ?: readyAgents.first().model,
+                    enabled = !busy && !agentsLoading && installingAgentId == null,
+                    onSelected = { agentId = it },
+                )
+            } else {
+                Text(
+                    text = if (agentsLoading) "Loading ACP agents..." else "No ready ACP agents.",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            agents.filter { it.acpAgent?.availability != "ready" }.forEach { agent ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = agent.displayName.ifBlank { agent.model },
+                            color = ThreadColors.Foreground,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            text = agent.acpAgent?.statusMessage ?: "Agent is unavailable.",
+                            color = ThreadColors.Warning,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    if (agent.acpAgent?.availability == "adapter_missing" && !agent.acpAgent.installCommand.isNullOrBlank()) {
+                        GraphButton(
+                            label = if (installingAgentId == agent.id || agent.acpAgent.busy) "Installing" else "Install",
+                            enabled = !busy && installingAgentId == null && !agent.acpAgent.busy,
+                            variant = GraphButtonVariant.Secondary,
+                            size = GraphButtonSize.Small,
+                            contentDescription = "Install ACP adapter for ${agent.displayName}",
+                            onClick = {
+                                installingAgentId = agent.id
+                                agentsError = null
+                                dialogScope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching { installAgentAdapter(agent) }
+                                    }
+                                    installingAgentId = null
+                                    result
+                                        .onSuccess { agentRefreshKey += 1 }
+                                        .onFailure { throwable ->
+                                            agentsError = throwable.message ?: "ACP adapter install failed."
+                                        }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            agentsError?.let { message ->
+                Text(
+                    text = message,
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
         if (models.isNotEmpty()) {
             OptionSelector(

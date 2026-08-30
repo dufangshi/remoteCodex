@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -16,11 +17,14 @@ if (args.help) {
 }
 
 const tag = args.tag ?? `v${packageJson.version}`;
+if (tag !== `v${packageJson.version}`) {
+  throw new Error(`Mobile release tag must be v${packageJson.version}; received ${tag}.`);
+}
+run('node', ['scripts/verify-mobile-build-inputs.mjs']);
 const apkPath = resolveFirstExisting(
   args.apk,
   [
     'apps/android/app/build/outputs/apk/release/app-release.apk',
-    'apps/android/app/build/outputs/apk/debug/app-debug.apk',
   ],
   'APK',
 );
@@ -36,8 +40,45 @@ const ipaPath = resolveFirstExisting(
 const uploadDir = path.join(repoRoot, '.local', 'mobile-release', 'release-assets');
 const uploadApkPath = prepareStableAsset(apkPath, uploadDir, 'remote-codex-android.apk');
 const uploadIpaPath = prepareStableAsset(ipaPath, uploadDir, 'RemoteCodex.ipa');
+const commit = currentCommit();
+const checksums = {
+  apk: sha256(uploadApkPath),
+  ipa: sha256(uploadIpaPath),
+};
+const evidencePath = path.resolve(
+  repoRoot,
+  args.evidence ?? '.local/mobile-release/verification.json',
+);
+const evidence = readAndValidateEvidence(evidencePath, {
+  version: packageJson.version,
+  commit,
+  checksums,
+});
+const manifestPath = path.join(uploadDir, 'remote-codex-mobile-manifest.json');
+fs.writeFileSync(
+  manifestPath,
+  `${JSON.stringify(
+    {
+      version: packageJson.version,
+      tag,
+      commit,
+      threadUiCommit: evidence.threadUiCommit,
+      verifiedAt: evidence.completedAt,
+      publishedAt: new Date().toISOString(),
+      requiredTestsSkipped: evidence.requiredTestsSkipped,
+      matrix: evidence.matrix,
+      artifacts: {
+        apk: { name: 'remote-codex-android.apk', sha256: checksums.apk },
+        ipa: { name: 'RemoteCodex.ipa', sha256: checksums.ipa },
+      },
+    },
+    null,
+    2,
+  )}\n`,
+);
 
 ensureGh();
+ensureCleanWorktree();
 ensureRelease(tag);
 
 run('gh', [
@@ -46,12 +87,14 @@ run('gh', [
   tag,
   uploadApkPath,
   uploadIpaPath,
+  manifestPath,
   '--clobber',
 ]);
 
 console.log(`Uploaded mobile app assets to GitHub Release ${tag}.`);
 console.log(`- remote-codex-android.apk <- ${path.relative(repoRoot, apkPath)}`);
 console.log(`- RemoteCodex.ipa <- ${path.relative(repoRoot, ipaPath)}`);
+console.log(`- remote-codex-mobile-manifest.json <- ${path.relative(repoRoot, manifestPath)}`);
 
 function parseArgs(values) {
   const parsed = {};
@@ -68,6 +111,9 @@ function parseArgs(values) {
         break;
       case '--tag':
         parsed.tag = values[++index];
+        break;
+      case '--evidence':
+        parsed.evidence = values[++index];
         break;
       case '-h':
       case '--help':
@@ -87,6 +133,43 @@ function prepareStableAsset(sourcePath, outputDir, stableName) {
     fs.copyFileSync(sourcePath, outputPath);
   }
   return outputPath;
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function readAndValidateEvidence(filePath, expected) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(
+      `Missing full mobile verification evidence at ${path.relative(repoRoot, filePath)}. Run the complete Android AOSP and iOS Simulator Local/Server/Relay gate first.`,
+    );
+  }
+  const evidence = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const failures = [];
+  if (evidence.status !== 'passed') failures.push('status must be passed');
+  if (evidence.version !== expected.version) failures.push(`version must be ${expected.version}`);
+  if (evidence.commit !== expected.commit) failures.push(`commit must be ${expected.commit}`);
+  if (!evidence.threadUiCommit) failures.push('threadUiCommit is required');
+  if (!evidence.completedAt) failures.push('completedAt is required');
+  if (evidence.requiredTestsSkipped !== 0) failures.push('requiredTestsSkipped must be 0');
+  for (const platform of ['androidAosp', 'iosSimulator']) {
+    for (const mode of ['local', 'server', 'relay']) {
+      if (evidence.matrix?.[platform]?.[mode] !== 'passed') {
+        failures.push(`${platform}.${mode} must be passed`);
+      }
+    }
+  }
+  if (evidence.artifacts?.apk?.sha256 !== expected.checksums.apk) {
+    failures.push('APK checksum does not match verification evidence');
+  }
+  if (evidence.artifacts?.ipa?.sha256 !== expected.checksums.ipa) {
+    failures.push('IPA checksum does not match verification evidence');
+  }
+  if (failures.length > 0) {
+    throw new Error(`Mobile verification evidence is not publishable:\n- ${failures.join('\n- ')}`);
+  }
+  return evidence;
 }
 
 function resolveFirstExisting(explicitPath, candidates, label) {
@@ -109,6 +192,19 @@ function ensureGh() {
   });
   if (result.status !== 0) {
     throw new Error('GitHub CLI is not authenticated. Run `gh auth login` first.');
+  }
+}
+
+function ensureCleanWorktree() {
+  const result = spawnSync('git', ['status', '--porcelain'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || 'Unable to inspect git worktree status.');
+  }
+  if (result.stdout.trim()) {
+    throw new Error('Refusing to publish mobile assets from a dirty git worktree.');
   }
 }
 
@@ -159,15 +255,17 @@ function printHelp() {
   console.log(`Publish Remote Codex mobile app assets to GitHub Releases.
 
 Usage:
-  pnpm release:mobile -- --tag v0.11.23 --apk path/to/app.apk --ipa path/to/RemoteCodex.ipa
+  pnpm release:mobile -- --tag v0.11.50 --apk path/to/app-release.apk --ipa path/to/RemoteCodex.ipa --evidence path/to/verification.json
 
 Defaults:
   --tag v<package.json version>
-  --apk apps/android/app/build/outputs/apk/release/app-release.apk, then debug APK
+  --apk apps/android/app/build/outputs/apk/release/app-release.apk
   --ipa apps/ios/build/RemoteCodex.ipa, then apps/ios/RemoteCodex.ipa
+  --evidence .local/mobile-release/verification.json
 
 The uploaded asset names are stable:
   remote-codex-android.apk
   RemoteCodex.ipa
+  remote-codex-mobile-manifest.json
 `);
 }

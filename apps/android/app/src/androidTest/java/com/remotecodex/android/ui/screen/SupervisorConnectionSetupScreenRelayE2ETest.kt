@@ -44,7 +44,7 @@ class SupervisorConnectionSetupScreenRelayE2ETest {
                     initialConfig = null,
                     savedDevices = savedDevices,
                     activeDeviceId = null,
-                    onConnectionReady = { _, _ -> },
+                    onConnectionReady = { _, _, _ -> },
                     onSavedDeviceUpsert = { device ->
                         savedDevices = savedDevices
                             .filterNot { it.id == device.id }
@@ -70,12 +70,12 @@ class SupervisorConnectionSetupScreenRelayE2ETest {
                     it.password == password
             }
         }
-        composeRule.onNodeWithContentDescription("Open relay devices Relay").performClick()
+        composeRule.onNodeWithContentDescription("Open relay portal Relay").performClick()
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
             savedDevices.any { it.mode == SupervisorConnectionMode.Relay && !it.authToken.isNullOrBlank() }
         }
-        assertTrue(composeRule.onAllNodesWithText("Relay Devices").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Relay portal").fetchSemanticsNodes().isNotEmpty())
         assertTrue(savedDevices.any { it.mode == SupervisorConnectionMode.Relay && !it.authToken.isNullOrBlank() })
 
         composeRule.onNodeWithContentDescription("Create relay device").performClick()

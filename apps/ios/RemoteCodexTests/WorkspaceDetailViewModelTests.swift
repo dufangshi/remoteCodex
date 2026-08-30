@@ -389,7 +389,7 @@ private extension WorkspaceDetailViewModelTests {
       "enabled": true,
       "isDefault": false,
       "status": {"state": "ready"},
-      "capabilities": {},
+      "capabilities": {"sessions":{"resume":true},"turns":{"start":true}},
       "managementSchema": {
         "hostConfigFiles": [],
         "toolboxItems": [],
@@ -452,7 +452,7 @@ private extension WorkspaceDetailViewModelTests {
       "enabled": true,
       "isDefault": true,
       "status": {"state": "ready"},
-      "capabilities": {},
+      "capabilities": {"sessions":{"resume":true},"turns":{"start":true}},
       "managementSchema": {
         "hostConfigFiles": [],
         "toolboxItems": [],
@@ -483,7 +483,7 @@ private extension WorkspaceDetailViewModelTests {
       "enabled": false,
       "isDefault": false,
       "status": {"state": "stopped", "detail": "Not installed"},
-      "capabilities": {},
+      "capabilities": {"sessions":{"resume":true},"turns":{"start":true}},
       "managementSchema": {
         "hostConfigFiles": [],
         "toolboxItems": [],
@@ -514,7 +514,7 @@ private extension WorkspaceDetailViewModelTests {
       "enabled": true,
       "isDefault": false,
       "status": {"state": "ready"},
-      "capabilities": {},
+      "capabilities": {"sessions":{"resume":true},"turns":{"start":true}},
       "managementSchema": {
         "hostConfigFiles": [],
         "toolboxItems": [],

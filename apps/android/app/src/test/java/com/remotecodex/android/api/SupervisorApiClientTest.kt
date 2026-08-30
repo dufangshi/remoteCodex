@@ -143,7 +143,7 @@ class SupervisorApiClientTest {
         val transport = RecordingTransport(
             SupervisorHttpResponse(
                 200,
-                """{"id":"thread-1","workspaceId":"workspace-1","title":"Android started thread","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":null}""",
+                """{"id":"thread-1","workspaceId":"workspace-1","provider":"acp","agentId":"grok","title":"Android started thread","status":"idle","model":"grok-4","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":null}""",
             ),
         )
         val client = SupervisorApiClient(
@@ -160,9 +160,10 @@ class SupervisorApiClientTest {
             StartSupervisorThreadRequest(
                 workspaceId = "workspace-1",
                 title = "Android started thread",
-                model = "gpt-5",
+                model = "grok-4",
                 approvalMode = "yolo",
-                provider = "codex",
+                provider = "acp",
+                agentId = "grok",
                 reasoningEffort = "xhigh",
             ),
         )
@@ -176,9 +177,11 @@ class SupervisorApiClientTest {
         val body = transport.requests.single().body!!
         assertTrue(body.contains("\"workspaceId\":\"workspace-1\""))
         assertTrue(body.contains("\"title\":\"Android started thread\""))
-        assertTrue(body.contains("\"model\":\"gpt-5\""))
+        assertEquals("grok", thread.agentId)
+        assertTrue(body.contains("\"model\":\"grok-4\""))
         assertTrue(body.contains("\"approvalMode\":\"yolo\""))
-        assertTrue(body.contains("\"provider\":\"codex\""))
+        assertTrue(body.contains("\"provider\":\"acp\""))
+        assertTrue(body.contains("\"agentId\":\"grok\""))
         assertTrue(body.contains("\"reasoningEffort\":\"xhigh\""))
     }
 
@@ -201,6 +204,34 @@ class SupervisorApiClientTest {
         assertEquals("gpt-5", models.single().model)
         assertEquals("xhigh", models.single().defaultReasoningEffort)
         assertEquals(listOf("low", "xhigh"), models.single().supportedReasoningEfforts.map { it.reasoningEffort })
+    }
+
+    @Test
+    fun listAcpAgentsAndScopedModelsPreserveAvailabilityAndQuery() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """[{"id":"grok","model":"grok","displayName":"Grok Build","description":"ACP agent","isDefault":true,"hidden":false,"selectionKind":"agent","supportedReasoningEfforts":[],"defaultReasoningEffort":null,"acpAgent":{"transport":"adapter","availability":"adapter_missing","installCommand":"npm install grok-acp","busy":false,"statusMessage":"Adapter needed"}}]""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """[{"id":"grok-4","model":"grok-4","displayName":"Grok 4","description":"ACP model","isDefault":true,"hidden":false,"supportedReasoningEfforts":[],"defaultReasoningEffort":null}]""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(SupervisorConnectionMode.Server, "https://server.example.test"),
+            transport,
+        )
+
+        val agents = client.listAgentAgents("acp")
+        val models = client.listAgentModels("acp", agentId = "grok", cwd = "/repo with space")
+
+        assertEquals("adapter_missing", agents.single().acpAgent?.availability)
+        assertEquals("agent", agents.single().selectionKind)
+        assertEquals("grok-4", models.single().model)
+        assertEquals("https://server.example.test/api/agent-runtimes/acp/agents", transport.requests[0].url)
+        assertTrue(transport.requests[1].url.contains("agentId=grok"))
+        assertTrue(transport.requests[1].url.contains("cwd=%2Frepo+with+space"))
     }
 
     @Test
@@ -1161,7 +1192,7 @@ class SupervisorApiClientTest {
             transport,
         )
 
-        val backend = client.installOrUpdateAgentBackend("claude", "install")
+        val backend = client.installOrUpdateAgentBackend("claude", "install", modelId = "grok")
 
         assertEquals("claude", backend.provider)
         assertTrue(backend.enabled)
@@ -1172,6 +1203,7 @@ class SupervisorApiClientTest {
         assertEquals("POST", transport.requests.single().method)
         assertEquals("relay-token", transport.requests.single().bearerToken)
         assertTrue(transport.requests.single().body!!.contains("\"action\":\"install\""))
+        assertTrue(transport.requests.single().body!!.contains("\"modelId\":\"grok\""))
     }
 
     @Test

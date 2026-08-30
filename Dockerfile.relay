@@ -25,8 +25,10 @@ COPY packages/plugin-terminal ./packages/plugin-terminal
 COPY packages/shared ./packages/shared
 
 RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
+  --mount=type=secret,id=remote_codex_thread_ui_git_token,required=false \
   echo "thread-ui cache key: ${REMOTE_CODEX_THREAD_UI_CACHE_BUST}" >/dev/null \
   && REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
+  REMOTE_CODEX_THREAD_UI_GIT_TOKEN_FILE=/run/secrets/remote_codex_thread_ui_git_token \
   bash ./scripts/setup-thread-ui-git-auth.sh \
   && pnpm --dir /opt/remote-codex-thread-ui install --frozen-lockfile \
   && pnpm --dir /opt/remote-codex-thread-ui --filter @remote-codex/plugin-xyz-viewer build \

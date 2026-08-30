@@ -164,6 +164,7 @@ final class ThreadDetailWebBootstrapTests: XCTestCase {
     }
 }
 
+@MainActor
 final class ThreadDetailWebBridgeTests: XCTestCase {
     func testDecodesNavigationAndOpenMessages() {
         let bridge = ThreadDetailWebBridge()

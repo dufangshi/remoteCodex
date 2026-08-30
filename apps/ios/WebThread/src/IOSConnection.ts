@@ -27,7 +27,12 @@ export function supervisorWebSocketUrl(
   const base = bootstrap.baseUrl
     .replace(/^https:\/\//, 'wss://')
     .replace(/^http:\/\//, 'ws://');
-  const path = bootstrap.mode === 'relay' ? '/relay/ws' : '/ws';
+  const path =
+    bootstrap.mode === 'relay' && bootstrap.relayDeviceId
+      ? `/relay/devices/${encodeURIComponent(bootstrap.relayDeviceId)}/ws`
+      : bootstrap.mode === 'relay'
+        ? '/relay/ws'
+        : '/ws';
 
   const params: string[] = [];
   if (bootstrap.authToken) {

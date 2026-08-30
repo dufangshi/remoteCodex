@@ -7,6 +7,7 @@ import {
   CreateThreadInput,
   defaultAgentBackendId,
   ModelOptionDto,
+  ReasoningEffortDto,
   ThreadDto,
   WorkspaceDto,
 } from '@remote-codex/shared';
@@ -14,7 +15,12 @@ import {
 export interface MobileThreadCreateClient {
   listWorkspaces(): Promise<WorkspaceDto[]>;
   listAgentRuntimes(): Promise<AgentBackendDto[]>;
-  listModels(provider: AgentBackendIdDto): Promise<ModelOptionDto[]>;
+  listAgents(provider: AgentBackendIdDto): Promise<ModelOptionDto[]>;
+  listModels(
+    provider: AgentBackendIdDto,
+    options?: { agentId?: string | null; cwd?: string | null },
+  ): Promise<ModelOptionDto[]>;
+  installAgentAdapter(provider: AgentBackendIdDto, modelId: string): Promise<AgentBackendDto>;
   createThread(input: CreateThreadInput): Promise<ThreadDto>;
 }
 
@@ -47,15 +53,25 @@ export function MobileThreadCreateDialogContent({
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [backends, setBackends] = useState<AgentBackendDto[]>([]);
   const [models, setModels] = useState<ModelOptionDto[]>([]);
+  const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
   const [provider, setProvider] = useState<AgentBackendIdDto>(defaultAgentBackendId);
   const [workspaceId, setWorkspaceId] = useState('');
+  const [agentId, setAgentId] = useState('');
   const [model, setModel] = useState('');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
   const [title, setTitle] = useState(initialTitle ?? '');
   const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selectedBackend = backends.find((backend) => backend.provider === provider);
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+  const selectedAgent = agentOptions.find((entry) => entry.model === agentId) ?? null;
+  const selectedModel = models.find((entry) => entry.model === model) ?? null;
+  const isAcpAgentSelection = provider === 'acp' && agentOptions.some(
+    (entry) => entry.selectionKind === 'agent',
+  );
 
   useEffect(() => {
     setTitle(initialTitle ?? '');
@@ -64,25 +80,19 @@ export function MobileThreadCreateDialogContent({
   useEffect(() => {
     let cancelled = false;
     Promise.all([client.listWorkspaces(), client.listAgentRuntimes()])
-      .then(async ([workspaceRecords, backendRecords]) => {
+      .then(([workspaceRecords, backendRecords]) => {
         if (cancelled) {
           return;
         }
         const initialProvider = chooseInitialProvider(backendRecords);
-        const modelRecords = await client.listModels(initialProvider);
-        if (cancelled) {
-          return;
-        }
         setWorkspaces(workspaceRecords);
         setBackends(backendRecords);
         setProvider(initialProvider);
-        setModels(modelRecords);
         setWorkspaceId(
           workspaceRecords.some((workspace) => workspace.id === initialWorkspaceId)
             ? initialWorkspaceId!
             : workspaceRecords[0]?.id ?? '',
         );
-        setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -106,7 +116,44 @@ export function MobileThreadCreateDialogContent({
     let cancelled = false;
     setModels([]);
     setModel('');
+    setReasoningEffort(null);
     setError(null);
+    if (provider === 'acp') {
+      client
+        .listAgents(provider)
+        .then((agents) => {
+          if (cancelled) {
+            return;
+          }
+          setAgentOptions(agents);
+          setAgentId((currentAgentId) => {
+            const current = agents.find(
+              (entry) =>
+                entry.model === currentAgentId && entry.acpAgent?.availability === 'ready',
+            );
+            const next =
+              current ??
+              agents.find(
+                (entry) => entry.isDefault && entry.acpAgent?.availability === 'ready',
+              ) ??
+              agents.find((entry) => entry.acpAgent?.availability === 'ready') ??
+              null;
+            return next?.model ?? '';
+          });
+        })
+        .catch((caught) => {
+          if (!cancelled) {
+            setAgentOptions([]);
+            setAgentId('');
+            setError(caught instanceof Error ? caught.message : 'Unable to load ACP agents.');
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setAgentOptions([]);
+    setAgentId('');
     client
       .listModels(provider)
       .then((modelRecords) => {
@@ -114,7 +161,9 @@ export function MobileThreadCreateDialogContent({
           return;
         }
         setModels(modelRecords);
-        setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
+        const next = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+        setModel(next?.model ?? '');
+        setReasoningEffort(next?.defaultReasoningEffort ?? null);
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -126,6 +175,54 @@ export function MobileThreadCreateDialogContent({
     };
   }, [client, provider]);
 
+  useEffect(() => {
+    if (provider !== 'acp' || !agentId || !selectedWorkspace) {
+      return;
+    }
+    let cancelled = false;
+    setModels([]);
+    setModel('');
+    setReasoningEffort(null);
+    setError(null);
+    client
+      .listModels(provider, { agentId, cwd: selectedWorkspace.absPath })
+      .then((modelRecords) => {
+        if (cancelled) {
+          return;
+        }
+        setModels(modelRecords);
+        const next = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+        setModel(next?.model ?? '');
+        setReasoningEffort(next?.defaultReasoningEffort ?? null);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : 'Unable to load agent models.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, client, provider, selectedWorkspace]);
+
+  async function handleInstallAgent(entry: ModelOptionDto) {
+    setInstallingAgentId(entry.id);
+    setError(null);
+    try {
+      await client.installAgentAdapter('acp', entry.id);
+      const agents = await client.listAgents('acp');
+      setAgentOptions(agents);
+      const installed = agents.find((candidate) => candidate.id === entry.id);
+      if (installed?.acpAgent?.availability === 'ready') {
+        setAgentId(installed.model);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Unable to install ${entry.displayName}.`);
+    } finally {
+      setInstallingAgentId(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -134,7 +231,9 @@ export function MobileThreadCreateDialogContent({
       const thread = await client.createThread({
         workspaceId,
         provider,
+        ...(provider === 'acp' ? { agentId } : {}),
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         approvalMode,
         ...(title.trim() ? { title: title.trim() } : {}),
       });
@@ -168,7 +267,7 @@ export function MobileThreadCreateDialogContent({
           Create New Chat
         </h2>
         <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-          Choose the workspace, model, and approval mode.
+          Choose the workspace, agent, and approval mode.
         </p>
       </div>
       <div>
@@ -215,6 +314,47 @@ export function MobileThreadCreateDialogContent({
           ))}
         </select>
       </div>
+      {isAcpAgentSelection ? (
+        <fieldset>
+          <legend className={labelClassName}>Agent</legend>
+          <div className="mt-1.5 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] p-1.5">
+            {agentOptions.map((entry) => {
+              const metadata = entry.acpAgent;
+              const ready = metadata?.availability === 'ready';
+              const installing = installingAgentId === entry.id || metadata?.busy === true;
+              return (
+                <div key={entry.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={entry.model === agentId}
+                    disabled={!ready || installingAgentId !== null}
+                    onClick={() => setAgentId(entry.model)}
+                    className="min-w-0 flex-1 text-left disabled:opacity-60"
+                  >
+                    <span className="block truncate text-sm font-medium text-[var(--theme-fg)]">
+                      {entry.displayName}
+                    </span>
+                    <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
+                      {metadata?.statusMessage ?? metadata?.availability ?? 'Unavailable'}
+                    </span>
+                  </button>
+                  {metadata?.availability === 'adapter_missing' && metadata.installCommand ? (
+                    <button
+                      type="button"
+                      disabled={installing || installingAgentId !== null}
+                      onClick={() => void handleInstallAgent(entry)}
+                      className="rounded-lg border border-[var(--theme-border)] px-2.5 py-1.5 text-xs text-[var(--theme-fg)] disabled:opacity-60"
+                    >
+                      {installing ? 'Installing...' : 'Install'}
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </fieldset>
+      ) : null}
       <div>
         <label className={labelClassName} htmlFor={`${formId}-model`}>
           Model
@@ -222,7 +362,16 @@ export function MobileThreadCreateDialogContent({
         <select
           id={`${formId}-model`}
           value={model}
-          onChange={(event) => setModel(event.target.value)}
+          onChange={(event) => {
+            const next = models.find((entry) => entry.model === event.target.value) ?? null;
+            setModel(event.target.value);
+            setReasoningEffort((current) =>
+              current &&
+              next?.supportedReasoningEfforts.some((entry) => entry.reasoningEffort === current)
+                ? current
+                : next?.defaultReasoningEffort ?? null,
+            );
+          }}
           disabled={models.length === 0}
           className={controlClassName}
         >
@@ -234,6 +383,27 @@ export function MobileThreadCreateDialogContent({
           ))}
         </select>
       </div>
+      {selectedModel && selectedModel.supportedReasoningEfforts.length > 0 ? (
+        <div>
+          <label className={labelClassName} htmlFor={`${formId}-reasoning-effort`}>
+            Reasoning effort
+          </label>
+          <select
+            id={`${formId}-reasoning-effort`}
+            value={reasoningEffort ?? ''}
+            onChange={(event) =>
+              setReasoningEffort((event.target.value || null) as ReasoningEffortDto | null)
+            }
+            className={controlClassName}
+          >
+            {selectedModel.supportedReasoningEfforts.map((entry) => (
+              <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
+                {entry.reasoningEffort}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <div>
         <label className={labelClassName} htmlFor={`${formId}-title`}>
           Title
@@ -268,7 +438,12 @@ export function MobileThreadCreateDialogContent({
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <button
           type="submit"
-          disabled={busy || !workspaceId || !model}
+          disabled={
+            busy ||
+            !workspaceId ||
+            !model ||
+            (provider === 'acp' && selectedAgent?.acpAgent?.availability !== 'ready')
+          }
           className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2.5 text-sm font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:opacity-55"
         >
           {busy ? 'Creating...' : 'Create Thread'}

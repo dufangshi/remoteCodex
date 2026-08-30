@@ -252,15 +252,34 @@ final class SupervisorAPIClient: @unchecked Sendable {
         try await requestJSON(config.restPath("/api/agent-runtimes"))
     }
 
-    func listAgentModels(provider: String) async throws -> [SupervisorModelOption] {
-        try await requestJSON(config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/models"))
+    func listAgentModels(
+        provider: String,
+        agentId: String? = nil,
+        cwd: String? = nil
+    ) async throws -> [SupervisorModelOption] {
+        let query = buildQuery(["agentId": agentId, "cwd": cwd])
+        return try await requestJSON(
+            config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/models\(query)")
+        )
     }
 
-    func installOrUpdateAgentBackend(provider: String, action: String) async throws -> SupervisorAgentBackend {
-        try await requestJSON(
+    func listAgentAgents(provider: String) async throws -> [SupervisorModelOption] {
+        try await requestJSON(config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/agents"))
+    }
+
+    func installOrUpdateAgentBackend(
+        provider: String,
+        action: String,
+        modelId: String? = nil
+    ) async throws -> SupervisorAgentBackend {
+        var body = ["action": action]
+        if let modelId {
+            body["modelId"] = modelId
+        }
+        return try await requestJSON(
             config.restPath("/api/agent-runtimes/\(provider.urlPathEncoded)/install"),
             method: "POST",
-            body: ["action": action]
+            body: body
         )
     }
 

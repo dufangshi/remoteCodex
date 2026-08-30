@@ -13,11 +13,15 @@ final class HomeViewModel: ObservableObject {
     @Published var newThreadWorkspaceId = ""
     @Published var newThreadTitle = ""
     @Published var newThreadProvider = ""
+    @Published var newThreadAgentId = ""
     @Published var newThreadModel = ""
+    @Published var newThreadReasoningEffort: String?
     @Published var newThreadBackends: [SupervisorAgentBackend] = []
+    @Published var newThreadAgents: [SupervisorModelOption] = []
     @Published var newThreadModels: [SupervisorModelOption] = []
     @Published var newThreadOptionsLoading = false
     @Published var newThreadRuntimeBusyProvider: String?
+    @Published var newThreadBusyAgentId: String?
     @Published var newThreadOptionsError: String?
     @Published var importThreadProvider = ""
     @Published var importThreadSessionId = ""
@@ -87,13 +91,25 @@ final class HomeViewModel: ObservableObject {
         return visible.isEmpty ? newThreadModels : visible
     }
 
+    var visibleNewThreadAgents: [SupervisorModelOption] {
+        let visible = newThreadAgents.filter { !$0.hidden }
+        return visible.isEmpty ? newThreadAgents : visible
+    }
+
+    var selectedNewThreadModel: SupervisorModelOption? {
+        visibleNewThreadModels.first { $0.model == newThreadModel }
+    }
+
     var canStartNewThread: Bool {
         !newThreadWorkspaceId.isEmpty &&
             !newThreadProvider.isEmpty &&
             !newThreadModel.isEmpty &&
             !loading &&
             !newThreadOptionsLoading &&
-            newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true
+            newThreadBackends.first(where: { $0.provider == newThreadProvider })?.canStartSession == true &&
+            (newThreadProvider != "acp" || visibleNewThreadAgents.first {
+                $0.model == newThreadAgentId
+            }?.acpAgent?.availability == "ready")
     }
 
     var importableBackends: [SupervisorAgentBackend] {
@@ -186,8 +202,9 @@ final class HomeViewModel: ObservableObject {
                     workspaceId: newThreadWorkspaceId,
                     title: newThreadTitle.trimmedNonEmpty,
                     provider: newThreadProvider.trimmedNonEmpty,
+                    agentId: newThreadProvider == "acp" ? newThreadAgentId.trimmedNonEmpty : nil,
                     model: newThreadModel,
-                    reasoningEffort: nil,
+                    reasoningEffort: newThreadReasoningEffort,
                     approvalMode: "yolo"
                 )
             )
@@ -243,7 +260,7 @@ final class HomeViewModel: ObservableObject {
                 importThreadProvider = provider
             }
             if selectable.contains(where: { $0.provider == provider }) {
-                try await loadNewThreadModels(provider: provider)
+                try await loadNewThreadProvider(provider)
             } else {
                 newThreadModels = []
                 newThreadModel = ""
@@ -258,6 +275,8 @@ final class HomeViewModel: ObservableObject {
         guard provider != newThreadProvider else { return }
         guard newThreadBackends.first(where: { $0.provider == provider })?.canStartSession == true else {
             newThreadProvider = provider
+            newThreadAgents = []
+            newThreadAgentId = ""
             newThreadModels = []
             newThreadModel = ""
             newThreadOptionsError = "Install this runtime before creating a thread."
@@ -270,7 +289,7 @@ final class HomeViewModel: ObservableObject {
         newThreadOptionsLoading = true
         defer { newThreadOptionsLoading = false }
         do {
-            try await loadNewThreadModels(provider: provider)
+            try await loadNewThreadProvider(provider)
         } catch {
             newThreadOptionsError = error.localizedDescription
         }
@@ -295,24 +314,103 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    func selectNewThreadAgent(_ agentId: String) async {
+        guard newThreadProvider == "acp" else { return }
+        guard visibleNewThreadAgents.first(where: { $0.model == agentId })?.acpAgent?.availability == "ready" else {
+            return
+        }
+        newThreadAgentId = agentId
+        newThreadOptionsLoading = true
+        newThreadOptionsError = nil
+        defer { newThreadOptionsLoading = false }
+        do {
+            try await loadNewThreadModels(provider: "acp", agentId: agentId)
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func installNewThreadAgentAdapter(_ agent: SupervisorModelOption) async {
+        newThreadBusyAgentId = agent.id
+        newThreadOptionsError = nil
+        defer { newThreadBusyAgentId = nil }
+        do {
+            _ = try await client.installOrUpdateAgentBackend(
+                provider: "acp",
+                action: "install",
+                modelId: agent.id
+            )
+            try await loadNewThreadProvider("acp")
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
+    func selectNewThreadModel(_ model: String) {
+        newThreadModel = model
+        let option = visibleNewThreadModels.first { $0.model == model }
+        let efforts = option?.supportedReasoningEfforts.map(\.reasoningEffort) ?? []
+        if let current = newThreadReasoningEffort, efforts.contains(current) {
+            return
+        }
+        newThreadReasoningEffort = option?.defaultReasoningEffort ?? efforts.first
+    }
+
+    func reloadNewThreadModelsForWorkspace() async {
+        guard newThreadProvider == "acp", !newThreadAgentId.isEmpty else { return }
+        do {
+            try await loadNewThreadModels(provider: "acp", agentId: newThreadAgentId)
+        } catch {
+            newThreadOptionsError = error.localizedDescription
+        }
+    }
+
     private func selectableBackends(from backends: [SupervisorAgentBackend]) -> [SupervisorAgentBackend] {
         let selectable = backends.filter(\.canStartSession)
         return selectable.isEmpty ? [] : selectable
     }
 
-    private func loadNewThreadModels(provider: String) async throws {
-        let models = try await client.listAgentModels(provider: provider)
+    private func loadNewThreadProvider(_ provider: String) async throws {
+        if provider == "acp" {
+            newThreadAgents = try await client.listAgentAgents(provider: provider)
+            let candidates = visibleNewThreadAgents.filter { $0.acpAgent?.availability == "ready" }
+            newThreadAgentId = candidates.first { $0.model == newThreadAgentId }?.model
+                ?? candidates.first { $0.isDefault }?.model
+                ?? candidates.first?.model
+                ?? ""
+            guard !newThreadAgentId.isEmpty else {
+                newThreadModels = []
+                newThreadModel = ""
+                newThreadReasoningEffort = nil
+                newThreadOptionsError = "No ready ACP agents are available."
+                return
+            }
+        } else {
+            newThreadAgents = []
+            newThreadAgentId = ""
+        }
+        try await loadNewThreadModels(
+            provider: provider,
+            agentId: provider == "acp" ? newThreadAgentId : nil
+        )
+    }
+
+    private func loadNewThreadModels(provider: String, agentId: String? = nil) async throws {
+        let cwd = snapshot?.workspaces.first { $0.id == newThreadWorkspaceId }?.absPath
+        let models = try await client.listAgentModels(provider: provider, agentId: agentId, cwd: cwd)
         newThreadModels = models
         let selectableModels = models.filter { !$0.hidden }
         let candidates = selectableModels.isEmpty ? models : selectableModels
         guard !candidates.isEmpty else {
             newThreadModel = ""
             newThreadOptionsError = "No models are available for this provider."
+            newThreadReasoningEffort = nil
             return
         }
-        newThreadModel = candidates.first { $0.model == newThreadModel }?.model
-            ?? candidates.first { $0.isDefault }?.model
-            ?? candidates[0].model
+        let nextModel = candidates.first { $0.model == newThreadModel }
+            ?? candidates.first { $0.isDefault }
+            ?? candidates[0]
+        selectNewThreadModel(nextModel.model)
     }
 
     private func isCurrentRelayDeviceShared() async -> Bool {
@@ -712,6 +810,9 @@ struct HomeScreen: View {
                         Text(workspace.label).tag(workspace.id)
                     }
                 }
+                .onChange(of: model.newThreadWorkspaceId) {
+                    Task { await model.reloadNewThreadModelsForWorkspace() }
+                }
                 TextField("Title", text: $model.newThreadTitle)
                 Section("Provider") {
                     if model.newThreadBackends.isEmpty, model.newThreadOptionsLoading {
@@ -765,13 +866,48 @@ struct HomeScreen: View {
                         }
                     }
                 }
+                if model.newThreadProvider == "acp" {
+                    Section("Agent") {
+                        ForEach(model.visibleNewThreadAgents) { agent in
+                            let ready = agent.acpAgent?.availability == "ready"
+                            HStack {
+                                Button {
+                                    Task { await model.selectNewThreadAgent(agent.model) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(agent.displayName)
+                                            .foregroundStyle(ready ? RemoteCodexTheme.foreground : RemoteCodexTheme.foregroundMuted)
+                                        Text(agent.acpAgent?.statusMessage ?? "Agent is unavailable.")
+                                            .font(.caption2)
+                                            .remoteCodexStatusText()
+                                    }
+                                }
+                                .disabled(!ready || model.newThreadBusyAgentId != nil)
+                                Spacer()
+                                if agent.acpAgent?.availability == "adapter_missing",
+                                   agent.acpAgent?.installCommand != nil
+                                {
+                                    Button("Install") {
+                                        Task { await model.installNewThreadAgentAdapter(agent) }
+                                    }
+                                    .disabled(model.newThreadBusyAgentId != nil || agent.acpAgent?.busy == true)
+                                    .buttonStyle(RemoteCodexSecondaryButtonStyle())
+                                }
+                                if agent.model == model.newThreadAgentId {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                            .accessibilityIdentifier("new-thread-agent-\(agent.id)")
+                        }
+                    }
+                }
                 Section("Model") {
                     if model.newThreadOptionsLoading, model.visibleNewThreadModels.isEmpty {
                         ProgressView()
                     } else {
                         ForEach(model.visibleNewThreadModels) { option in
                             Button {
-                                model.newThreadModel = option.model
+                                model.selectNewThreadModel(option.model)
                             } label: {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 3) {
@@ -783,6 +919,25 @@ struct HomeScreen: View {
                                     }
                                     Spacer()
                                     if option.model == model.newThreadModel {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let selectedModel = model.selectedNewThreadModel,
+                   !selectedModel.supportedReasoningEfforts.isEmpty
+                {
+                    Section("Reasoning") {
+                        ForEach(selectedModel.supportedReasoningEfforts, id: \.reasoningEffort) { effort in
+                            Button {
+                                model.newThreadReasoningEffort = effort.reasoningEffort
+                            } label: {
+                                HStack {
+                                    Text(effort.reasoningEffort)
+                                    Spacer()
+                                    if effort.reasoningEffort == model.newThreadReasoningEffort {
                                         Image(systemName: "checkmark")
                                     }
                                 }

@@ -5,7 +5,9 @@ import {
 } from '@remote-codex/shared';
 import type {
   AgentBackendToolboxItemSchemaDto,
+  AgentBackendManagementSchemaDto,
   AgentProviderCapabilitiesDto,
+  AgentRuntimeStatusDto,
   AgentSubscriptionUsageDto,
   ExportThreadPdfInput,
   ModelOptionDto,
@@ -16,13 +18,20 @@ import type {
   ThreadDto,
   ThreadExportTurnOptionsDto,
   ThreadForkTurnOptionDto,
+  ThreadHooksDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
   UpdateThreadGoalInput,
+  CreateThreadHookInput,
+  UpdateThreadHookInput,
   UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import type {
   CreateThreadShareInput,
   ThreadDetailUiAdapter,
   ThreadShareSummary,
+  ThreadShellAdapter,
+  ThreadShellControlState,
   ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import {
@@ -31,11 +40,14 @@ import {
   PluginProvider,
   ThreadActionsDialog,
   ThreadDetailSurface,
+  ThreadShellPanel,
   threadStatusLabel,
 } from '@remote-codex/thread-ui';
+import { builtinFrontendPlugins } from '@remote-codex/thread-ui/builtin-plugins';
 import { Copy, Share2 } from 'lucide-react';
 
 import { AndroidApiClient } from './AndroidApiClient';
+import { connectAndroidShellSocket } from './AndroidShellSocket';
 import {
   applyAndroidTheme,
   type AndroidThemeMode,
@@ -152,6 +164,15 @@ export function AndroidThreadDetailPage({
   const [exportBusy, setExportBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [followTail, setFollowTail] = useState(true);
+  const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] = useState<{
+    path: string;
+    line?: number;
+    requestId: number;
+  } | null>(null);
+  const workspaceFocusRequestIdRef = useRef(0);
+  const [shellControlState, setShellControlState] = useState<ThreadShellControlState | null>(null);
+  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
   const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
@@ -196,9 +217,22 @@ export function AndroidThreadDetailPage({
     useState<'idle' | 'copied' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
+  const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [toolboxItems, setToolboxItems] = useState<
     AgentBackendToolboxItemSchemaDto[]
   >([]);
+  const [managementSchema, setManagementSchema] =
+    useState<AgentBackendManagementSchemaDto | null>(null);
+  const [skillsState, setSkillsState] = useState<PanelState<ThreadSkillsDto>>({
+    status: 'idle', data: null, error: null,
+  });
+  const [mcpState, setMcpState] = useState<PanelState<ThreadMcpServersDto>>({
+    status: 'idle', data: null, error: null,
+  });
+  const [hooksState, setHooksState] = useState<PanelState<ThreadHooksDto>>({
+    status: 'idle', data: null, error: null,
+  });
   const [capabilities, setCapabilities] =
     useState<AgentProviderCapabilitiesDto | null>(null);
   const [subscriptionUsage, setSubscriptionUsage] =
@@ -215,12 +249,115 @@ export function AndroidThreadDetailPage({
     applyAndroidTheme(bootstrap.theme ?? 'system'),
   );
   const client = useMemo(() => new AndroidApiClient(bootstrap), [bootstrap]);
+  const pluginAdapter = useMemo(
+    () => ({
+      fetchPlugins: () => client.listPlugins(),
+      updatePlugin: (pluginId: string, input: { enabled: boolean }) =>
+        client.updatePlugin(pluginId, input),
+    }),
+    [client],
+  );
+  const shellAdapter = useMemo<ThreadShellAdapter>(
+    () => ({
+      fetchState: (threadId) => client.fetchThreadShellState(threadId),
+      createShell: (threadId, input) => client.createThreadShell(threadId, input),
+      terminateShell: (shellId) => client.terminateShell(shellId),
+      updateShell: (shellId, input) => client.updateShell(shellId, input),
+      connectSocket: (handlers) => connectAndroidShellSocket(bootstrap, handlers),
+    }),
+    [bootstrap, client],
+  );
   const relayDeviceId = bootstrap.mode === 'relay' ? bootstrap.relayDeviceId : null;
   const relayShareAvailable = Boolean(relayDeviceId);
 
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listPlugins()
+      .then((plugins) => {
+        if (!cancelled) {
+          setTerminalPluginEnabled(
+            plugins.find((plugin) => plugin.id === 'remote-codex.terminal')?.enabled ?? true,
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTerminalPluginEnabled(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const loadSkills = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setSkillsState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadSkills(threadId);
+      setSkillsState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setSkillsState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const loadMcp = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setMcpState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadMcpServers(threadId);
+      setMcpState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setMcpState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const loadHooks = useCallback(async () => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    setHooksState((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const data = await client.fetchThreadHooks(threadId);
+      setHooksState({ status: 'ready', data, error: null });
+    } catch (caught) {
+      setHooksState((current) => ({ ...current, status: 'failed', error: errorMessage(caught) }));
+    }
+  }, [client]);
+
+  const createHook = useCallback(async (input: CreateThreadHookInput) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.createThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const updateHook = useCallback(async (input: UpdateThreadHookInput) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.updateThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const trustHook = useCallback(async (input: { key: string; currentHash: string }) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.trustThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
+
+  const untrustHook = useCallback(async (input: { key: string }) => {
+    const threadId = detailRef.current?.thread.id;
+    if (!threadId) return;
+    const data = await client.untrustThreadHook(threadId, input);
+    setHooksState({ status: 'ready', data, error: null });
+  }, [client]);
 
   const applyDetailResponse = useCallback((loadedDetail: ThreadDetailDto) => {
     const existingTurns =
@@ -635,23 +772,37 @@ export function AndroidThreadDetailPage({
     }
     let cancelled = false;
     const provider = detail.thread.provider;
+    const agentId = detail.thread.agentId ?? null;
+    const modelRequest =
+      provider === 'acp' && agentId
+        ? client.listModels(provider, { agentId, cwd: detail.workspace.absPath })
+        : client.listModels(provider);
+    const agentRequest =
+      provider === 'acp' ? client.listAgents(provider) : Promise.resolve([] as ModelOptionDto[]);
     Promise.all([
-      client.listModels(provider),
+      modelRequest,
       client.listAgentRuntimes(),
+      agentRequest,
     ])
-      .then(([loadedModelOptions, runtimes]) => {
+      .then(([loadedModelOptions, runtimes, loadedAgentOptions]) => {
         if (cancelled) {
           return;
         }
         const runtime = runtimes.find((entry) => entry.provider === provider);
         setModelOptions(loadedModelOptions);
+        setAgentOptions(loadedAgentOptions);
+        setRuntimeStatus(runtime?.status ?? null);
         setCapabilities(runtime?.capabilities ?? null);
+        setManagementSchema(runtime?.managementSchema ?? null);
         setToolboxItems(runtime?.managementSchema.toolboxItems ?? []);
       })
       .catch((caught) => {
         if (!cancelled) {
           console.warn('Unable to load Android WebView thread metadata.', caught);
           setModelOptions([]);
+          setAgentOptions([]);
+          setRuntimeStatus(null);
+          setManagementSchema(null);
           setCapabilities(null);
           setToolboxItems([]);
         }
@@ -659,7 +810,7 @@ export function AndroidThreadDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [client, detail?.thread.provider]);
+  }, [client, detail?.thread.agentId, detail?.thread.provider, detail?.workspace.absPath]);
 
   useEffect(() => {
     if (!detail) {
@@ -1595,18 +1746,15 @@ export function AndroidThreadDetailPage({
         return client.buildThreadImageAssetUrl(currentDetail.thread.id, { path });
       },
       openWorkspaceFile(input) {
-        const currentDetail = detailRef.current;
-        if (!currentDetail) {
-          return;
-        }
-        postAndroidMessage({
-          type: 'openWorkspace',
-          workspaceId: currentDetail.workspace.id,
+        workspaceFocusRequestIdRef.current += 1;
+        setWorkspaceFocusPathRequest({
+          path: input.path,
+          ...(input.line !== undefined ? { line: input.line } : {}),
+          requestId: workspaceFocusRequestIdRef.current,
         });
-        console.info('Requested workspace file', input);
       },
       workspace: workspaceAdapter,
-      shell: null,
+      shell: terminalPluginEnabled ? shellAdapter : null,
     };
   }, [
     client,
@@ -1618,12 +1766,16 @@ export function AndroidThreadDetailPage({
     effectiveWorkspaceAccess,
     renameThread,
     renderNewThreadDialogContent,
+    shellAdapter,
     resolveWorkspaceId,
     submitPromptText,
+    terminalPluginEnabled,
     updateThreadSettings,
   ]);
 
   const settingsContent = null;
+  const mcpProviderConfigFileName =
+    managementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))?.name ?? null;
 
   const handleShellThemeModeChange = useCallback((mode: AndroidThemeMode) => {
     setThemeMode(mode);
@@ -1730,13 +1882,26 @@ export function AndroidThreadDetailPage({
   ) : null;
 
   return (
-    <PluginProvider>
+    <PluginProvider adapter={pluginAdapter} builtinPlugins={builtinFrontendPlugins}>
       <ThreadDetailSurface
         threads={threads}
         detail={detail}
+        status={runtimeStatus}
         loading={loading}
         error={error}
         adapter={adapter}
+        activeView={activeView}
+        workspaceFeatures={{
+          workspace: true,
+          toolUsage: false,
+          guide: false,
+          threadGraph: false,
+          extensions: false,
+          defaultTab: 'workspace',
+        }}
+        workspaceFocusPathRequest={workspaceFocusPathRequest}
+        shellPanelComponent={ThreadShellPanel}
+        onShellStateChange={setShellControlState}
         shellEffectiveTheme={effectiveThemeValue}
         shellThemeMode={themeMode}
         onShellThemeModeChange={handleShellThemeModeChange}
@@ -1812,13 +1977,17 @@ export function AndroidThreadDetailPage({
                 busy: submitting,
                 settingsBusy,
                 model: detail.thread.model,
+                agentLabel:
+                  agentOptions.find((entry) => entry.model === detail.thread.agentId)
+                    ?.displayName ?? detail.thread.agentId ?? null,
                 reasoningEffort: detail.thread.reasoningEffort,
                 fastMode: detail.thread.fastMode ?? false,
                 collaborationMode: detail.thread.collaborationMode,
-                sandboxMode: null,
-                hideSandboxModeControl: true,
+                sandboxMode: detail.thread.sandboxMode ?? null,
                 modelOptions,
                 toolboxItems,
+                hookCommandTemplates: managementSchema?.hookCommandTemplates ?? [],
+                mcpConfigFormat: managementSchema?.mcpConfigFormat ?? 'none',
                 goalState: {
                   status: 'ready',
                   data: detail.goal,
@@ -1844,7 +2013,10 @@ export function AndroidThreadDetailPage({
                           'This shared session is view-only.',
                       }
                     : {}),
-                shellAvailable: false,
+                shellAvailable: terminalPluginEnabled,
+                shellControlState,
+                onToggleView: () =>
+                  setActiveView((current) => (current === 'chat' ? 'shell' : 'chat')),
                 canInterrupt: Boolean(
                   detail.thread.activeTurnId && effectiveThreadCanControl,
                 ),
@@ -1870,8 +2042,33 @@ export function AndroidThreadDetailPage({
                   ? {
                       onOpenGoal: openThreadGoals,
                       onUpdateGoal: updateThreadGoal,
+                      onOpenSkills: loadSkills,
+                      onOpenMcp: loadMcp,
+                      onOpenHooks: loadHooks,
+                      onCreateHook: createHook,
+                      onUpdateHook: updateHook,
+                      onTrustHook: trustHook,
+                      onUntrustHook: untrustHook,
                     }
                   : {}),
+                ...(mcpProviderConfigFileName && effectiveThreadIsOwner
+                  ? {
+                      onReadProviderConfig: () =>
+                        client.fetchProviderHostFile(
+                          detail.thread.provider,
+                          mcpProviderConfigFileName,
+                        ),
+                      onWriteProviderConfig: (content: string) =>
+                        client.updateProviderHostFile(
+                          detail.thread.provider,
+                          mcpProviderConfigFileName,
+                          { content },
+                        ),
+                    }
+                  : {}),
+                skillsState,
+                mcpState,
+                hooksState,
                 ...(effectiveThreadIsOwner
                   ? {
                       onOpenForkTurns: loadForkTurnOptions,

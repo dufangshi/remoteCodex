@@ -4,8 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prebuild": "pnpm --dir ../../.. build:mobile-web-deps",
     "build": "vite build && node scripts/inline-webview.mjs",
+    "pretypecheck": "pnpm --dir ../../.. build:mobile-web-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --dir ../../.. build:mobile-web-deps",
     "test": "cross-env NODE_ENV=test vitest run"
   },
   "dependencies": {

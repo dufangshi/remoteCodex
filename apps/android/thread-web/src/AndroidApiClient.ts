@@ -4,10 +4,13 @@ import type {
   AgentSubscriptionUsageDto,
   ApiErrorShape,
   CreateRelaySessionShareInput,
+  CreateThreadHookInput,
   CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
   ModelOptionDto,
+  PluginDto,
+  ProviderHostFileDto,
   RelayEffectiveAccessDto,
   RelayPortalSummaryDto,
   RelaySessionShareDto,
@@ -21,6 +24,17 @@ import type {
   ThreadHistoryItemDetailDto,
   ThreadGoalDto,
   ThreadWorkspaceUploadResultDto,
+  ThreadShellStateDto,
+  ThreadHooksDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
+  ShellSessionDto,
+  UpdatePluginInput,
+  UpdateProviderHostFileInput,
+  UpdateShellInput,
+  UpdateThreadHookInput,
+  TrustThreadHookInput,
+  UntrustThreadHookInput,
   ThreadWorkspaceFilePreviewDto,
   ThreadWorkspaceTreeNodeDto,
   UpdateThreadSettingsInput,
@@ -293,11 +307,151 @@ export class AndroidApiClient {
     );
   }
 
-  listModels(provider: ThreadDto['provider']) {
+  listAgents(provider: ThreadDto['provider']) {
     return this.requestJson<ModelOptionDto[]>(
-      `/api/agent-runtimes/${encodeURIComponent(provider)}/models`,
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/agents`,
       { cache: 'no-store' },
     );
+  }
+
+  listModels(
+    provider: ThreadDto['provider'],
+    options: { agentId?: string | null; cwd?: string | null } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (options.agentId) {
+      params.set('agentId', options.agentId);
+    }
+    if (options.cwd) {
+      params.set('cwd', options.cwd);
+    }
+    const query = params.toString();
+    return this.requestJson<ModelOptionDto[]>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/models${query ? `?${query}` : ''}`,
+      { cache: 'no-store' },
+    );
+  }
+
+  installAgentAdapter(provider: ThreadDto['provider'], modelId: string) {
+    return this.requestJson<AgentBackendDto>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/install`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action: 'install', modelId }),
+      },
+    );
+  }
+
+  listPlugins() {
+    return this.requestJson<PluginDto[]>('/api/plugins', { cache: 'no-store' });
+  }
+
+  updatePlugin(pluginId: string, input: UpdatePluginInput) {
+    return this.requestJson<PluginDto>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  }
+
+  fetchProviderHostFile(provider: ThreadDto['provider'], name: string) {
+    return this.requestJson<ProviderHostFileDto>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/config/files/${encodeURIComponent(name)}`,
+      { cache: 'no-store' },
+    );
+  }
+
+  updateProviderHostFile(
+    provider: ThreadDto['provider'],
+    name: string,
+    input: UpdateProviderHostFileInput,
+  ) {
+    return this.requestJson<ProviderHostFileDto>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/config/files/${encodeURIComponent(name)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    );
+  }
+
+  fetchThreadSkills(threadId: string) {
+    return this.requestJson<ThreadSkillsDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/skills`,
+      { cache: 'no-store' },
+    );
+  }
+
+  fetchThreadMcpServers(threadId: string) {
+    return this.requestJson<ThreadMcpServersDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/mcp-servers`,
+      { cache: 'no-store' },
+    );
+  }
+
+  fetchThreadHooks(threadId: string) {
+    return this.requestJson<ThreadHooksDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/hooks`,
+      { cache: 'no-store' },
+    );
+  }
+
+  createThreadHook(threadId: string, input: CreateThreadHookInput) {
+    return this.requestJson<ThreadHooksDto>(`/api/threads/${encodeURIComponent(threadId)}/hooks`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  updateThreadHook(threadId: string, input: UpdateThreadHookInput) {
+    return this.requestJson<ThreadHooksDto>(`/api/threads/${encodeURIComponent(threadId)}/hooks`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  }
+
+  trustThreadHook(threadId: string, input: TrustThreadHookInput) {
+    return this.requestJson<ThreadHooksDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/hooks/trust`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  untrustThreadHook(threadId: string, input: UntrustThreadHookInput) {
+    return this.requestJson<ThreadHooksDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/hooks/untrust`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  fetchThreadShellState(threadId: string) {
+    return this.requestJson<ThreadShellStateDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/shell`,
+      { cache: 'no-store' },
+    );
+  }
+
+  createThreadShell(
+    threadId: string,
+    input: { cols?: number; rows?: number; label?: string } = {},
+  ) {
+    return this.requestJson<ThreadShellStateDto>(
+      `/api/threads/${encodeURIComponent(threadId)}/shell`,
+      {
+        method: 'POST',
+        ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
+      },
+    );
+  }
+
+  terminateShell(shellId: string) {
+    return this.requestJson<ShellSessionDto>(
+      `/api/shells/${encodeURIComponent(shellId)}/terminate`,
+      { method: 'POST' },
+    );
+  }
+
+  updateShell(shellId: string, input: UpdateShellInput) {
+    return this.requestJson<ShellSessionDto>(`/api/shells/${encodeURIComponent(shellId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
   }
 
   createThread(input: CreateThreadInput) {

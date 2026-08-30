@@ -261,7 +261,10 @@ final class SupervisorAPIClientTests: XCTestCase {
             XCTAssertEqual(request.url.path, "/api/threads/start")
             XCTAssertEqual(request.method, "POST")
             XCTAssertEqual(request.jsonBodyString("workspaceId"), "w1")
-            XCTAssertEqual(request.jsonBodyString("model"), "gpt-5.4")
+            XCTAssertEqual(request.jsonBodyString("provider"), "acp")
+            XCTAssertEqual(request.jsonBodyString("agentId"), "grok")
+            XCTAssertEqual(request.jsonBodyString("model"), "grok-4")
+            XCTAssertEqual(request.jsonBodyString("reasoningEffort"), "high")
             XCTAssertEqual(request.jsonBodyString("approvalMode"), "yolo")
             return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.threadJSON.utf8), headers: [:])
         }
@@ -274,9 +277,10 @@ final class SupervisorAPIClientTests: XCTestCase {
             StartSupervisorThreadRequest(
                 workspaceId: "w1",
                 title: "New thread",
-                provider: nil,
-                model: "gpt-5.4",
-                reasoningEffort: nil,
+                provider: "acp",
+                agentId: "grok",
+                model: "grok-4",
+                reasoningEffort: "high",
                 approvalMode: "yolo"
             )
         )
@@ -332,6 +336,7 @@ final class SupervisorAPIClientTests: XCTestCase {
             XCTAssertEqual(request.method, "POST")
             XCTAssertEqual(request.url.path, "/api/agent-runtimes/claude/install")
             XCTAssertEqual(request.jsonBodyString("action"), "install")
+            XCTAssertEqual(request.jsonBodyString("modelId"), "grok")
             let backendJSON = Self.agentBackendsJSON
                 .replacingOccurrences(of: #"^\s*\[\s*"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"\s*\]\s*$"#, with: "", options: .regularExpression)
@@ -342,9 +347,49 @@ final class SupervisorAPIClientTests: XCTestCase {
             transport: transport
         )
 
-        let backend = try await client.installOrUpdateAgentBackend(provider: "claude", action: "install")
+        let backend = try await client.installOrUpdateAgentBackend(
+            provider: "claude",
+            action: "install",
+            modelId: "grok"
+        )
 
         XCTAssertEqual(backend.provider, "claude")
+    }
+
+    func testAcpAgentsAndScopedModelsUseExpectedContract() async throws {
+        let transport = MockSupervisorTransport()
+        transport.handler = { request in
+            switch request.url.path {
+            case "/api/agent-runtimes/acp/agents":
+                let body = """
+                [{"id":"grok","model":"grok","displayName":"Grok Build","description":"ACP agent","isDefault":true,"hidden":false,"selectionKind":"agent","supportedReasoningEfforts":[],"defaultReasoningEffort":null,"acpAgent":{"transport":"adapter","availability":"adapter_missing","installCommand":"npm install grok-acp","busy":false,"statusMessage":"Adapter needed"}}]
+                """
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(body.utf8), headers: [:])
+            case "/api/agent-runtimes/acp/models":
+                let components = URLComponents(url: request.url, resolvingAgainstBaseURL: false)
+                XCTAssertEqual(components?.queryItems?.first { $0.name == "agentId" }?.value, "grok")
+                XCTAssertEqual(components?.queryItems?.first { $0.name == "cwd" }?.value, "/repo with space")
+                return SupervisorHTTPResponse(statusCode: 200, body: Data(Self.agentModelsJSON.utf8), headers: [:])
+            default:
+                XCTFail("Unexpected path \(request.url.path)")
+                return SupervisorHTTPResponse(statusCode: 404, body: Data(), headers: [:])
+            }
+        }
+        let client = SupervisorAPIClient(
+            config: SupervisorConnectionConfig(mode: .local, baseURL: "http://host"),
+            transport: transport
+        )
+
+        let agents = try await client.listAgentAgents(provider: "acp")
+        let models = try await client.listAgentModels(
+            provider: "acp",
+            agentId: "grok",
+            cwd: "/repo with space"
+        )
+
+        XCTAssertEqual(agents.first?.selectionKind, "agent")
+        XCTAssertEqual(agents.first?.acpAgent?.availability, "adapter_missing")
+        XCTAssertEqual(models.first?.model, "claude-sonnet-4")
     }
 
     func testSettingsAndPluginEndpointsUseExpectedPaths() async throws {
@@ -691,7 +736,10 @@ private extension SupervisorAPIClientTests {
         "state": "ready",
         "detail": "Runtime is ready"
       },
-      "capabilities": {},
+      "capabilities": {
+        "sessions": {"resume": true},
+        "turns": {"start": true}
+      },
       "managementSchema": {
         "hostConfigFiles": [],
         "toolboxItems": [],

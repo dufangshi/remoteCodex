@@ -302,21 +302,34 @@ struct ThreadDetailWebViewScreen: View {
     }
 }
 
-private struct ThreadDetailShareSheet: UIViewControllerRepresentable {
+private struct ThreadDetailShareSheet: View {
     let file: ThreadDetailWebSharedFile
     let onComplete: () -> Void
 
-    func makeUIViewController(context _: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            DispatchQueue.main.async {
-                onComplete()
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("File") {
+                    LabeledContent("Name", value: file.filename)
+                    LabeledContent("Type", value: file.contentType)
+                }
+                Section {
+                    ShareLink(item: file.url) {
+                        Label(file.filename, systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("thread-webview-share-export")
+                }
+            }
+            .navigationTitle("Share Export")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onComplete)
+                }
             }
         }
-        return controller
     }
-
-    func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
 
 private struct ThreadDetailWebView: UIViewRepresentable {
@@ -387,6 +400,7 @@ private struct ThreadDetailWebView: UIViewRepresentable {
         webView.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
     }
 
+    @MainActor
     final class Coordinator {
         var bootstrap: ThreadDetailWebBootstrap?
         var bootstrapScript: String?
@@ -397,7 +411,7 @@ private struct ThreadDetailWebView: UIViewRepresentable {
         private var lastAttachmentPickerResultId: UUID?
         private var notificationObservers: [NSObjectProtocol] = []
 
-        deinit {
+        isolated deinit {
             for observer in notificationObservers {
                 NotificationCenter.default.removeObserver(observer)
             }
@@ -414,7 +428,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.sendSceneActive(false, force: true)
+                    MainActor.assumeIsolated {
+                        self?.sendSceneActive(false, force: true)
+                    }
                 }
             )
             notificationObservers.append(
@@ -423,7 +439,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.sendSceneActive(false, force: true)
+                    MainActor.assumeIsolated {
+                        self?.sendSceneActive(false, force: true)
+                    }
                 }
             )
             notificationObservers.append(
@@ -432,7 +450,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.resumeSceneActiveAfterForeground()
+                    MainActor.assumeIsolated {
+                        self?.resumeSceneActiveAfterForeground()
+                    }
                 }
             )
             notificationObservers.append(
@@ -441,7 +461,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.sendSceneActive(false, force: true)
+                    MainActor.assumeIsolated {
+                        self?.sendSceneActive(false, force: true)
+                    }
                 }
             )
             notificationObservers.append(
@@ -450,7 +472,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.sendSceneActive(false, force: true)
+                    MainActor.assumeIsolated {
+                        self?.sendSceneActive(false, force: true)
+                    }
                 }
             )
             notificationObservers.append(
@@ -459,7 +483,9 @@ private struct ThreadDetailWebView: UIViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.resumeSceneActiveAfterForeground()
+                    MainActor.assumeIsolated {
+                        self?.resumeSceneActiveAfterForeground()
+                    }
                 }
             )
         }
@@ -518,7 +544,7 @@ private struct ThreadDetailWebView: UIViewRepresentable {
 
         func requiresReload(for nextBootstrap: ThreadDetailWebBootstrap) -> Bool {
             guard var currentBootstrap = bootstrap else { return true }
-            var comparableBootstrap = nextBootstrap
+            let comparableBootstrap = nextBootstrap
             currentBootstrap.theme = comparableBootstrap.theme
             return currentBootstrap != comparableBootstrap
         }

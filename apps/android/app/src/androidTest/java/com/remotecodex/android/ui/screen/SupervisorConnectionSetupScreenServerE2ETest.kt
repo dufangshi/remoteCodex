@@ -51,7 +51,7 @@ class SupervisorConnectionSetupScreenServerE2ETest {
                     initialConfig = null,
                     savedDevices = savedDevices,
                     activeDeviceId = null,
-                    onConnectionReady = { config, check ->
+                    onConnectionReady = { config, check, _ ->
                         connectedConfig = config
                         connectedCheck = check
                     },

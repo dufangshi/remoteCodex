@@ -32,7 +32,12 @@ export function supervisorWebSocketUrl(
 ) {
   const base = new URL(bootstrap.baseUrl);
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
-  base.pathname = bootstrap.mode === 'relay' ? '/relay/ws' : '/ws';
+  base.pathname =
+    bootstrap.mode === 'relay' && bootstrap.relayDeviceId
+      ? `/relay/devices/${encodeURIComponent(bootstrap.relayDeviceId)}/ws`
+      : bootstrap.mode === 'relay'
+        ? '/relay/ws'
+        : '/ws';
   base.search = '';
   if (bootstrap.mode === 'server' && bootstrap.authToken) {
     base.searchParams.set('token', bootstrap.authToken);

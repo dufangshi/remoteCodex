@@ -70,6 +70,7 @@ struct SupervisorThreadSummary: Codable, Equatable, Identifiable {
     var id: String
     var workspaceId: String
     var provider: String
+    var agentId: String? = nil
     var title: String
     var status: String
     var model: String?
@@ -113,6 +114,7 @@ struct StartSupervisorThreadRequest: Codable, Equatable {
     var workspaceId: String
     var title: String?
     var provider: String?
+    var agentId: String? = nil
     var model: String
     var reasoningEffort: String?
     var approvalMode: String
@@ -457,6 +459,8 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
     var description: String
     var enabled: Bool
     var isDefault: Bool
+    var canResumeSessions: Bool
+    var canStartTurns: Bool
     var statusState: String
     var statusDetail: String?
     var installed: Bool
@@ -475,6 +479,7 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
         case description
         case enabled
         case isDefault
+        case capabilities
         case status
         case statusState
         case statusDetail
@@ -495,6 +500,19 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
         case state
         case detail
         case message
+    }
+
+    enum CapabilitiesCodingKeys: String, CodingKey {
+        case sessions
+        case turns
+    }
+
+    enum SessionCapabilitiesCodingKeys: String, CodingKey {
+        case resume
+    }
+
+    enum TurnCapabilitiesCodingKeys: String, CodingKey {
+        case start
     }
 
     enum InstallationCodingKeys: String, CodingKey {
@@ -519,6 +537,24 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
         description = try container.decode(String.self, forKey: .description)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        if let capabilities = try? container.nestedContainer(
+            keyedBy: CapabilitiesCodingKeys.self,
+            forKey: .capabilities
+        ) {
+            let sessions = try? capabilities.nestedContainer(
+                keyedBy: SessionCapabilitiesCodingKeys.self,
+                forKey: .sessions
+            )
+            let turns = try? capabilities.nestedContainer(
+                keyedBy: TurnCapabilitiesCodingKeys.self,
+                forKey: .turns
+            )
+            canResumeSessions = try sessions?.decodeIfPresent(Bool.self, forKey: .resume) ?? false
+            canStartTurns = try turns?.decodeIfPresent(Bool.self, forKey: .start) ?? false
+        } else {
+            canResumeSessions = false
+            canStartTurns = false
+        }
 
         if let status = try? container.nestedContainer(keyedBy: StatusCodingKeys.self, forKey: .status) {
             statusState = try status.decodeIfPresent(String.self, forKey: .state) ?? "unknown"
@@ -563,6 +599,17 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
         try container.encode(description, forKey: .description)
         try container.encode(enabled, forKey: .enabled)
         try container.encode(isDefault, forKey: .isDefault)
+        var capabilities = container.nestedContainer(keyedBy: CapabilitiesCodingKeys.self, forKey: .capabilities)
+        var sessions = capabilities.nestedContainer(
+            keyedBy: SessionCapabilitiesCodingKeys.self,
+            forKey: .sessions
+        )
+        var turns = capabilities.nestedContainer(
+            keyedBy: TurnCapabilitiesCodingKeys.self,
+            forKey: .turns
+        )
+        try sessions.encode(canResumeSessions, forKey: .resume)
+        try turns.encode(canStartTurns, forKey: .start)
         try container.encode(statusState, forKey: .statusState)
         try container.encodeIfPresent(statusDetail, forKey: .statusDetail)
         try container.encode(installed, forKey: .installed)
@@ -579,7 +626,7 @@ struct SupervisorAgentBackend: Codable, Equatable, Identifiable {
 
 extension SupervisorAgentBackend {
     var canStartSession: Bool {
-        enabled
+        enabled && canResumeSessions && canStartTurns
     }
 
     var runtimeActionLabel: String? {
@@ -598,6 +645,16 @@ struct SupervisorModelOption: Codable, Equatable, Identifiable {
     var hidden: Bool
     var supportedReasoningEfforts: [SupervisorReasoningEffortOption]
     var defaultReasoningEffort: String?
+    var selectionKind: String? = nil
+    var acpAgent: SupervisorAcpAgentOption? = nil
+}
+
+struct SupervisorAcpAgentOption: Codable, Equatable {
+    var transport: String
+    var availability: String
+    var installCommand: String?
+    var busy: Bool
+    var statusMessage: String
 }
 
 struct SupervisorReasoningEffortOption: Codable, Equatable {

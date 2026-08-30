@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     revokeRelayShare: vi.fn(),
     listModels: vi.fn(),
     listAgentRuntimes: vi.fn(),
+    listPlugins: vi.fn(),
     fetchAgentSubscriptionUsage: vi.fn(),
     fetchThreadExportTurns: vi.fn(),
     downloadThreadTranscriptExport: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('@remote-codex/thread-ui', async () => {
     PluginProvider: ({ children }: { children: React.ReactNode }) =>
       React.createElement(React.Fragment, null, children),
     ThreadActionsDialog: dialog.ThreadActionsDialog,
+    ThreadShellPanel: () => null,
     ThreadDetailSurface: ({
       detail,
       timelineProps,
@@ -269,6 +271,7 @@ describe('AndroidThreadDetailPage', () => {
     mocks.client.fetchRelayPortal.mockResolvedValue(emptyPortal);
     mocks.client.listModels.mockResolvedValue([]);
     mocks.client.listAgentRuntimes.mockResolvedValue([]);
+    mocks.client.listPlugins.mockResolvedValue([]);
     mocks.client.fetchAgentSubscriptionUsage.mockResolvedValue({ usage: null });
     mocks.client.buildWorkspaceRawFileUrl.mockReturnValue('');
     mocks.client.buildThreadImageAssetUrl.mockReturnValue('');
