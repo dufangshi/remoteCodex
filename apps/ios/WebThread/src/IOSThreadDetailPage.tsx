@@ -43,6 +43,7 @@ import {
 } from '@remote-codex/thread-ui';
 import { builtinFrontendPlugins } from '@remote-codex/thread-ui/builtin-plugins';
 
+import { MobileProviderSettings } from '../../../mobile-thread-web/MobileProviderSettings';
 import {
   applyIOSTheme,
   type IOSBootstrap,
@@ -284,7 +285,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   );
   const workspaceFocusRequestIdRef = useRef(bootstrap.uiTestFocusWorkspacePath ? 1 : 0);
   const [shellControlState, setShellControlState] = useState<ThreadShellControlState | null>(null);
-  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(true);
+  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(false);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
   const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
@@ -351,6 +352,8 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   const uiTestPendingRequestsResolvedRef = useRef(false);
   const uiTestPendingRequestControlsClickedRef = useRef(false);
   const uiTestVisibleSettingsControlsClickedRef = useRef(false);
+  const uiTestProviderSettingsOpenedRef = useRef(false);
+  const uiTestVisibleSandboxClickedRef = useRef(false);
   const uiTestForkControlsClickedRef = useRef(false);
   const uiTestExportStartedRef = useRef(false);
   const uiTestVisibleExportControlsClickedRef = useRef(false);
@@ -421,7 +424,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       })
       .catch(() => {
         if (!cancelled) {
-          setTerminalPluginEnabled(true);
+          setTerminalPluginEnabled(false);
         }
       });
     return () => {
@@ -2161,25 +2164,28 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     uiTestPendingRequestControlsClickedRef.current = true;
     let cancelled = false;
     let timer: number | null = null;
-    const clickLabels = [
-      'thread-pending-request-option-approval-Allow',
-      'thread-pending-request-submit-ios-web-approval-request',
-      'thread-pending-request-option-question-1-Detailed',
-      'thread-pending-request-submit-ios-web-question-request',
-      'thread-pending-request-option-plan-decision-Implement-Recommended',
+    const clickActions = [
+      { cardText: 'Allow', buttonText: 'Allow' },
+      { cardText: 'Allow', buttonText: 'Submit' },
+      { cardText: 'Detailed', buttonText: 'Detailed' },
+      { cardText: 'Detailed', buttonText: 'Submit' },
+      { cardText: 'Implement', buttonText: 'Implement' },
     ];
     const sleep = (milliseconds: number) =>
       new Promise<void>((resolve) => {
         timer = window.setTimeout(resolve, milliseconds);
       });
-    const clickButton = async (label: string) => {
+    const clickButton = async (cardText: string, buttonText: string) => {
       for (let attempt = 0; attempt < 50; attempt += 1) {
         if (cancelled) {
           return false;
         }
-        const button = document.querySelector<HTMLButtonElement>(
-          `button[aria-label="${label}"]`,
-        );
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>('.timeline-pending-card'),
+        ).find((candidate) => candidate.textContent?.includes(cardText));
+        const button = Array.from(
+          card?.querySelectorAll<HTMLButtonElement>('button') ?? [],
+        ).find((candidate) => candidate.textContent?.includes(buttonText) && !candidate.disabled);
         if (button && !button.disabled) {
           button.click();
           await sleep(120);
@@ -2194,14 +2200,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         if (cancelled) {
           return false;
         }
-        if (
-          clickLabels.every(
-            (label) =>
-              !document.querySelector<HTMLButtonElement>(
-                `button[aria-label="${label}"]`,
-              ),
-          )
-        ) {
+        if (document.querySelectorAll('.timeline-pending-card').length === 0) {
           return true;
         }
         await sleep(120);
@@ -2210,12 +2209,12 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     };
 
     void (async () => {
-      for (const label of clickLabels) {
-        const clicked = await clickButton(label);
+      for (const action of clickActions) {
+        const clicked = await clickButton(action.cardText, action.buttonText);
         if (!clicked) {
           postNativeMessage({
             type: 'threadWebDebug',
-            message: `pendingRequests:click-controls-missing:${label}`,
+            message: `pendingRequests:click-controls-missing:${action.buttonText}`,
           });
           return;
         }
@@ -2341,18 +2340,23 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       try {
         if (
           !(await clickWhenReady(
-            () => buttonWithLabel('Thread actions'),
+            () => buttonWithLabel('Export or share thread'),
             'export-button',
           ))
         ) {
           return;
         }
-        if (!(await clickWhenReady(() => dialogButton('Custom selection'), 'custom-selection'))) {
-          return;
-        }
         if (!(await waitFor(() => dialog() !== null, 'dialog'))) {
           return;
         }
+        const customSelected = await waitFor(() => {
+          const select = dialog()?.querySelector<HTMLSelectElement>('select');
+          if (!select) return false;
+          select.value = 'custom';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return select.value === 'custom';
+        }, 'custom-selection');
+        if (!customSelected) return;
         if (!(await clickWhenReady(() => dialogButton('HTML'), 'html-format'))) {
           return;
         }
@@ -2375,7 +2379,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
           return;
         }
         const footerReady = await waitFor(
-          () => dialog()?.textContent?.includes('1 turn will be exported') ?? false,
+          () => dialog()?.textContent?.includes('1 turn selected.') ?? false,
           'single-turn-footer',
         );
         if (!footerReady) {
@@ -2481,7 +2485,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       try {
         if (
           !(await clickWhenReady(
-            () => buttonWithLabel('Thread actions'),
+            () => buttonWithLabel('Export or share thread'),
             'thread-actions-button',
           ))
         ) {
@@ -2591,9 +2595,9 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     let cancelled = false;
     let timer: number | null = null;
     const targetModel = 'ios-e2e-alt';
+    const targetModelLabel = 'iOS E2E Alt';
     const targetReasoning = 'high';
     const targetCollaborationMode = 'plan';
-    const targetSandboxMode = 'danger-full-access';
     const sleep = (milliseconds: number) =>
       new Promise<void>((resolve) => {
         timer = window.setTimeout(resolve, milliseconds);
@@ -2601,6 +2605,8 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
     const buttons = () => Array.from(document.querySelectorAll('button'));
     const buttonWithExactText = (text: string) =>
       buttons().find((button) => button.textContent?.trim() === text);
+    const buttonStartingWithText = (text: string) =>
+      buttons().find((button) => button.textContent?.trim().startsWith(text));
     const clickButton = async (
       findButton: () => HTMLButtonElement | undefined,
       missingLabel: string,
@@ -2619,7 +2625,11 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       }
       postNativeMessage({
         type: 'threadWebDebug',
-        message: `visible-settings:missing:${missingLabel}`,
+        message: `visible-settings:missing:${missingLabel}:buttons=${buttons()
+          .map((button) => button.textContent?.trim())
+          .filter(Boolean)
+          .slice(-20)
+          .join('|')}`,
       });
       return false;
     };
@@ -2628,23 +2638,18 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         if (cancelled) {
           return false;
         }
-        const selectedModel = document.querySelector<HTMLButtonElement>(
-          `button[aria-label="${targetModel}"]`,
+        const modelTrigger = document.querySelector<HTMLButtonElement>(
+          'button[aria-label^="Model and effort:"]',
         );
-        const selectedReasoning = buttonWithExactText(targetReasoning);
         const selectedPlanMode = buttons().find(
           (button) =>
             button.textContent?.trim() === 'Plan' &&
             button.getAttribute('aria-pressed') === 'true',
         );
-        const selectedSandboxMode = document.querySelector<HTMLButtonElement>(
-          'button[aria-label="Sandbox mode: danger-full-access"][aria-pressed="true"]',
-        );
         if (
-          selectedModel &&
-          selectedReasoning &&
-          selectedPlanMode &&
-          selectedSandboxMode
+          modelTrigger?.getAttribute('aria-label')?.includes(targetModelLabel) &&
+          modelTrigger.getAttribute('aria-label')?.includes(targetReasoning) &&
+          selectedPlanMode
         ) {
           return true;
         }
@@ -2657,7 +2662,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       const modelOpened = await clickButton(
         () =>
           document.querySelector<HTMLButtonElement>(
-            `button[aria-label="${detail.thread.model}"]`,
+            'button[aria-label^="Model and effort:"]',
           ) ?? undefined,
         'model-trigger',
       );
@@ -2665,8 +2670,16 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         return;
       }
 
+      const modelSectionOpened = await clickButton(
+        () => buttonStartingWithText('Model'),
+        'model-section',
+      );
+      if (!modelSectionOpened) {
+        return;
+      }
+
       const modelSelected = await clickButton(
-        () => buttonWithExactText(targetModel),
+        () => buttonWithExactText(targetModelLabel),
         targetModel,
       );
       if (!modelSelected) {
@@ -2676,7 +2689,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
       const effortOpened = await clickButton(
         () =>
           document.querySelector<HTMLButtonElement>(
-            'button[title="Select reasoning effort"]',
+            'button[aria-label^="Model and effort:"]',
           ) ?? undefined,
         'reasoning-trigger',
       );
@@ -2684,8 +2697,16 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         return;
       }
 
+      const effortSectionOpened = await clickButton(
+        () => buttonStartingWithText('Effort'),
+        'reasoning-section',
+      );
+      if (!effortSectionOpened) {
+        return;
+      }
+
       const reasoningSelected = await clickButton(
-        () => buttonWithExactText(targetReasoning),
+        () => buttonStartingWithText(targetReasoning),
         targetReasoning,
       );
       if (!reasoningSelected) {
@@ -2700,25 +2721,11 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         return;
       }
 
-      setSettingsDialogOpen(true);
-      await sleep(250);
-
-      const sandboxSelected = await clickButton(
-        () =>
-          document.querySelector<HTMLButtonElement>(
-            'button[aria-label="Sandbox mode: danger-full-access"]',
-          ) ?? undefined,
-        'sandbox-danger-full-access',
-      );
-      if (!sandboxSelected) {
-        return;
-      }
-
       const ready = await waitForState();
       postNativeMessage({
         type: 'threadWebDebug',
         message: ready
-          ? `visible-settings:updated:${targetModel}:${targetReasoning}:${targetCollaborationMode}:${targetSandboxMode}`
+          ? `visible-settings:updated:${targetModel}:${targetReasoning}:${targetCollaborationMode}:sandbox-unavailable`
           : 'visible-settings:missing:updated-state',
       });
     })();
@@ -2732,6 +2739,140 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
   }, [
     bootstrap.fixture,
     bootstrap.uiTestClickVisibleSettingsControls,
+    Boolean(detail),
+    setSettingsDialogOpen,
+  ]);
+
+  useEffect(() => {
+    if (
+      bootstrap.fixture ||
+      !detail ||
+      !bootstrap.uiTestClickVisibleSandbox ||
+      capabilities?.controls.sandboxMode !== true ||
+      uiTestVisibleSandboxClickedRef.current
+    ) {
+      return;
+    }
+    uiTestVisibleSandboxClickedRef.current = true;
+    let cancelled = false;
+    let timer: number | null = null;
+    const sleep = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, milliseconds);
+      });
+    const clickButton = async (find: () => HTMLButtonElement | undefined) => {
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        const button = find();
+        if (button && !button.disabled) {
+          button.click();
+          await sleep(150);
+          return true;
+        }
+        await sleep(150);
+      }
+      return false;
+    };
+
+    void (async () => {
+      const opened = await clickButton(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            'button[aria-label^="Sandbox:"]',
+          ) ?? undefined,
+      );
+      const selected = opened
+        ? await clickButton(() =>
+            Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+              (button) => button.textContent?.trim() === 'Danger',
+            ),
+          )
+        : false;
+      for (let attempt = 0; attempt < 60 && selected && !cancelled; attempt += 1) {
+        if (document.querySelector('button[aria-label="Sandbox: Danger"]')) {
+          postNativeMessage({
+            type: 'threadWebDebug',
+            message: 'visible-sandbox:updated:danger-full-access',
+          });
+          return;
+        }
+        await sleep(150);
+      }
+      if (!cancelled) {
+        postNativeMessage({ type: 'threadWebDebug', message: 'visible-sandbox:missing' });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    bootstrap.fixture,
+    bootstrap.uiTestClickVisibleSandbox,
+    capabilities?.controls.sandboxMode,
+    Boolean(detail),
+  ]);
+
+  useEffect(() => {
+    if (
+      bootstrap.fixture ||
+      !detail ||
+      !bootstrap.uiTestOpenProviderSettings ||
+      uiTestProviderSettingsOpenedRef.current
+    ) {
+      return;
+    }
+    uiTestProviderSettingsOpenedRef.current = true;
+    let cancelled = false;
+    let timer: number | null = null;
+    const sleep = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, milliseconds);
+      });
+
+    void (async () => {
+      setSettingsDialogOpen(true);
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        const globalButton = Array.from(document.querySelectorAll('button')).find(
+          (button) => button.textContent?.trim() === 'Global',
+        );
+        if (globalButton && !globalButton.disabled) {
+          globalButton.click();
+          break;
+        }
+        await sleep(150);
+      }
+      for (let attempt = 0; attempt < 80 && !cancelled; attempt += 1) {
+        const content = document.body.textContent ?? '';
+        if (
+          content.includes('Runtime controls') &&
+          content.includes('Host configuration') &&
+          content.includes('Config archives') &&
+          content.includes('config.toml')
+        ) {
+          postNativeMessage({
+            type: 'threadWebDebug',
+            message: 'provider-settings:ready',
+          });
+          return;
+        }
+        await sleep(150);
+      }
+      if (!cancelled) {
+        postNativeMessage({
+          type: 'threadWebDebug',
+          message: 'provider-settings:missing',
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    bootstrap.fixture,
+    bootstrap.uiTestOpenProviderSettings,
     Boolean(detail),
     setSettingsDialogOpen,
   ]);
@@ -3954,6 +4095,14 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         onSettingsDialogOpenChange={setSettingsDialogOpen}
         metaContent={metaContent}
         settingsContent={settingsContent}
+        globalSettingsContent={
+          effectiveThreadIsOwner ? (
+            <MobileProviderSettings
+              client={client}
+              currentProvider={detail?.thread.provider ?? null}
+            />
+          ) : null
+        }
         surfaceActions={relayAccessBadge}
         mobileHeaderAction={relayAccessBadge}
         threadActionsButton={
@@ -4093,7 +4242,10 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
             }
           : {})}
         timelineProps={{
-          autoCollapseCompletedTurns: !bootstrap.uiTestAutoVerifyImageAsset,
+          autoCollapseCompletedTurns:
+            !bootstrap.fixture &&
+            !bootstrap.uiTestAutoVerifyImageAsset &&
+            !bootstrap.uiTestAutoLoadHistoryDetail,
           scrollRequestKey,
           previousTurnScrollRequestKey,
           nextTurnScrollRequestKey,
@@ -4144,7 +4296,7 @@ export function IOSThreadDetailPage({ bootstrap }: IOSThreadDetailPageProps) {
         }
         shellUnavailableContent={
           <div className="ios-thread-message">
-            Shell is disabled in the first iOS WebView migration slice.
+            Enable the Terminal plugin to use the shell.
           </div>
         }
       />

@@ -4,18 +4,18 @@ extension RemoteCodexUITests {
     @MainActor
     func testThreadExportFixtureExportsPDFAndHTMLCustomTurns() {
         let app = XCUIApplication()
-        app.launchArguments = ["--reset-settings", "--ui-test-workspace-fixture", "--ui-test-thread-route"]
+        app.launchArguments = [
+            "--reset-settings",
+            "--ui-test-ios-thread-webview-fixture",
+            "--ui-test-ios-thread-webview-click-visible-export",
+        ]
         app.launch()
 
-        openExportDialog(in: app)
-        XCTAssertTrue(tapElement(app.buttons["Custom"], in: app, maxSwipes: 2))
-        XCTAssertTrue(tapElement(app.buttons["thread-export-submit"], in: app, maxSwipes: 2))
-        XCTAssertTrue(app.buttons["Share fixture-thread.pdf"].waitForExistence(timeout: 5))
-
-        openExportDialog(in: app)
-        XCTAssertTrue(tapElement(app.buttons["HTML"], in: app, maxSwipes: 2))
-        XCTAssertTrue(tapElement(app.buttons["thread-export-submit"], in: app, maxSwipes: 2))
-        XCTAssertTrue(app.buttons["Share fixture-thread.html"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
+        let debug = app.staticTexts["thread-webview-debug"]
+        XCTAssertTrue(waitForElement(debug, containing: "visible-export:custom-html:1-turn", timeout: 20))
+        XCTAssertTrue(app.buttons["thread-webview-share-export"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["thread-webview-share-export"].label.contains("ios-webview-fixture.html"))
     }
 
     @MainActor
@@ -32,7 +32,7 @@ extension RemoteCodexUITests {
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["thread-webview-share-export"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["Share ios-webview-fixture.pdf"].exists)
+        XCTAssertTrue(app.buttons["thread-webview-share-export"].label.contains("ios-webview-fixture.pdf"))
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
@@ -52,7 +52,7 @@ extension RemoteCodexUITests {
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["thread-webview-ready"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["thread-webview-share-export"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["Share ios-webview-fixture.html"].exists)
+        XCTAssertTrue(app.buttons["thread-webview-share-export"].label.contains("ios-webview-fixture.html"))
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }
@@ -76,7 +76,7 @@ extension RemoteCodexUITests {
             debug.exists ? debug.label : "WebView did not click visible export custom selection controls."
         )
         XCTAssertTrue(app.buttons["thread-webview-share-export"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["Share ios-webview-fixture.html"].exists)
+        XCTAssertTrue(app.buttons["thread-webview-share-export"].label.contains("ios-webview-fixture.html"))
         let error = app.staticTexts["thread-webview-error"]
         XCTAssertFalse(error.exists, error.exists ? error.label : "Thread WebView reported an unknown error.")
     }

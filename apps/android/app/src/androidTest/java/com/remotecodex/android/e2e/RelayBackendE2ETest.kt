@@ -29,6 +29,7 @@ class RelayBackendE2ETest {
         val deviceId = args.getString(ARG_RELAY_DEVICE_ID).orEmpty()
         val workspacePath = args.getString(ARG_WORKSPACE_PATH).orEmpty()
         val model = args.getString(ARG_MODEL).orEmpty().ifBlank { "gpt-5" }
+        val reasoningEffort = args.getString(ARG_REASONING_EFFORT).orEmpty().ifBlank { "medium" }
         val expectedReply = args.getString(ARG_EXPECTED_REPLY).orEmpty()
             .ifBlank { "android relay e2e ok" }
 
@@ -67,9 +68,9 @@ class RelayBackendE2ETest {
 
         val check = relayClient.checkConnection()
         assertTrue(check.authenticated)
-        assertEquals("Relay connected", check.healthLabel)
+        assertEquals("Supervisor ok", check.healthLabel)
         assertTrue(check.websocketUrl.contains("/relay/devices/$deviceId/ws"))
-        assertTrue(check.websocketUrl.contains("token="))
+        assertTrue(check.websocketUrl.contains("relaySession="))
 
         val workspace = relayClient.createWorkspaceOrFindExisting(
             CreateSupervisorWorkspaceRequest(
@@ -84,6 +85,7 @@ class RelayBackendE2ETest {
                 workspaceId = workspace.id,
                 title = "Android relay E2E",
                 model = model,
+                reasoningEffort = reasoningEffort,
                 approvalMode = "yolo",
             ),
         )
@@ -112,6 +114,7 @@ class RelayBackendE2ETest {
         const val ARG_RELAY_DEVICE_ID = "relayDeviceId"
         const val ARG_WORKSPACE_PATH = "workspacePath"
         const val ARG_MODEL = "model"
+        const val ARG_REASONING_EFFORT = "reasoningEffort"
         const val ARG_EXPECTED_REPLY = "expectedReply"
         const val REPLY_TIMEOUT_MS = 180_000L
         const val REPLY_POLL_MS = 2_000L

@@ -828,4 +828,28 @@ describe('IOSApiClient', () => {
       'application/json',
     );
   });
+
+  it('uses canonical provider config, archive, and recovery routes', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({}));
+    const client = new IOSApiClient(bootstrap());
+
+    await client.updateProviderHostFile('codex', 'config.toml', { content: 'saved' });
+    await client.fetchProviderHostConfigArchives('codex');
+    await client.createProviderHostConfigArchive('codex', { label: 'Known good' });
+    await client.renameProviderHostConfigArchive('codex', 'archive/1', { label: 'Renamed' });
+    await client.applyProviderHostConfigArchive('codex', 'archive/1');
+    await client.restartAgentBackend('codex');
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://remote-codex.example.test/api/config/providers/codex/files/config.toml',
+      'https://remote-codex.example.test/api/config/providers/codex/archives',
+      'https://remote-codex.example.test/api/config/providers/codex/archives',
+      'https://remote-codex.example.test/api/config/providers/codex/archives/archive%2F1',
+      'https://remote-codex.example.test/api/config/providers/codex/archives/archive%2F1/apply',
+      'https://remote-codex.example.test/api/agent-runtimes/codex/restart',
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ content: 'saved' }) }),
+    );
+  });
 });

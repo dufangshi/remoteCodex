@@ -13,6 +13,8 @@ struct ThreadDetailWebViewScreen: View {
     let uiTestAutoResolvePendingRequests: Bool
     let uiTestClickPendingRequestControls: Bool
     let uiTestClickVisibleSettingsControls: Bool
+    let uiTestOpenProviderSettings: Bool
+    let uiTestClickVisibleSandbox: Bool
     let uiTestForkMode: String?
     let uiTestAutoExportTranscript: Bool
     let uiTestAutoExportTranscriptFormat: String?
@@ -66,6 +68,8 @@ struct ThreadDetailWebViewScreen: View {
                         uiTestAutoResolvePendingRequests: uiTestAutoResolvePendingRequests,
                         uiTestClickPendingRequestControls: uiTestClickPendingRequestControls,
                         uiTestClickVisibleSettingsControls: uiTestClickVisibleSettingsControls,
+                        uiTestOpenProviderSettings: uiTestOpenProviderSettings,
+                        uiTestClickVisibleSandbox: uiTestClickVisibleSandbox,
                         uiTestForkMode: uiTestForkMode,
                         uiTestAutoExportTranscript: uiTestAutoExportTranscript,
                         uiTestAutoExportTranscriptFormat: uiTestAutoExportTranscriptFormat,
@@ -589,6 +593,8 @@ struct ThreadDetailWebBootstrap: Codable, Equatable {
     var uiTestAutoResolvePendingRequests: Bool
     var uiTestClickPendingRequestControls: Bool
     var uiTestClickVisibleSettingsControls: Bool
+    var uiTestOpenProviderSettings: Bool = false
+    var uiTestClickVisibleSandbox: Bool = false
     var uiTestForkMode: String?
     var uiTestAutoExportTranscript: Bool
     var uiTestAutoExportTranscriptFormat: String?

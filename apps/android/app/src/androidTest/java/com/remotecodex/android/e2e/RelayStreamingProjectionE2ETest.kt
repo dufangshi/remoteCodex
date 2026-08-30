@@ -38,6 +38,7 @@ class RelayStreamingProjectionE2ETest {
         val deviceId = args.getString(ARG_RELAY_DEVICE_ID).orEmpty()
         val workspacePath = args.getString(ARG_WORKSPACE_PATH).orEmpty()
         val model = args.getString(ARG_MODEL).orEmpty().ifBlank { "gpt-5" }
+        val reasoningEffort = args.getString(ARG_REASONING_EFFORT).orEmpty().ifBlank { "medium" }
         val marker = args.getString(ARG_EXPECTED_MARKER).orEmpty().ifBlank { "ANDROID_STREAM_STABLE_OK" }
 
         assumeTrue(
@@ -79,6 +80,7 @@ class RelayStreamingProjectionE2ETest {
                 workspaceId = workspace.id,
                 title = "Android relay streaming E2E",
                 model = model,
+                reasoningEffort = reasoningEffort,
                 approvalMode = "yolo",
             ),
         )
@@ -162,6 +164,7 @@ class RelayStreamingProjectionE2ETest {
         const val ARG_RELAY_DEVICE_ID = "relayDeviceId"
         const val ARG_WORKSPACE_PATH = "workspacePath"
         const val ARG_MODEL = "model"
+        const val ARG_REASONING_EFFORT = "reasoningEffort"
         const val ARG_EXPECTED_MARKER = "expectedMarker"
     }
 }

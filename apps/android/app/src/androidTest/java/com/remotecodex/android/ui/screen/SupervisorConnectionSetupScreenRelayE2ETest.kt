@@ -90,7 +90,9 @@ class SupervisorConnectionSetupScreenRelayE2ETest {
                     !it.relayDeviceId.isNullOrBlank()
             }
         }
-        composeRule.onNodeWithText("Android relay login test").assertExists()
+        assertTrue(
+            composeRule.onAllNodesWithText("Android relay login test").fetchSemanticsNodes().isNotEmpty(),
+        )
         assertTrue(savedDevices.any { it.mode == SupervisorConnectionMode.Relay && !it.relayDeviceId.isNullOrBlank() })
     }
 

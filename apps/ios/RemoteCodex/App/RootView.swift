@@ -108,6 +108,8 @@ struct RootView: View {
                         uiTestAutoResolvePendingRequests: threadWebViewUITestAutoResolvePendingRequests,
                         uiTestClickPendingRequestControls: threadWebViewUITestClickPendingRequestControls,
                         uiTestClickVisibleSettingsControls: threadWebViewUITestClickVisibleSettingsControls,
+                        uiTestOpenProviderSettings: threadWebViewUITestOpenProviderSettings,
+                        uiTestClickVisibleSandbox: threadWebViewUITestClickVisibleSandbox,
                         uiTestForkMode: threadWebViewUITestForkMode,
                         uiTestAutoExportTranscript: threadWebViewUITestAutoExportTranscript,
                         uiTestAutoExportTranscriptFormat: threadWebViewUITestAutoExportTranscriptFormat,
@@ -222,6 +224,16 @@ struct RootView: View {
     private var threadWebViewUITestClickVisibleSettingsControls: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-click-visible-settings")
             || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_CLICK_VISIBLE_SETTINGS"] == "1"
+    }
+
+    private var threadWebViewUITestOpenProviderSettings: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-provider-settings")
+            || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_PROVIDER_SETTINGS"] == "1"
+    }
+
+    private var threadWebViewUITestClickVisibleSandbox: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-ios-thread-webview-click-visible-sandbox")
+            || ProcessInfo.processInfo.environment["REMOTE_CODEX_IOS_E2E_WEBVIEW_CLICK_VISIBLE_SANDBOX"] == "1"
     }
 
     private var threadWebViewUITestForkMode: String? {

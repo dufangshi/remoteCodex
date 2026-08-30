@@ -46,6 +46,7 @@ import {
 import { builtinFrontendPlugins } from '@remote-codex/thread-ui/builtin-plugins';
 import { Copy, Share2 } from 'lucide-react';
 
+import { MobileProviderSettings } from '../../../mobile-thread-web/MobileProviderSettings';
 import { AndroidApiClient } from './AndroidApiClient';
 import { connectAndroidShellSocket } from './AndroidShellSocket';
 import {
@@ -172,7 +173,7 @@ export function AndroidThreadDetailPage({
   } | null>(null);
   const workspaceFocusRequestIdRef = useRef(0);
   const [shellControlState, setShellControlState] = useState<ThreadShellControlState | null>(null);
-  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(true);
+  const [terminalPluginEnabled, setTerminalPluginEnabled] = useState(false);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [previousTurnScrollRequestKey, setPreviousTurnScrollRequestKey] = useState(0);
   const [nextTurnScrollRequestKey, setNextTurnScrollRequestKey] = useState(0);
@@ -287,7 +288,7 @@ export function AndroidThreadDetailPage({
       })
       .catch(() => {
         if (!cancelled) {
-          setTerminalPluginEnabled(true);
+          setTerminalPluginEnabled(false);
         }
       });
     return () => {
@@ -1911,6 +1912,14 @@ export function AndroidThreadDetailPage({
         onSettingsDialogOpenChange={setSettingsDialogOpen}
         metaContent={metaContent}
         settingsContent={settingsContent}
+        globalSettingsContent={
+          effectiveThreadIsOwner ? (
+            <MobileProviderSettings
+              client={client}
+              currentProvider={detail?.thread.provider ?? null}
+            />
+          ) : null
+        }
         surfaceActions={relayAccessBadge}
         mobileHeaderAction={relayAccessBadge}
         threadActionsButton={
@@ -2094,7 +2103,7 @@ export function AndroidThreadDetailPage({
         }}
         shellUnavailableContent={
           <div className="android-thread-message">
-            Shell is disabled in the Android WebView migration slice.
+            Enable the Terminal plugin to use the shell.
           </div>
         }
         loadingContent={

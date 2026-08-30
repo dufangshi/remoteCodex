@@ -18,6 +18,8 @@ export interface IOSBootstrap {
   uiTestAutoResolvePendingRequests?: boolean;
   uiTestClickPendingRequestControls?: boolean;
   uiTestClickVisibleSettingsControls?: boolean;
+  uiTestOpenProviderSettings?: boolean;
+  uiTestClickVisibleSandbox?: boolean;
   uiTestForkMode?: 'latest' | 'selected' | null;
   uiTestAutoExportTranscript?: boolean;
   uiTestAutoExportTranscriptFormat?: ThreadExportFormatDto;
@@ -72,6 +74,8 @@ export function readIOSBootstrap(): IOSBootstrap {
       value.uiTestClickPendingRequestControls ?? false,
     uiTestClickVisibleSettingsControls:
       value.uiTestClickVisibleSettingsControls ?? false,
+    uiTestOpenProviderSettings: value.uiTestOpenProviderSettings ?? false,
+    uiTestClickVisibleSandbox: value.uiTestClickVisibleSandbox ?? false,
     uiTestForkMode:
       value.uiTestForkMode === 'latest' || value.uiTestForkMode === 'selected'
         ? value.uiTestForkMode

@@ -2,13 +2,11 @@ package com.remotecodex.android.ui.screen
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
@@ -32,60 +30,35 @@ class SupervisorHomeScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun homeShowsNavigationDestinationsAndOpensThreadPreview() {
-        var openedThreadId: String? = null
+    fun homeShowsWorkspaceFirstNavigationAndMenu() {
         var openedWorkspaceId: String? = null
 
         setHomeContent(
-            onOpenThread = { openedThreadId = it },
             onOpenWorkspace = { openedWorkspaceId = it },
         )
 
         composeRule.onNodeWithText("Remote Codex").assertExists()
-        composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
-        composeRule.onNodeWithContentDescription("Open Threads").assertExists()
-        composeRule.onAllNodesWithContentDescription("Open Shells").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Workspaces").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription("Open home menu").assertExists()
         composeRule.onNodeWithText("remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").assertExists()
-        composeRule.onNodeWithContentDescription("Toggle favorite workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Toggle pinned workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").assertExists()
-        composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Create workspace").assertExists()
         composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").performClick()
         assertEquals("workspace-1", openedWorkspaceId)
-
-        composeRule.onNodeWithContentDescription("Open Threads").performClick()
-        composeRule.onNodeWithContentDescription("Thread search input").assertExists()
-        composeRule.onNodeWithContentDescription("Filter threads Running").assertExists()
-        composeRule.onNodeWithContentDescription("Filter threads Attention").assertExists()
-        composeRule.onNodeWithText("Android native thread client").assertExists()
-        composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
-
-        assertEquals("thread-1", openedThreadId)
     }
 
     @Test
-    fun threadListFiltersSearchesSortsAndGroups() {
+    fun homeMenuExposesSettingsRefreshAndDevices() {
         setHomeContent()
 
-        composeRule.onNodeWithContentDescription("Open Threads").performClick()
-        composeRule.onNodeWithText("Needs Attention").assertExists()
-        composeRule.onNodeWithText("Waiting for approval").assertExists()
-        composeRule.onNodeWithText("Completed").assertExists()
-        composeRule.onNodeWithText("Finished transcript export").assertExists()
-
-        composeRule.onNodeWithContentDescription("Filter threads Attention").performClick()
-        composeRule.onNodeWithText("Waiting for approval").assertExists()
-        composeRule.onNodeWithText("Android native thread client").assertDoesNotExist()
-
-        composeRule.onNodeWithContentDescription("Thread search input").performTextInput("transcript")
-        composeRule.onNodeWithText("No matching threads").assertExists()
-
-        composeRule.onNodeWithContentDescription("Filter threads All").performClick()
-        composeRule.onNodeWithText("Finished transcript export").assertExists()
-        composeRule.onNodeWithContentDescription("Sort threads by Title").performClick()
-        composeRule.onNodeWithText("Completed").assertExists()
+        composeRule.onNodeWithContentDescription("Open home menu").performClick()
+        composeRule.onNodeWithText("Actions").assertExists()
+        composeRule.onNodeWithContentDescription("Open settings").assertExists()
+        composeRule.onNodeWithContentDescription("Refresh home").assertExists()
+        composeRule.onNodeWithContentDescription("Open devices").assertExists()
     }
 
     @Test
@@ -97,13 +70,6 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithText("Workspace path").assertExists()
         composeRule.onNodeWithText("Label").assertExists()
         composeRule.onNodeWithText("The supervisor must be able to access this absolute path.").assertExists()
-        composeRule.onNodeWithContentDescription("Close dialog").performClick()
-
-        composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").performClick()
-        composeRule.onNodeWithText("Thread title").assertExists()
-        composeRule.onNodeWithText("Model").assertExists()
-        composeRule.onNodeWithText("gpt-5").assertExists()
-        composeRule.onNodeWithText("Starts a codex thread in /home/u/dev/remoteCodex-main.").assertExists()
         composeRule.onNodeWithContentDescription("Close dialog").performClick()
 
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").performClick()
@@ -123,6 +89,7 @@ class SupervisorHomeScreenTest {
     fun settingsShowsImportPluginDraftForm() {
         setHomeContent()
 
+        composeRule.onNodeWithContentDescription("Open home menu").performClick()
         composeRule.onNodeWithContentDescription("Open settings").performClick()
         composeRule.onNodeWithText("remote-codex 0.1.0 / test").assertExists()
         composeRule.onNodeWithText("local 127.0.0.1:8787").assertExists()

@@ -799,6 +799,7 @@ struct WorkspaceDetailScreen: View {
                     Image(systemName: "square.and.arrow.up")
                 }
                 .accessibilityLabel("Upload file")
+                .accessibilityIdentifier("workspace-file-upload")
             }
         }
         .remoteCodexListRow()
@@ -822,6 +823,7 @@ struct WorkspaceDetailScreen: View {
                     Button("Copy raw") { Task { await model.copyRawFile() } }
                         .accessibilityIdentifier("workspace-file-copy-raw")
                     Button("Open") { Task { await model.openRawFile() } }
+                        .accessibilityIdentifier("workspace-file-open")
                     Button("Download") { Task { await model.downloadCurrentFile() } }
                         .accessibilityIdentifier("workspace-file-download")
                 }
@@ -835,6 +837,7 @@ struct WorkspaceDetailScreen: View {
                     .frame(minHeight: 140)
                     .font(.caption.monospaced())
                 Button("Save changes") { Task { await model.saveCurrentFile() } }
+                    .accessibilityIdentifier("workspace-file-save")
             }
             .remoteCodexListRow()
         }

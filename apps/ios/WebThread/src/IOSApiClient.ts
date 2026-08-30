@@ -1,8 +1,10 @@
 import type {
+  ApplyProviderHostConfigArchiveResultDto,
   ApiErrorShape,
   AgentBackendDto,
   AgentBackendIdDto,
   AgentSubscriptionUsageDto,
+  CreateProviderHostConfigArchiveInput,
   CreateRelaySessionShareInput,
   CreateThreadHookInput,
   CreateThreadInput,
@@ -10,10 +12,12 @@ import type {
   ForkThreadInput,
   ModelOptionDto,
   PluginDto,
+  ProviderHostConfigArchiveDto,
   ProviderHostFileDto,
   RelayEffectiveAccessDto,
   RelayPortalSummaryDto,
   RelaySessionShareDto,
+  RenameProviderHostConfigArchiveInput,
   RespondThreadActionRequestInput,
   ThreadDetailDto,
   ThreadDto,
@@ -321,7 +325,7 @@ export class IOSApiClient {
 
   fetchProviderHostFile(provider: ThreadDto['provider'], name: string) {
     return this.requestJson<ProviderHostFileDto>(
-      `/api/agent-runtimes/${encodeURIComponent(provider)}/config/files/${encodeURIComponent(name)}`,
+      `/api/config/providers/${encodeURIComponent(provider)}/files/${encodeURIComponent(name)}`,
       { cache: 'no-store' },
     );
   }
@@ -332,8 +336,67 @@ export class IOSApiClient {
     input: UpdateProviderHostFileInput,
   ) {
     return this.requestJson<ProviderHostFileDto>(
-      `/api/agent-runtimes/${encodeURIComponent(provider)}/config/files/${encodeURIComponent(name)}`,
-      { method: 'PUT', body: JSON.stringify(input) },
+      `/api/config/providers/${encodeURIComponent(provider)}/files/${encodeURIComponent(name)}`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
+  restartAgentBackend(provider: ThreadDto['provider']) {
+    return this.requestJson<AgentBackendDto>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/restart`,
+      { method: 'POST' },
+    );
+  }
+
+  installOrUpdateAgentBackend(
+    provider: ThreadDto['provider'],
+    action: 'install' | 'update',
+  ) {
+    return this.requestJson<AgentBackendDto>(
+      `/api/agent-runtimes/${encodeURIComponent(provider)}/install`,
+      { method: 'POST', body: JSON.stringify({ action }) },
+    );
+  }
+
+  buildAndRestartService() {
+    return this.requestJson<{ status: 'launched'; pid: number | null; message: string }>(
+      '/api/service/build-restart',
+      { method: 'POST' },
+    );
+  }
+
+  fetchProviderHostConfigArchives(provider: ThreadDto['provider']) {
+    return this.requestJson<ProviderHostConfigArchiveDto[]>(
+      `/api/config/providers/${encodeURIComponent(provider)}/archives`,
+      { cache: 'no-store' },
+    );
+  }
+
+  createProviderHostConfigArchive(
+    provider: ThreadDto['provider'],
+    input: CreateProviderHostConfigArchiveInput = {},
+  ) {
+    return this.requestJson<ProviderHostConfigArchiveDto>(
+      `/api/config/providers/${encodeURIComponent(provider)}/archives`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  renameProviderHostConfigArchive(
+    provider: ThreadDto['provider'],
+    id: string,
+    input: RenameProviderHostConfigArchiveInput,
+  ) {
+    return this.requestJson<ProviderHostConfigArchiveDto>(
+      `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
+  applyProviderHostConfigArchive(provider: ThreadDto['provider'], id: string) {
+    return this.requestJson<ApplyProviderHostConfigArchiveResultDto>(
+      `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}/apply`,
+      { method: 'POST' },
     );
   }
 

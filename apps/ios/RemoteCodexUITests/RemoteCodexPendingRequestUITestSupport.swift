@@ -99,7 +99,7 @@ extension RemoteCodexUITests {
             baseURL: baseURL,
             thread: approvalThread,
             expectedTitle: "Command approval required",
-            optionIdentifier: "thread-pending-request-option-approval-Allow",
+            optionIdentifier: "Allow",
             completionText: "IOS_PENDING_APPROVAL_RESOLVED"
         )
 
@@ -108,7 +108,7 @@ extension RemoteCodexUITests {
         try await submitPendingRequestInUI(
             baseURL: baseURL,
             thread: questionThread,
-            optionIdentifier: "thread-pending-request-option-question-1-Detailed",
+            optionIdentifier: "Detailed",
             completionText: "IOS_PENDING_QUESTION_RESOLVED"
         )
 
@@ -162,8 +162,8 @@ extension RemoteCodexUITests {
     ) async throws {
         let app = launchLiveThreadApp(baseURL: baseURL, thread: thread)
         focusPendingRequests(in: app)
-        XCTAssertTrue(tapElement(app.descendants(matching: .any)[optionIdentifier], in: app, maxSwipes: 10))
-        XCTAssertTrue(tapElement(app.buttons["Submit Response"], in: app, maxSwipes: 4))
+        XCTAssertTrue(tapElement(app.buttons[optionIdentifier], in: app, maxSwipes: 10))
+        XCTAssertTrue(tapElement(app.buttons["Submit"], in: app, maxSwipes: 4))
         try await Self.waitForNoLivePendingRequests(baseURL: baseURL, threadId: thread.id)
         try await Self.waitForLiveThreadText(baseURL: baseURL, threadId: thread.id, text: completionText)
         app.terminate()
@@ -173,7 +173,7 @@ extension RemoteCodexUITests {
     private func submitPlanDecisionInUI(baseURL: URL, thread: LiveThread) async throws {
         let app = launchLiveThreadApp(baseURL: baseURL, thread: thread)
         focusPendingRequests(in: app)
-        let planOption = app.descendants(matching: .any)["thread-pending-request-option-plan-decision-Stay-in-plan-mode"]
+        let planOption = app.buttons["Stay in plan mode"]
         XCTAssertTrue(tapElement(planOption, in: app, maxSwipes: 10))
         try await Self.waitForNoLivePendingRequests(baseURL: baseURL, threadId: thread.id)
         app.terminate()
