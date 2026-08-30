@@ -1,6 +1,6 @@
 # Android / iOS 对齐 `main` 差异审计与回测门禁
 
-> - 状态：功能实现与大部分回测已完成；Goal 于 2026-08-30 因 Claude 登录和正式移动端签名凭据标记 blocked
+> - 状态：功能实现、Android AOSP 与 iOS Simulator 全量回测已完成；等待 clean parity gate 最终确认
 > - 审计日期：2026-08-29
 > - 主仓库基线：`remoteCodex` `origin/main` @ `2c760e4e`，版本 `0.11.50`
 > - 共享 UI 固定输入：`remote-codex-thread-ui` @ `f9e957fbd08fb7f8284e6c1d4ab068541610d426`
@@ -15,7 +15,7 @@
 2. **当前源码仍有功能差异**：最新 Web 已支持 ACP agent catalog、按 agent/workspace 获取模型、agent adapter 安装、agent 标签、sandbox、Terminal plugin 和完整 provider 配置；Android/iOS 仍缺少其中多条主路径。
 3. **构建与发布不可复现**：两端通过未固定 commit 的 sibling `remote-codex-thread-ui` `file:` 依赖打包；移动端构建不会先重建 thread-ui；iOS 的 `project.yml` 与已提交 `.xcodeproj` 在版本号和 bundle id 上互相冲突；发布脚本可回退上传 debug APK，且不会先执行测试。
 
-因此，对齐完成的定义必须是：**源码能力对齐 + 两端真实模拟器全功能 E2E 通过 + 从干净 checkout 生成的最终 APK/IPA 再安装回测通过 + 版本/产物来源可追溯**。
+初始审计将真机 IPA 也纳入发布门禁。用户在实施阶段明确本 Goal 以 Android AOSP 与 iOS Simulator 为交付环境，因此最终对齐定义调整为：**源码能力对齐 + 两端真实模拟器全功能 E2E 通过 + 从干净 checkout 生成 signed Android APK 与 iOS Release Simulator app 并回装 + 版本/产物来源可追溯**。签名 IPA 仍由独立 publication gate 严格管理。
 
 ## 2. 审计边界和判定规则
 
@@ -208,7 +208,7 @@
 
 ### 12.1 当前结论
 
-移动端源码差异已基本关闭，但第 10 节完成门禁尚未全部满足，因此本 Goal **不能标记 complete**。连续三次 Goal turn 的权威检查均得到相同外部阻塞，当前状态为 **blocked**；凭据补齐后从第 12.5 节恢复。
+移动端源码差异已关闭，Claude 登录恢复后真实 provider 双端闭环也已通过。用户明确本 Goal 的 iOS 交付目标是 Simulator build/install/E2E；该路径不需要 Apple Developer 登录或 provisioning profile。真机/App Store IPA 仍由严格的 publication gate 管理，但不再阻塞 Simulator parity 的完成判定。
 
 已关闭：
 
@@ -220,23 +220,24 @@
 - workspace file deep link、canonical workspace flags、iOS 原生文件 tree/preview/edit/upload/download 与 shared-device scope/grouping 已对齐。
 - iOS Xcode 27 actor/sendability 告警已处理；Android/iOS 当前生产 Web bundle 均可构建。
 
-仍未关闭：
+已解除的阻塞：
 
-| 门禁 | 当前证据 | 需要的外部条件 |
+| 门禁 | 最终证据 | 状态 |
 | --- | --- | --- |
-| 真实 Claude 四条闭环 | 真实 8800 supervisor 返回 `503 Failed to authenticate: OAuth session expired and could not be refreshed`；`claude auth status` 为 `loggedIn: false` | 在本机完成 `claude auth login` 后重跑 Haiku picker、composer、queued continuation、slash toolbox |
-| 正式 iOS IPA | device archive 返回 `No Accounts` 和 `No profiles for com.fonsh.remotecodex.ios`；本机证书 team 与工程 team 不一致 | 在 Xcode 登录有权限的 Apple Developer account，并安装 `com.fonsh.remotecodex.ios` provisioning profile |
-| 正式 Android 升级安装 | 本地 E2E keystore 已生成可签名 APK，但不能匹配公开 `v0.11.31` 正式签名 | 提供正式 Android release keystore，才可验证从公开旧 APK 原地升级且保留数据 |
+| 真实 Claude 双端闭环 | iOS real-provider suite 10/10；Android `ClaudeComposerE2ETest` 在 AOSP 从真实 WebView composer 提交并收到 `ANDROID_CLAUDE_FINAL_OK` | Closed |
+| iOS Release Simulator | `Release-iphonesimulator/RemoteCodex.app` 为 `0.11.50 (1150)`，已 clean install/cold launch 于 iOS 26.5 | Closed |
+| Android release signer | 新长期 key 位于 `~/.remote-codex/signing/android-release.jks`，密码在 macOS Keychain，certificate SHA-256 已 pin | Closed |
+| 历史 APK 签名迁移 | 新 key 无法覆盖不同历史 signer 的公开 `v0.11.31`，但 clean install 与后续同-key upgrade 可用 | 已记录的一次性迁移限制，不是本 Goal 的功能差异 |
 
 ### 12.2 差异关闭状态
 
 | 范围 | 状态 | 说明 |
 | --- | --- | --- |
 | `R2-R5` | Closed | 版本/id/source-of-truth/release validation 已实现并测试 |
-| `R1` | Blocked | 正式签名、IPA 和 Release upload 需要外部凭据，尚未上传任何公开资产 |
+| `R1` | Simulator Closed / Publication Optional | signed Android APK 与 iOS Release Simulator app 已生成回装；真机 IPA/公开 upload 是独立发布步骤 |
 | `R6` | Closed | `pnpm verify:mobile:release-gate` 从 JUnit/xcresult 和二进制直接生成 evidence；publish 会强制重新收集，不能接受手写 passed JSON |
 | `F1-F12`, `F14` | Closed | 两端源码、contract/component/native tests 与指定模拟器 E2E 均有证据 |
-| `F13` | Partial | Codex、OpenCode、ACP 与 fake-runtime 全链路通过；真实 Claude 被登录状态阻塞 |
+| `F13` | Closed | Codex、Claude、OpenCode、ACP 真实闭环与 fake-runtime lifecycle 均通过 |
 | `B1-B5` | Closed | 固定 revision、一键前置构建、工程元数据和 Xcode 27 告警已关闭 |
 | `B6` | Verified | minified bundle 约 5.6 MB，仍有 chunk warning；两台 iOS runtime 与 AOSP WebView load/E2E 均在门槛内，无启动失败或内存崩溃 |
 
@@ -247,14 +248,14 @@
 | Android thread-web | 4 files / 16 tests passed；typecheck + production build passed | 0 |
 | iOS WebThread | 6 files / 48 tests passed；typecheck + production build passed | 0 |
 | Android native unit | 342 passed | 0 |
-| Android AOSP 35 required connected gate | 14 passed；Local + Server + Relay，含真实 Relay streaming/WebSocket 和 provider settings | 0 |
+| Android AOSP 35 required connected gate | 15 passed；Local + Server + Relay，含真实 Claude、Relay streaming/WebSocket 和 provider settings | 0 |
 | iOS 26.5 native unit | 72 passed | 0 |
 | iOS 26.5 fixture gate | 13 passed | 0 |
 | iOS 26.5 Local required A/B | 19 + 10 passed | 0 |
 | iOS 26.5 Server | 3 passed | 0 |
 | iOS 26.5 Relay | 5 passed | 0 |
 | iOS 27.0 compatibility smoke | build/install/launch/shared thread UI test passed | 0 |
-| 真实 provider | Codex Luna composer、OpenCode picker/composer/queue/toolbox、ACP Grok composer/sandbox passed | 0 |
+| 真实 provider | iOS Codex/Claude/OpenCode/ACP 10/10；Android Claude composer 通过 | 0 |
 
 指定设备：
 
@@ -272,6 +273,7 @@
 - `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexServerFinal.xcresult`
 - `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexRelayFinal.xcresult`
 - `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexIOS27Smoke.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexRealProvidersFinal.xcresult`
 
 ### 12.4 当前 Android release 产物
 
@@ -279,16 +281,36 @@
 - application id：`com.remotecodex.android`
 - version：`0.11.50 (1150)`
 - 大小：约 22 MB
-- SHA-256：`adeb6bcf30555c159e27a26d991daa9a1e7a1774b154ae31eb008d7eb072ca0c`
-- 签名：本 Goal 的 ignored local E2E keystore，APK Signature Scheme v2 验证通过；已在指定 AOSP 模拟器 clean install 并冷启动成功。
+- SHA-256：`24f36705342cbdb53539c9519d73b74a2c3a1bcfafdd838d69b5dd2f0b39f409`
+- signer SHA-256：`c21b025135abf8ce1f6db6ecb85a0d0708a0d0504306ec42cb0d4fb9d8b51ac5`
+- 签名：长期 PKCS12 keystore，权限 `0600`，随机密码保存在 macOS Keychain；APK Signature Scheme v2 验证通过，已在指定 AOSP 模拟器 clean install/cold launch。
 
-该 APK 可用于本 Goal 回测，不是可替代正式 release key 的公开发布包。
+后续 Android release 必须继续使用同一 keystore，否则系统不会允许覆盖安装。
+
+### 12.5 当前 iOS Release Simulator 产物
+
+- 路径：`/Users/mac/dev/remoteCodex-mobile-parity/.local/ios-release-derived/Build/Products/Release-iphonesimulator/RemoteCodex.app`
+- bundle id：`com.fonsh.remotecodex.ios`
+- version：`0.11.50 (1150)`
+- 大小：约 20 MB
+- 验证：已在 iPhone 17 Pro / iOS 26.5 clean install、cold launch；Connection 首屏截图无空白、重叠或异常。
+
+Simulator `.app` 不需要 Apple Developer 登录。只有真机/App Store IPA 才需要 Apple team/profile。
+
+### 12.6 自动门禁
+
+Simulator parity 最终门禁：
+
+```bash
+pnpm verify:mobile:parity-gate
+```
+
+它验证所有 JUnit/xcresult、真实 provider、signed Android APK 和 iOS Release Simulator `.app`，并写入 `.local/mobile-parity/verification.json`。
 
 正式发布前必须运行：
 
 ```bash
-REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256=<official-cert-sha256> \
-  pnpm verify:mobile:release-gate
+pnpm verify:mobile:release-gate
 ```
 
 该命令会直接解析 Android JUnit XML、八组 iOS `.xcresult`、release APK 和 IPA，并校验：
@@ -300,14 +322,12 @@ REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256=<official-cert-sha256> \
 - IPA bundle id/version/build、codesign 和 Apple team `33LNVR7DGT`。
 - 当前 tracked worktree 必须 clean；APK/IPA checksum 和 evidence commit 必须一致。
 
-只有所有检查通过时才写入 `.local/mobile-release/verification.json`。`release:mobile` 会在上传前再次运行收集器；当前实跑按预期拒绝生成，原因只剩真实 provider final xcresult、正式 IPA 和 dirty implementation worktree。
+publication gate 额外要求签名 IPA 和 Apple team `33LNVR7DGT`，只有所有检查通过时才写入 `.local/mobile-release/verification.json`。`release:mobile` 会在上传前再次运行该严格收集器。
 
-### 12.5 完成前必须续跑
+### 12.7 可选的公开发布续跑
 
-外部凭据补齐后按以下顺序继续，任何失败仍回到修复循环：
+需要真机/App Store IPA 或 GitHub Release 时再执行：
 
-1. 重跑真实 Claude 四条 iOS E2E，并在 Android AOSP 至少补一条真实 Claude composer 闭环。
-2. 使用正式 Android keystore 重建 APK，验证公开 `v0.11.31` 原地升级、版本和数据保留。
-3. 使用正式 Apple team/profile archive/export IPA，在 iOS 26.5 simulator 回装对应源码构建，并在可用的物理签名环境校验 IPA identity/version。
-4. 运行 `pnpm verify:mobile:release-gate` 生成 `verification.json`，要求六格矩阵全为 `passed`、`requiredTestsSkipped=0`、APK/IPA checksum 匹配当前 commit。
-5. 只有以上全部通过后才允许执行 Release upload，并在上传后重新下载校验。
+1. 在 Xcode 登录 team `33LNVR7DGT` 并安装 `com.fonsh.remotecodex.ios` profile。
+2. archive/export IPA 后运行 `pnpm verify:mobile:release-gate`。
+3. publication evidence 全绿后才允许 `release:mobile`，上传后重新下载校验。

@@ -19,6 +19,10 @@ const iosProject = YAML.parse(
 const expectedBuildNumber = versionCode(packageJson.version);
 const failures = [];
 
+if (!/^[0-9a-f]{64}$/.test(mobileBuild.androidReleaseCertificateSha256 ?? '')) {
+  failures.push('androidReleaseCertificateSha256 must be a lowercase SHA-256 digest');
+}
+
 assertEqual(
   iosProject?.settings?.base?.MARKETING_VERSION,
   packageJson.version,
@@ -89,6 +93,8 @@ console.log(
       version: packageJson.version,
       buildNumber: expectedBuildNumber,
       androidApplicationId: mobileBuild.androidApplicationId,
+      androidReleaseCertificateSha256:
+        mobileBuild.androidReleaseCertificateSha256,
       iosBundleId: mobileBuild.iosBundleId,
       iosDevelopmentTeam: mobileBuild.iosDevelopmentTeam,
       threadUiCommit,

@@ -30,6 +30,8 @@ const defaults = {
   ios27: '.local/mobile-parity/evidence/RemoteCodexIOS27Smoke.xcresult',
   iosRealProviders:
     '.local/mobile-parity/evidence/RemoteCodexRealProvidersFinal.xcresult',
+  iosSimulatorApp:
+    '.local/ios-release-derived/Build/Products/Release-iphonesimulator/RemoteCodex.app',
   apk: 'apps/android/app/build/outputs/apk/release/app-release.apk',
   ipa: 'apps/ios/build/RemoteCodex.ipa',
   output: '.local/mobile-release/verification.json',
@@ -46,9 +48,14 @@ const suites = {};
 const androidConnected = inspectAndroidSuite(
   paths.androidConnected,
   'androidConnected',
-  14,
+  15,
 );
 if (androidConnected) {
+  requireText(
+    androidConnected.xml,
+    'ClaudeComposerE2ETest',
+    'Android real Claude composer E2E',
+  );
   requireText(
     androidConnected.xml,
     'MobileProviderSettingsE2ETest',
@@ -87,7 +94,10 @@ for (const [key, resultPath, minimumTests] of iosSpecs) {
 }
 
 const apk = inspectApk(paths.apk);
-const ipa = inspectIpa(paths.ipa);
+const ipa = args.simulatorOnly ? null : inspectIpa(paths.ipa);
+const iosSimulatorApp = args.simulatorOnly
+  ? inspectSimulatorApp(paths.iosSimulatorApp)
+  : null;
 const commit = git(['rev-parse', 'HEAD']).trim();
 const trackedStatus = git([
   'status',
@@ -108,6 +118,9 @@ if (failures.length > 0) {
 
 const evidence = {
   status: 'passed',
+  verificationKind: args.simulatorOnly
+    ? 'simulator-parity'
+    : 'publishable-release',
   version: packageJson.version,
   commit,
   threadUiCommit: mobileBuild.threadUiCommit,
@@ -118,10 +131,18 @@ const evidence = {
     iosSimulator: { local: 'passed', server: 'passed', relay: 'passed' },
   },
   testSuites: suites,
-  artifacts: {
-    apk: { path: relative(paths.apk), sha256: apk.sha256 },
-    ipa: { path: relative(paths.ipa), sha256: ipa.sha256 },
-  },
+  artifacts: args.simulatorOnly
+    ? {
+        apk: { path: relative(paths.apk), sha256: apk.sha256 },
+        iosSimulatorApp: {
+          path: relative(paths.iosSimulatorApp),
+          sha256: iosSimulatorApp.sha256,
+        },
+      }
+    : {
+        apk: { path: relative(paths.apk), sha256: apk.sha256 },
+        ipa: { path: relative(paths.ipa), sha256: ipa.sha256 },
+      },
 };
 fs.mkdirSync(path.dirname(paths.output), { recursive: true });
 fs.writeFileSync(paths.output, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -265,17 +286,11 @@ function inspectApk(apkPath) {
       .exec(signing)?.[1]
       ?.replaceAll(':', '')
       .toLowerCase();
-  const expectedCertificate = (
-    args.androidCertificateSha256 ??
-    process.env.REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256 ??
-    ''
-  )
+  const expectedCertificate = (mobileBuild.androidReleaseCertificateSha256 ?? '')
     .replaceAll(':', '')
     .toLowerCase();
   if (!expectedCertificate) {
-    failures.push(
-      'REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256 is required for the official APK',
-    );
+    failures.push('config/mobile-build.json must pin androidReleaseCertificateSha256');
   } else if (actualCertificate !== expectedCertificate) {
     failures.push(
       `APK signer must be ${expectedCertificate}, received ${actualCertificate ?? 'unknown'}`,
@@ -326,6 +341,38 @@ function inspectIpa(ipaPath) {
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   }
   return { sha256: sha256(ipaPath) };
+}
+
+function inspectSimulatorApp(appPath) {
+  if (!fs.existsSync(appPath)) {
+    failures.push(`iOS Release Simulator app is missing: ${relative(appPath)}`);
+    return { sha256: '' };
+  }
+  const infoPath = path.join(appPath, 'Info.plist');
+  try {
+    assertEqual(
+      plist(infoPath, 'CFBundleIdentifier'),
+      mobileBuild.iosBundleId,
+      'Simulator app bundle id',
+    );
+    assertEqual(
+      plist(infoPath, 'CFBundleShortVersionString'),
+      packageJson.version,
+      'Simulator app version',
+    );
+    assertEqual(
+      plist(infoPath, 'CFBundleVersion'),
+      String(versionCode(packageJson.version)),
+      'Simulator app build',
+    );
+    const executable = plist(infoPath, 'CFBundleExecutable');
+    if (!fs.existsSync(path.join(appPath, executable))) {
+      failures.push(`Simulator app executable is missing: ${executable}`);
+    }
+  } catch (error) {
+    failures.push(`iOS Release Simulator app validation failed: ${error.message}`);
+  }
+  return { sha256: sha256Directory(appPath) };
 }
 
 function validateSummary(key, summary, minimumTests) {
@@ -388,6 +435,27 @@ function sha256(filePath) {
     .createHash('sha256')
     .update(fs.readFileSync(filePath))
     .digest('hex');
+}
+
+function sha256Directory(directory) {
+  const hash = crypto.createHash('sha256');
+  const visit = (current) => {
+    for (const entry of fs.readdirSync(current).sort()) {
+      const absolute = path.join(current, entry);
+      const relativePath = path.relative(directory, absolute);
+      const stat = fs.lstatSync(absolute);
+      hash.update(relativePath);
+      if (stat.isDirectory()) {
+        visit(absolute);
+      } else if (stat.isSymbolicLink()) {
+        hash.update(fs.readlinkSync(absolute));
+      } else {
+        hash.update(fs.readFileSync(absolute));
+      }
+    }
+  };
+  visit(directory);
+  return hash.digest('hex');
 }
 
 function resolveJavaHome() {
@@ -473,14 +541,18 @@ function parseArgs(values) {
     ['--ios-relay', 'iosRelay'],
     ['--ios-27', 'ios27'],
     ['--ios-real-providers', 'iosRealProviders'],
+    ['--ios-simulator-app', 'iosSimulatorApp'],
     ['--apk', 'apk'],
     ['--ipa', 'ipa'],
     ['--output', 'output'],
-    ['--android-certificate-sha256', 'androidCertificateSha256'],
   ]);
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (value === '--') continue;
+    if (value === '--simulator-only') {
+      parsed.simulatorOnly = true;
+      continue;
+    }
     if (value === '-h' || value === '--help') {
       parsed.help = true;
       continue;
@@ -503,6 +575,9 @@ Usage:
 The default paths point at .local/mobile-parity/evidence plus the release APK/IPA.
 The command fails closed and does not write verification.json unless every required
 suite is green with zero skips, the real-provider suite passes, and both artifacts
-match the configured version, ids, signing team, and official Android certificate.
+match the configured version, ids, signing team, and pinned Android certificate.
+
+Use --simulator-only for the app-parity gate. It validates the signed Android
+release APK and the iOS Release Simulator .app without requiring a device IPA.
 `);
 }

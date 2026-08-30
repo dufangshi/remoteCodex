@@ -278,7 +278,7 @@ The uploaded asset names are stable:
   remote-codex-mobile-manifest.json
 
 Before upload, the command regenerates verification evidence from the persisted
-JUnit/xcresult suites and validates both signed artifacts. Set
-REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256 to the official APK certificate digest.
+JUnit/xcresult suites and validates both signed artifacts against the certificate
+and Apple team pinned in config/mobile-build.json.
 `);
 }
