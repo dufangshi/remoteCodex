@@ -361,9 +361,7 @@ describe('RelayDevicesPage', () => {
 
     await screen.findByText('Token created for Studio Mac');
     fireEvent.click(screen.getByRole('button', { name: 'Copy setup' }));
-    fireEvent.click(
-      screen.getByRole('menuitem', { name: 'macOS & Linux' }),
-    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'macOS & Linux' }));
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -601,7 +599,6 @@ describe('RelayDevicesPage', () => {
   });
 
   it('manages sessions shared by the current relay account', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage(
       [],
       [],
@@ -654,12 +651,82 @@ describe('RelayDevicesPage', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    expect(
+      screen.getByRole('dialog', { name: 'Revoke shared thread access' }),
+    ).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalledWith(
+      '/relay/shares/share-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke access' }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         '/relay/shares/share-1',
         expect.objectContaining({
           method: 'DELETE',
         }),
+      );
+    });
+  });
+
+  it('uses the device as the grant title and describes thread-scoped access', async () => {
+    renderPage([], [], [], {
+      grantsByMe: [
+        {
+          ...sharedDeviceGrant,
+          id: 'grant-thread-1',
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+          scope: 'thread',
+          threadId: 'thread-shared',
+          threadTitle: 'Investigate relay setup',
+          workspaceId: 'workspace-1',
+          workspaceLabel: 'remoteCodex',
+        },
+      ],
+    });
+
+    const section = screen
+      .getByRole('heading', { name: 'Shared devices by me' })
+      .closest('section');
+    expect(section).not.toBeNull();
+    const scoped = within(section!);
+    expect(await scoped.findByText('Owner Mac')).toBeInTheDocument();
+    expect(scoped.getByText('remoteCodex')).toBeInTheDocument();
+    expect(scoped.getByText('Investigate relay setup')).toBeInTheDocument();
+    expect(scoped.queryByText('Device: Owner Mac')).not.toBeInTheDocument();
+  });
+
+  it('shows whole-device scope and confirms grant revocation in the app dialog', async () => {
+    renderPage([], [], [], {
+      grantsByMe: [
+        {
+          ...sharedDeviceGrant,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Entire device')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    expect(
+      screen.getByRole('dialog', { name: 'Revoke shared device access' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Scope: entire device/)).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalledWith(
+      '/relay/grants/grant-device-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke access' }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/relay/grants/grant-device-1',
+        expect.objectContaining({ method: 'DELETE' }),
       );
     });
   });

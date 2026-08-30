@@ -35,6 +35,7 @@ import {
   updateRelayShare,
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
@@ -178,6 +179,11 @@ export function RelayDevicesPage() {
   const [editingGrant, setEditingGrant] = useState<RelayAccessGrantDto | null>(
     null,
   );
+  const [revokeTarget, setRevokeTarget] = useState<
+    | { kind: 'grant'; grant: RelayAccessGrantDto }
+    | { kind: 'share'; share: RelaySessionShareDto }
+    | null
+  >(null);
   const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(
     null,
   );
@@ -365,16 +371,12 @@ export function RelayDevicesPage() {
   }
 
   async function revokeAccessGrant(grant: RelayAccessGrantDto) {
-    if (
-      !window.confirm(`Remove sharing access for "${grantTitleText(grant)}"?`)
-    ) {
-      return;
-    }
     setBusy(`grant:${grant.id}`);
     setError(null);
     try {
       await revokeRelayGrant(grant.id);
       setExpandedGrantId((current) => (current === grant.id ? null : current));
+      setRevokeTarget(null);
       await load({ showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to remove shared access.'));
@@ -409,16 +411,12 @@ export function RelayDevicesPage() {
   }
 
   async function revokeSharedSession(share: RelaySessionShareDto) {
-    if (
-      !window.confirm(`Remove sharing access for "${shareTitleText(share)}"?`)
-    ) {
-      return;
-    }
     setBusy(`share:${share.id}`);
     setError(null);
     try {
       await revokeRelayShare(share.id);
       setExpandedShareId((current) => (current === share.id ? null : current));
+      setRevokeTarget(null);
       await load({ showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to remove shared thread access.'));
@@ -593,7 +591,7 @@ export function RelayDevicesPage() {
                   mode="outgoing"
                   onOpen={() => openSharedGrant(grant)}
                   onEdit={() => setEditingGrant(grant)}
-                  onRevoke={() => void revokeAccessGrant(grant)}
+                  onRevoke={() => setRevokeTarget({ kind: 'grant', grant })}
                   onToggleAccess={() => {
                     setExpandedGrantId((current) =>
                       current === grant.id ? null : grant.id,
@@ -620,7 +618,7 @@ export function RelayDevicesPage() {
                   share={share}
                   onOpen={() => openSharedSession(share)}
                   onEdit={() => setEditingShare(share)}
-                  onRevoke={() => void revokeSharedSession(share)}
+                  onRevoke={() => setRevokeTarget({ kind: 'share', share })}
                   onToggleAccess={() => {
                     setExpandedShareId((current) =>
                       current === share.id ? null : share.id,
@@ -665,6 +663,31 @@ export function RelayDevicesPage() {
           onShare={(input) => void createDeviceGrant(sharingDevice, input)}
         />
       ) : null}
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        title={
+          revokeTarget?.kind === 'grant'
+            ? 'Revoke shared device access'
+            : 'Revoke shared thread access'
+        }
+        description={revokeTarget ? revokeDescription(revokeTarget) : ''}
+        confirmLabel="Revoke access"
+        busyLabel="Revoking..."
+        busy={revokeTargetBusy(revokeTarget, busy)}
+        onCancel={() => {
+          if (!revokeTargetBusy(revokeTarget, busy)) {
+            setRevokeTarget(null);
+          }
+        }}
+        onConfirm={() => {
+          if (!revokeTarget) {
+            return;
+          }
+          return revokeTarget.kind === 'grant'
+            ? revokeAccessGrant(revokeTarget.grant)
+            : revokeSharedSession(revokeTarget.share);
+        }}
+      />
     </main>
   );
 }
@@ -1017,14 +1040,8 @@ function GrantRow({
   const title = grantTitleText(grant);
   const scopeLabel = grantScopeLabel(grant);
   const workspaceLabel =
-    grant.workspaceLabel?.trim() ||
-    (grant.scope === 'device' ? 'All workspaces' : 'Workspace unavailable');
-  const threadLabel =
-    grant.scope === 'thread'
-      ? (stableGrantThreadTitle(grant) ?? 'Thread unavailable')
-      : grant.scope === 'workspace'
-        ? 'Workspace access'
-        : 'Whole device';
+    grant.workspaceLabel?.trim() || 'Workspace unavailable';
+  const threadLabel = stableGrantThreadTitle(grant) ?? 'Thread unavailable';
   const label = grant.label?.trim() || null;
   const lastAccessLabel = grant.lastAccessedAt
     ? `${grant.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(grant.lastAccessedAt)}`
@@ -1043,16 +1060,38 @@ function GrantRow({
             </span>
           </div>
           <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
-            <p className="truncate">
-              Workspace:{' '}
-              <span className="text-[var(--theme-fg-soft)]">
-                {workspaceLabel}
-              </span>
-            </p>
-            <p className="truncate">
-              {grant.scope === 'thread' ? 'Thread' : 'Access'}:{' '}
-              <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
-            </p>
+            {grant.scope === 'device' ? (
+              <p className="truncate">
+                Scope:{' '}
+                <span className="text-[var(--theme-fg-soft)]">
+                  {deviceGrantScopeText(grant)}
+                </span>
+              </p>
+            ) : (
+              <>
+                <p className="truncate">
+                  Workspace:{' '}
+                  <span className="text-[var(--theme-fg-soft)]">
+                    {workspaceLabel}
+                  </span>
+                </p>
+                {grant.scope === 'thread' ? (
+                  <p className="truncate">
+                    Thread:{' '}
+                    <span className="text-[var(--theme-fg-soft)]">
+                      {threadLabel}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="truncate">
+                    Scope:{' '}
+                    <span className="text-[var(--theme-fg-soft)]">
+                      Entire workspace
+                    </span>
+                  </p>
+                )}
+              </>
+            )}
             {label ? (
               <p className="truncate">
                 Label:{' '}
@@ -1064,7 +1103,6 @@ function GrantRow({
                 ? `From ${grant.ownerUsername}`
                 : `To ${grant.targetUsername}`}
             </p>
-            <p className="truncate">Device: {grant.deviceName}</p>
           </div>
           {mode === 'outgoing' ? (
             <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
@@ -1993,17 +2031,52 @@ function stableShareThreadTitle(share: RelaySessionShareDto) {
 }
 
 function grantTitleText(grant: RelayAccessGrantDto) {
-  if (grant.scope === 'device') {
-    return grant.deviceName?.trim() || 'Shared device';
+  return grant.deviceName?.trim() || 'Shared device';
+}
+
+function deviceGrantScopeText(grant: RelayAccessGrantDto) {
+  if (grant.workspaceScope !== 'selected') {
+    return 'Entire device';
   }
-  if (grant.scope === 'workspace') {
-    return (
-      grant.workspaceLabel?.trim() ||
-      grant.deviceName?.trim() ||
-      'Shared workspace'
-    );
+  if (grant.workspaceLabel?.trim()) {
+    return `Selected workspace: ${grant.workspaceLabel.trim()}`;
   }
-  return stableGrantThreadTitle(grant) ?? 'Thread unavailable';
+  const count = grant.workspaceIds.length;
+  return `${count} selected workspace${count === 1 ? '' : 's'}`;
+}
+
+function revokeDescription(
+  target:
+    | { kind: 'grant'; grant: RelayAccessGrantDto }
+    | { kind: 'share'; share: RelaySessionShareDto },
+) {
+  if (target.kind === 'share') {
+    return `Revoke ${target.share.targetUsername}'s access to thread ${shareTitleText(target.share)}? Their shared link will stop working immediately.`;
+  }
+  const grant = target.grant;
+  const range =
+    grant.scope === 'thread'
+      ? `workspace ${grant.workspaceLabel?.trim() || 'unavailable'}, thread ${stableGrantThreadTitle(grant) ?? 'unavailable'}`
+      : grant.scope === 'workspace'
+        ? `workspace ${grant.workspaceLabel?.trim() || 'unavailable'}`
+        : deviceGrantScopeText(grant).toLowerCase();
+  return `Revoke ${grant.targetUsername}'s access to ${grantTitleText(grant)}? Scope: ${range}. Access will stop immediately.`;
+}
+
+function revokeTargetBusy(
+  target:
+    | { kind: 'grant'; grant: RelayAccessGrantDto }
+    | { kind: 'share'; share: RelaySessionShareDto }
+    | null,
+  busy: string | null,
+) {
+  if (!target) {
+    return false;
+  }
+  return (
+    busy ===
+    `${target.kind}:${target.kind === 'grant' ? target.grant.id : target.share.id}`
+  );
 }
 
 function stableGrantThreadTitle(grant: RelayAccessGrantDto) {
