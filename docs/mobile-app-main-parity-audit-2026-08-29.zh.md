@@ -1,9 +1,9 @@
 # Android / iOS 对齐 `main` 差异审计与回测门禁
 
-> - 状态：审计基线已冻结；实施与回测证据将在本 Goal 完成前更新到本文
+> - 状态：功能实现与大部分回测已完成；Goal 因 Claude 登录和正式移动端签名凭据保持 open
 > - 审计日期：2026-08-29
-> - 主仓库基线：`remoteCodex` `origin/main` @ `e1f9eabd`，版本 `0.11.50`
-> - 共享 UI 基线：`remote-codex-thread-ui` `origin/main` @ `34603b03`
+> - 主仓库基线：`remoteCodex` `origin/main` @ `2c760e4e`，版本 `0.11.50`
+> - 共享 UI 固定输入：`remote-codex-thread-ui` @ `f9e957fbd08fb7f8284e6c1d4ab068541610d426`
 > - 工作分支：`codex/mobile-app-parity`
 > - Worktree：`/Users/mac/dev/remoteCodex-mobile-parity`
 
@@ -195,7 +195,7 @@
 - 每次修复后重跑受影响单测、对应模式 E2E，最后再完整重跑六组矩阵；不得只重跑最初失败的单点后结束。
 - 最终报告列出设备/OS、app 版本、主仓库 commit、thread-ui commit、服务模式、workspace、thread id、model/effort/agent、sentinel、截图/日志路径和所有命令结果。
 
-## 11. 本阶段不做的事情
+## 11. 审计阶段的历史约束
 
 - 不修改 `apps/android`、`apps/ios`、supervisor 或外部 thread-ui 源码。
 - 不启动 Android/iOS 模拟器执行产品 E2E。
@@ -203,3 +203,92 @@
 - 不触碰当前已有 dirty worktree 中的用户改动。
 
 下一步由当前 Goal 按第 7 节开始实施；在第 10 节全部满足前不得宣称完成对齐。
+
+## 12. 2026-08-30 实施与验收进度
+
+### 12.1 当前结论
+
+移动端源码差异已基本关闭，但第 10 节完成门禁尚未全部满足，因此本 Goal **不能标记 complete**。
+
+已关闭：
+
+- Android/iOS 版本、build number、bundle/application id 与根版本统一为 `0.11.50 (1150)`。
+- thread-ui revision、构建输入、release asset 名称、checksum 与回测 evidence contract 已固定；禁止 debug APK fallback。
+- ACP agent catalog、adapter install、agent-scoped models、agent label、sandbox capability、真实 runtime status 已接入两端原生和 WebView。
+- Terminal builtin、server plugin adapter、Local/Server/selected-device Relay shell WebSocket、xterm 和 plugin enable/disable 已接入。
+- skills、MCP、hooks、provider config read/write、config archives、runtime install/update/restart/build-restart 已接入移动端设置面。
+- workspace file deep link、canonical workspace flags、iOS 原生文件 tree/preview/edit/upload/download 与 shared-device scope/grouping 已对齐。
+- iOS Xcode 27 actor/sendability 告警已处理；Android/iOS 当前生产 Web bundle 均可构建。
+
+仍未关闭：
+
+| 门禁 | 当前证据 | 需要的外部条件 |
+| --- | --- | --- |
+| 真实 Claude 四条闭环 | 真实 8800 supervisor 返回 `503 Failed to authenticate: OAuth session expired and could not be refreshed`；`claude auth status` 为 `loggedIn: false` | 在本机完成 `claude auth login` 后重跑 Haiku picker、composer、queued continuation、slash toolbox |
+| 正式 iOS IPA | device archive 返回 `No Accounts` 和 `No profiles for com.fonsh.remotecodex.ios`；本机证书 team 与工程 team 不一致 | 在 Xcode 登录有权限的 Apple Developer account，并安装 `com.fonsh.remotecodex.ios` provisioning profile |
+| 正式 Android 升级安装 | 本地 E2E keystore 已生成可签名 APK，但不能匹配公开 `v0.11.31` 正式签名 | 提供正式 Android release keystore，才可验证从公开旧 APK 原地升级且保留数据 |
+
+### 12.2 差异关闭状态
+
+| 范围 | 状态 | 说明 |
+| --- | --- | --- |
+| `R2-R5` | Closed | 版本/id/source-of-truth/release validation 已实现并测试 |
+| `R1`, `R6` | Blocked | 本地产物门禁已实现；正式签名、IPA 和 Release upload 需要外部凭据，尚未上传任何公开资产 |
+| `F1-F12`, `F14` | Closed | 两端源码、contract/component/native tests 与指定模拟器 E2E 均有证据 |
+| `F13` | Partial | Codex、OpenCode、ACP 与 fake-runtime 全链路通过；真实 Claude 被登录状态阻塞 |
+| `B1-B5` | Closed | 固定 revision、一键前置构建、工程元数据和 Xcode 27 告警已关闭 |
+| `B6` | Verified | minified bundle 约 5.6 MB，仍有 chunk warning；两台 iOS runtime 与 AOSP WebView load/E2E 均在门槛内，无启动失败或内存崩溃 |
+
+### 12.3 最终通过的回测证据
+
+| 层级 / 设备 | 结果 | skip |
+| --- | --- | --- |
+| Android thread-web | 4 files / 16 tests passed；typecheck + production build passed | 0 |
+| iOS WebThread | 6 files / 48 tests passed；typecheck + production build passed | 0 |
+| Android native unit | 342 passed | 0 |
+| Android AOSP 35 required connected gate | 14 passed；Local + Server + Relay，含真实 Relay streaming/WebSocket 和 provider settings | 0 |
+| iOS 26.5 native unit | 72 passed | 0 |
+| iOS 26.5 fixture gate | 13 passed | 0 |
+| iOS 26.5 Local required A/B | 19 + 10 passed | 0 |
+| iOS 26.5 Server | 3 passed | 0 |
+| iOS 26.5 Relay | 5 passed | 0 |
+| iOS 27.0 compatibility smoke | build/install/launch/shared thread UI test passed | 0 |
+| 真实 provider | Codex Luna composer、OpenCode picker/composer/queue/toolbox、ACP Grok composer/sandbox passed | 0 |
+
+指定设备：
+
+- Android：`cardverify_aosp35_root` / `emulator-5554` / Android 15 AOSP arm64。
+- iOS 主门禁：iPhone 17 Pro `B9E0BB3C-4FB0-4C86-A0E1-E578E1AFCBC9` / iOS 26.5。
+- iOS 兼容：iPhone 17 Pro `053902BA-2D76-4C4C-B540-FA34020EBF07` / iOS 27.0。
+
+持久化 evidence 位于：
+
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/android-connected-final.xml`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexUnitFinal.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexFixtureFinal.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexLocalFinalA.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexLocalFinalB.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexServerFinal.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexRelayFinal.xcresult`
+- `/Users/mac/dev/remoteCodex-mobile-parity/.local/mobile-parity/evidence/RemoteCodexIOS27Smoke.xcresult`
+
+### 12.4 当前 Android release 产物
+
+- 路径：`/Users/mac/dev/remoteCodex-mobile-parity/apps/android/app/build/outputs/apk/release/app-release.apk`
+- application id：`com.remotecodex.android`
+- version：`0.11.50 (1150)`
+- 大小：约 22 MB
+- SHA-256：`adeb6bcf30555c159e27a26d991daa9a1e7a1774b154ae31eb008d7eb072ca0c`
+- 签名：本 Goal 的 ignored local E2E keystore，APK Signature Scheme v2 验证通过；已在指定 AOSP 模拟器 clean install 并冷启动成功。
+
+该 APK 可用于本 Goal 回测，不是可替代正式 release key 的公开发布包。
+
+### 12.5 完成前必须续跑
+
+外部凭据补齐后按以下顺序继续，任何失败仍回到修复循环：
+
+1. 重跑真实 Claude 四条 iOS E2E，并在 Android AOSP 至少补一条真实 Claude composer 闭环。
+2. 使用正式 Android keystore 重建 APK，验证公开 `v0.11.31` 原地升级、版本和数据保留。
+3. 使用正式 Apple team/profile archive/export IPA，在 iOS 26.5 simulator 回装对应源码构建，并在可用的物理签名环境校验 IPA identity/version。
+4. 生成 `verification.json`，要求六格矩阵全为 `passed`、`requiredTestsSkipped=0`、APK/IPA checksum 匹配当前 commit。
+5. 只有以上全部通过后才允许执行 Release upload，并在上传后重新下载校验。
