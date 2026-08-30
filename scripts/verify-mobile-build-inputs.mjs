@@ -34,6 +34,11 @@ assertEqual(
   mobileBuild.iosBundleId,
   'project.yml PRODUCT_BUNDLE_IDENTIFIER',
 );
+assertEqual(
+  iosProject?.settings?.base?.DEVELOPMENT_TEAM,
+  mobileBuild.iosDevelopmentTeam,
+  'project.yml DEVELOPMENT_TEAM',
+);
 
 const threadUiCommit = git(threadUiDir, ['rev-parse', 'HEAD']);
 assertEqual(threadUiCommit, mobileBuild.threadUiCommit, 'thread-ui commit');
@@ -68,6 +73,11 @@ assertEqual(
   mobileBuild.iosBundleId,
   'Xcode PRODUCT_BUNDLE_IDENTIFIER',
 );
+assertEqual(
+  buildSettings.DEVELOPMENT_TEAM,
+  mobileBuild.iosDevelopmentTeam,
+  'Xcode DEVELOPMENT_TEAM',
+);
 
 if (failures.length > 0) {
   throw new Error(`Mobile build inputs are inconsistent:\n- ${failures.join('\n- ')}`);
@@ -80,6 +90,7 @@ console.log(
       buildNumber: expectedBuildNumber,
       androidApplicationId: mobileBuild.androidApplicationId,
       iosBundleId: mobileBuild.iosBundleId,
+      iosDevelopmentTeam: mobileBuild.iosDevelopmentTeam,
       threadUiCommit,
       threadUiDir,
       xcodeDeveloperDir,

@@ -65,6 +65,7 @@
     "verify:package": "node scripts/verify-package-install.mjs",
     "verify:relay": "node scripts/verify-relay-supervisor-smoke.mjs",
     "verify:mobile:inputs": "node scripts/verify-mobile-build-inputs.mjs",
+    "verify:mobile:release-gate": "node scripts/collect-mobile-verification-evidence.mjs",
     "build:windows-device-manager": "dotnet publish apps/windows-device-manager/RemoteCodex.DeviceManager.csproj -c Release -r win-x64 --self-contained true -o artifacts/windows-device-manager/win-x64",
     "db:migrate": "pnpm --filter @remote-codex/db db:migrate",
     "release:mobile": "node scripts/publish-mobile-release-assets.mjs",

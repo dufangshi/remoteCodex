@@ -233,7 +233,8 @@
 | 范围 | 状态 | 说明 |
 | --- | --- | --- |
 | `R2-R5` | Closed | 版本/id/source-of-truth/release validation 已实现并测试 |
-| `R1`, `R6` | Blocked | 本地产物门禁已实现；正式签名、IPA 和 Release upload 需要外部凭据，尚未上传任何公开资产 |
+| `R1` | Blocked | 正式签名、IPA 和 Release upload 需要外部凭据，尚未上传任何公开资产 |
+| `R6` | Closed | `pnpm verify:mobile:release-gate` 从 JUnit/xcresult 和二进制直接生成 evidence；publish 会强制重新收集，不能接受手写 passed JSON |
 | `F1-F12`, `F14` | Closed | 两端源码、contract/component/native tests 与指定模拟器 E2E 均有证据 |
 | `F13` | Partial | Codex、OpenCode、ACP 与 fake-runtime 全链路通过；真实 Claude 被登录状态阻塞 |
 | `B1-B5` | Closed | 固定 revision、一键前置构建、工程元数据和 Xcode 27 告警已关闭 |
@@ -283,6 +284,24 @@
 
 该 APK 可用于本 Goal 回测，不是可替代正式 release key 的公开发布包。
 
+正式发布前必须运行：
+
+```bash
+REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256=<official-cert-sha256> \
+  pnpm verify:mobile:release-gate
+```
+
+该命令会直接解析 Android JUnit XML、八组 iOS `.xcresult`、release APK 和 IPA，并校验：
+
+- 每组最小测试数、`failures=0`、`errors=0`、`skipped=0`。
+- Android Local/Server/Relay 必须存在对应的 required E2E class。
+- iOS Local A/B、Server、Relay、iOS 27 和真实 provider final suite 必须全部通过。
+- APK application id/version/build/signature 和官方 certificate SHA-256。
+- IPA bundle id/version/build、codesign 和 Apple team `33LNVR7DGT`。
+- 当前 tracked worktree 必须 clean；APK/IPA checksum 和 evidence commit 必须一致。
+
+只有所有检查通过时才写入 `.local/mobile-release/verification.json`。`release:mobile` 会在上传前再次运行收集器；当前实跑按预期拒绝生成，原因只剩真实 provider final xcresult、正式 IPA 和 dirty implementation worktree。
+
 ### 12.5 完成前必须续跑
 
 外部凭据补齐后按以下顺序继续，任何失败仍回到修复循环：
@@ -290,5 +309,5 @@
 1. 重跑真实 Claude 四条 iOS E2E，并在 Android AOSP 至少补一条真实 Claude composer 闭环。
 2. 使用正式 Android keystore 重建 APK，验证公开 `v0.11.31` 原地升级、版本和数据保留。
 3. 使用正式 Apple team/profile archive/export IPA，在 iOS 26.5 simulator 回装对应源码构建，并在可用的物理签名环境校验 IPA identity/version。
-4. 生成 `verification.json`，要求六格矩阵全为 `passed`、`requiredTestsSkipped=0`、APK/IPA checksum 匹配当前 commit。
+4. 运行 `pnpm verify:mobile:release-gate` 生成 `verification.json`，要求六格矩阵全为 `passed`、`requiredTestsSkipped=0`、APK/IPA checksum 匹配当前 commit。
 5. 只有以上全部通过后才允许执行 Release upload，并在上传后重新下载校验。

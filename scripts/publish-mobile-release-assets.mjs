@@ -49,6 +49,15 @@ const evidencePath = path.resolve(
   repoRoot,
   args.evidence ?? '.local/mobile-release/verification.json',
 );
+run('node', [
+  'scripts/collect-mobile-verification-evidence.mjs',
+  '--apk',
+  uploadApkPath,
+  '--ipa',
+  uploadIpaPath,
+  '--output',
+  evidencePath,
+]);
 const evidence = readAndValidateEvidence(evidencePath, {
   version: packageJson.version,
   commit,
@@ -267,5 +276,9 @@ The uploaded asset names are stable:
   remote-codex-android.apk
   RemoteCodex.ipa
   remote-codex-mobile-manifest.json
+
+Before upload, the command regenerates verification evidence from the persisted
+JUnit/xcresult suites and validates both signed artifacts. Set
+REMOTE_CODEX_ANDROID_RELEASE_CERT_SHA256 to the official APK certificate digest.
 `);
 }

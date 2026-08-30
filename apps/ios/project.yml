@@ -8,7 +8,7 @@ settings:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.11.50"
     CURRENT_PROJECT_VERSION: "1150"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: 33LNVR7DGT
 targets:
   RemoteCodex:
     type: application
