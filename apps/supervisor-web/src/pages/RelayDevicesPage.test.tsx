@@ -669,9 +669,16 @@ describe('RelayDevicesPage', () => {
     });
   });
 
-  it('uses the device as the grant title and describes thread-scoped access', async () => {
+  it('groups multiple grant scopes under one device card', async () => {
     renderPage([], [], [], {
       grantsByMe: [
+        {
+          ...sharedDeviceGrant,
+          ownerUserId: 'user-1',
+          ownerUsername: 'user',
+          targetUserId: 'friend-1',
+          targetUsername: 'friend',
+        },
         {
           ...sharedDeviceGrant,
           id: 'grant-thread-1',
@@ -693,9 +700,13 @@ describe('RelayDevicesPage', () => {
       .closest('section');
     expect(section).not.toBeNull();
     const scoped = within(section!);
-    expect(await scoped.findByText('Owner Mac')).toBeInTheDocument();
+    expect(await scoped.findAllByText('Owner Mac')).toHaveLength(1);
+    expect(scoped.getAllByRole('article')).toHaveLength(1);
+    expect(scoped.getByText('2 shares')).toBeInTheDocument();
+    expect(scoped.getByText('Entire device')).toBeInTheDocument();
     expect(scoped.getByText('remoteCodex')).toBeInTheDocument();
     expect(scoped.getByText('Investigate relay setup')).toBeInTheDocument();
+    expect(scoped.getAllByRole('button', { name: 'Revoke' })).toHaveLength(2);
     expect(scoped.queryByText('Device: Owner Mac')).not.toBeInTheDocument();
   });
 

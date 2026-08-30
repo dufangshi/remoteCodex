@@ -557,42 +557,44 @@ export function RelayDevicesPage() {
             />
 
             <GrantSection
-              count={sharedDevicesWithMe.length}
               emptyText="No devices have been shared with this account yet."
               grants={sharedDevicesWithMe}
               loading={loading}
               loadingText="Loading shared devices..."
               title="Shared devices"
               subtitle="Devices another relay user has shared with this account."
-              renderGrant={(grant) => (
-                <GrantRow
-                  key={grant.id}
-                  grant={grant}
+              renderDevice={(group) => (
+                <GrantDeviceCard
+                  key={group.deviceId}
+                  grants={group.grants}
                   mode="incoming"
-                  onOpen={() => openSharedGrant(grant)}
+                  onOpen={openSharedGrant}
                 />
               )}
             />
 
             <GrantSection
-              count={outgoingGrants.length}
               emptyText="No devices have been shared by this account yet."
               grants={outgoingGrants}
               loading={loading}
               loadingText="Loading shared devices..."
               title="Shared devices by me"
               subtitle="Devices this relay account has shared with other users."
-              renderGrant={(grant) => (
-                <GrantRow
-                  busy={busy === `grant:${grant.id}`}
-                  expanded={expandedGrantId === grant.id}
-                  key={grant.id}
-                  grant={grant}
+              renderDevice={(group) => (
+                <GrantDeviceCard
+                  busyGrantId={
+                    busy?.startsWith('grant:') ? busy.slice(6) : null
+                  }
+                  expandedGrantId={expandedGrantId}
+                  key={group.deviceId}
+                  grants={group.grants}
                   mode="outgoing"
-                  onOpen={() => openSharedGrant(grant)}
-                  onEdit={() => setEditingGrant(grant)}
-                  onRevoke={() => setRevokeTarget({ kind: 'grant', grant })}
-                  onToggleAccess={() => {
+                  onOpen={openSharedGrant}
+                  onEdit={setEditingGrant}
+                  onRevoke={(grant) =>
+                    setRevokeTarget({ kind: 'grant', grant })
+                  }
+                  onToggleAccess={(grant) => {
                     setExpandedGrantId((current) =>
                       current === grant.id ? null : grant.id,
                     );
@@ -816,25 +818,57 @@ function ShareSection({
   );
 }
 
+interface GrantDeviceGroup {
+  deviceId: string;
+  grants: RelayAccessGrantDto[];
+}
+
+function groupGrantsByDevice(
+  grants: RelayAccessGrantDto[],
+): GrantDeviceGroup[] {
+  const grouped = new Map<string, RelayAccessGrantDto[]>();
+  for (const grant of grants) {
+    const deviceGrants = grouped.get(grant.deviceId);
+    if (deviceGrants) {
+      deviceGrants.push(grant);
+    } else {
+      grouped.set(grant.deviceId, [grant]);
+    }
+  }
+  const scopeOrder: Record<RelayAccessGrantDto['scope'], number> = {
+    device: 0,
+    workspace: 1,
+    thread: 2,
+  };
+  return [...grouped].map(([deviceId, deviceGrants]) => ({
+    deviceId,
+    grants: [...deviceGrants].sort(
+      (left, right) =>
+        scopeOrder[left.scope] - scopeOrder[right.scope] ||
+        (left.workspaceLabel ?? '').localeCompare(right.workspaceLabel ?? '') ||
+        (left.threadTitle ?? '').localeCompare(right.threadTitle ?? ''),
+    ),
+  }));
+}
+
 function GrantSection({
-  count,
   emptyText,
   grants,
   loading,
   loadingText,
-  renderGrant,
+  renderDevice,
   subtitle,
   title,
 }: {
-  count: number;
   emptyText: string;
   grants: RelayAccessGrantDto[];
   loading: boolean;
   loadingText: string;
-  renderGrant: (grant: RelayAccessGrantDto) => React.ReactNode;
+  renderDevice: (group: GrantDeviceGroup) => React.ReactNode;
   subtitle: string;
   title: string;
 }) {
+  const deviceGroups = groupGrantsByDevice(grants);
   return (
     <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -847,16 +881,16 @@ function GrantSection({
           </p>
         </div>
         <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
-          {count}
+          {deviceGroups.length}
         </span>
       </div>
       {loading ? (
         <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
           {loadingText}
         </p>
-      ) : grants.length ? (
+      ) : deviceGroups.length ? (
         <div className="grid gap-3">
-          {grants.map((grant) => renderGrant(grant))}
+          {deviceGroups.map((group) => renderDevice(group))}
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
@@ -1018,9 +1052,65 @@ function SharedSessionRow({
   );
 }
 
-function GrantRow({
-  busy = false,
-  expanded = false,
+function GrantDeviceCard({
+  busyGrantId = null,
+  expandedGrantId = null,
+  grants,
+  mode,
+  onEdit,
+  onOpen,
+  onRevoke,
+  onToggleAccess,
+}: {
+  busyGrantId?: string | null;
+  expandedGrantId?: string | null;
+  grants: RelayAccessGrantDto[];
+  mode: 'incoming' | 'outgoing';
+  onEdit?: (grant: RelayAccessGrantDto) => void;
+  onOpen?: (grant: RelayAccessGrantDto) => void;
+  onRevoke?: (grant: RelayAccessGrantDto) => void;
+  onToggleAccess?: (grant: RelayAccessGrantDto) => void;
+}) {
+  const firstGrant = grants[0];
+  if (!firstGrant) {
+    return null;
+  }
+  const deviceName = grantTitleText(firstGrant);
+
+  return (
+    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]">
+      <header className="flex items-center justify-between gap-3 px-3 py-3">
+        <p className="min-w-0 truncate text-sm font-semibold text-[var(--theme-fg)]">
+          {deviceName}
+        </p>
+        <span className="shrink-0 rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] text-[var(--theme-fg-muted)]">
+          {grants.length} {grants.length === 1 ? 'share' : 'shares'}
+        </span>
+      </header>
+      <div className="divide-y divide-[var(--theme-border)] border-t border-[var(--theme-border)] px-3">
+        {grants.map((grant) => (
+          <GrantScopeRow
+            busy={busyGrantId === grant.id}
+            expanded={expandedGrantId === grant.id}
+            grant={grant}
+            key={grant.id}
+            mode={mode}
+            {...(onEdit ? { onEdit: () => onEdit(grant) } : {})}
+            {...(onOpen ? { onOpen: () => onOpen(grant) } : {})}
+            {...(onRevoke ? { onRevoke: () => onRevoke(grant) } : {})}
+            {...(onToggleAccess
+              ? { onToggleAccess: () => onToggleAccess(grant) }
+              : {})}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function GrantScopeRow({
+  busy,
+  expanded,
   grant,
   mode,
   onEdit,
@@ -1028,8 +1118,8 @@ function GrantRow({
   onRevoke,
   onToggleAccess,
 }: {
-  busy?: boolean;
-  expanded?: boolean;
+  busy: boolean;
+  expanded: boolean;
   grant: RelayAccessGrantDto;
   mode: 'incoming' | 'outgoing';
   onEdit?: () => void;
@@ -1037,7 +1127,6 @@ function GrantRow({
   onRevoke?: () => void;
   onToggleAccess?: () => void;
 }) {
-  const title = grantTitleText(grant);
   const scopeLabel = grantScopeLabel(grant);
   const workspaceLabel =
     grant.workspaceLabel?.trim() || 'Workspace unavailable';
@@ -1048,13 +1137,10 @@ function GrantRow({
     : 'Not accessed yet';
 
   return (
-    <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+    <div className="relative py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-              {title}
-            </p>
             <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--theme-fg-muted)]">
               {scopeLabel}
             </span>
@@ -1195,7 +1281,7 @@ function GrantRow({
           )}
         </div>
       ) : null}
-    </article>
+    </div>
   );
 }
 
