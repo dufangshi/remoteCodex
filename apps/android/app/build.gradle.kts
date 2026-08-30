@@ -18,6 +18,16 @@ val remoteCodexVersionCode = remoteCodexVersion
     .take(3)
     .fold(0) { code, part -> (code * 100) + (part.toIntOrNull() ?: 0) }
     .coerceAtLeast(1)
+val releaseKeystorePath = providers.environmentVariable("REMOTE_CODEX_ANDROID_KEYSTORE").orNull
+val releaseKeystorePassword = providers.environmentVariable("REMOTE_CODEX_ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("REMOTE_CODEX_ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("REMOTE_CODEX_ANDROID_KEY_PASSWORD").orNull
+val releaseSigningConfigured = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 val buildAndroidThreadWeb by tasks.registering(Exec::class) {
     workingDir = repoRoot
@@ -60,6 +70,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             val nativeThreadFallbackEnabled = providers
@@ -74,6 +95,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
             buildConfigField(
                 "boolean",
                 "REMOTE_CODEX_NATIVE_THREAD_DETAIL_FALLBACK",
