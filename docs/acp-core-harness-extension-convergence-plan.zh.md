@@ -1,6 +1,6 @@
 # ACP Core 与 Harness 扩展收敛计划
 
-- 状态：实现、E2E 与功能分支提交已完成，待审阅合并
+- 状态：Complete
 - 最后审阅：2026-08-31
 - 适用范围：Remote Codex agent runtime、Supervisor conversation persistence、Web/iOS/Android thread surface
 
@@ -19,11 +19,11 @@
 ## 当前进度
 
 - 当前 Phase：Phase 7 与完成后源码复核均已完成。
-- 下一项：审阅 `codex/acp-harness-adapter-plan` 并合并到 `main`；native Codex 保留为明确 fallback，尚未退役。
+- 下一项：后续版本按 capability 变化维护 contract snapshot；native Codex 保留为明确 fallback，尚未退役。
 - 已完成实现项：Phase 0-7 全部保留范围；ACP core、versioned extension、durable journal、Codex parity、adopt/import、多 harness contract、Web/mobile/relay 与 native fallback。
 - 已关闭 Phase gate：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4、Phase 5、Phase 6、Phase 7。
 - 已记录真实 E2E：Codex ACP restart/context/image/approval/steering/compact/goal/fast/import；Claude ACP restart/context/fork；Web desktop/mobile；Android local/server/relay；iOS prompt/relaunch；native Codex restart/context fallback。
-- 实际集成状态：功能分支从 `main` 的 `ea4764b3c08343f9720b773830dc45b9b9b980fd` 建立，完整实现和证据已提交到该分支；`main` 尚未合并这些提交。
+- 实际集成状态：完整实现、证据与 lint 收口已通过 merge commit 集成到 `main`。
 
 交付 checklist：
 
@@ -31,7 +31,7 @@
 - [x] 修复复核发现的 capability 隔离、扩展失败关闭和临时 session 残留问题。
 - [x] 重新运行受影响的 unit、integration、build、真实 provider 和浏览器 E2E。
 - [x] 将当前 worktree 变更提交到 `codex/acp-harness-adapter-plan`。
-- [ ] 审阅后合并到 `main`。
+- [x] 审阅后合并到 `main`。
 
 Goal 模式每次推进后必须更新本节。只允许在对应 checklist 和证据同时更新后改变 Phase 状态。
 
