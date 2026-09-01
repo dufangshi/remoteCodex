@@ -13,7 +13,6 @@ import type {
   RelayCreateDeviceResultDto,
   RelayLoginResultDto,
   RelayHostedSandboxCapabilityDto,
-  RelayHostedCodexConfigDto,
   RelayHostedCodexFilesDto,
   RelayHostedSandboxDetailDto,
   RelayHostedSandboxDto,

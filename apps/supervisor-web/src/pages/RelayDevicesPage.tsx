@@ -2002,10 +2002,7 @@ function CodeBlock({
   );
 }
 
-function Notice({
-  tone,
-  children,
-}: {
+function Notice({ children }: {
   tone: 'danger';
   children: React.ReactNode;
 }) {

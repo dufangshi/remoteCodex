@@ -101,7 +101,6 @@ import {
   removePendingRequestFromDetail,
   turnHasPhotoAttachment,
   promptHasPhotoPlaceholder,
-  turnHasPhotoPromptText,
   turnHasUserMessage,
 } from './threadDetailModel';
 import {

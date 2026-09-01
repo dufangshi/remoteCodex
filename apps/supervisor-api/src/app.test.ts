@@ -34,14 +34,10 @@ import {
 } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
 import {
-  createThreadRecord,
-  createWorkspaceRecord,
   updateThreadRecord,
-  upsertThreadTurnMetadata,
 } from '../../../packages/db/src/repositories';
 import type {
   ShellBackend,
-  ShellBackendAttachOptions,
   ShellBackendCreateInput,
   ShellBackendSession,
 } from './shell/shell-backend';
@@ -480,7 +476,7 @@ function createTestShellBackend(): ShellBackend {
     async createSession(input: ShellBackendCreateInput) {
       sessions.set(input.sessionId, makeSession(input.sessionId, input.cwd));
     },
-    async attach(sessionName: string, _options: ShellBackendAttachOptions) {
+    async attach(sessionName: string) {
       const session = sessions.get(sessionName);
       if (!session) {
         throw new Error('Missing test shell session.');
@@ -526,7 +522,6 @@ describe('supervisor api', () => {
   let app: ReturnType<typeof buildApp>;
   let fakeCodexManager: FakeCodexManager;
   let fakeClaudeRuntime: FakeClaudeRuntime | null = null;
-  let launchBuildRestartCalls = 0;
 
   function buildTestApp(
     manager: FakeCodexManager,
@@ -568,7 +563,6 @@ describe('supervisor api', () => {
       shellBackend: createTestShellBackend(),
       serviceLifecycle: {
         async launchBuildRestart() {
-          launchBuildRestartCalls += 1;
           return { pid: 12345 };
         },
       },
@@ -601,7 +595,6 @@ describe('supervisor api', () => {
     await fs.mkdir(codexHome, { recursive: true });
     fakeCodexManager = new FakeCodexManager();
     fakeClaudeRuntime = null;
-    launchBuildRestartCalls = 0;
     vi.stubEnv('REMOTE_CODEX_PACKAGE_ROOT', repoRoot);
 
     app = buildTestApp(fakeCodexManager);

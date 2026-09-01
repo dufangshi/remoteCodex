@@ -700,7 +700,7 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加 `codex/acp-harnes
 - fake streaming crash、真实 Codex adopt/import、native Codex fallback 三个 verifier 全部通过，且运行结束后未残留测试临时目录。
 - 本机移动端产物复核：iOS 27 real-provider xcresult 为 1/1 通过，iOS unit xcresult 为 72/72 通过；Android local/server/relay 三份证据存在。
 
-已知基线：根级 `pnpm lint` 仍因 `HEAD` 已存在的 10 个 unused-variable 错误返回非零，分布于 `apps/supervisor-api/src/app.test.ts`、`routes/workspaces.ts` 和 `shell/unsupported-shell-backend.ts`。将 `HEAD` 的 `app.test.ts` 单独送入同一 ESLint 可复现其中 5 个；本计划相关 ACP lint 为绿色。本轮未扩大范围清理这些基线问题。
+Lint 收口：根级 `pnpm lint` 已返回 0。除原先记录的 10 个 Supervisor unused-variable error 外，完整 lint 继续执行后又暴露 6 个 Web unused-variable error；均已在不改变行为的前提下清理。当前仍有 28 个既有 React fast-refresh/hook warning，但没有 lint error。
 
 ## 完成定义
 
