@@ -7,6 +7,7 @@ import {
   parseCommandLine,
   spawnProcess,
 } from '../../process-runtime/src/index';
+import { resolveAcpWorkspacePath } from './workspace-boundary';
 
 const DEFAULT_OUTPUT_BYTE_LIMIT = 1024 * 1024;
 
@@ -38,11 +39,30 @@ function retainedOutput(state: AcpTerminalState) {
 export class AcpTerminalService {
   private readonly terminals = new Map<string, AcpTerminalState>();
 
-  constructor(private readonly sessionCwd: (sessionId: string) => string | null) {}
+  constructor(
+    private readonly sessionCwd: (sessionId: string) => string | null,
+    private readonly onOperation: (input: {
+      operation: 'terminal.create';
+      sessionId: string;
+      path: string;
+    }) => void = () => undefined,
+  ) {}
 
-  create(params: acp.CreateTerminalRequest): acp.CreateTerminalResponse {
+  async create(params: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
     const terminalId = randomUUID();
-    const cwd = params.cwd ?? this.sessionCwd(params.sessionId) ?? process.cwd();
+    const sessionCwd = this.sessionCwd(params.sessionId);
+    if (!sessionCwd) {
+      throw new Error(`ACP session workspace not found: ${params.sessionId}`);
+    }
+    const cwd = await resolveAcpWorkspacePath(
+      sessionCwd,
+      params.cwd ?? sessionCwd,
+    );
+    this.onOperation({
+      operation: 'terminal.create',
+      sessionId: params.sessionId,
+      path: cwd,
+    });
     const parsed = params.args && params.args.length > 0
       ? { command: params.command, args: params.args }
       : parseCommandLine(params.command);

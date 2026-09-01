@@ -53,6 +53,7 @@ import {
   fetchAgentBackendModels,
   fetchAgentBackendAgents,
   fetchAgentBackendModelsFor,
+  fetchAgentCapabilitySnapshot,
   fetchAgentBackendStatus,
   fetchAgentSubscriptionUsage,
   fetchProviderHostFile,
@@ -100,7 +101,6 @@ import {
   removePendingRequestFromDetail,
   turnHasPhotoAttachment,
   promptHasPhotoPlaceholder,
-  turnHasPhotoPromptText,
   turnHasUserMessage,
 } from './threadDetailModel';
 import {
@@ -132,6 +132,51 @@ const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
 > = [];
 const EMPTY_ACTIVITY_NOTES: NonNullable<ThreadDetailDto['activityNotes']> = [];
 const EMPTY_PENDING_STEERS: NonNullable<ThreadDetailDto['pendingSteers']> = [];
+const UNAVAILABLE_AGENT_CAPABILITIES: AgentProviderCapabilitiesDto = {
+  sessions: {
+    list: false,
+    read: false,
+    resume: false,
+    importLocal: false,
+    load: false,
+    close: false,
+    delete: false,
+  },
+  turns: {
+    start: false,
+    streamInput: false,
+    steer: false,
+    interrupt: false,
+    compact: false,
+  },
+  branching: {
+    fork: false,
+    hardRollback: false,
+    resumeAt: false,
+    rewindFiles: false,
+  },
+  controls: {
+    planMode: false,
+    permissionRequests: false,
+    sandboxMode: false,
+    performanceMode: false,
+    goals: false,
+  },
+  management: {
+    models: false,
+    mcpStatus: false,
+    skills: false,
+    hooks: false,
+    hookTrust: false,
+    hostConfigFiles: false,
+    providerSettings: false,
+  },
+  usage: {
+    contextWindow: false,
+    tokenUsage: false,
+    costUsd: false,
+  },
+};
 const SUPERVISOR_WORKSPACE_FEATURES: ThreadGraphWorkspaceFeatures = {
   workspace: true,
   toolUsage: false,
@@ -1163,12 +1208,16 @@ export function ThreadDetailPage() {
       const agentRequest = provider === 'acp'
         ? fetchAgentBackendAgents(provider)
         : Promise.resolve([] as ModelOptionDto[]);
+      const capabilityRequest = provider === 'acp' && agentId
+        ? fetchAgentCapabilitySnapshot(provider, agentId)
+        : Promise.resolve(null);
 
-      const [threadResult, statusResult, modelResult, agentResult] = await Promise.allSettled([
+      const [threadResult, statusResult, modelResult, agentResult, capabilityResult] = await Promise.allSettled([
         fetchThreads(),
         fetchAgentBackendStatus(provider),
         modelRequest,
         agentRequest,
+        capabilityRequest,
       ]);
 
       if (pageContextRequestIdRef.current !== requestId) {
@@ -1198,6 +1247,17 @@ export function ThreadDetailPage() {
       }
       if (agentResult.status === 'fulfilled') {
         setAgentOptions(agentResult.value);
+      }
+      if (capabilityResult.status === 'fulfilled' && capabilityResult.value) {
+        const capabilitySnapshot = capabilityResult.value;
+        setBackendCapabilities(
+          capabilitySnapshot.effectiveCapabilities ??
+            UNAVAILABLE_AGENT_CAPABILITIES,
+        );
+        if (!capabilitySnapshot.effectiveCapabilities) {
+          setError((current) => current ??
+            `The selected ACP agent is ${capabilitySnapshot.availability.replaceAll('_', ' ')}. Install or repair its adapter before continuing.`);
+        }
       }
     },
     [],
@@ -2966,9 +3026,9 @@ export function ThreadDetailPage() {
       <div>
         <dt className="text-[var(--theme-fg-muted)]">Source</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
-          {detail.thread.source === 'local_codex_import'
-            ? `Imported local ${detail.thread.provider} session`
-            : `${detail.thread.provider} supervisor thread`}
+          {detail.thread.source === 'supervisor'
+            ? `${detail.thread.provider} supervisor thread`
+            : `Imported local ${detail.thread.provider} session`}
         </dd>
       </div>
       <div>

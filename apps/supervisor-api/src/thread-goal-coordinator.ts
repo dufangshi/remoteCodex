@@ -1,5 +1,6 @@
 import type {
   AgentGoal,
+  AgentProviderCapabilities,
   AgentRuntime,
 } from '../../../packages/agent-runtime/src/index';
 import {
@@ -22,6 +23,7 @@ export interface ThreadGoalRecordContext {
   id: string;
   providerSessionId: string | null;
   provider?: string | null;
+  agentId?: string | null;
   model?: string | null;
   sandboxMode?: string | null;
   approvalMode?: string | null;
@@ -38,6 +40,9 @@ interface ThreadGoalCoordinatorCallbacks {
   ): void;
   requireProviderSessionId(record: { providerSessionId?: string | null }): string;
   runtimeForProvider(provider: string | null | undefined): AgentRuntime;
+  capabilitiesForRecord(
+    record: ThreadGoalRecordContext,
+  ): Promise<AgentProviderCapabilities>;
   appendGoalActivityNote(threadId: string, objective: string): void;
 }
 
@@ -77,7 +82,8 @@ export class ThreadGoalCoordinator {
     }
 
     const runtime = this.callbacks.runtimeForProvider(record.provider);
-    if (!runtime.setGoal || !runtime.capabilities.controls.goals) {
+    const capabilities = await this.callbacks.capabilitiesForRecord(record);
+    if (!runtime.setGoal || !capabilities.controls.goals) {
       throw new HttpError(409, {
         code: 'conflict',
         message: 'This backend does not support goals.',
@@ -166,7 +172,8 @@ export class ThreadGoalCoordinator {
     }
 
     const runtime = this.callbacks.runtimeForProvider(record.provider);
-    if (!runtime.clearGoal || !runtime.capabilities.controls.goals) {
+    const capabilities = await this.callbacks.capabilitiesForRecord(record);
+    if (!runtime.clearGoal || !capabilities.controls.goals) {
       throw new HttpError(409, {
         code: 'conflict',
         message: 'This backend does not support goals.',
@@ -198,7 +205,8 @@ export class ThreadGoalCoordinator {
         await this.ensureGoalsFeatureEnabled(record.provider);
       }
       const runtime = this.callbacks.runtimeForProvider(record.provider);
-      if (!runtime.getGoal || !runtime.capabilities.controls.goals) {
+      const capabilities = await this.callbacks.capabilitiesForRecord(record);
+      if (!runtime.getGoal || !capabilities.controls.goals) {
         return null;
       }
       const goal = await runtime.getGoal(record.providerSessionId);

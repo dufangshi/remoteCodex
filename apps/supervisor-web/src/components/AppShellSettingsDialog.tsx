@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import type {
   AgentBackendDto,
   AgentBackendIdDto,
-  AgentBackendInstallationDto,
   ProviderHostConfigArchiveDto,
   WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';

@@ -230,6 +230,15 @@ export class ThreadDetailAssembler {
     const persistedItemsByTurnIdForPatch = this.input.callbacks.listPersistedHistoryItemsByTurnId(
       input.localThreadId,
     );
+    if (input.record.provider === 'acp') {
+      remoteSession = {
+        ...remoteSession,
+        turns: alignHydratedAcpTurnsWithPersistedHistory(
+          remoteSession.turns,
+          persistedItemsByTurnIdForPatch,
+        ),
+      };
+    }
     const activeDisplayTurnId =
       this.input.liveState.displayTurnIdForRuntimeTurn(
         input.localThreadId,
@@ -556,6 +565,144 @@ function appendPersistedFailureTurnsIfMissing(
   }
 
   return sortTurnsByStartedAt([...turns, ...missingFailureTurns]);
+}
+
+function normalizedConversationText(value: string | null | undefined) {
+  return value?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function turnConversationText(items: ThreadHistoryItemDto[], kind: 'userMessage' | 'agentMessage') {
+  return items
+    .filter((item) => item.kind === kind)
+    .map((item) => normalizedConversationText(item.text))
+    .filter(Boolean)
+    .join('\n');
+}
+
+function conversationMatchScore(
+  turn: AgentTurn,
+  persistedItems: ThreadHistoryItemDto[],
+) {
+  const remoteUser = turnConversationText(turn.items, 'userMessage');
+  const persistedUser = turnConversationText(persistedItems, 'userMessage');
+  if (!remoteUser || !persistedUser) {
+    return 0;
+  }
+  const userScore = remoteUser === persistedUser
+    ? 2
+    : Math.min(remoteUser.length, persistedUser.length) >= 16 &&
+        (remoteUser.includes(persistedUser) || persistedUser.includes(remoteUser))
+      ? 1
+      : 0;
+  if (userScore === 0) {
+    return 0;
+  }
+  const remoteAgent = turnConversationText(turn.items, 'agentMessage');
+  const persistedAgent = turnConversationText(persistedItems, 'agentMessage');
+  if (!remoteAgent || !persistedAgent) {
+    return userScore;
+  }
+  if (remoteAgent === persistedAgent) {
+    return userScore + 4;
+  }
+  if (remoteAgent.includes(persistedAgent) || persistedAgent.includes(remoteAgent)) {
+    return userScore + 3;
+  }
+  return userScore;
+}
+
+function historyItemMatchScore(
+  remote: ThreadHistoryItemDto,
+  persisted: ThreadHistoryItemDto,
+) {
+  if (remote.id === persisted.id) {
+    return 100;
+  }
+  if (remote.kind !== persisted.kind) {
+    return 0;
+  }
+  const remoteText = normalizedConversationText(remote.detailText ?? remote.text);
+  const persistedText = normalizedConversationText(persisted.detailText ?? persisted.text);
+  if (!remoteText || !persistedText) {
+    return 0;
+  }
+  if (remoteText === persistedText) {
+    return 50;
+  }
+  if (
+    (remote.kind === 'agentMessage' || remote.kind === 'reasoning') &&
+    (remoteText.includes(persistedText) || persistedText.includes(remoteText))
+  ) {
+    return 40;
+  }
+  return 0;
+}
+
+function alignHydratedItems(
+  remoteItems: ThreadHistoryItemDto[],
+  persistedItems: ThreadHistoryItemDto[],
+  turnId: string,
+) {
+  const used = new Set<string>();
+  return remoteItems.map((remote) => {
+    const match = persistedItems
+      .filter((persisted) => !used.has(persisted.id))
+      .map((persisted, index) => ({
+        persisted,
+        index,
+        score: historyItemMatchScore(remote, persisted),
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index)[0];
+    if (!match) {
+      return remote.sourceTurnId
+        ? { ...remote, sourceTurnId: turnId }
+        : remote;
+    }
+    used.add(match.persisted.id);
+    return {
+      ...remote,
+      id: match.persisted.id,
+      ...(remote.sourceTurnId || remote.kind === 'agentMessage'
+        ? { sourceTurnId: turnId }
+        : {}),
+    };
+  });
+}
+
+export function alignHydratedAcpTurnsWithPersistedHistory(
+  turns: AgentTurn[],
+  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
+) {
+  const remoteTurnIds = new Set(turns.map((turn) => turn.providerTurnId));
+  const candidates = [...persistedItemsByTurnId.entries()].filter(
+    ([turnId]) => !remoteTurnIds.has(turnId),
+  );
+  const used = new Set<string>();
+  return turns.map((turn) => {
+    if (!turn.providerTurnId.startsWith('acp-hydrated:')) {
+      return turn;
+    }
+    const match = candidates
+      .filter(([turnId]) => !used.has(turnId))
+      .map(([turnId, items], index) => ({
+        turnId,
+        items,
+        index,
+        score: conversationMatchScore(turn, items),
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index)[0];
+    if (!match) {
+      return turn;
+    }
+    used.add(match.turnId);
+    return {
+      ...turn,
+      providerTurnId: match.turnId,
+      items: alignHydratedItems(turn.items, match.items, match.turnId),
+    };
+  });
 }
 
 function appendPersistedTurnsIfMissing(

@@ -28,6 +28,7 @@ function threadTempDirectoryPath(workspacePath: string, localThreadId: string) {
 }
 
 interface ThreadDeletionCallbacks {
+  clearHistoryPersistence(localThreadId: string): void;
   invalidateThreadDetailCache(localThreadId: string): void;
 }
 
@@ -57,6 +58,7 @@ export class ThreadDeletionCoordinator {
     }
 
     this.requestCoordinator.clearThread(localThreadId);
+    this.callbacks.clearHistoryPersistence(localThreadId);
     this.callbacks.invalidateThreadDetailCache(localThreadId);
     this.usageAccounting.clearThread(localThreadId);
     this.liveState.clearThread(localThreadId);

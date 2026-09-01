@@ -221,7 +221,6 @@ function AppShell({
   const isViewportLockedRoute = isThreadDetailRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
     isThreadsRoute || isThreadDetailRoute;
-  const ownsNavigationShell = isThreadDetailRoute;
   const isWorkspacesRoute =
     location.pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);

@@ -107,6 +107,7 @@ const builtinAcpAgents: AcpAgentDefinition[] = [
     serverCommand: 'opencode acp',
     serverProbeCommand: 'opencode acp --help',
     installCommand: null,
+    modelListCommand: 'opencode models',
   },
   {
     id: 'deepseek',
@@ -269,7 +270,8 @@ export class AcpAgentCatalog {
     const output = `${result.stdout}\n${result.stderr}`;
     const defaultModel = output.match(/^Default model:\s*(\S+)/m)?.[1] ?? null;
     const models = output.split(/\r?\n/).flatMap((line) => {
-      const match = line.match(/^\s*[-*]\s+(\S+?)(?:\s+\(default\))?\s*$/);
+      const match = line.match(/^\s*[-*]\s+(\S+?)(?:\s+\(default\))?\s*$/)
+        ?? line.match(/^\s*([A-Za-z0-9._-]+\/[A-Za-z0-9._:/-]+)\s*$/);
       if (!match?.[1]) {
         return [];
       }

@@ -230,6 +230,22 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
     return (await runtime.listAgentOptions()).map(modelDto);
   });
 
+  app.get('/api/agent-runtimes/:provider/capabilities', async (request) => {
+    const { provider } = providerParamSchema.parse(request.params);
+    const query = z.object({ agentId: z.string().min(1) }).parse(request.query);
+    const runtime = app.services.agentRuntimes.getOptional(provider);
+    if (!runtime) {
+      throw providerNotConfigured(provider);
+    }
+    if (!runtime.getAgentCapabilitySnapshot) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: `${runtime.displayName} does not expose per-agent capabilities.`,
+      });
+    }
+    return runtime.getAgentCapabilitySnapshot(query.agentId);
+  });
+
   app.post('/api/agent-runtimes/:provider/build-restart', async (request) => {
     if (!app.services.config.managementRoutesEnabled) {
       throw new HttpError(403, {

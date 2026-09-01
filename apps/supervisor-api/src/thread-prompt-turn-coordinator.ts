@@ -38,6 +38,7 @@ import {
 interface PromptTurnRecord {
   id: string;
   provider?: string | null;
+  agentId?: string | null;
   providerSessionId: string;
   title: string;
 }
@@ -56,7 +57,7 @@ interface PromptTurnInput {
   normalizedReasoning: ReasoningEffortDto | null;
   collaborationMode: CollaborationModeDto;
   sandboxMode: SandboxModeDto;
-  performanceMode: 'fast' | 'standard';
+  performanceMode: 'fast' | 'standard' | null;
   workspacePath: string;
   hidden?: boolean;
   displayTurnId?: string | null;
@@ -111,7 +112,11 @@ export class ThreadPromptTurnCoordinator {
   ): Promise<ThreadDto> {
     const displayPrompt = input.displayPrompt ?? input.prompt;
     const runtime = this.callbacks.runtimeForProvider(record.provider);
-    const modelRecords = await runtime.listModels().catch(() => []);
+    const modelRecords = await (
+      record.agentId && runtime.listModelsForAgent
+        ? runtime.listModelsForAgent(record.agentId, input.workspacePath)
+        : runtime.listModels()
+    ).catch(() => []);
     ensureFastModeSupported(
       input.effectiveModel,
       input.performanceMode === 'fast',

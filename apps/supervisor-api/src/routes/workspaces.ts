@@ -28,7 +28,6 @@ import {
   WorkspaceTreeDto
 } from '../../../../packages/shared/src/index';
 import {
-  assertPathWithinRoot,
   deleteWorkspaceFile,
   moveWorkspaceFile,
   readWorkspaceTree,

@@ -25,7 +25,11 @@ import { listThreadTurnMetadataMap } from './thread-turn-metadata';
 interface ThreadForkCallbacks {
   requireProviderSessionId(record: { providerSessionId?: string | null }): string;
   providerForRecord(record: { provider?: string | null | undefined }): AgentProviderId;
-  fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean;
+  fastModeForProvider(
+    provider: string | null | undefined,
+    fastMode: unknown,
+    scope: { agentId?: string | null; providerSessionId?: string | null },
+  ): boolean;
   normalizeCollaborationMode(value: string | null | undefined): 'default' | 'plan';
   normalizeSandboxMode(value: string | null | undefined): 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   normalizeReasoningEffort(value: string | null | undefined):
@@ -107,6 +111,7 @@ export class ThreadForkCoordinator {
     const turnOptions = await this.listForkTurnOptions(localThreadId);
     const forkResult = await this.sessionCoordinator.forkThreadSession({
       provider: record.provider,
+      agentId: record.agentId,
       providerSessionId,
       mode: input.mode,
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -118,11 +123,15 @@ export class ThreadForkCoordinator {
     const created = createThreadRecord(this.db, {
       workspaceId: record.workspaceId,
       provider: this.callbacks.providerForRecord(record),
+      agentId: forkedSession.agentId ?? record.agentId ?? null,
       providerSessionId: forkedSession.providerSessionId,
       title: `${forkTitleBase} / fork`,
       model: record.model,
       reasoningEffort: record.reasoningEffort,
-      fastMode: this.callbacks.fastModeForProvider(record.provider, record.fastMode),
+      fastMode: this.callbacks.fastModeForProvider(record.provider, record.fastMode, {
+        agentId: record.agentId ?? null,
+        providerSessionId,
+      }),
       fastBaseModel: record.fastBaseModel,
       fastBaseReasoningEffort: record.fastBaseReasoningEffort,
       collaborationMode: this.callbacks.normalizeCollaborationMode(record.collaborationMode),

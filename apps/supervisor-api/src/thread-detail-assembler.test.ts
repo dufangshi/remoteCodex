@@ -52,7 +52,7 @@ function session(turns: AgentTurn[], totalTurnCount = turns.length): AgentSessio
   };
 }
 
-function createAssembler(remoteSession: AgentSessionDetail) {
+function createAssembler(remoteSession: AgentSessionDetail | null) {
   const liveState = new ThreadLiveStateStore();
   const readRemoteSession = vi.fn(async () => remoteSession);
   const callbacks = {
@@ -61,7 +61,12 @@ function createAssembler(remoteSession: AgentSessionDetail) {
     listPersistedHistoryItemsByTurnId: vi.fn(() => new Map()),
     materializeHiddenRuntimeTurns: vi.fn(),
     readRemoteSession,
-    resumeRemoteSession: vi.fn(async () => remoteSession),
+    resumeRemoteSession: vi.fn(async () => {
+      if (!remoteSession) {
+        throw new Error('Provider session is unavailable.');
+      }
+      return remoteSession;
+    }),
     syncAfterRemoteSession: vi.fn(),
     updateThreadRecord: vi.fn(),
     getUpdatedThreadRecord: vi.fn(() => record),
@@ -78,6 +83,45 @@ function createAssembler(remoteSession: AgentSessionDetail) {
 }
 
 describe('ThreadDetailAssembler', () => {
+  it('keeps persisted ACP history readable when provider bootstrap is unavailable', async () => {
+    const persistedItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'offline-turn:user',
+        kind: 'userMessage',
+        text: 'Persisted prompt',
+        status: 'completed',
+        createdAt: '2026-08-31T12:00:00.000Z',
+      },
+      {
+        id: 'offline-turn:agent',
+        kind: 'agentMessage',
+        text: 'Persisted response',
+        status: 'completed',
+        createdAt: '2026-08-31T12:00:01.000Z',
+        sourceTurnId: 'offline-turn',
+      },
+    ];
+    const { assembler, callbacks } = createAssembler(null);
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['offline-turn', persistedItems]]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: { ...record, provider: 'acp' },
+      turnMetadataById: new Map(),
+    });
+
+    expect(entry.turns).toMatchObject([{
+      id: 'offline-turn',
+      status: 'completed',
+      items: [
+        { kind: 'userMessage', text: 'Persisted prompt' },
+        { kind: 'agentMessage', text: 'Persisted response' },
+      ],
+    }]);
+  });
+
   it('caches repeated latest paged detail reads within the ttl', async () => {
     const { assembler, callbacks } = createAssembler(
       session([turn('turn-2'), turn('turn-3'), turn('turn-4')], 4),
@@ -451,6 +495,76 @@ describe('ThreadDetailAssembler', () => {
         { kind: 'agentMessage', text: 'Previous ACP response' },
       ],
     });
+  });
+
+  it('aligns hydrated ACP turns with their supervisor-persisted live turn', async () => {
+    const persistedItems: ThreadHistoryItemDto[] = [
+      {
+        id: 'local-live:user',
+        kind: 'userMessage',
+        text: 'Remember the restart marker.',
+        status: 'completed',
+      },
+      {
+        id: 'local-live:agent',
+        kind: 'agentMessage',
+        text: 'PARTIAL_MARKER',
+        status: 'running',
+        sourceTurnId: 'local-live-turn',
+      },
+    ];
+    const hydrated: AgentTurn = {
+      providerTurnId: 'acp-hydrated:provider-user-message',
+      startedAt: '2026-08-31T12:00:00.000Z',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'provider-user-message',
+          kind: 'userMessage',
+          text:
+            'Developer instructions:\nKeep the response concise.\n\n' +
+            'Remember the restart marker.',
+          status: 'completed',
+        },
+        {
+          id: 'provider-agent-message',
+          kind: 'agentMessage',
+          text: 'PARTIAL_MARKER_COMPLETE',
+          status: 'completed',
+          sourceTurnId: 'acp-hydrated:provider-user-message',
+        },
+      ],
+    };
+    const { assembler, callbacks } = createAssembler(session([hydrated]));
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([['local-live-turn', persistedItems]]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: { ...record, provider: 'acp' },
+      turnMetadataById: new Map(),
+    });
+
+    expect(entry.turns).toHaveLength(1);
+    expect(entry.turns[0]).toMatchObject({
+      id: 'local-live-turn',
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'local-live:agent',
+          text: 'PARTIAL_MARKER_COMPLETE',
+          sourceTurnId: 'local-live-turn',
+        }),
+      ]),
+    });
+    expect(callbacks.syncAfterRemoteSession).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        turns: [expect.objectContaining({ providerTurnId: 'local-live-turn' })],
+      }),
+    );
   });
 
   it('does not turn a completed ACP turn into a failure because one tool failed', async () => {

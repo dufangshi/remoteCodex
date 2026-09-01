@@ -11,6 +11,7 @@ import {
   AgentRuntimeError,
   type AgentActionRequestResponseInput,
   type AgentHistoryItem,
+  type AgentGoal,
   type AgentModel,
   type AgentPendingProviderRequest,
   type AgentProviderCapabilities,
@@ -21,10 +22,13 @@ import {
   type AgentRuntimeManagementSchema,
   type AgentRuntimeStatus,
   type AgentSessionDetail,
+  type AgentSessionHistoryCoverage,
   type AgentSessionSummary,
   type AgentTurn,
   type InterruptAgentTurnInput,
   type ResumeAgentSessionInput,
+  type SendAgentInputInput,
+  type SetAgentGoalInput,
   type StartAgentSessionInput,
   type StartAgentSessionResult,
   type StartAgentTurnInput,
@@ -38,7 +42,17 @@ import {
   AcpTurnItemMapper,
   type AcpMappedItemUpdate,
 } from './item-mapper';
+import { snapshotAcpInitializeResponse } from './capabilities';
+import { buildAcpPromptContent } from './prompt-content';
+import { HarnessExtensionRegistry } from './extension-registry';
+import {
+  REMOTE_CODEX_HARNESS_EXTENSION_EVENT_METHOD,
+  type HarnessExtensionCallEnvelope,
+  type HarnessExtensionEventEnvelope,
+} from './extensions';
+import { AcpSessionHydrator } from './session-hydrator';
 import { AcpTerminalService } from './terminal-service';
+import { resolveAcpWorkspacePath } from './workspace-boundary';
 
 interface AcpRuntimeOptions {
   command: string;
@@ -66,6 +80,8 @@ interface AcpSessionState {
   modes: acp.SessionModeState | null;
   configOptions: acp.SessionConfigOption[];
   availableCommands: acp.AvailableCommand[];
+  hydrationCoverage: AgentSessionHistoryCoverage | null;
+  goal: AgentGoal | null;
 }
 
 interface PendingPermission {
@@ -74,12 +90,15 @@ interface PendingPermission {
   timer: NodeJS.Timeout;
 }
 
-const acpCapabilities: AgentProviderCapabilities = {
+export const acpCapabilities: AgentProviderCapabilities = {
   sessions: {
-    list: true,
+    list: false,
     read: true,
-    resume: true,
+    resume: false,
     importLocal: false,
+    load: false,
+    close: false,
+    delete: false,
   },
   turns: {
     start: true,
@@ -133,6 +152,23 @@ function errorMessage(error: unknown) {
 
 function cloneCapabilities(): AgentProviderCapabilities {
   return structuredClone(acpCapabilities);
+}
+
+export function applyNegotiatedAcpCapabilities(
+  target: AgentProviderCapabilities,
+  capabilities: acp.AgentCapabilities | null | undefined,
+) {
+  target.sessions.list = Boolean(capabilities?.sessionCapabilities?.list);
+  target.sessions.load = capabilities?.loadSession === true;
+  target.sessions.resume = Boolean(
+    capabilities?.loadSession || capabilities?.sessionCapabilities?.resume,
+  );
+  target.sessions.close = Boolean(capabilities?.sessionCapabilities?.close);
+  target.sessions.delete = Boolean(capabilities?.sessionCapabilities?.delete);
+  // Imported ACP sessions need Supervisor-owned stable history before import is safe.
+  target.sessions.importLocal = false;
+  target.branching.fork = Boolean(capabilities?.sessionCapabilities?.fork);
+  return target;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -249,8 +285,14 @@ function sessionDetail(state: AcpSessionState): AgentSessionDetail {
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,
     status: state.status,
-    turns: state.turns,
+    turns: state.turns.map((turn) => ({
+      ...turn,
+      items: turn.items.map((item) => ({ ...item })),
+    })),
     totalTurnCount: state.turns.length,
+    ...(state.hydrationCoverage
+      ? { historyCoverage: { ...state.hydrationCoverage } }
+      : {}),
   };
 }
 
@@ -288,6 +330,8 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly sessions = new Map<string, AcpSessionState>();
   private readonly knownSessions = new Map<string, AgentSessionSummary>();
   private readonly pendingPermissions = new Map<number, PendingPermission>();
+  private readonly hydrators = new Map<string, AcpSessionHydrator>();
+  private readonly extensionRegistry = new HarnessExtensionRegistry();
   private readonly terminalService: AcpTerminalService;
   private child: ChildProcess | null = null;
   private connection: acp.ClientConnection | null = null;
@@ -306,13 +350,34 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   constructor(private readonly options: AcpRuntimeOptions) {
     super();
+    this.extensionRegistry.on(
+      'event',
+      (event: HarnessExtensionEventEnvelope) => this.emitRuntimeEvent({
+        type: 'harness.extension',
+        provider: 'acp',
+        providerSessionId: event.providerSessionId,
+        providerTurnId: event.providerTurnId,
+        providerItemId: event.providerItemId,
+        extensionId: event.extensionId,
+        extensionVersion: event.extensionVersion,
+        event: event.event,
+        operationId: event.operationId,
+        sequence: event.sequence,
+        payload: event.payload,
+      }),
+    );
     this.terminalService = new AcpTerminalService(
       (sessionId) => this.sessions.get(sessionId)?.cwd ?? null,
+      (operation) => this.emit('fs-operation', operation),
     );
   }
 
   getStatus() {
     return { ...this.status };
+  }
+
+  getProtocolSnapshot() {
+    return snapshotAcpInitializeResponse(this.initializeResponse);
   }
 
   async start() {
@@ -374,6 +439,16 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
           this.requestPermission(request.params))
         .onNotification(acp.methods.client.session.update, (notification) =>
           this.handleSessionUpdate(notification.params))
+        .onNotification<HarnessExtensionEventEnvelope>(
+          REMOTE_CODEX_HARNESS_EXTENSION_EVENT_METHOD,
+          (params) => params as HarnessExtensionEventEnvelope,
+          (notification) => {
+            this.extensionRegistry.handleEvent(
+              'acp-agent',
+              notification.params,
+            );
+          },
+        )
         .onRequest(acp.methods.client.fs.readTextFile, (request) =>
           this.readTextFile(request.params))
         .onRequest(acp.methods.client.fs.writeTextFile, (request) =>
@@ -409,7 +484,9 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }) as Promise<acp.InitializeResponse>;
       const initializeResponse = await this.withStartupTimeout(initialize);
       this.initializeResponse = initializeResponse;
+      this.resetCapabilities();
       this.applyAgentCapabilities(initializeResponse.agentCapabilities);
+      this.registerNegotiatedExtensions(initializeResponse);
       this.status = {
         ...this.status,
         state: 'ready',
@@ -444,11 +521,11 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   async stop() {
     this.stopping = true;
     this.terminalService.stop();
-    for (const [id, permission] of this.pendingPermissions) {
-      clearTimeout(permission.timer);
-      permission.resolve(cancelledPermission());
-      this.pendingPermissions.delete(id);
-    }
+    this.settleActiveTurns('interrupted', 'ACP runtime stopped.');
+    this.cancelPendingPermissions();
+    this.hydrators.clear();
+    await this.closeLoadedSessionsBeforeStop();
+    this.extensionRegistry.unregisterOwner('acp-agent');
     this.connection?.close();
     this.child?.kill('SIGTERM');
     this.connection = null;
@@ -462,6 +539,26 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       lastError: null,
     };
     this.emit('status', this.getStatus());
+  }
+
+  private async closeLoadedSessionsBeforeStop() {
+    if (
+      !this.context ||
+      !this.initializeResponse?.agentCapabilities?.sessionCapabilities?.close
+    ) {
+      return;
+    }
+    const sessionIds = [...this.sessions.keys()];
+    const results = await Promise.allSettled(sessionIds.map((sessionId) =>
+      this.context!.request(acp.methods.agent.session.close, { sessionId })));
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.emit(
+          'warning',
+          `Unable to close ACP session ${sessionIds[index] ?? 'unknown'} before stop: ${errorMessage(result.reason)}`,
+        );
+      }
+    });
   }
 
   async listModels(): Promise<AgentModel[]> {
@@ -478,6 +575,11 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   async inspectModelOptions(cwd: string): Promise<AgentModel[]> {
+    const sessionCapabilities =
+      this.initializeResponse?.agentCapabilities?.sessionCapabilities;
+    if (!sessionCapabilities?.delete) {
+      return this.listModels();
+    }
     const context = await this.requireContext();
     const response = await context.request(acp.methods.agent.session.new, {
       cwd: path.resolve(cwd),
@@ -485,6 +587,10 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       _meta: { yoloMode: false, remoteCodexCapabilityProbe: true },
     });
     let configOptions = response.configOptions ?? [];
+    this.updateCapabilitiesFromConfigOptions(configOptions);
+    const supportsPerformanceMode = configOptions.some(
+      (option) => option.id === 'fast-mode' || option.category === 'model_config',
+    );
     try {
       const modelOption = configOptionByCategory(configOptions, 'model');
       if (!modelOption || modelOption.type !== 'select') {
@@ -496,6 +602,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
           description: 'Use the model configured by the ACP agent.',
           isDefault: true,
           hidden: false,
+          supportsPerformanceMode,
           supportedReasoningEfforts: reasoning.efforts,
           defaultReasoningEffort: reasoning.defaultEffort,
           selectionKind: 'model',
@@ -524,6 +631,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
           description: option.description ?? '',
           isDefault: option.value === modelOption.currentValue,
           hidden: false,
+          supportsPerformanceMode,
           supportedReasoningEfforts: reasoning.efforts,
           defaultReasoningEffort: reasoning.defaultEffort,
           selectionKind: 'model',
@@ -531,11 +639,9 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
       return models;
     } finally {
-      if (this.initializeResponse?.agentCapabilities?.sessionCapabilities?.close) {
-        await context.request(acp.methods.agent.session.close, {
-          sessionId: response.sessionId,
-        }).catch(() => undefined);
-      }
+      await context.request(acp.methods.agent.session.delete, {
+        sessionId: response.sessionId,
+      }).catch(() => undefined);
     }
   }
 
@@ -573,19 +679,198 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return [...this.sessions.keys()];
   }
 
+  async closeSession(providerSessionId: string) {
+    if (!this.initializeResponse?.agentCapabilities?.sessionCapabilities?.close) {
+      throw new AgentRuntimeError(
+        'ACP agent does not support session/close.',
+        'acp',
+        'request_failed',
+      );
+    }
+    await (await this.requireContext()).request(acp.methods.agent.session.close, {
+      sessionId: providerSessionId,
+    });
+    this.sessions.delete(providerSessionId);
+  }
+
+  async deleteSession(providerSessionId: string) {
+    if (!this.initializeResponse?.agentCapabilities?.sessionCapabilities?.delete) {
+      throw new AgentRuntimeError(
+        'ACP agent does not support session/delete.',
+        'acp',
+        'request_failed',
+      );
+    }
+    await (await this.requireContext()).request(acp.methods.agent.session.delete, {
+      sessionId: providerSessionId,
+    });
+    this.sessions.delete(providerSessionId);
+    this.knownSessions.delete(providerSessionId);
+  }
+
+  async sendInput(input: SendAgentInputInput): Promise<AgentTurn | null> {
+    const state = this.sessions.get(input.providerSessionId);
+    if (!state?.activeMapper || state.activeMapper.turnId !== input.providerTurnId) {
+      return null;
+    }
+    if (!this.extensionRegistry.supports('acp.steering', 1, 'steer')) {
+      throw new AgentRuntimeError(
+        'The selected ACP agent does not support running-turn steering.',
+        'acp',
+        'request_failed',
+      );
+    }
+    const prompt = await buildAcpPromptContent({
+      prompt: input.prompt,
+      workspacePath: input.workspacePath ?? state.cwd,
+      promptCapabilities: this.initializeResponse?.agentCapabilities?.promptCapabilities,
+    });
+    const operationId = randomUUID();
+    await this.extensionRegistry.invoke({
+      extensionId: 'acp.steering',
+      extensionVersion: 1,
+      method: 'steer',
+      operationId,
+      idempotencyKey: `${input.providerSessionId}:${input.providerTurnId}:steer:${operationId}`,
+      params: {
+        providerSessionId: input.providerSessionId,
+        prompt,
+      },
+    });
+    return state.activeMapper.turn();
+  }
+
+  async compactSession(providerSessionId: string) {
+    const operationId = randomUUID();
+    await this.extensionRegistry.invoke({
+      extensionId: 'codex.control',
+      extensionVersion: 1,
+      method: 'compact',
+      operationId,
+      idempotencyKey: `${providerSessionId}:compact:${operationId}`,
+      params: { providerSessionId },
+      timeoutMs: 180_000,
+    });
+  }
+
+  async forkSession(input: { providerSessionId: string; atTurnId?: string | null }) {
+    if (!this.initializeResponse?.agentCapabilities?.sessionCapabilities?.fork) {
+      throw new AgentRuntimeError(
+        'The selected ACP agent does not support session/fork.',
+        'acp',
+        'request_failed',
+      );
+    }
+    const source = this.sessions.get(input.providerSessionId) ??
+      await this.restoreSession(input.providerSessionId);
+    const response = await (await this.requireContext()).request(
+      acp.methods.agent.session.fork,
+      {
+        sessionId: source.providerSessionId,
+        cwd: source.cwd,
+        mcpServers: [],
+      },
+    );
+    const now = new Date().toISOString();
+    this.knownSessions.set(response.sessionId, {
+      provider: 'acp',
+      providerSessionId: response.sessionId,
+      cwd: source.cwd,
+      title: source.title,
+      preview: source.turns.at(-1)?.items
+        .filter((item) => item.kind === 'agentMessage')
+        .map((item) => item.text)
+        .join('\n') || null,
+      createdAt: now,
+      updatedAt: now,
+      status: 'not_loaded',
+    });
+    const forked = await this.restoreSession(response.sessionId);
+    if (forked.turns.length === 0 && source.turns.length > 0) {
+      forked.turns = structuredClone(source.turns);
+      forked.hydrationCoverage = null;
+    }
+    forked.modes = response.modes ?? forked.modes;
+    forked.configOptions = response.configOptions ?? forked.configOptions;
+    this.syncStateFromConfigOptions(forked);
+    return sessionDetail(forked);
+  }
+
+  async getGoal(providerSessionId: string) {
+    return this.sessions.get(providerSessionId)?.goal ?? null;
+  }
+
+  async setGoal(input: SetAgentGoalInput) {
+    const state = this.sessions.get(input.providerSessionId);
+    if (!state) {
+      throw new AgentRuntimeError('ACP session is not loaded.', 'acp', 'request_failed');
+    }
+    if (input.tokenBudget !== undefined && input.tokenBudget !== null) {
+      throw new AgentRuntimeError(
+        'Codex ACP goal control does not expose token budgets.',
+        'acp',
+        'request_failed',
+      );
+    }
+    const action: { action: 'set'; objective: string } |
+      { action: 'pause' | 'resume' | 'clear' } | null = input.objective?.trim()
+      ? { action: 'set', objective: input.objective.trim() }
+      : input.status === 'paused'
+        ? { action: 'pause' }
+        : input.status === 'active'
+          ? { action: 'resume' }
+          : null;
+    if (!action) {
+      throw new AgentRuntimeError(
+        'Codex ACP goal update requires an objective, pause, or resume action.',
+        'acp',
+        'request_failed',
+      );
+    }
+    await this.invokeAcpGoal(input.providerSessionId, action);
+    if (!state.goal) {
+      throw new AgentRuntimeError(
+        'Codex ACP completed goal control without publishing a goal snapshot.',
+        'acp',
+        'invalid_response',
+      );
+    }
+    return state.goal;
+  }
+
+  async clearGoal(providerSessionId: string) {
+    const state = this.sessions.get(providerSessionId);
+    if (!state) {
+      return false;
+    }
+    const existed = Boolean(state.goal);
+    await this.invokeAcpGoal(providerSessionId, { action: 'clear' });
+    return existed;
+  }
+
+  listHarnessExtensions() {
+    return this.extensionRegistry.list();
+  }
+
+  invokeHarnessExtension<T = unknown>(input: {
+    extensionId: string;
+    extensionVersion: number;
+    method: string;
+    operationId: string;
+    idempotencyKey: string;
+    params: unknown;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }) {
+    return this.extensionRegistry.invoke<T>(input);
+  }
+
   async readSession(
     providerSessionId: string,
   ): Promise<AgentSessionDetail> {
-    const state = this.sessions.get(providerSessionId);
-    if (state) {
-      return sessionDetail(state);
-    }
-    throw new AgentRuntimeError(
-      'ACP session history is owned by the Remote Codex supervisor and is not materialized in this runtime process.',
-      'acp',
-      'request_failed',
-      { historyUnavailable: true, providerSessionId },
-    );
+    const state = this.sessions.get(providerSessionId) ??
+      await this.restoreSession(providerSessionId);
+    return sessionDetail(state);
   }
 
   async startSession(input: StartAgentSessionInput): Promise<StartAgentSessionResult> {
@@ -604,8 +889,8 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       title: null,
       createdAt: now,
       updatedAt: now,
-      model: input.model === 'default' ? null : input.model,
-      reasoningEffort: input.reasoningEffort ?? null,
+      model: null,
+      reasoningEffort: null,
       sandboxMode: input.sandboxMode ?? null,
       status: 'idle',
       turns: [],
@@ -613,10 +898,20 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       modes: response.modes ?? null,
       configOptions: response.configOptions ?? [],
       availableCommands: [],
+      hydrationCoverage: null,
+      goal: null,
     };
     this.sessions.set(state.providerSessionId, state);
+    this.syncStateFromConfigOptions(state);
     this.knownSessions.set(state.providerSessionId, sessionDetail(state));
-    await this.applySessionSettings(state, input.model, input.reasoningEffort, input.sandboxMode);
+    await this.applySessionSettings(
+      state,
+      input.model,
+      input.reasoningEffort,
+      input.sandboxMode,
+      undefined,
+      input.performanceMode,
+    );
     const session = sessionDetail(state);
     return {
       provider: 'acp',
@@ -633,7 +928,14 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   async resumeSession(input: ResumeAgentSessionInput): Promise<StartAgentSessionResult> {
     const existing = this.sessions.get(input.providerSessionId);
     const state = existing ?? await this.restoreSession(input.providerSessionId);
-    await this.applySessionSettings(state, input.model, undefined, input.sandboxMode);
+    await this.applySessionSettings(
+      state,
+      input.model,
+      undefined,
+      input.sandboxMode,
+      undefined,
+      input.performanceMode,
+    );
     state.status = 'idle';
     state.updatedAt = new Date().toISOString();
     const session = sessionDetail(state);
@@ -665,6 +967,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       input.reasoningEffort,
       input.sandboxMode,
       input.collaborationMode,
+      input.performanceMode,
     );
 
     const turnId = input.displayTurnId ?? randomUUID();
@@ -690,13 +993,19 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       turn: startedTurn,
     });
 
-    const prompt = input.developerInstructions?.trim()
-      ? `${input.developerInstructions.trim()}\n\n${input.prompt}`
-      : input.prompt;
+    const prompt = await buildAcpPromptContent({
+      prompt: input.prompt,
+      workspacePath: input.workspacePath ?? state.cwd,
+      promptCapabilities: this.initializeResponse?.agentCapabilities?.promptCapabilities,
+      ...(input.content ? { content: input.content } : {}),
+    });
+    if (input.developerInstructions?.trim()) {
+      prompt.unshift({ type: 'text', text: `${input.developerInstructions.trim()}\n\n` });
+    }
     const context = await this.requireContext();
     void context.request(acp.methods.agent.session.prompt, {
       sessionId: state.providerSessionId,
-      prompt: [{ type: 'text', text: prompt }],
+      prompt,
     }).then(
       (response) => this.completePrompt(state, mapper, response),
       (error) => this.failPrompt(state, mapper, error),
@@ -826,18 +1135,29 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       modes: null,
       configOptions: [],
       availableCommands: [],
+      hydrationCoverage: null,
+      goal: null,
     };
     this.sessions.set(providerSessionId, state);
     try {
       const capabilities = this.initializeResponse?.agentCapabilities;
       if (capabilities?.loadSession) {
-        const response = await context.request(acp.methods.agent.session.load, {
-          sessionId: providerSessionId,
-          cwd: summary.cwd,
-          mcpServers: [],
-        });
-        state.modes = response.modes ?? null;
-        state.configOptions = response.configOptions ?? [];
+        const hydrator = new AcpSessionHydrator(providerSessionId);
+        this.hydrators.set(providerSessionId, hydrator);
+        try {
+          const response = await context.request(acp.methods.agent.session.load, {
+            sessionId: providerSessionId,
+            cwd: summary.cwd,
+            mcpServers: [],
+          });
+          state.modes = response.modes ?? null;
+          state.configOptions = response.configOptions ?? [];
+          state.turns = hydrator.complete();
+          state.hydrationCoverage = hydrator.coverage();
+          this.syncStateFromConfigOptions(state);
+        } finally {
+          this.hydrators.delete(providerSessionId);
+        }
       } else if (capabilities?.sessionCapabilities?.resume) {
         const response = await context.request(acp.methods.agent.session.resume, {
           sessionId: providerSessionId,
@@ -846,6 +1166,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
         });
         state.modes = response.modes ?? null;
         state.configOptions = response.configOptions ?? [];
+        this.syncStateFromConfigOptions(state);
       } else {
         throw new Error('ACP agent does not support session/load or session/resume.');
       }
@@ -869,17 +1190,24 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     reasoningEffort?: string | null,
     sandboxMode?: string | null,
     collaborationMode?: 'default' | 'plan' | null,
+    performanceMode?: 'standard' | 'fast' | null,
   ) {
     if (model && model !== 'default') {
-      await this.setConfigOption(state, 'model', model);
-      state.model = model;
+      state.model = await this.setConfigOption(state, 'model', model);
     }
     if (reasoningEffort) {
-      await this.setConfigOption(state, 'thought_level', reasoningEffort);
-      state.reasoningEffort = reasoningEffort;
+      const applied = await this.setConfigOption(
+        state,
+        'thought_level',
+        reasoningEffort,
+      );
+      state.reasoningEffort = normalizeAcpEffort(applied);
     }
     if (sandboxMode !== undefined) {
       state.sandboxMode = sandboxMode;
+    }
+    if (performanceMode) {
+      await this.setFastMode(state, performanceMode === 'fast');
     }
 
     const modes = state.modes?.availableModes ?? [];
@@ -920,16 +1248,27 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
         sessionId: state.providerSessionId,
         modelId: value,
       });
-      return;
+      return value;
     }
     if (!option || option.type !== 'select') {
-      return;
+      throw new AgentRuntimeError(
+        `ACP agent does not expose a ${category} config option.`,
+        'acp',
+        'request_failed',
+      );
     }
     const selected = allSelectOptions(option).find((candidate) =>
       candidate.value === value || candidate.name.toLowerCase() === value.toLowerCase(),
     );
-    if (!selected || selected.value === option.currentValue) {
-      return;
+    if (!selected) {
+      throw new AgentRuntimeError(
+        `ACP agent rejected unknown ${category} option: ${value}`,
+        'acp',
+        'request_failed',
+      );
+    }
+    if (selected.value === option.currentValue) {
+      return selected.value;
     }
     const context = await this.requireContext();
     const response = await context.request(acp.methods.agent.session.setConfigOption, {
@@ -938,6 +1277,73 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       value: selected.value,
     });
     state.configOptions = response.configOptions;
+    return selected.value;
+  }
+
+  private syncStateFromConfigOptions(state: AcpSessionState) {
+    this.updateCapabilitiesFromConfigOptions(state.configOptions);
+    const modelOption = configOptionByCategory(state.configOptions, 'model');
+    if (modelOption?.type === 'select') {
+      state.model = modelOption.currentValue;
+    }
+    const thoughtOption = configOptionByCategory(
+      state.configOptions,
+      'thought_level',
+    );
+    if (thoughtOption?.type === 'select') {
+      state.reasoningEffort = normalizeAcpEffort(thoughtOption.currentValue);
+    }
+  }
+
+  private updateCapabilitiesFromConfigOptions(
+    configOptions: acp.SessionConfigOption[],
+  ) {
+    this.capabilities.management.models ||= Boolean(
+      configOptionByCategory(configOptions, 'model'),
+    );
+    this.capabilities.controls.performanceMode ||= configOptions.some(
+      (option) => option.id === 'fast-mode' || option.category === 'model_config',
+    );
+  }
+
+  private async setFastMode(state: AcpSessionState, enabled: boolean) {
+    const option = state.configOptions.find(
+      (candidate) =>
+        candidate.id === 'fast-mode' || candidate.category === 'model_config',
+    );
+    if (!option) {
+      throw new AgentRuntimeError(
+        'The selected ACP agent does not expose fast mode.',
+        'acp',
+        'request_failed',
+      );
+    }
+    const value = option.type === 'boolean'
+      ? enabled
+      : allSelectOptions(option).find((candidate) =>
+          enabled
+            ? ['on', 'true', 'fast'].includes(candidate.value.toLowerCase())
+            : ['off', 'false', 'standard'].includes(candidate.value.toLowerCase()))?.value;
+    if (value === undefined || value === option.currentValue) {
+      return;
+    }
+    const response = await (await this.requireContext()).request(
+      acp.methods.agent.session.setConfigOption,
+      option.type === 'boolean'
+        ? {
+            sessionId: state.providerSessionId,
+            configId: option.id,
+            type: 'boolean',
+            value: value as boolean,
+          }
+        : {
+            sessionId: state.providerSessionId,
+            configId: option.id,
+            value: value as string,
+          },
+    );
+    state.configOptions = response.configOptions;
+    this.updateCapabilitiesFromConfigOptions(state.configOptions);
   }
 
   private handleSessionUpdate(notification: acp.SessionNotification) {
@@ -947,8 +1353,10 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
     state.updatedAt = new Date().toISOString();
     const update = notification.update;
+    const hydrator = this.hydrators.get(notification.sessionId);
     if (update.sessionUpdate === 'config_option_update') {
       state.configOptions = update.configOptions;
+      this.syncStateFromConfigOptions(state);
     } else if (update.sessionUpdate === 'current_mode_update' && state.modes) {
       state.modes = { ...state.modes, currentModeId: update.currentModeId };
     } else if (update.sessionUpdate === 'available_commands_update') {
@@ -956,7 +1364,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     } else if (update.sessionUpdate === 'session_info_update') {
       if (update.title !== undefined) {
         state.title = update.title;
-        if (update.title) {
+        if (update.title && !hydrator) {
           this.emitRuntimeEvent({
             type: 'session.title.updated',
             provider: 'acp',
@@ -965,6 +1373,33 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
           });
         }
       }
+      const goal = this.goalFromSessionInfoUpdate(
+        state.providerSessionId,
+        update,
+      );
+      if (goal !== undefined) {
+        state.goal = goal;
+        if (!hydrator) {
+          this.emitRuntimeEvent(goal
+            ? {
+                type: 'goal.updated',
+                provider: 'acp',
+                providerSessionId: state.providerSessionId,
+                providerTurnId: state.activeMapper?.turnId ?? null,
+                goal,
+              }
+            : {
+                type: 'goal.cleared',
+                provider: 'acp',
+                providerSessionId: state.providerSessionId,
+              });
+        }
+      }
+    }
+
+    if (hydrator) {
+      hydrator.apply(update);
+      return;
     }
 
     const mapper = state.activeMapper;
@@ -1118,10 +1553,17 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   private async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
-    if (!path.isAbsolute(params.path)) {
-      throw new Error('ACP file paths must be absolute.');
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw new Error(`ACP session workspace not found: ${params.sessionId}`);
     }
-    const content = await fs.readFile(params.path, 'utf8');
+    const filePath = await resolveAcpWorkspacePath(session.cwd, params.path);
+    this.emit('fs-operation', {
+      operation: 'fs.readTextFile',
+      sessionId: params.sessionId,
+      path: filePath,
+    });
+    const content = await fs.readFile(filePath, 'utf8');
     if (params.line === undefined && params.limit === undefined) {
       return { content };
     }
@@ -1132,11 +1574,18 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   private async writeTextFile(params: acp.WriteTextFileRequest) {
-    if (!path.isAbsolute(params.path)) {
-      throw new Error('ACP file paths must be absolute.');
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw new Error(`ACP session workspace not found: ${params.sessionId}`);
     }
-    await fs.mkdir(path.dirname(params.path), { recursive: true });
-    await fs.writeFile(params.path, params.content, 'utf8');
+    const filePath = await resolveAcpWorkspacePath(session.cwd, params.path);
+    this.emit('fs-operation', {
+      operation: 'fs.writeTextFile',
+      sessionId: params.sessionId,
+      path: filePath,
+    });
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, params.content, 'utf8');
     return {};
   }
 
@@ -1149,11 +1598,251 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   private applyAgentCapabilities(capabilities: acp.AgentCapabilities | null | undefined) {
-    this.capabilities.sessions.list = Boolean(capabilities?.sessionCapabilities?.list);
-    // Imported ACP sessions have no supervisor-owned item history yet. Keep
-    // import disabled until replayed updates can be assigned stable turn ids.
-    this.capabilities.sessions.importLocal = false;
-    this.capabilities.branching.fork = false;
+    applyNegotiatedAcpCapabilities(this.capabilities, capabilities);
+  }
+
+  private resetCapabilities() {
+    const baseline = cloneCapabilities();
+    for (const section of Object.keys(baseline) as Array<keyof AgentProviderCapabilities>) {
+      Object.assign(this.capabilities[section], baseline[section]);
+    }
+  }
+
+  private goalFromSessionInfoUpdate(
+    providerSessionId: string,
+    update: Extract<acp.SessionUpdate, { sessionUpdate: 'session_info_update' }>,
+  ): AgentGoal | null | undefined {
+    const meta = isRecord(update._meta) ? update._meta : null;
+    if (!meta || !Object.hasOwn(meta, 'goal')) {
+      return undefined;
+    }
+    if (meta.goal === null) {
+      return null;
+    }
+    if (!isRecord(meta.goal)) {
+      return undefined;
+    }
+    const objective = typeof meta.goal.objective === 'string'
+      ? meta.goal.objective.trim()
+      : '';
+    if (!objective) {
+      return undefined;
+    }
+    return {
+      providerSessionId,
+      objective,
+      status: typeof meta.goal.status === 'string' ? meta.goal.status : 'active',
+      tokenBudget: typeof meta.goal.tokenBudget === 'number'
+        ? meta.goal.tokenBudget
+        : null,
+      tokensUsed: typeof meta.goal.tokensUsed === 'number' ? meta.goal.tokensUsed : 0,
+      timeUsedSeconds: typeof meta.goal.timeUsedSeconds === 'number'
+        ? meta.goal.timeUsedSeconds
+        : 0,
+      createdAt: typeof meta.goal.createdAt === 'number'
+        ? meta.goal.createdAt
+        : Date.now(),
+      updatedAt: typeof meta.goal.updatedAt === 'number'
+        ? meta.goal.updatedAt
+        : Date.now(),
+      rawGoal: structuredClone(meta.goal),
+    };
+  }
+
+  private async invokeAcpGoal(
+    providerSessionId: string,
+    action: { action: 'set'; objective: string } | { action: 'pause' | 'resume' | 'clear' },
+  ) {
+    if (!this.extensionRegistry.supports('acp.goal', 1, action.action)) {
+      throw new AgentRuntimeError(
+        'The selected ACP agent does not expose goal control.',
+        'acp',
+        'request_failed',
+      );
+    }
+    const operationId = randomUUID();
+    await this.extensionRegistry.invoke({
+      extensionId: 'acp.goal',
+      extensionVersion: 1,
+      method: action.action,
+      operationId,
+      idempotencyKey: `${providerSessionId}:goal:${operationId}`,
+      params: { providerSessionId, ...action },
+      timeoutMs: 180_000,
+    });
+  }
+
+  private async runControlPrompt(
+    providerSessionId: string,
+    prompt: string,
+    signal: AbortSignal,
+  ) {
+    const state = this.sessions.get(providerSessionId);
+    if (!state || state.activeMapper) {
+      throw new AgentRuntimeError(
+        'ACP control prompt requires an idle loaded session.',
+        'acp',
+        'request_failed',
+      );
+    }
+    let startedTurnId: string | null = null;
+    let cleanupCompletion!: () => void;
+    const completed = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
+      (resolve, reject) => {
+        const cleanup = () => {
+          this.off('event', onEvent);
+          signal.removeEventListener('abort', onAbort);
+        };
+        const onEvent = (event: AgentRuntimeEvent) => {
+          if (
+            event.type === 'turn.completed' &&
+            event.providerSessionId === providerSessionId &&
+            (!startedTurnId || event.turn.providerTurnId === startedTurnId)
+          ) {
+            cleanup();
+            resolve(event);
+          }
+        };
+        const onAbort = () => {
+          cleanup();
+          reject(signal.reason ?? new Error('ACP control prompt cancelled.'));
+        };
+        cleanupCompletion = cleanup;
+        this.on('event', onEvent);
+        signal.addEventListener('abort', onAbort, { once: true });
+      },
+    );
+    try {
+      const turn = await this.startTurn({
+        providerSessionId,
+        prompt,
+        hidden: true,
+      });
+      startedTurnId = turn.providerTurnId;
+      const event = await completed;
+      if (event.turn.status === 'failed') {
+        throw new Error(event.turn.error?.message ?? 'ACP control prompt failed.');
+      }
+      return { providerTurnId: event.turn.providerTurnId, status: event.turn.status };
+    } catch (error) {
+      cleanupCompletion();
+      throw error;
+    }
+  }
+
+  private registerNegotiatedExtensions(response: acp.InitializeResponse) {
+    const snapshot = snapshotAcpInitializeResponse(response);
+    if (!snapshot || !this.context) {
+      return;
+    }
+    const wireTransport = {
+      request: (method: string, params: unknown, signal: AbortSignal) =>
+        this.context!.request<unknown, typeof params>(method, params, {
+          cancellationSignal: signal,
+        }),
+    };
+    for (const descriptor of snapshot.harnessExtensions) {
+      this.extensionRegistry.register({
+        ownerId: 'acp-agent',
+        descriptor,
+        transport: wireTransport,
+      });
+    }
+    if (snapshot.legacyExtensions.steering?.supported) {
+      this.extensionRegistry.register({
+        ownerId: 'acp-agent',
+        descriptor: {
+          id: 'acp.steering',
+          version: 1,
+          stability: 'experimental',
+          methods: ['steer'],
+          events: [],
+        },
+        transport: wireTransport,
+        wireMethods: { steer: '_session/steering' },
+        paramMappers: {
+          steer: (envelope) => {
+            const params = isRecord(envelope.params) ? envelope.params : {};
+            return {
+              sessionId: params.providerSessionId,
+              prompt: params.prompt,
+            };
+          },
+        },
+        capabilityPatch: { turns: { steer: true } },
+      });
+    }
+    const goal = snapshot.legacyExtensions.goal;
+    const goalVersion = typeof goal?.version === 'number'
+      ? goal.version
+      : goal?.version === '1'
+        ? 1
+        : null;
+    if (
+      goal?.controlMethod &&
+      goalVersion === 1 &&
+      goal.actions.includes('set') &&
+      goal.actions.includes('clear')
+    ) {
+      const actions = goal.actions.filter((action) =>
+        ['set', 'pause', 'resume', 'clear'].includes(action));
+      this.extensionRegistry.register({
+        ownerId: 'acp-agent',
+          descriptor: {
+            id: 'acp.goal',
+            version: goalVersion,
+          stability: 'experimental',
+          methods: actions,
+          events: [],
+        },
+        transport: wireTransport,
+        wireMethods: Object.fromEntries(actions.map((action) => [action, goal.controlMethod!])),
+        paramMappers: Object.fromEntries(actions.map((action) => [
+          action,
+          (envelope: HarnessExtensionCallEnvelope) => {
+            const params = isRecord(envelope.params) ? envelope.params : {};
+            return {
+              sessionId: params.providerSessionId,
+              action,
+              ...(action === 'set' ? { objective: params.objective } : {}),
+            };
+          },
+        ])),
+        capabilityPatch: { controls: { goals: true } },
+      });
+    }
+    if (snapshot.agentInfo?.name === '@agentclientprotocol/codex-acp') {
+      this.extensionRegistry.register({
+        ownerId: 'acp-agent',
+        descriptor: {
+          id: 'codex.control',
+          version: 1,
+          stability: 'experimental',
+          methods: ['compact'],
+          events: [],
+        },
+        transport: {
+          request: async (_method, params, signal) => {
+            const providerSessionId = isRecord(params)
+              ? String(params.providerSessionId ?? '')
+              : '';
+            return this.runControlPrompt(providerSessionId, '/compact', signal);
+          },
+        },
+        paramMappers: {
+          compact: (envelope) => ({
+            providerSessionId: isRecord(envelope.params)
+              ? envelope.params.providerSessionId
+              : null,
+          }),
+        },
+        capabilityPatch: { turns: { compact: true } },
+      });
+    }
+    const effective = this.extensionRegistry.effectiveCapabilities(this.capabilities);
+    for (const section of Object.keys(effective) as Array<keyof AgentProviderCapabilities>) {
+      Object.assign(this.capabilities[section], effective[section]);
+    }
   }
 
   private withStartupTimeout<T>(promise: Promise<T>) {
@@ -1178,6 +1867,8 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   private markFailed(error: unknown) {
     const message = errorMessage(error);
+    this.settleActiveTurns('failed', message);
+    this.cancelPendingPermissions();
     this.status = {
       ...this.status,
       state: 'failed',
@@ -1185,6 +1876,46 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     };
     this.installation.lastError = message;
     this.emit('status', this.getStatus());
+  }
+
+  private cancelPendingPermissions() {
+    for (const [id, permission] of this.pendingPermissions) {
+      clearTimeout(permission.timer);
+      permission.resolve(cancelledPermission());
+      this.pendingPermissions.delete(id);
+    }
+  }
+
+  private settleActiveTurns(
+    status: 'failed' | 'interrupted',
+    error: string,
+  ) {
+    for (const state of this.sessions.values()) {
+      const mapper = state.activeMapper;
+      if (!mapper) {
+        continue;
+      }
+      const completed = mapper.complete(status, error);
+      for (const itemUpdate of completed.updates) {
+        this.emitItemUpdate(state, mapper.turnId, itemUpdate);
+      }
+      const turn = {
+        ...completed.turn,
+        startedAt: state.turns.find(
+          (candidate) => candidate.providerTurnId === mapper.turnId,
+        )?.startedAt ?? null,
+      };
+      this.replaceTurn(state, turn);
+      state.activeMapper = null;
+      state.status = status;
+      state.updatedAt = new Date().toISOString();
+      this.emitRuntimeEvent({
+        type: 'turn.completed',
+        provider: 'acp',
+        providerSessionId: state.providerSessionId,
+        turn,
+      });
+    }
   }
 
   private emitRuntimeEvent(event: AgentRuntimeEvent) {

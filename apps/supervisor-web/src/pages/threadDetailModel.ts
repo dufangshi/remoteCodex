@@ -10,8 +10,9 @@ import {
 } from '@remote-codex/shared';
 
 export function effectiveSandboxMode(
-  _thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,
+  thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,
 ): 'danger-full-access' {
+  void thread;
   return 'danger-full-access';
 }
 

@@ -273,6 +273,23 @@ normalized turn item in its supervisor SQLite database, so transcript history
 remains available even when an ACP agent resumes context without replaying old
 turns.
 
+The [ACP core and harness extension convergence plan](docs/acp-core-harness-extension-convergence-plan.zh.md)
+tracks durable history hydration, capability extensions, native Codex parity,
+and the real E2E gates required before the native runtime can be retired.
+
+Backend ownership is selected per thread. Keep both `codex` and `acp` enabled
+while ACP capabilities are being rolled out: choose `acp` plus the concrete
+agent for negotiated ACP behavior, or choose `codex` for native-only fork,
+rollback, MCP management, skills, hooks, and host configuration. Existing
+threads are never converted in place.
+
+To roll back from Codex ACP, keep the existing ACP thread as readable history,
+create or resume a thread with backend `codex`, and use Resume / Connect after a
+Supervisor restart before sending the next prompt. Check
+`/api/agent-runtimes/acp/status` for restart and failure counters and the
+per-agent capability endpoint before re-enabling an ACP workflow. These
+diagnostics contain counts and status only, not message text.
+
 ### Development
 
 ```bash
@@ -551,6 +568,20 @@ Supervisor 会先探测基础 Agent。基础 Agent 不存在时选项保持灰�
 `session/load`、`session/resume`、同时支持两者，或都不支持。Remote Codex 会把
 所有规范化后的 turn item 持久化到 supervisor SQLite，因此即使 Agent 恢复上下文时
 不回放旧 turn，前端 transcript 历史仍然可用。
+
+[ACP Core 与 Harness 扩展收敛计划](docs/acp-core-harness-extension-convergence-plan.zh.md)
+记录 durable history hydration、扩展能力、原生 Codex parity，以及允许退役原生
+runtime 前必须通过的真实 E2E gate。
+
+Backend owner 按 thread 选择。ACP 仍在分阶段启用时应同时保留 `codex` 和 `acp`：
+选择 `acp` 并指定具体 Agent 可使用协商后的 ACP 能力；需要 native-only 的 fork、
+rollback、MCP 管理、skills、hooks 或 host config 时选择 `codex`。已有 thread 不会
+被原地转换成另一种 backend。
+
+从 Codex ACP 回滚时，保留原 ACP thread 作为只读历史，创建或恢复 `codex` backend
+thread；Supervisor 重启后先执行 Resume / Connect，再发送下一条 prompt。重新开放
+ACP workflow 前检查 `/api/agent-runtimes/acp/status` 的 restart/failure 计数和
+per-agent capability endpoint。这些诊断只包含计数和状态，不记录消息正文。
 
 ### 开发
 

@@ -20,6 +20,7 @@ function definition(
     serverCommand: input.serverCommand ?? process.execPath,
     serverProbeCommand: input.serverProbeCommand ?? `${nodeCommand} --version`,
     installCommand: input.installCommand ?? null,
+    modelListCommand: input.modelListCommand ?? null,
   };
 }
 
@@ -53,5 +54,29 @@ describe('AcpAgentCatalog', () => {
     ]);
     expect(entries[1]?.statusMessage).toContain('Install the base agent first');
     expect(entries[2]?.statusMessage).toContain('Install its ACP adapter');
+  });
+
+  it('parses both plain provider model ids and bulleted model lists', async () => {
+    const plain = new AcpAgentCatalog({
+      definitions: [definition({
+        id: 'plain',
+        modelListCommand: `${nodeCommand} -e "process.stdout.write('provider/first\\nprovider/second\\n')"`,
+      })],
+    });
+    const bulleted = new AcpAgentCatalog({
+      definitions: [definition({
+        id: 'bulleted',
+        modelListCommand: `${nodeCommand} -e "process.stdout.write('Default model: model-one\\n\\nAvailable models:\\n  * model-one (default)\\n  - model-two\\n')"`,
+      })],
+    });
+
+    await expect(plain.listCommandModels('plain')).resolves.toMatchObject([
+      { model: 'provider/first', isDefault: false },
+      { model: 'provider/second', isDefault: false },
+    ]);
+    await expect(bulleted.listCommandModels('bulleted')).resolves.toMatchObject([
+      { model: 'model-one', isDefault: true },
+      { model: 'model-two', isDefault: false },
+    ]);
   });
 });

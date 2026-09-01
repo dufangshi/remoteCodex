@@ -39,6 +39,11 @@ export interface AgentRuntimeStatus {
   lastStartedAt: string | null;
   lastError: string | null;
   restartCount: number;
+  operationalMetrics?: {
+    sessionStartFailures: number;
+    resumeFailures: number;
+    capabilityProbeFailures: number;
+  };
 }
 
 export interface AgentProviderCapabilities {
@@ -47,6 +52,9 @@ export interface AgentProviderCapabilities {
     read: boolean;
     resume: boolean;
     importLocal: boolean;
+    load?: boolean;
+    close?: boolean;
+    delete?: boolean;
   };
   turns: {
     start: boolean;
@@ -94,6 +102,14 @@ export interface AgentRuntimeDescriptor {
   capabilities: AgentProviderCapabilities;
   managementSchema: AgentRuntimeManagementSchema;
   installation: AgentBackendInstallationDto;
+}
+
+export interface AgentCapabilitySnapshot {
+  provider: AgentProviderId;
+  agentId: string;
+  availability: AcpAgentOptionMetadataDto['availability'];
+  negotiated: unknown | null;
+  effectiveCapabilities: AgentProviderCapabilities | null;
 }
 
 export interface AgentRuntimeConfigFileSchema {
@@ -174,6 +190,7 @@ export type AgentSessionStatus =
 
 export interface AgentSessionSummary {
   provider: AgentProviderId;
+  agentId?: string | null;
   providerSessionId: string;
   cwd: string;
   title: string | null;
@@ -220,6 +237,15 @@ export interface AgentTurn {
 export interface AgentSessionDetail extends AgentSessionSummary {
   turns: AgentTurn[];
   totalTurnCount?: number | null;
+  historyCoverage?: AgentSessionHistoryCoverage | null;
+}
+
+export interface AgentSessionHistoryCoverage {
+  source: 'providerReplay';
+  completeness: 'complete' | 'partial' | 'unknown';
+  replayedTurnCount: number;
+  replayedItemCount: number;
+  providerIdentifiedTurnCount: number;
 }
 
 export interface ReadAgentSessionOptions {
@@ -257,6 +283,18 @@ export interface ResumeAgentSessionInput {
   performanceMode?: 'standard' | 'fast' | null;
 }
 
+export type AgentPromptContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string; uri?: string | null }
+  | { type: 'audio'; data: string; mimeType: string }
+  | { type: 'resource_link'; name: string; uri: string; title?: string | null }
+  | {
+      type: 'resource';
+      resource:
+        | { uri: string; text: string; mimeType?: string | null }
+        | { uri: string; blob: string; mimeType?: string | null };
+    };
+
 export interface StartAgentTurnInput {
   providerSessionId: string;
   prompt: string;
@@ -270,6 +308,7 @@ export interface StartAgentTurnInput {
   performanceMode?: 'standard' | 'fast' | null;
   hidden?: boolean;
   displayTurnId?: string | null;
+  content?: AgentPromptContentBlock[];
 }
 
 export interface SendAgentInputInput {
@@ -475,6 +514,20 @@ export interface AgentRuntimeTurnFailedEvent {
   willRetry?: boolean;
 }
 
+export interface AgentRuntimeHarnessExtensionEvent {
+  type: 'harness.extension';
+  provider: AgentProviderId;
+  providerSessionId: string;
+  providerTurnId: string | null;
+  providerItemId: string | null;
+  extensionId: string;
+  extensionVersion: number;
+  event: string;
+  operationId: string | null;
+  sequence: number | null;
+  payload: unknown;
+}
+
 export type AgentRuntimeEvent =
   | AgentRuntimeStatusChangedEvent
   | AgentRuntimeTitleUpdatedEvent
@@ -487,7 +540,8 @@ export type AgentRuntimeEvent =
   | AgentRuntimePlanUpdatedEvent
   | AgentRuntimeOutputDeltaEvent
   | AgentRuntimeTurnCompletedEvent
-  | AgentRuntimeTurnFailedEvent;
+  | AgentRuntimeTurnFailedEvent
+  | AgentRuntimeHarnessExtensionEvent;
 
 export interface AgentProviderRequest {
   provider: AgentProviderId;
@@ -556,7 +610,13 @@ export interface AgentRuntime extends EventEmitter {
   listModels(): Promise<AgentModel[]>;
   listAgentOptions?(): Promise<AgentModel[]>;
   listModelsForAgent?(agentId: string, cwd: string): Promise<AgentModel[]>;
+  getAgentCapabilitySnapshot?(agentId: string): Promise<AgentCapabilitySnapshot>;
+  getScopedCapabilities?(input: {
+    agentId?: string | null;
+    providerSessionId?: string | null;
+  }): AgentProviderCapabilities;
   listSessions(): Promise<AgentSessionSummary[]>;
+  listImportSessions?(agentId?: string | null): Promise<AgentSessionSummary[]>;
   listLoadedSessions(): Promise<string[]>;
   readSession(
     providerSessionId: string,

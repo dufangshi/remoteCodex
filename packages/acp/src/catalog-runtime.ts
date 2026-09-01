@@ -18,6 +18,8 @@ import {
   type InterruptAgentTurnInput,
   type ReadAgentSessionOptions,
   type ResumeAgentSessionInput,
+  type SendAgentInputInput,
+  type SetAgentGoalInput,
   type StartAgentSessionInput,
   type StartAgentSessionResult,
   type StartAgentTurnInput,
@@ -28,6 +30,7 @@ import {
   acpAgentMetadata,
   type AcpAgentCatalogEntry,
 } from './agent-catalog';
+import { snapshotAcpAgentCapabilities } from './capabilities';
 import { AcpRuntimeAdapter } from './runtimeAdapter';
 import { loadCodexAcpEnvironment } from './codex-environment';
 
@@ -90,7 +93,12 @@ const catalogCapabilities: AgentProviderCapabilities = {
 
 const catalogManagementSchema: AgentRuntimeManagementSchema = {
   hostConfigFiles: [],
-  toolboxItems: [],
+  toolboxItems: [
+    { action: 'fast', command: '/fast', label: 'Fast mode' },
+    { action: 'compact', command: '/compact', label: 'Compact context' },
+    { action: 'goal', command: '/goal', label: 'Goal' },
+    { action: 'fork', command: '/fork', label: 'Fork' },
+  ],
   hookCommandTemplates: [],
   providerConfigFormat: 'none',
   mcpConfigFormat: 'none',
@@ -117,6 +125,7 @@ function decodeScopedId(value: string | number) {
 function scopedSession(agentId: string, session: AgentSessionDetail): AgentSessionDetail {
   return {
     ...session,
+    agentId,
     providerSessionId: encodeSessionId(agentId, session.providerSessionId),
   };
 }
@@ -124,6 +133,7 @@ function scopedSession(agentId: string, session: AgentSessionDetail): AgentSessi
 function scopedSummary(agentId: string, session: AgentSessionSummary): AgentSessionSummary {
   return {
     ...session,
+    agentId,
     providerSessionId: encodeSessionId(agentId, session.providerSessionId),
   };
 }
@@ -154,6 +164,11 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
   private readonly catalog: AcpAgentCatalog;
   private readonly agents = new Map<string, AcpRuntimeAdapter>();
   private readonly modelCache = new Map<string, { at: number; models: AgentModel[] }>();
+  private readonly operationalMetrics = {
+    sessionStartFailures: 0,
+    resumeFailures: 0,
+    capabilityProbeFailures: 0,
+  };
   private status: AgentRuntimeStatus = {
     state: 'stopped',
     transport: 'stdio',
@@ -172,7 +187,10 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
   }
 
   getStatus() {
-    return { ...this.status };
+    return {
+      ...this.status,
+      operationalMetrics: { ...this.operationalMetrics },
+    };
   }
 
   async start() {
@@ -189,6 +207,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
   async stop() {
     await Promise.allSettled([...this.agents.values()].map((agent) => agent.stop()));
     this.agents.clear();
+    this.recomputeAgentCapabilities();
     this.status = {
       ...this.status,
       state: 'stopped',
@@ -219,21 +238,65 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
   }
 
   async listModelsForAgent(agentId: string, cwd: string) {
-    const cacheKey = `${agentId}\0${cwd}`;
-    const cached = this.modelCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < 30_000) {
-      return cached.models;
+    try {
+      const cacheKey = `${agentId}\0${cwd}`;
+      const cached = this.modelCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < 30_000) {
+        return cached.models;
+      }
+      const agent = await this.agentFor(agentId);
+      let models = await agent.inspectModelOptions(cwd);
+      if (agent.capabilities.controls.performanceMode) {
+        models = models.map((model) => ({
+          ...model,
+          supportsPerformanceMode: true,
+        }));
+      }
+      if (models.length === 1 && models[0]?.model === 'default') {
+        const commandModels = await this.catalog.listCommandModels(agentId);
+        if (commandModels.length > 0) {
+          models = commandModels;
+        }
+      }
+      this.modelCache.set(cacheKey, { at: Date.now(), models });
+      return models;
+    } catch (error) {
+      this.operationalMetrics.capabilityProbeFailures += 1;
+      throw error;
+    }
+  }
+
+  async getAgentCapabilitySnapshot(agentId: string) {
+    const entry = (await this.refreshCatalog()).find((candidate) => candidate.id === agentId);
+    if (!entry) {
+      throw new AgentRuntimeError(`Unknown ACP agent: ${agentId}`, 'acp', 'request_failed');
+    }
+    if (entry.availability !== 'ready') {
+      return snapshotAcpAgentCapabilities({
+        agentId,
+        availability: entry.availability,
+        effectiveCapabilities: this.capabilities,
+      });
     }
     const agent = await this.agentFor(agentId);
-    let models = await agent.inspectModelOptions(cwd);
-    if (models.length === 1 && models[0]?.model === 'default') {
-      const commandModels = await this.catalog.listCommandModels(agentId);
-      if (commandModels.length > 0) {
-        models = commandModels;
-      }
-    }
-    this.modelCache.set(cacheKey, { at: Date.now(), models });
-    return models;
+    return snapshotAcpAgentCapabilities({
+      agentId,
+      availability: entry.availability,
+      negotiated: agent.getProtocolSnapshot(),
+      effectiveCapabilities: agent.capabilities,
+    });
+  }
+
+  getScopedCapabilities(input: {
+    agentId?: string | null;
+    providerSessionId?: string | null;
+  }) {
+    const sessionOwner = input.providerSessionId
+      ? decodeScopedId(input.providerSessionId)
+      : null;
+    const agentId = sessionOwner?.agentId ?? input.agentId ?? null;
+    const child = agentId ? this.agents.get(agentId) : null;
+    return structuredClone(child?.capabilities ?? catalogCapabilities);
   }
 
   async installModel(modelId: string) {
@@ -246,6 +309,27 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
       [...this.agents.entries()].map(async ([agentId, agent]) =>
         (await agent.listSessions()).map((session) => scopedSummary(agentId, session)),
       ),
+    );
+    return sessions.flat();
+  }
+
+  async listImportSessions(agentId?: string | null) {
+    const entries = agentId
+      ? (await this.refreshCatalog()).filter((entry) => entry.id === agentId)
+      : [];
+    const sessions = await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.availability !== 'ready') {
+          return [];
+        }
+        try {
+          const agent = await this.agentFor(entry.id);
+          return (await agent.listSessions()).map((session) =>
+            scopedSummary(entry.id, session));
+        } catch {
+          return [];
+        }
+      }),
     );
     return sessions.flat();
   }
@@ -279,14 +363,30 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     if (!agentId) {
       throw new AgentRuntimeError('Select an ACP agent before creating the thread.', 'acp');
     }
-    const agent = await this.agentFor(agentId);
-    const response = await agent.startSession(delegatedSessionInput(input));
+    let agent: AcpRuntimeAdapter;
+    let response: StartAgentSessionResult;
+    try {
+      agent = await this.agentFor(agentId);
+      response = await agent.startSession(delegatedSessionInput(input));
+    } catch (error) {
+      this.operationalMetrics.sessionStartFailures += 1;
+      throw error;
+    }
+    const probedDefaultModel = this.modelCache
+      .get(`${agentId}\0${input.cwd}`)
+      ?.models.find((model) => model.isDefault)?.model ?? null;
+    const resolvedModel = response.model && response.model !== 'default'
+      ? response.model
+      : input.model !== 'default'
+        ? input.model
+        : probedDefaultModel ?? input.model;
+    this.refreshAgentSessionCapabilities(agentId, agent);
     const session = scopedSession(agentId, response.session);
     return {
       ...response,
       agentId,
       providerSessionId: session.providerSessionId,
-      model: response.model ?? input.model,
+      model: resolvedModel,
       reasoningEffort: response.reasoningEffort ?? input.reasoningEffort ?? null,
       session,
     };
@@ -294,11 +394,19 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
 
   async resumeSession(input: ResumeAgentSessionInput): Promise<StartAgentSessionResult> {
     const owner = this.requireSessionOwner(input.providerSessionId);
-    const agent = await this.agentFor(owner.agentId);
-    const response = await agent.resumeSession({
-      ...input,
-      providerSessionId: owner.rawId,
-    });
+    let agent: AcpRuntimeAdapter;
+    let response: StartAgentSessionResult;
+    try {
+      agent = await this.agentFor(owner.agentId);
+      response = await agent.resumeSession({
+        ...input,
+        providerSessionId: owner.rawId,
+      });
+    } catch (error) {
+      this.operationalMetrics.resumeFailures += 1;
+      throw error;
+    }
+    this.refreshAgentSessionCapabilities(owner.agentId, agent);
     const session = scopedSession(owner.agentId, response.session);
     return {
       ...response,
@@ -327,6 +435,55 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     });
   }
 
+  async sendInput(input: SendAgentInputInput) {
+    const owner = this.requireSessionOwner(input.providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    return agent.sendInput({
+      ...input,
+      providerSessionId: owner.rawId,
+    });
+  }
+
+  async compactSession(providerSessionId: string) {
+    const owner = this.requireSessionOwner(providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    return agent.compactSession(owner.rawId);
+  }
+
+  async forkSession(input: { providerSessionId: string; atTurnId?: string | null }) {
+    const owner = this.requireSessionOwner(input.providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    return scopedSession(owner.agentId, await agent.forkSession({
+      ...input,
+      providerSessionId: owner.rawId,
+    }));
+  }
+
+  async getGoal(providerSessionId: string) {
+    const owner = this.requireSessionOwner(providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    return agent.getGoal(owner.rawId);
+  }
+
+  async setGoal(input: SetAgentGoalInput) {
+    const owner = this.requireSessionOwner(input.providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    const goal = await agent.setGoal({
+      ...input,
+      providerSessionId: owner.rawId,
+    });
+    return {
+      ...goal,
+      providerSessionId: encodeSessionId(owner.agentId, goal.providerSessionId),
+    };
+  }
+
+  async clearGoal(providerSessionId: string) {
+    const owner = this.requireSessionOwner(providerSessionId);
+    const agent = await this.agentFor(owner.agentId);
+    return agent.clearGoal(owner.rawId);
+  }
+
   mapProviderRequest(
     request: AgentProviderRequest,
     options: { approvalMode: 'yolo' | 'guarded' },
@@ -336,10 +493,17 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     if (!owner || !agent) {
       return null;
     }
+    const scopedProviderSessionId = request.params && typeof request.params === 'object'
+      ? String((request.params as Record<string, unknown>).sessionId ?? '')
+      : '';
+    const sessionOwner = decodeScopedId(scopedProviderSessionId);
+    if (!sessionOwner || sessionOwner.agentId !== owner.agentId || !sessionOwner.rawId) {
+      return null;
+    }
     const params = request.params && typeof request.params === 'object'
       ? {
           ...(request.params as Record<string, unknown>),
-          sessionId: owner.rawId,
+          sessionId: sessionOwner.rawId,
         }
       : request.params;
     const mapping = agent.mapProviderRequest({
@@ -415,6 +579,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     const existing = this.agents.get(agentId);
     if (existing) {
       await existing.start();
+      this.mergeAgentCapabilities(existing);
       return existing;
     }
 
@@ -435,10 +600,45 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     this.agents.set(agentId, agent);
     try {
       await agent.start();
+      this.mergeAgentCapabilities(agent);
       return agent;
     } catch (error) {
       this.agents.delete(agentId);
       throw error;
+    }
+  }
+
+  private mergeAgentCapabilities(agent: AcpRuntimeAdapter) {
+    void agent;
+    this.recomputeAgentCapabilities();
+  }
+
+  private refreshAgentSessionCapabilities(
+    agentId: string,
+    agent: AcpRuntimeAdapter,
+  ) {
+    for (const key of this.modelCache.keys()) {
+      if (key.startsWith(`${agentId}\0`)) {
+        this.modelCache.delete(key);
+      }
+    }
+    this.mergeAgentCapabilities(agent);
+  }
+
+  private recomputeAgentCapabilities() {
+    const next = structuredClone(catalogCapabilities);
+    for (const child of this.agents.values()) {
+      next.turns.steer ||= child.capabilities.turns.steer;
+      next.turns.compact ||= child.capabilities.turns.compact;
+      next.branching.fork ||= child.capabilities.branching.fork;
+      next.controls.goals ||= child.capabilities.controls.goals;
+      next.controls.performanceMode ||= child.capabilities.controls.performanceMode;
+      next.management.mcpStatus ||= child.capabilities.management.mcpStatus;
+      next.management.skills ||= child.capabilities.management.skills;
+      next.management.hooks ||= child.capabilities.management.hooks;
+    }
+    for (const section of Object.keys(next) as Array<keyof AgentProviderCapabilities>) {
+      Object.assign(this.capabilities[section], next[section]);
     }
   }
 
@@ -461,9 +661,18 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
         : {}),
     });
     agent.on('event', (event: AgentRuntimeEvent) => {
+      const providerSessionId = encodeSessionId(entry.id, event.providerSessionId);
       this.emit('event', {
         ...event,
-        providerSessionId: encodeSessionId(entry.id, event.providerSessionId),
+        providerSessionId,
+        ...(event.type === 'goal.updated'
+          ? {
+              goal: {
+                ...event.goal,
+                providerSessionId,
+              },
+            }
+          : {}),
       } satisfies AgentRuntimeEvent);
     });
     agent.on('provider-request', (request: AgentProviderRequest) => {

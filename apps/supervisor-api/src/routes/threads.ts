@@ -114,6 +114,11 @@ const importThreadSchema = z.object({
   provider: agentBackendIdSchema.optional(),
 });
 
+const importThreadCandidatesQuerySchema = z.object({
+  provider: agentBackendIdSchema.optional(),
+  agentId: z.string().min(1).optional(),
+});
+
 const resumeThreadSchema = z.object({
   model: z.string().min(1).optional(),
 });
@@ -420,6 +425,14 @@ export async function registerThreadRoutes(app: FastifyInstance) {
       ...(body.provider ? { provider: body.provider } : {}),
     };
     return app.services.threadService.importThread(input);
+  });
+
+  app.get('/api/threads/import-candidates', async (request) => {
+    const query = importThreadCandidatesQuerySchema.parse(request.query);
+    return app.services.threadService.listImportCandidates(
+      query.provider,
+      query.agentId,
+    );
   });
 
   app.get('/api/threads/:id', async (request) => {

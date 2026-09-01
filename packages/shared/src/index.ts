@@ -581,6 +581,11 @@ export interface AgentRuntimeStatusDto {
   lastStartedAt: string | null;
   lastError: string | null;
   restartCount: number;
+  operationalMetrics?: {
+    sessionStartFailures: number;
+    resumeFailures: number;
+    capabilityProbeFailures: number;
+  };
 }
 
 export interface AgentSubscriptionUsageWindowDto {
@@ -605,6 +610,9 @@ export interface AgentProviderCapabilitiesDto {
     read: boolean;
     resume: boolean;
     importLocal: boolean;
+    load?: boolean;
+    close?: boolean;
+    delete?: boolean;
   };
   turns: {
     start: boolean;
@@ -652,6 +660,14 @@ export interface AgentBackendDto {
   capabilities: AgentProviderCapabilitiesDto;
   managementSchema: AgentBackendManagementSchemaDto;
   installation: AgentBackendInstallationDto;
+}
+
+export interface AgentCapabilitySnapshotDto {
+  provider: AgentBackendIdDto;
+  agentId: string;
+  availability: AcpAgentOptionMetadataDto['availability'];
+  negotiated: unknown | null;
+  effectiveCapabilities: AgentProviderCapabilitiesDto | null;
 }
 
 export interface AgentBackendInstallationDto {
@@ -829,7 +845,10 @@ export interface UpdateWorkspaceInput {
   label: string;
 }
 
-export type ThreadSourceDto = 'supervisor' | 'local_codex_import';
+export type ThreadSourceDto =
+  | 'supervisor'
+  | 'local_codex_import'
+  | 'local_provider_import';
 
 export interface UpdateWorkspaceFavoriteInput {
   isFavorite: boolean;
@@ -1638,6 +1657,18 @@ export interface UpdateThreadInput {
 export interface ImportThreadInput {
   sessionId: string;
   provider?: AgentBackendIdDto;
+}
+
+export interface ImportThreadCandidateDto {
+  provider: AgentBackendIdDto;
+  agentId: string | null;
+  sessionId: string;
+  cwd: string;
+  title: string;
+  preview: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  historyStatus: 'unknown';
 }
 
 export interface SendThreadPromptInput {

@@ -20,15 +20,22 @@ export class UnsupportedShellBackend implements ShellBackend {
     return [];
   }
 
-  async hasSession(_sessionId: string) {
+  async hasSession(sessionId: string) {
+    void sessionId;
     return false;
   }
 
-  async createSession(_input: ShellBackendCreateInput): Promise<void> {
+  async createSession(input: ShellBackendCreateInput): Promise<void> {
+    void input;
     this.throwUnavailable();
   }
 
-  async attach(_sessionId: string, _options: ShellBackendAttachOptions): Promise<never> {
+  async attach(
+    sessionId: string,
+    options: ShellBackendAttachOptions,
+  ): Promise<never> {
+    void sessionId;
+    void options;
     return this.throwUnavailable();
   }
 

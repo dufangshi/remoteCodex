@@ -112,7 +112,11 @@ export function toThreadDto(
   },
   loadedIds: Set<string>,
   callbacks: {
-    fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean;
+    fastModeForProvider(
+      provider: string | null | undefined,
+      fastMode: unknown,
+      scope: { agentId?: string | null; providerSessionId?: string | null },
+    ): boolean;
     getThreadContextUsage(localThreadId: string): ThreadContextUsageDto;
   },
 ): ThreadDto {
@@ -135,7 +139,10 @@ export function toThreadDto(
     title: record.title,
     model,
     reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
-    fastMode: callbacks.fastModeForProvider(record.provider, record.fastMode),
+    fastMode: callbacks.fastModeForProvider(record.provider, record.fastMode, {
+      agentId,
+      providerSessionId: record.providerSessionId ?? null,
+    }),
     collaborationMode: normalizeCollaborationMode(record.collaborationMode),
     approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
     sandboxMode:
