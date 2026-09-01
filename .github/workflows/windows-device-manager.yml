@@ -19,10 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Test managed supervisor environment
+        shell: pwsh
+        run: node --test scripts/windows/relay-supervisor-environment.test.mjs
 
       - name: Build and run self-test
         shell: pwsh

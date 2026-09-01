@@ -64,6 +64,8 @@
     "test:e2e": "playwright test",
     "verify:package": "node scripts/verify-package-install.mjs",
     "verify:relay": "node scripts/verify-relay-supervisor-smoke.mjs",
+    "test:windows-device-manager-env": "node --test scripts/windows/relay-supervisor-environment.test.mjs",
+    "verify:windows-device-manager-acp": "node scripts/windows/verify-acp-device-manager-integration.mjs",
     "verify:mobile:inputs": "node scripts/verify-mobile-build-inputs.mjs",
     "verify:mobile:parity-gate": "node scripts/collect-mobile-verification-evidence.mjs --simulator-only --output .local/mobile-parity/verification.json",
     "verify:mobile:release-gate": "node scripts/collect-mobile-verification-evidence.mjs",

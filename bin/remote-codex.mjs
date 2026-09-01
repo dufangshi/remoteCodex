@@ -9,6 +9,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 
+import {
+  configureWindowsDeviceManagerEnvironment,
+  WINDOWS_DEVICE_MANAGER_ENV,
+} from './relay-supervisor-environment.mjs';
+
 const binDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(binDir, '..');
 const packageJsonPath = path.join(packageRoot, 'package.json');
@@ -50,6 +55,7 @@ const relaySupervisorConfigKeys = [
   'REMOTE_CODEX_E2E_FAKE_RUNTIME',
   'REMOTE_CODEX_DISABLE_BUILD_RESTART',
   'REMOTE_CODEX_PACKAGE_ROOT',
+  WINDOWS_DEVICE_MANAGER_ENV,
 ];
 const sourceCheckout =
   fs.existsSync(path.join(packageRoot, 'pnpm-workspace.yaml')) &&
@@ -787,6 +793,11 @@ function commandExists(commandName) {
 
 async function ensureRelaySupervisorConfig() {
   const existing = readRelaySupervisorConfig();
+  configureWindowsDeviceManagerEnvironment({
+    env: process.env,
+    savedConfig: existing,
+    configPath: relaySupervisorConfigPath,
+  });
   const generated = {
     REMOTE_CODEX_ADMIN_USERNAME: 'admin',
     REMOTE_CODEX_ADMIN_PASSWORD: randomSecret(24),

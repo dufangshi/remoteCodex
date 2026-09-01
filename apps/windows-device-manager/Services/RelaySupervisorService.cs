@@ -32,6 +32,7 @@ internal sealed class RelaySupervisorService(ProcessRunner runner, AppLogger log
                 : configuration.DeviceToken.Trim(),
             ["REMOTE_CODEX_RELAY_SUPERVISOR_HOST"] = "127.0.0.1",
             ["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"] = configuration.SupervisorPort.ToString(),
+            ["REMOTE_CODEX_WINDOWS_DEVICE_MANAGER"] = "1",
             ["REMOTE_CODEX_ENABLED_AGENT_PROVIDERS"] = "codex,acp",
             ["CODEX_COMMAND"] = runtime.CodexCommandPath,
             ["WORKSPACE_ROOT"] = Path.GetFullPath(configuration.WorkspaceRoot.Trim()),
