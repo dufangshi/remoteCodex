@@ -1,7 +1,7 @@
 # ACP Core 与 Harness 扩展收敛计划
 
 - 状态：Complete
-- 最后审阅：2026-08-31
+- 最后审阅：2026-09-01
 - 适用范围：Remote Codex agent runtime、Supervisor conversation persistence、Web/iOS/Android thread surface
 
 ## 目标
@@ -22,7 +22,7 @@
 - 下一项：后续版本按 capability 变化维护 contract snapshot；native Codex 保留为明确 fallback，尚未退役。
 - 已完成实现项：Phase 0-7 全部保留范围；ACP core、versioned extension、durable journal、Codex parity、adopt/import、多 harness contract、Web/mobile/relay 与 native fallback。
 - 已关闭 Phase gate：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4、Phase 5、Phase 6、Phase 7。
-- 已记录真实 E2E：Codex ACP restart/context/image/approval/steering/compact/goal/fast/import；Claude ACP restart/context/fork；Web desktop/mobile；Android local/server/relay；iOS prompt/relaunch；native Codex restart/context fallback。
+- 已记录真实 E2E：Codex ACP restart/context/image/approval/steering/compact/goal/fast/import；Claude ACP restart/context/fork；Grok/Cursor/DeepSeek model/reasoning/long-turn；Web desktop/mobile；Android local/server/relay；iOS prompt/relaunch；native Codex restart/context fallback。
 - 实际集成状态：完整实现、证据与 lint 收口已通过 merge commit 集成到 `main`。
 
 交付 checklist：
@@ -139,6 +139,38 @@ Harness adapter 不负责：
 - Thread UI、Relay、workspace 权限或移动端路由。
 - 通用 history merge、turn ordering 或 idempotency。
 - 创建第二套 provider session 生命周期。
+
+### 3.1 源码边界与命名
+
+实现必须维持以下物理边界，禁止把 harness 名称判断重新散落到
+`runtimeAdapter.ts`、Supervisor route 或 Thread UI：
+
+```text
+packages/acp/src/runtimeAdapter.ts
+  标准 ACP lifecycle、config option、event mapping、permission、usage
+
+packages/acp/src/harness-adapters/
+  types.ts       adapter contract
+  standard.ts    无特例的默认实现
+  grok.ts        Grok legacy models 与 _meta.reasoningEffort
+  cursor.ts      Cursor parameterizedModelPicker 与 model catalog extension
+  deepseek.ts    DeepSeek 的命名边界；当前原生 profile 无协议特例
+  index.ts       agentId -> adapter registry；唯一允许按 harness 选择实现的位置
+```
+
+新增 harness 时必须先走 `standard` adapter 并记录真实 initialize/session 响应；只有
+标准 ACP 无法表达、且真实 E2E 已证明需要的部分，才允许新增或扩展命名 adapter。
+每个 adapter 必须有独立单测，并以 provider 返回值确认设置生效，不能仅验证 UI 的
+optimistic state。
+
+当前特例矩阵：
+
+| Harness | 标准 ACP core | 小型 adapter 兜底 | 禁止做法 |
+| --- | --- | --- | --- |
+| Grok Build | prompt/load/events/permission | legacy `models`、每模型 effort、`session/new/load._meta.reasoningEffort` | 在通用 runtime 中出现 `agentId === "grok"` |
+| Cursor Agent | 标准 parameterized config options | initialize `_meta.parameterizedModelPicker`、`cursor/list_available_models` catalog | 拼接或猜测参数化 model ID |
+| DeepSeek Harness | 原生 `dsh --profile acp` 的标准 ACP v1 | 当前无；命名 adapter 只预留明确 owner | 使用旧外置 bridge 或伪造 Fast capability |
+| 其他 harness | initialize 协商出的标准能力 | 默认无 | 按名称伪造 capability |
 
 ### 4. Capability 以运行时协商为准
 
@@ -656,6 +688,38 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 - 共享 contract checker 接入后重新运行真实 Codex verifier：restart、steer、compact、goal、fast、image、approval 全部通过。
 
 实现检查：Claude/OpenCode 同时声明的 unstable `session/fork` 晋升 ACP core；Codex/Claude 同 contract steering/goal 复用协商 adapter；Codex `/compact` 未泄漏给其他 harness。Claude fork 的 provider load 返回空 transcript 时，child journal 使用已 hydrate source snapshot，随后用真实 nonce follow-up 独立证明 fork provider context。测试 session 与 workspace 已清理，报告不含凭据、session ID 或消息正文。
+
+### 2026-09-01 Harness Adapter 与长任务复核证据
+
+平台：macOS arm64；Chrome desktop；独立 Supervisor `127.0.0.1:45682` 与
+Vite `127.0.0.1:45683`；主 Relay Supervisor `127.0.0.1:45679` 全程未重启。<br>
+实际版本：Grok `1.0.13`；Cursor Agent `2026.08.11-e8db854`；DeepSeek
+Harness `0.1.2-alpha.2`。<br>
+命令与结果：
+
+- `pnpm --filter @remote-codex/acp test -- --run`：14 files、60 tests 通过；
+  adapter registry、Grok legacy projection、Cursor parameterized catalog 和
+  standard fallback 均有独立覆盖。
+- `pnpm --filter @remote-codex/supervisor-api test -- --run`：19 files、229
+  tests 通过；新增 unsupported Fast 显式拒绝覆盖。
+- Grok Build：真实三轮 Relay E2E 分别验证 `xhigh`、`high`、`low`；provider
+  `chat_history.jsonl` 与 UI effort 一致；历史 hydration 无重复，并使用
+  `_meta.agentTimestampMs` 恢复实际事件时间。
+- Cursor Agent：真实 provider ACK 确认 `gpt-5.6-sol`、`reasoning=high`、
+  `fast=true`；浏览器 `/fast` 完成 On -> Off -> On。长任务运行 1 分 55 秒，
+  82 items、1 个 user item、0 重复 ID、sequence 连续，最终报告 8,531 字。
+  7 个 subagent tool 均为 foreground；adapter preamble 阻止 ACP 无法可靠续接的
+  background subagent。
+- DeepSeek Harness：catalog 从已失效的外置 `dsh-acp` 改为随发行版提供的
+  `dsh --profile acp`。真实 config option 确认 Flash/Pro/Vision 模型与
+  `none|low|high|max` reasoning；provider 不声明 Fast，UI 不显示 `/fast`，API
+  显式拒绝强制开启。`deepseek-official` 无 key 的失败 turn 被完整投影；切换到
+  本机已有凭据的 route 后，长任务运行 34 秒，16 items、0 重复 ID、sequence
+  连续，最终报告 5,705 字。
+
+实现检查：`runtimeAdapter.ts` 不再含 Grok/Cursor/DeepSeek/Codex 名称判断或
+未协商的 `session/set_model`；Grok model fallback 与 Codex compact 分别归属
+命名 adapter。测试实例使用独立 SQLite；未记录或输出 provider credential。
 
 ### Phase 7 客户端与受控切换证据
 

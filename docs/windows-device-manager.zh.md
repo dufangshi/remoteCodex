@@ -43,6 +43,8 @@
 
 Device Manager 与 Remote Codex runtime 使用独立版本。EXE 只承载设备配置、进程管理和 runtime 更新能力；ACP、provider 与 Supervisor 业务修复应优先通过 npm runtime 发布，并由 EXE 内的 **Check for updates** / **Install update** 完成升级。只有安装器、运行时管理协议或 Windows 原生集成发生不兼容变化时，才需要重新发布 EXE。
 
+安装 Remote Codex 时，Device Manager 会把选中的 Node.js 22 目录固定在安装子进程 PATH 首位，并锁定 npm 的 Node 版本和 x64 架构，避免 npm lifecycle 的 `.cmd` shim 误用系统 PATH 中的 Node.js 20/24。原生依赖下载会重试三次；失败时完整的 npm/prebuild 输出会写入 `device-manager.log`，界面会提示检查 npm 和 GitHub Releases 网络访问，而不会要求用户安装 Visual Studio。
+
 ## 托盘行为
 
 主窗口关闭或最小化后，应用只隐藏到通知区域，Device 继续运行。托盘菜单提供：
@@ -131,7 +133,9 @@ CI 检测到证书后会进行 Authenticode SHA-256 签名、可信时间戳和�
 7. 重新运行两次，确认 Node、Codex 和 Remote Codex 均走复用/跳过路径；
 8. 启用 **Start with Windows** 后注销并登录，确认托盘和 Device 自动恢复；
 9. 在已有 Node 20 或 24 的电脑上运行，确认原 Node 和 PATH 没有被修改；
-10. 检查日志，确认没有完整 token、密码或 session secret。
+10. 将 Node 20 或 24 放在 PATH 首位且不安装 Visual Studio，确认安装后的 `better-sqlite3` 能由私有 Node 22 打开 `:memory:` 数据库；
+11. 模拟一次 GitHub Releases 下载失败后恢复，确认安装会重试并成功；
+12. 检查日志，确认失败时包含 npm/prebuild 原始诊断，且没有完整 token、密码或 session secret。
 
 ## 当前边界
 

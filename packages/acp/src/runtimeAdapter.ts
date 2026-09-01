@@ -53,9 +53,16 @@ import {
 import { AcpSessionHydrator } from './session-hydrator';
 import { AcpTerminalService } from './terminal-service';
 import { resolveAcpWorkspacePath } from './workspace-boundary';
+import {
+  normalizeAcpEffort,
+  standardAcpHarnessAdapter,
+  type AcpHarnessAdapter,
+  type AcpHarnessSessionProjection,
+} from './harness-adapters';
 
 interface AcpRuntimeOptions {
   command: string;
+  harnessAdapter?: AcpHarnessAdapter;
   startupTimeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   clientInfo?: {
@@ -79,6 +86,7 @@ interface AcpSessionState {
   activeMapper: AcpTurnItemMapper | null;
   modes: acp.SessionModeState | null;
   configOptions: acp.SessionConfigOption[];
+  harnessState: unknown;
   availableCommands: acp.AvailableCommand[];
   hydrationCoverage: AgentSessionHistoryCoverage | null;
   goal: AgentGoal | null;
@@ -191,29 +199,23 @@ function configOptionByCategory(
   const hints = category === 'model'
     ? ['model']
     : ['thought', 'reasoning', 'effort'];
-  return options.find((option) =>
+  const candidates = options.filter((option) =>
     option.category === category ||
     hints.some((hint) => option.id.toLowerCase().includes(hint)),
-  ) ?? null;
-}
-
-function normalizeAcpEffort(value: string | null | undefined) {
-  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, '_');
-  switch (normalized) {
-    case 'none':
-    case 'minimal':
-    case 'low':
-    case 'medium':
-    case 'high':
-    case 'max':
-    case 'ultra':
-      return normalized;
-    case 'xhigh':
-    case 'extra_high':
-      return 'xhigh';
-    default:
-      return null;
+  );
+  if (category === 'thought_level') {
+    const reasoningSelect = candidates.find(
+      (option) =>
+        option.type === 'select' &&
+        allSelectOptions(option).some((entry) =>
+          normalizeAcpEffort(entry.value),
+        ),
+    );
+    if (reasoningSelect) {
+      return reasoningSelect;
+    }
   }
+  return candidates[0] ?? null;
 }
 
 function reasoningOptions(configOptions: acp.SessionConfigOption[]) {
@@ -237,6 +239,31 @@ function reasoningOptions(configOptions: acp.SessionConfigOption[]) {
     ),
     defaultEffort: normalizeAcpEffort(option.currentValue),
   };
+}
+
+function modelsFromConfigOptions(
+  configOptions: acp.SessionConfigOption[],
+): AgentModel[] {
+  const modelOption = configOptionByCategory(configOptions, 'model');
+  if (!modelOption || modelOption.type !== 'select') {
+    return [];
+  }
+  const reasoning = reasoningOptions(configOptions);
+  const supportsPerformanceMode = configOptions.some(
+    (option) => option.id === 'fast-mode' || option.id === 'fast',
+  );
+  return allSelectOptions(modelOption).map((option) => ({
+    id: option.value,
+    model: option.value,
+    displayName: option.name || option.value,
+    description: option.description ?? '',
+    isDefault: option.value === modelOption.currentValue,
+    hidden: false,
+    supportsPerformanceMode,
+    supportedReasoningEfforts: reasoning.efforts,
+    defaultReasoningEffort: reasoning.defaultEffort,
+    selectionKind: 'model',
+  }));
 }
 
 function permissionOptions(params: acp.RequestPermissionRequest) {
@@ -333,6 +360,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly hydrators = new Map<string, AcpSessionHydrator>();
   private readonly extensionRegistry = new HarnessExtensionRegistry();
   private readonly terminalService: AcpTerminalService;
+  private readonly harnessAdapter: AcpHarnessAdapter;
   private child: ChildProcess | null = null;
   private connection: acp.ClientConnection | null = null;
   private context: acp.ClientContext | null = null;
@@ -350,6 +378,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   constructor(private readonly options: AcpRuntimeOptions) {
     super();
+    this.harnessAdapter = options.harnessAdapter ?? standardAcpHarnessAdapter;
     this.extensionRegistry.on(
       'event',
       (event: HarnessExtensionEventEnvelope) => this.emitRuntimeEvent({
@@ -475,6 +504,9 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
             configOptions: { boolean: {} },
           },
           plan: {},
+          ...(this.harnessAdapter.initializeClientMeta
+            ? { _meta: this.harnessAdapter.initializeClientMeta }
+            : {}),
         },
         clientInfo: {
           name: this.options.clientInfo?.name ?? 'remote-codex-supervisor',
@@ -575,12 +607,47 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   async inspectModelOptions(cwd: string): Promise<AgentModel[]> {
+    const context = await this.requireContext();
+    const adapterModels = await this.harnessAdapter.listModels?.(context);
+    if (adapterModels && adapterModels.length > 0) {
+      return adapterModels;
+    }
     const sessionCapabilities =
       this.initializeResponse?.agentCapabilities?.sessionCapabilities;
     if (!sessionCapabilities?.delete) {
-      return this.listModels();
+      const normalizedCwd = path.resolve(cwd);
+      const loadedSession = [...this.sessions.values()].find(
+        (session) =>
+          session.cwd === normalizedCwd &&
+          (session.configOptions.length > 0 || session.harnessState !== null),
+      );
+      if (!loadedSession) {
+        return this.listModels();
+      }
+      if (loadedSession.harnessState && this.harnessAdapter.modelsFromState) {
+        return this.harnessAdapter.modelsFromState(loadedSession.harnessState);
+      }
+      const loadedModels = modelsFromConfigOptions(loadedSession.configOptions);
+      if (loadedModels.length > 0) {
+        return loadedModels;
+      }
+      const reasoning = reasoningOptions(loadedSession.configOptions);
+      const supportsPerformanceMode = loadedSession.configOptions.some(
+        (option) => option.id === 'fast-mode' || option.id === 'fast',
+      );
+      return [{
+        id: 'default',
+        model: 'default',
+        displayName: 'Agent default',
+        description: 'Use the model configured by the ACP agent.',
+        isDefault: true,
+        hidden: false,
+        supportsPerformanceMode,
+        supportedReasoningEfforts: reasoning.efforts,
+        defaultReasoningEffort: reasoning.defaultEffort,
+        selectionKind: 'model',
+      }];
     }
-    const context = await this.requireContext();
     const response = await context.request(acp.methods.agent.session.new, {
       cwd: path.resolve(cwd),
       mcpServers: [],
@@ -589,9 +656,13 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     let configOptions = response.configOptions ?? [];
     this.updateCapabilitiesFromConfigOptions(configOptions);
     const supportsPerformanceMode = configOptions.some(
-      (option) => option.id === 'fast-mode' || option.category === 'model_config',
+      (option) => option.id === 'fast-mode' || option.id === 'fast',
     );
     try {
+      const harnessProjection = this.harnessAdapter.projectSession?.(response);
+      if (harnessProjection) {
+        return harnessProjection.models;
+      }
       const modelOption = configOptionByCategory(configOptions, 'model');
       if (!modelOption || modelOption.type !== 'select') {
         const reasoning = reasoningOptions(configOptions);
@@ -792,6 +863,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
     forked.modes = response.modes ?? forked.modes;
     forked.configOptions = response.configOptions ?? forked.configOptions;
+    this.applyHarnessProjection(forked, response);
     this.syncStateFromConfigOptions(forked);
     return sessionDetail(forked);
   }
@@ -880,9 +952,15 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       mcpServers: [],
       _meta: {
         yoloMode: input.approvalMode === 'yolo',
+        ...(this.harnessAdapter.sessionNewMeta?.({
+          ...(input.reasoningEffort !== undefined
+            ? { reasoningEffort: input.reasoningEffort }
+            : {}),
+        }) ?? {}),
       },
     });
     const now = new Date().toISOString();
+    const harnessProjection = this.harnessAdapter.projectSession?.(response);
     const state: AcpSessionState = {
       providerSessionId: response.sessionId,
       cwd: path.resolve(input.cwd),
@@ -897,10 +975,15 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       activeMapper: null,
       modes: response.modes ?? null,
       configOptions: response.configOptions ?? [],
+      harnessState: harnessProjection?.state ?? null,
       availableCommands: [],
       hydrationCoverage: null,
       goal: null,
     };
+    if (harnessProjection) {
+      state.model = harnessProjection.model;
+      state.reasoningEffort = harnessProjection.reasoningEffort;
+    }
     this.sessions.set(state.providerSessionId, state);
     this.syncStateFromConfigOptions(state);
     this.knownSessions.set(state.providerSessionId, sessionDetail(state));
@@ -999,8 +1082,12 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       promptCapabilities: this.initializeResponse?.agentCapabilities?.promptCapabilities,
       ...(input.content ? { content: input.content } : {}),
     });
-    if (input.developerInstructions?.trim()) {
-      prompt.unshift({ type: 'text', text: `${input.developerInstructions.trim()}\n\n` });
+    const promptPreamble = [
+      this.harnessAdapter.promptPreamble,
+      input.developerInstructions?.trim(),
+    ].filter((value): value is string => Boolean(value));
+    if (promptPreamble.length > 0) {
+      prompt.unshift({ type: 'text', text: `${promptPreamble.join('\n\n')}\n\n` });
     }
     const context = await this.requireContext();
     void context.request(acp.methods.agent.session.prompt, {
@@ -1134,6 +1221,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       activeMapper: null,
       modes: null,
       configOptions: [],
+      harnessState: null,
       availableCommands: [],
       hydrationCoverage: null,
       goal: null,
@@ -1152,6 +1240,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
           });
           state.modes = response.modes ?? null;
           state.configOptions = response.configOptions ?? [];
+          this.applyHarnessProjection(state, response);
           state.turns = hydrator.complete();
           state.hydrationCoverage = hydrator.coverage();
           this.syncStateFromConfigOptions(state);
@@ -1166,6 +1255,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
         });
         state.modes = response.modes ?? null;
         state.configOptions = response.configOptions ?? [];
+        this.applyHarnessProjection(state, response);
         this.syncStateFromConfigOptions(state);
       } else {
         throw new Error('ACP agent does not support session/load or session/resume.');
@@ -1195,7 +1285,10 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (model && model !== 'default') {
       state.model = await this.setConfigOption(state, 'model', model);
     }
-    if (reasoningEffort) {
+    if (
+      reasoningEffort &&
+      normalizeAcpEffort(reasoningEffort) !== state.reasoningEffort
+    ) {
       const applied = await this.setConfigOption(
         state,
         'thought_level',
@@ -1239,16 +1332,40 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     category: 'model' | 'thought_level',
     value: string,
   ) {
-    const option = state.configOptions.find((candidate) =>
-      candidate.category === category || candidate.id.toLowerCase().includes(category === 'model' ? 'model' : 'thought'),
-    );
+    const option = configOptionByCategory(state.configOptions, category);
     if ((!option || option.type !== 'select') && category === 'model') {
-      const context = await this.requireContext();
-      await context.request('session/set_model', {
+      if (!state.harnessState || !this.harnessAdapter.applyModel) {
+        throw new AgentRuntimeError(
+          'ACP agent does not expose a model config option.',
+          'acp',
+          'request_failed',
+        );
+      }
+      const projection = await this.harnessAdapter.applyModel({
+        context: await this.requireContext(),
         sessionId: state.providerSessionId,
-        modelId: value,
+        state: state.harnessState,
+        model: value,
       });
+      if (projection) {
+        this.applyHarnessProjectionValue(state, projection);
+      }
       return value;
+    }
+    if ((!option || option.type !== 'select') && category === 'thought_level') {
+      if (state.harnessState && this.harnessAdapter.applyReasoningEffort) {
+        const projection = await this.harnessAdapter.applyReasoningEffort({
+          context: await this.requireContext(),
+          sessionId: state.providerSessionId,
+          cwd: state.cwd,
+          state: state.harnessState,
+          reasoningEffort: value,
+        });
+        if (projection) {
+          this.applyHarnessProjectionValue(state, projection);
+          return projection.reasoningEffort ?? value;
+        }
+      }
     }
     if (!option || option.type !== 'select') {
       throw new AgentRuntimeError(
@@ -1258,7 +1375,10 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       );
     }
     const selected = allSelectOptions(option).find((candidate) =>
-      candidate.value === value || candidate.name.toLowerCase() === value.toLowerCase(),
+      candidate.value === value ||
+      candidate.name.toLowerCase() === value.toLowerCase() ||
+      (category === 'thought_level' &&
+        normalizeAcpEffort(candidate.value) === normalizeAcpEffort(value)),
     );
     if (!selected) {
       throw new AgentRuntimeError(
@@ -1277,6 +1397,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       value: selected.value,
     });
     state.configOptions = response.configOptions;
+    this.applyHarnessProjection(state, response);
     return selected.value;
   }
 
@@ -1295,6 +1416,22 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
   }
 
+  private applyHarnessProjection(state: AcpSessionState, response: unknown) {
+    const projection = this.harnessAdapter.projectSession?.(response);
+    if (projection) {
+      this.applyHarnessProjectionValue(state, projection);
+    }
+  }
+
+  private applyHarnessProjectionValue(
+    state: AcpSessionState,
+    projection: AcpHarnessSessionProjection,
+  ) {
+    state.harnessState = projection.state;
+    state.model = projection.model;
+    state.reasoningEffort = projection.reasoningEffort;
+  }
+
   private updateCapabilitiesFromConfigOptions(
     configOptions: acp.SessionConfigOption[],
   ) {
@@ -1302,14 +1439,14 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       configOptionByCategory(configOptions, 'model'),
     );
     this.capabilities.controls.performanceMode ||= configOptions.some(
-      (option) => option.id === 'fast-mode' || option.category === 'model_config',
+      (option) => option.id === 'fast-mode' || option.id === 'fast',
     );
   }
 
   private async setFastMode(state: AcpSessionState, enabled: boolean) {
     const option = state.configOptions.find(
       (candidate) =>
-        candidate.id === 'fast-mode' || candidate.category === 'model_config',
+        candidate.id === 'fast-mode' || candidate.id === 'fast',
     );
     if (!option) {
       throw new AgentRuntimeError(
@@ -1352,7 +1489,15 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       return;
     }
     state.updatedAt = new Date().toISOString();
-    const update = notification.update;
+    const notificationMeta = (
+      notification as acp.SessionNotification & { _meta?: unknown }
+    )._meta;
+    const update = notificationMeta
+      ? {
+          ...notification.update,
+          _meta: notificationMeta,
+        } as acp.SessionUpdate
+      : notification.update;
     const hydrator = this.hydrators.get(notification.sessionId);
     if (update.sessionUpdate === 'config_option_update') {
       state.configOptions = update.configOptions;
@@ -1418,6 +1563,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
         providerTurnId: mapper.turnId,
         itemId: delta.itemId,
         delta: delta.delta,
+        ...(delta.createdAt ? { createdAt: delta.createdAt } : {}),
       });
     }
     if (mapped.planUpdate) {
@@ -1811,34 +1957,12 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
         capabilityPatch: { controls: { goals: true } },
       });
     }
-    if (snapshot.agentInfo?.name === '@agentclientprotocol/codex-acp') {
-      this.extensionRegistry.register({
-        ownerId: 'acp-agent',
-        descriptor: {
-          id: 'codex.control',
-          version: 1,
-          stability: 'experimental',
-          methods: ['compact'],
-          events: [],
-        },
-        transport: {
-          request: async (_method, params, signal) => {
-            const providerSessionId = isRecord(params)
-              ? String(params.providerSessionId ?? '')
-              : '';
-            return this.runControlPrompt(providerSessionId, '/compact', signal);
-          },
-        },
-        paramMappers: {
-          compact: (envelope) => ({
-            providerSessionId: isRecord(envelope.params)
-              ? envelope.params.providerSessionId
-              : null,
-          }),
-        },
-        capabilityPatch: { turns: { compact: true } },
-      });
-    }
+    this.harnessAdapter.registerExtensions?.({
+      registry: this.extensionRegistry,
+      snapshot,
+      runControlPrompt: (providerSessionId, prompt, signal) =>
+        this.runControlPrompt(providerSessionId, prompt, signal),
+    });
     const effective = this.extensionRegistry.effectiveCapabilities(this.capabilities);
     for (const section of Object.keys(effective) as Array<keyof AgentProviderCapabilities>) {
       Object.assign(this.capabilities[section], effective[section]);

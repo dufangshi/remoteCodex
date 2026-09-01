@@ -444,6 +444,71 @@ describe('relay server', () => {
     await app.close();
   });
 
+  it('closes a superseded supervisor tunnel so it can reconnect', async () => {
+    const app = buildRelayServer(testConfig());
+    await app.ready();
+    await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const ownerResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/auth/register',
+      payload: {
+        email: 'owner@example.test',
+        username: 'owner',
+        password: 'password123',
+      },
+    });
+    const deviceResponse = await app.inject({
+      method: 'POST',
+      url: '/relay/devices',
+      headers: {
+        authorization: `Bearer ${ownerResponse.json().token}`,
+      },
+      payload: { name: 'Owner workstation' },
+    });
+    const deviceToken = deviceResponse.json().token as string;
+    const tunnelUrl = `${websocketBaseUrl(app)}/supervisor/tunnel?deviceToken=${encodeURIComponent(
+      deviceToken,
+    )}`;
+    const firstSocket = new WebSocket(tunnelUrl);
+    let replacementSocket: WebSocket | null = null;
+    let reconnectedSocket: WebSocket | null = null;
+
+    try {
+      await waitForSocketOpen(firstSocket);
+      const firstClosePromise = waitForSocketClose(firstSocket);
+
+      replacementSocket = new WebSocket(tunnelUrl);
+      await waitForSocketOpen(replacementSocket);
+
+      const firstClose = await firstClosePromise;
+      expect(firstClose.code).toBe(1012);
+      expect(firstClose.reason).toBe('Supervisor connection replaced.');
+
+      const replacementClosePromise = waitForSocketClose(replacementSocket);
+      replacementSocket.close();
+      await replacementClosePromise;
+
+      reconnectedSocket = new WebSocket(tunnelUrl);
+      await waitForSocketOpen(reconnectedSocket);
+      const healthResponse = await app.inject({
+        method: 'GET',
+        url: '/healthz',
+      });
+      expect(healthResponse.json()).toMatchObject({
+        supervisorConnected: true,
+        supervisorCount: 1,
+      });
+    } finally {
+      for (const socket of [firstSocket, replacementSocket, reconnectedSocket]) {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+      }
+      await app.close();
+    }
+  });
+
   it('requires client auth for relayed HTTP requests when configured', async () => {
     const app = buildRelayServer(testConfig({ clientToken: 'client-token' }));
     await app.ready();

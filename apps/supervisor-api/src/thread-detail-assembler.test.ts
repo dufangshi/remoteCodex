@@ -4,7 +4,10 @@ import type {
   AgentSessionDetail,
   AgentTurn,
 } from '../../../packages/agent-runtime/src/index';
-import type { ThreadHistoryItemDto } from '../../../packages/shared/src/index';
+import type {
+  ThreadHistoryItemDto,
+  ThreadTurnDto,
+} from '../../../packages/shared/src/index';
 import { ThreadLiveStateStore } from './thread-live-state-store';
 import {
   ThreadDetailAssembler,
@@ -55,9 +58,12 @@ function session(turns: AgentTurn[], totalTurnCount = turns.length): AgentSessio
 function createAssembler(remoteSession: AgentSessionDetail | null) {
   const liveState = new ThreadLiveStateStore();
   const readRemoteSession = vi.fn(async () => remoteSession);
+  const findLocalSession = vi.fn(
+    async (): Promise<{ turns: ThreadTurnDto[] } | null> => null,
+  );
   const callbacks = {
     buildThreadPatch: vi.fn(() => ({})),
-    findLocalSession: vi.fn(async () => null),
+    findLocalSession,
     listPersistedHistoryItemsByTurnId: vi.fn(() => new Map()),
     materializeHiddenRuntimeTurns: vi.fn(),
     readRemoteSession,
@@ -120,6 +126,51 @@ describe('ThreadDetailAssembler', () => {
         { kind: 'agentMessage', text: 'Persisted response' },
       ],
     }]);
+  });
+
+  it('uses rollout history without reading an unconnected imported session', async () => {
+    const { assembler, callbacks } = createAssembler(session([]));
+    callbacks.findLocalSession.mockResolvedValue({
+      turns: [
+        {
+          id: 'local-turn-1',
+          startedAt: '2026-06-07T00:00:00.000Z',
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'local-message-1',
+              kind: 'agentMessage',
+              text: 'Recovered from the rollout file.',
+              createdAt: '2026-06-07T00:00:05.000Z',
+            },
+          ],
+        },
+      ],
+    });
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: {
+        ...record,
+        source: 'local_codex_import',
+        isConnected: false,
+      },
+      turnMetadataById: new Map(),
+    });
+
+    expect(callbacks.readRemoteSession).not.toHaveBeenCalled();
+    expect(entry.turns).toEqual([
+      expect.objectContaining({
+        id: 'local-turn-1',
+        items: [
+          expect.objectContaining({
+            text: 'Recovered from the rollout file.',
+            createdAt: '2026-06-07T00:00:05.000Z',
+          }),
+        ],
+      }),
+    ]);
   });
 
   it('caches repeated latest paged detail reads within the ttl', async () => {
@@ -308,7 +359,6 @@ describe('ThreadDetailAssembler', () => {
     expect(entry.turns[0]?.items).toMatchObject([
       {
         id: 'user-1',
-        createdAt: turnStartedAt,
       },
       {
         id: 'agent-live-1',
@@ -316,6 +366,23 @@ describe('ThreadDetailAssembler', () => {
         sequence,
       },
     ]);
+    liveState.getLiveItems(record.id, entry.turns);
+    liveState.appendLiveAgentMessageDelta({
+      localThreadId: record.id,
+      turnId: 'turn-1',
+      itemId: 'agent-live-1',
+      delta: ' continued',
+      sequence,
+      createdAt: '2026-06-07T00:00:40.000Z',
+    });
+    expect(
+      liveState.getLiveItemsForTurn(record.id, 'turn-1')?.items.find(
+        (item) => item.id === 'agent-live-1',
+      ),
+    ).toMatchObject({
+      text: 'Materialized response text continued',
+      createdAt: liveAgentCreatedAt,
+    });
   });
 
   it('uses stored display prompt when Codex history returns local image placeholders', async () => {
@@ -504,6 +571,7 @@ describe('ThreadDetailAssembler', () => {
         kind: 'userMessage',
         text: 'Remember the restart marker.',
         status: 'completed',
+        createdAt: '2026-08-31T11:58:00.000Z',
       },
       {
         id: 'local-live:agent',
@@ -511,6 +579,7 @@ describe('ThreadDetailAssembler', () => {
         text: 'PARTIAL_MARKER',
         status: 'running',
         sourceTurnId: 'local-live-turn',
+        createdAt: '2026-08-31T11:59:00.000Z',
       },
     ];
     const hydrated: AgentTurn = {
@@ -538,7 +607,20 @@ describe('ThreadDetailAssembler', () => {
     };
     const { assembler, callbacks } = createAssembler(session([hydrated]));
     callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
-      new Map([['local-live-turn', persistedItems]]),
+      new Map([
+        ['local-live-turn', persistedItems],
+        ['acp-hydrated:stale-duplicate', persistedItems.map((item) => ({
+          ...item,
+          id: `stale:${item.id}`,
+          ...(item.kind === 'userMessage'
+            ? {
+                text:
+                  'Developer instructions:\nKeep the response concise.\n\n' +
+                  item.text,
+              }
+            : {}),
+        }))],
+      ]),
     );
 
     const entry = await assembler.buildCacheEntry({
@@ -550,8 +632,15 @@ describe('ThreadDetailAssembler', () => {
     expect(entry.turns).toHaveLength(1);
     expect(entry.turns[0]).toMatchObject({
       id: 'local-live-turn',
+      startedAt: '2026-08-31T11:58:00.000Z',
       status: 'completed',
       items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'local-live:user',
+          kind: 'userMessage',
+          text: 'Remember the restart marker.',
+          createdAt: '2026-08-31T11:58:00.000Z',
+        }),
         expect.objectContaining({
           id: 'local-live:agent',
           text: 'PARTIAL_MARKER_COMPLETE',
@@ -559,6 +648,9 @@ describe('ThreadDetailAssembler', () => {
         }),
       ]),
     });
+    expect(
+      entry.turns[0]?.items.filter((item) => item.kind === 'userMessage'),
+    ).toHaveLength(1);
     expect(callbacks.syncAfterRemoteSession).toHaveBeenCalledWith(
       record.id,
       expect.objectContaining({

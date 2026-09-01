@@ -16,7 +16,7 @@ internal static class SelfTest
                 "rcd_self_test",
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ProductManifest.DefaultSupervisorPort).Validate(hasSavedToken: false);
-            var redacted = AppLogger.Redact("TOKEN=secret rcd_self_test Authorization bearer-value");
+            var redacted = AppLogger.Redact("TOKEN=secret _authToken=npm-secret rcd_self_test Authorization bearer-value");
             var powershellConfiguration = """
                 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
                 $env:REMOTE_CODEX_RELAY_SERVER_URL='wss://relay.example.test'
@@ -40,6 +40,7 @@ internal static class SelfTest
                 out _);
             var passed = errors.Count == 0
                 && !redacted.Contains("secret", StringComparison.Ordinal)
+                && !redacted.Contains("npm-secret", StringComparison.Ordinal)
                 && !redacted.Contains("rcd_self_test", StringComparison.Ordinal)
                 && !redacted.Contains("bearer-value", StringComparison.Ordinal)
                 && parsedPowerShell
@@ -55,22 +56,66 @@ internal static class SelfTest
             Directory.CreateDirectory(testDirectory);
             var shimPath = Path.Combine(testDirectory, "fake command.cmd");
             await File.WriteAllTextAsync(shimPath, "@echo off\r\nsetlocal\r\necho shim:%~1\r\n");
+            var privateNodeDirectory = Path.Combine(testDirectory, "private-node");
+            var otherNodeDirectory = Path.Combine(testDirectory, "other-node");
+            Directory.CreateDirectory(privateNodeDirectory);
+            Directory.CreateDirectory(otherNodeDirectory);
+            await File.WriteAllTextAsync(Path.Combine(privateNodeDirectory, "node.cmd"), "@echo private-node\r\n");
+            await File.WriteAllTextAsync(Path.Combine(otherNodeDirectory, "node.cmd"), "@echo other-node\r\n");
+            var lifecycleShimPath = Path.Combine(testDirectory, "fake lifecycle.cmd");
+            await File.WriteAllTextAsync(lifecycleShimPath, "@echo off\r\nnode\r\n");
+            var originalPath = Environment.GetEnvironmentVariable("PATH");
+            Environment.SetEnvironmentVariable(
+                "PATH",
+                string.IsNullOrWhiteSpace(originalPath)
+                    ? otherNodeDirectory
+                    : $"{otherNodeDirectory}{Path.PathSeparator}{originalPath}");
             var logger = new AppLogger();
             var runner = new ProcessRunner(logger);
-            var shim = await runner.RunAsync(
-                shimPath,
-                ["value with spaces"],
-                TimeSpan.FromSeconds(10));
-            var where = await runner.RunAsync(
-                "where.exe",
-                ["cmd.exe"],
-                TimeSpan.FromSeconds(10));
+            ProcessResult shim;
+            ProcessResult lifecycleShim;
+            ProcessResult where;
+            IReadOnlyDictionary<string, string?> nodeEnvironment;
+            try
+            {
+                shim = await runner.RunAsync(
+                    shimPath,
+                    ["value with spaces"],
+                    TimeSpan.FromSeconds(10));
+                nodeEnvironment = RuntimeProvisioner.BuildNodeEnvironment(
+                    Path.Combine(privateNodeDirectory, "node.exe"));
+                lifecycleShim = await runner.RunAsync(
+                    lifecycleShimPath,
+                    [],
+                    TimeSpan.FromSeconds(10),
+                    environment: nodeEnvironment);
+                where = await runner.RunAsync(
+                    "where.exe",
+                    ["cmd.exe"],
+                    TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+            var configuredPath = nodeEnvironment["PATH"];
             var processChecksPassed = shim.Success
                 && shim.StandardOutput.Contains("shim:value with spaces", StringComparison.Ordinal)
+                && lifecycleShim.Success
+                && lifecycleShim.StandardOutput.Contains("private-node", StringComparison.Ordinal)
+                && !lifecycleShim.StandardOutput.Contains("other-node", StringComparison.Ordinal)
+                && configuredPath is not null
+                && configuredPath.StartsWith($"{privateNodeDirectory}{Path.PathSeparator}", StringComparison.OrdinalIgnoreCase)
+                && nodeEnvironment["npm_config_runtime"] == "node"
+                && nodeEnvironment["npm_config_target"] == ProductManifest.NodeVersion
+                && nodeEnvironment["npm_config_target_arch"] == "x64"
+                && nodeEnvironment["npm_config_nodedir"] == privateNodeDirectory
                 && where.Success;
             if (!processChecksPassed)
             {
-                logger.Error($"Self-test process check failed. shim={shim.ExitCode}:{shim.CombinedOutput}; where={where.ExitCode}:{where.CombinedOutput}");
+                logger.Error(
+                    $"Self-test process check failed. shim={shim.ExitCode}:{shim.CombinedOutput}; "
+                    + $"lifecycle={lifecycleShim.ExitCode}:{lifecycleShim.CombinedOutput}; where={where.ExitCode}:{where.CombinedOutput}");
             }
             return processChecksPassed ? 0 : 1;
         }

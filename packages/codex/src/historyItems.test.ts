@@ -55,6 +55,27 @@ describe('codex history item persistence policy', () => {
     ).toEqual([{ ...finalMessage, transcriptOrder: 0 }]);
   });
 
+  it('omits empty assistant and reasoning rows from runtime history', () => {
+    const finalMessage: AgentHistoryItem = {
+      id: 'agent-final-1',
+      kind: 'agentMessage',
+      text: 'Final answer',
+    };
+
+    expect(
+      agentTurnToThreadTurnDto({
+        providerTurnId: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          { id: 'reasoning-empty', kind: 'reasoning', text: '  \n' },
+          { id: 'agent-empty', kind: 'agentMessage', text: '' },
+          finalMessage,
+        ],
+      }).items,
+    ).toEqual([{ ...finalMessage, transcriptOrder: 0 }]);
+  });
+
   it('maps Codex collab agent tool calls to dedicated agent tool call items', () => {
     const turn = codexTurnToAgentTurn({
       id: 'turn-1',
@@ -102,6 +123,11 @@ describe('codex history item persistence policy', () => {
           text: 'done',
           completedAt: '2026-06-13T22:00:08.456Z',
         },
+        {
+          id: 'msg_019d70d5-9dc8-7000-8000-000000000000',
+          type: 'agentMessage',
+          text: 'inferred from id',
+        },
       ],
     });
 
@@ -113,6 +139,10 @@ describe('codex history item persistence policy', () => {
       {
         id: 'agent-1',
         createdAt: '2026-06-13T22:00:08.456Z',
+      },
+      {
+        id: 'msg_019d70d5-9dc8-7000-8000-000000000000',
+        createdAt: '2026-04-09T06:02:21.000Z',
       },
     ]);
   });

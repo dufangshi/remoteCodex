@@ -44,28 +44,28 @@ export function applyLiveItemTimestampsToTurns(
       return turn;
     }
 
-    const liveAgentItems = liveItems.items.filter(
-      (item) => item.kind === 'agentMessage' && item.createdAt,
+    const timestampedLiveItems = liveItems.items.filter(
+      (item) => item.createdAt,
     );
-    if (liveAgentItems.length === 0) {
+    if (timestampedLiveItems.length === 0) {
       return turn;
     }
 
-    const liveAgentItemsById = new Map(liveAgentItems.map((item) => [item.id, item]));
+    const liveItemsById = new Map(timestampedLiveItems.map((item) => [item.id, item]));
     const usedLiveAgentIds = new Set<string>();
     let changed = false;
     const nextItems = turn.items.map((item) => {
       if (
-        item.kind !== 'agentMessage' ||
-        (item.createdAt && item.createdAt !== turn.startedAt)
+        item.createdAt && item.createdAt !== turn.startedAt
       ) {
         return item;
       }
 
-      let liveItem = liveAgentItemsById.get(item.id);
-      if (!liveItem) {
-        liveItem = liveAgentItems.find(
+      let liveItem = liveItemsById.get(item.id);
+      if (!liveItem && item.kind === 'agentMessage') {
+        liveItem = timestampedLiveItems.find(
           (candidate) =>
+            candidate.kind === 'agentMessage' &&
             !usedLiveAgentIds.has(candidate.id) &&
             candidate.text.trim().length >= 8 &&
             item.text.trim().includes(candidate.text.trim()),

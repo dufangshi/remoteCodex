@@ -25,17 +25,29 @@ interface WebSearchSourceRecord {
 }
 
 export function parseUuidV7Timestamp(id: string): string | null {
-  const normalized = id.replace(/-/g, '');
-  if (!/^[0-9a-f]{32}$/i.test(normalized) || normalized[12]?.toLowerCase() !== '7') {
-    return null;
+  const candidates = [
+    id,
+    ...(id.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}/gi,
+    ) ?? []),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = candidate.replace(/-/g, '');
+    if (
+      !/^[0-9a-f]{32}$/i.test(normalized) ||
+      normalized[12]?.toLowerCase() !== '7'
+    ) {
+      continue;
+    }
+
+    const millis = Number.parseInt(normalized.slice(0, 12), 16);
+    if (Number.isFinite(millis)) {
+      return new Date(millis).toISOString();
+    }
   }
 
-  const millis = Number.parseInt(normalized.slice(0, 12), 16);
-  if (!Number.isFinite(millis)) {
-    return null;
-  }
-
-  return new Date(millis).toISOString();
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -529,14 +541,21 @@ export function shouldPersistRuntimeFinalHistoryItem(
 }
 
 function visibleRuntimeTurnItems(items: ThreadHistoryItemDto[]) {
-  const hasFinalAgentMessage = items.some(
+  const nonEmptyItems = items.filter(
+    (item) =>
+      !(
+        (item.kind === 'agentMessage' || item.kind === 'reasoning') &&
+        item.text.trim().length === 0
+      ),
+  );
+  const hasFinalAgentMessage = nonEmptyItems.some(
     (item) => item.kind === 'agentMessage' && !isTransientAgentHistoryItem(item),
   );
   if (!hasFinalAgentMessage) {
-    return items;
+    return nonEmptyItems;
   }
 
-  return items.filter(
+  return nonEmptyItems.filter(
     (item) => !(item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)),
   );
 }

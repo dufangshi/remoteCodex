@@ -8,6 +8,8 @@ namespace RemoteCodex.DeviceManager.Services;
 
 internal sealed class RuntimeProvisioner
 {
+    private const int RemoteCodexInstallAttempts = 3;
+
     private sealed record RemoteCodexRuntime(string EntryPath, string Version);
 
     private readonly AppLogger _logger;
@@ -393,27 +395,63 @@ internal sealed class RuntimeProvisioner
 
         try
         {
-            Directory.CreateDirectory(stagingPrefix);
-            var install = await _runner.RunAsync(
-                nodePath,
-                [
-                    npmCliPath,
-                    "install",
-                    "--global",
-                    "--prefix",
-                    stagingPrefix,
-                    $"remote-codex@{version}",
-                    "--no-audit",
-                    "--no-fund",
-                    "--loglevel=error",
-                ],
-                TimeSpan.FromMinutes(15),
-                environment: BuildNodeEnvironment(nodePath),
-                cancellationToken: cancellationToken);
             var stagedEntry = Path.Combine(stagingPrefix, "node_modules", "remote-codex", "bin", "remote-codex.mjs");
-            if (!install.Success || !await IsExpectedRemoteCodexAsync(nodePath, stagedEntry, version, cancellationToken))
+            ProcessResult? lastInstall = null;
+            for (var attempt = 1; attempt <= RemoteCodexInstallAttempts; attempt += 1)
             {
-                throw new InvalidOperationException($"Remote Codex installation failed. {install.CombinedOutput}".Trim());
+                if (Directory.Exists(stagingPrefix))
+                {
+                    Directory.Delete(stagingPrefix, recursive: true);
+                }
+                Directory.CreateDirectory(stagingPrefix);
+
+                lastInstall = await _runner.RunAsync(
+                    nodePath,
+                    [
+                        npmCliPath,
+                        "install",
+                        "--global",
+                        "--prefix",
+                        stagingPrefix,
+                        $"remote-codex@{version}",
+                        "--no-audit",
+                        "--no-fund",
+                        "--foreground-scripts",
+                        "--loglevel=verbose",
+                    ],
+                    TimeSpan.FromMinutes(15),
+                    environment: BuildNodeEnvironment(nodePath),
+                    cancellationToken: cancellationToken);
+                if (lastInstall.Success
+                    && await IsExpectedRemoteCodexAsync(nodePath, stagedEntry, version, cancellationToken))
+                {
+                    break;
+                }
+
+                _logger.Warning(
+                    $"Remote Codex npm install attempt {attempt}/{RemoteCodexInstallAttempts} failed. "
+                    + (string.IsNullOrWhiteSpace(lastInstall.CombinedOutput)
+                        ? "npm did not produce diagnostic output."
+                        : lastInstall.CombinedOutput));
+                if (attempt < RemoteCodexInstallAttempts)
+                {
+                    progress.Report(new(
+                        "Remote Codex",
+                        $"Native package download failed; retrying ({attempt + 1}/{RemoteCodexInstallAttempts})...",
+                        ProvisioningStepState.Running,
+                        62 + attempt * 3));
+                    await Task.Delay(TimeSpan.FromSeconds(attempt * 2), cancellationToken);
+                }
+            }
+
+            if (lastInstall is null
+                || !lastInstall.Success
+                || !await IsExpectedRemoteCodexAsync(nodePath, stagedEntry, version, cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "Remote Codex installation could not download a compatible Node.js 22 native package after three attempts. "
+                    + "Check access to npm and GitHub Releases, then retry; Visual Studio is not required. "
+                    + $"See {AppPaths.LogPath} for the original npm and prebuild diagnostics.");
             }
 
             if (Directory.Exists(prefix))
@@ -493,16 +531,20 @@ internal sealed class RuntimeProvisioner
         return Version.TryParse(coreVersion, out version!);
     }
 
-    private static IReadOnlyDictionary<string, string?> BuildNodeEnvironment(string nodePath)
+    internal static IReadOnlyDictionary<string, string?> BuildNodeEnvironment(string nodePath)
     {
         var nodeDirectory = Path.GetDirectoryName(nodePath)
             ?? throw new InvalidOperationException("The selected Node.js path has no parent directory.");
         var currentPath = Environment.GetEnvironmentVariable("PATH");
-        return new Dictionary<string, string?>
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["PATH"] = string.IsNullOrWhiteSpace(currentPath)
                 ? nodeDirectory
                 : $"{nodeDirectory}{Path.PathSeparator}{currentPath}",
+            ["npm_config_runtime"] = "node",
+            ["npm_config_target"] = ProductManifest.NodeVersion,
+            ["npm_config_target_arch"] = "x64",
+            ["npm_config_nodedir"] = nodeDirectory,
         };
     }
 

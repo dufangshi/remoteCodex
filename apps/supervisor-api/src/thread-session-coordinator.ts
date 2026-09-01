@@ -127,6 +127,10 @@ export interface ThreadLocalSessionLookup {
     sessionId: string,
     input: { fastMode: boolean; provider?: string | null },
   ): Promise<LocalImportSessionResult | null>;
+  watchSession?(
+    sessionId: string,
+    onChange: () => void,
+  ): Promise<() => void>;
 }
 
 export class ThreadSessionCoordinator {
@@ -375,8 +379,13 @@ export class ThreadSessionCoordinator {
 
     const effectiveModel =
       input.resumeInput.model ?? input.currentModel ?? response.model ?? null;
+    const resumedModelRecords = await this.listSessionModels({
+      provider: input.provider,
+      agentId: input.agentId,
+      workspacePath: input.workspacePath,
+    }).catch(() => modelRecords);
     const resumedReasoning = this.providerRuntime.normalizeReasoningForModel(
-      modelRecords,
+      resumedModelRecords,
       effectiveModel,
       normalizeReasoningEffort(input.currentReasoningEffort) ??
         normalizeReasoningEffort(response.reasoningEffort),
@@ -520,6 +529,13 @@ export class ThreadSessionCoordinator {
       input.provider,
       capabilityScope,
     );
+    if (input.settings.fastMode === true && !supportsFastMode) {
+      ensureFastModeSupported(
+        input.settings.model ?? input.currentModel ?? null,
+        true,
+        modelRecords,
+      );
+    }
     const currentFastMode = this.providerRuntime.fastModeForProvider(
       input.provider,
       input.currentFastMode,

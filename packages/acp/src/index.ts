@@ -3,6 +3,7 @@ export * from './capabilities';
 export * from './catalog-runtime';
 export * from './extensions';
 export * from './harness-contract';
+export * from './harness-adapters';
 export * from './extension-registry';
 export * from './item-mapper';
 export * from './prompt-content';

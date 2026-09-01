@@ -408,7 +408,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
   });
 
-  it('renders reasoning as a separate timeline message before the following agent reply', async () => {
+  it('folds reasoning into activity before the following agent reply', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -438,12 +438,15 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('The failing command is npm test.');
-    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
-    expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
+    expect(screen.getByText('Agent activity')).toBeInTheDocument();
+    expect(screen.queryByText('I should inspect the failing command first.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 1 operation' }));
+    FakeIntersectionObserver.triggerAll();
+    expect(await screen.findByText('I should inspect the failing command first.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Thought Process/i })).not.toBeInTheDocument();
   });
 
-  it('renders trailing live reasoning separately before the turn ends', async () => {
+  it('folds trailing live reasoning before the turn ends', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -485,11 +488,16 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('The direct answer is ready.');
-    expect(screen.getByText('I checked the context and selected the concise answer.')).toBeInTheDocument();
-    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
+    expect(screen.getByText('Agent activity')).toBeInTheDocument();
+    expect(screen.queryByText('I checked the context and selected the concise answer.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 1 operation' }));
+    FakeIntersectionObserver.triggerAll();
+    expect(
+      await screen.findByText('I checked the context and selected the concise answer.'),
+    ).toBeInTheDocument();
   });
 
-  it('keeps Claude reasoning visible when tool items intervene before the agent reply', async () => {
+  it('folds Claude reasoning with intervening tool items before the agent reply', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -531,11 +539,16 @@ describe('ThreadTimeline', () => {
     FakeIntersectionObserver.triggerAll();
 
     await screen.findByText('Here is the plan.');
-    expect(screen.getByText('I should produce a plan and avoid code edits.')).toBeInTheDocument();
-    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+    expect(screen.getByText('Agent activity')).toBeInTheDocument();
+    expect(screen.queryByText('I should produce a plan and avoid code edits.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 2 operations' }));
+    FakeIntersectionObserver.triggerAll();
+    expect(
+      await screen.findByText('I should produce a plan and avoid code edits.'),
+    ).toBeInTheDocument();
   });
 
-  it('renders pending live reasoning before Claude emits assistant text', async () => {
+  it('folds pending live reasoning before Claude emits assistant text', async () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -570,8 +583,11 @@ describe('ThreadTimeline', () => {
 
     FakeIntersectionObserver.triggerAll();
 
-    await screen.findByText('I am checking the image contents.');
-    expect(screen.queryByText('Agent')).not.toBeInTheDocument();
+    expect(await screen.findByText('Agent activity')).toBeInTheDocument();
+    expect(screen.queryByText('I am checking the image contents.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 1 operation' }));
+    FakeIntersectionObserver.triggerAll();
+    expect(await screen.findByText('I am checking the image contents.')).toBeInTheDocument();
   });
 
   it('renders inline photo and file attachments inside user messages', () => {

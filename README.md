@@ -263,7 +263,7 @@ missing, the create-thread form offers an adapter install action.
 | Gemini CLI | Native | `gemini --version` | `gemini --acp` |
 | GitHub Copilot CLI | Native | `copilot --version` | `copilot --acp` |
 | OpenCode | Native | `opencode --version` | `opencode acp` |
-| DeepSeek Harness | Adapter | `dsh --version` | `dsh-acp` |
+| DeepSeek Harness | Native | `dsh --version` | `dsh --profile acp` |
 
 `ACP_COMMAND` remains available for an additional custom ACP stdio server.
 
@@ -276,6 +276,11 @@ turns.
 The [ACP core and harness extension convergence plan](docs/acp-core-harness-extension-convergence-plan.zh.md)
 tracks durable history hydration, capability extensions, native Codex parity,
 and the real E2E gates required before the native runtime can be retired.
+The implementation keeps standard ACP behavior in `packages/acp/src/runtimeAdapter.ts`
+and isolates provider quirks in named modules under
+`packages/acp/src/harness-adapters/`. The registry is the only place that
+selects a harness-specific adapter. Adapters may fill protocol gaps, but may not
+own a second session lifecycle or duplicate the Supervisor journal.
 
 Backend ownership is selected per thread. Keep both `codex` and `acp` enabled
 while ACP capabilities are being rolled out: choose `acp` plus the concrete
@@ -560,7 +565,7 @@ Supervisor 会先探测基础 Agent。基础 Agent 不存在时选项保持灰�
 | Gemini CLI | 原生 | `gemini --version` | `gemini --acp` |
 | GitHub Copilot CLI | 原生 | `copilot --version` | `copilot --acp` |
 | OpenCode | 原生 | `opencode --version` | `opencode acp` |
-| DeepSeek Harness | Adapter | `dsh --version` | `dsh-acp` |
+| DeepSeek Harness | 原生 | `dsh --version` | `dsh --profile acp` |
 
 `ACP_COMMAND` 仍可用于额外配置一个自定义 ACP stdio server。
 
@@ -572,6 +577,10 @@ Supervisor 会先探测基础 Agent。基础 Agent 不存在时选项保持灰�
 [ACP Core 与 Harness 扩展收敛计划](docs/acp-core-harness-extension-convergence-plan.zh.md)
 记录 durable history hydration、扩展能力、原生 Codex parity，以及允许退役原生
 runtime 前必须通过的真实 E2E gate。
+实现上，标准 ACP 行为只放在 `packages/acp/src/runtimeAdapter.ts`，各 harness 的
+协议差异必须放入 `packages/acp/src/harness-adapters/` 下清晰命名的小 adapter；
+registry 是唯一允许选择特定 harness 实现的位置。adapter 只补协议缺口，不拥有
+第二套 session 生命周期，也不复制 Supervisor journal。
 
 Backend owner 按 thread 选择。ACP 仍在分阶段启用时应同时保留 `codex` 和 `acp`：
 选择 `acp` 并指定具体 Agent 可使用协商后的 ACP 能力；需要 native-only 的 fork、

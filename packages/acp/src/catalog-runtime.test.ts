@@ -168,6 +168,62 @@ describe('AcpCatalogRuntimeAdapter', () => {
     expect(forked.agentId).toBe('fixture-agent');
   }, 15_000);
 
+  it('refreshes command models with reasoning options from a close-only session', async () => {
+    const fixture = path.resolve('src/test/fixtures/fake-acp-agent.mjs');
+    vi.stubEnv('REMOTE_CODEX_FAKE_ACP_NO_SESSION_DELETE', '1');
+    const runtime = new AcpCatalogRuntimeAdapter({
+      catalog: new AcpAgentCatalog({
+        definitions: [{
+          id: 'grok-fixture',
+          displayName: 'Grok fixture',
+          description: 'Close-only ACP fixture',
+          transport: 'native',
+          baseCommand: process.execPath,
+          baseProbeCommand: `"${process.execPath}" --version`,
+          serverCommand: `"${process.execPath}" "${fixture}"`,
+          serverProbeCommand: `"${process.execPath}" --version`,
+          installCommand: null,
+          modelListCommand: `"${process.execPath}" -e "console.log('Default model: fixture-model\\nAvailable models:\\n * fixture-model (default)\\n - fixture-fast')"`,
+        }],
+      }),
+      startupTimeoutMs: 5_000,
+    });
+    runtimes.push(runtime);
+    await runtime.start();
+
+    expect(await runtime.listModelsForAgent('grok-fixture', process.cwd())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'fixture-model',
+          supportedReasoningEfforts: [],
+        }),
+      ]),
+    );
+
+    await runtime.startSession({
+      cwd: process.cwd(),
+      agentId: 'grok-fixture',
+      model: 'fixture-model',
+      reasoningEffort: 'high',
+      approvalMode: 'yolo',
+    });
+
+    expect(await runtime.listModelsForAgent('grok-fixture', process.cwd())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'fixture-model',
+          supportedReasoningEfforts: [
+            expect.objectContaining({ reasoningEffort: 'low' }),
+            expect.objectContaining({ reasoningEffort: 'medium' }),
+            expect.objectContaining({ reasoningEffort: 'high' }),
+          ],
+          defaultReasoningEffort: 'high',
+        }),
+        expect.objectContaining({ model: 'fixture-fast' }),
+      ]),
+    );
+  });
+
   it('delegates Codex child controls while preserving scoped goal identity', async () => {
     const fixture = path.resolve('src/test/fixtures/fake-acp-agent.mjs');
     vi.stubEnv('REMOTE_CODEX_FAKE_ACP_AGENT_KIND', 'codex');

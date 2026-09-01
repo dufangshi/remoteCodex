@@ -112,13 +112,13 @@ const builtinAcpAgents: AcpAgentDefinition[] = [
   {
     id: 'deepseek',
     displayName: 'DeepSeek Harness',
-    description: 'DeepSeek Harness connected through its ACP bridge.',
-    transport: 'adapter',
+    description: 'DeepSeek Harness through its shipped standard ACP profile.',
+    transport: 'native',
     baseCommand: 'dsh',
     baseProbeCommand: 'dsh --version',
-    serverCommand: 'dsh-acp',
-    serverProbeCommand: 'dsh-acp --version',
-    installCommand: 'npm install -g @openma/deepseek-harness-acp@latest',
+    serverCommand: 'dsh --profile acp',
+    serverProbeCommand: 'dsh --profile acp --help',
+    installCommand: null,
   },
 ];
 

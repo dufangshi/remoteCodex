@@ -642,6 +642,7 @@ export function buildApp(
 
   app.addHook('onClose', async () => {
     cleanupRelayActivity?.();
+    threadService.close();
     await shellService.stop();
     relayTunnelClient?.stop();
     await Promise.all(agentRuntimes.all().map((runtime) => runtime.stop()));

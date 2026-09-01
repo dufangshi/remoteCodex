@@ -4,7 +4,7 @@ import type {
   AgentSessionHistoryCoverage,
   AgentTurn,
 } from '../../agent-runtime/src/types';
-import { AcpTurnItemMapper } from './item-mapper';
+import { AcpTurnItemMapper, acpUpdateCreatedAt } from './item-mapper';
 
 interface HydratedTurnBuilder {
   userMessageId: string | null;
@@ -89,7 +89,7 @@ export class AcpSessionHydrator {
       if (this.current) {
         this.finishCurrent();
       }
-      this.startTurn(messageId);
+      this.startTurn(messageId, acpUpdateCreatedAt(update));
     }
     const current = this.current!;
     if (messageId && !current.userMessageId) {
@@ -98,10 +98,14 @@ export class AcpSessionHydrator {
     current.mapper.appendUserMessage(
       update.content,
       current.userMessageId ?? `${current.mapper.turnId}:user`,
+      acpUpdateCreatedAt(update),
     );
   }
 
-  private startTurn(userMessageId: string | null) {
+  private startTurn(
+    userMessageId: string | null,
+    providerCreatedAt: string | null = null,
+  ) {
     const index = this.turnIndex++;
     const stableSource = userMessageId ?? `${this.providerSessionId}:${index}`;
     const builder: HydratedTurnBuilder = {
@@ -111,7 +115,8 @@ export class AcpSessionHydrator {
         [],
         'hydrate',
       ),
-      startedAt: new Date(this.receivedAt + index).toISOString(),
+      startedAt:
+        providerCreatedAt ?? new Date(this.receivedAt + index).toISOString(),
       sawNonUserUpdate: false,
     };
     if (userMessageId) {

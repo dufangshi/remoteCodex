@@ -162,6 +162,60 @@ function canUseRuntimePagedTurns(
   return cachedDetail.totalTurnCount > enrichedTurns.length;
 }
 
+function latestTurnItemTimestamp(turn: ThreadTurnDto) {
+  return turn.items
+    .map((item) => item.createdAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? turn.startedAt ?? null;
+}
+
+function localImportThreadStatusPatch(
+  record: {
+    status?: string | null;
+    providerTurnId?: string | null;
+    lastError?: string | null;
+    lastTurnStartedAt?: string | null;
+    lastTurnCompletedAt?: string | null;
+  },
+  turns: ThreadTurnDto[],
+) {
+  const latestTurn = turns.at(-1);
+  if (!latestTurn) {
+    return null;
+  }
+
+  const status = latestTurn.status === 'inProgress'
+    ? 'running'
+    : latestTurn.status === 'completed'
+      ? 'idle'
+      : latestTurn.status;
+  const providerTurnId = latestTurn.status === 'inProgress' ? latestTurn.id : null;
+  const lastError = latestTurn.status === 'failed' ? latestTurn.error : null;
+  const lastTurnStartedAt = latestTurn.startedAt ?? record.lastTurnStartedAt ?? null;
+  const lastTurnCompletedAt = latestTurn.status === 'inProgress'
+    ? null
+    : latestTurnItemTimestamp(latestTurn) ?? record.lastTurnCompletedAt ?? null;
+
+  if (
+    record.status === status &&
+    record.providerTurnId === providerTurnId &&
+    record.lastError === lastError &&
+    record.lastTurnStartedAt === lastTurnStartedAt &&
+    record.lastTurnCompletedAt === lastTurnCompletedAt
+  ) {
+    return null;
+  }
+
+  return {
+    status,
+    providerTurnId,
+    lastError,
+    lastTurnStartedAt,
+    lastTurnCompletedAt,
+  };
+}
+
 export class ThreadService {
   private readonly liveState = new ThreadLiveStateStore();
   private readonly queuedContinuationDrains = new Set<string>();
@@ -183,12 +237,14 @@ export class ThreadService {
   private readonly forkCoordinator: ThreadForkCoordinator;
   private readonly attachmentCoordinator: ThreadAttachmentCoordinator;
   private readonly importCoordinator: ThreadImportCoordinator;
+  private readonly localImportWatcherStops = new Map<string, () => void>();
+  private readonly localImportWatcherStarts = new Map<string, Promise<void>>();
 
   constructor(
     private readonly db: DatabaseClient,
     agentRuntimes: AgentRuntimeRegistry,
     private readonly eventBus: SupervisorEventBus,
-    localSessionStore: ThreadLocalSessionLookup,
+    private readonly localSessionStore: ThreadLocalSessionLookup,
     private readonly workspaceRoot: string,
     providerManagement: ThreadHookFileManagement &
       ProviderGoalFeatureAdapter &
@@ -613,6 +669,9 @@ export class ThreadService {
       if (!local) {
         continue;
       }
+      if (local.source === 'local_codex_import' && local.isConnected === false) {
+        continue;
+      }
 
       updateThreadRecord(
         this.db,
@@ -692,6 +751,12 @@ export class ThreadService {
     const record = this.requireThreadRecord(localThreadId);
     const workspace = this.requireWorkspaceForThread(record);
 
+    if (record.source === 'local_codex_import' && record.isConnected === false) {
+      await this.ensureLocalImportWatcher(record);
+    } else {
+      this.stopLocalImportWatcher(record.id);
+    }
+
     this.requireProviderSessionId(record);
     const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
     const workspacePathStatus = (await pathExists(workspace.absPath)) ? 'present' : 'missing';
@@ -702,6 +767,12 @@ export class ThreadService {
       turnMetadataById,
       options,
     });
+    if (record.source === 'local_codex_import' && record.isConnected === false) {
+      const statusPatch = localImportThreadStatusPatch(record, cachedDetail.turns);
+      if (statusPatch) {
+        updateThreadRecord(this.db, record.id, statusPatch);
+      }
+    }
     const updated = getThreadRecordById(this.db, record.id)!;
     const enrichedTurns = this.pluginService?.enrichTurnsWithArtifacts({
       threadId: updated.id,
@@ -1484,6 +1555,72 @@ export class ThreadService {
 
   private async handleRuntimeEvent(event: AgentRuntimeEvent) {
     await this.runtimeEventProjector.handleRuntimeEvent(event);
+  }
+
+  close() {
+    for (const stop of this.localImportWatcherStops.values()) {
+      stop();
+    }
+    this.localImportWatcherStops.clear();
+    this.localImportWatcherStarts.clear();
+  }
+
+  private async ensureLocalImportWatcher(record: {
+    id: string;
+    providerSessionId: string | null;
+  }) {
+    if (
+      !record.providerSessionId ||
+      !this.localSessionStore.watchSession ||
+      this.localImportWatcherStops.has(record.id)
+    ) {
+      return;
+    }
+
+    const existingStart = this.localImportWatcherStarts.get(record.id);
+    if (existingStart) {
+      await existingStart;
+      return;
+    }
+
+    const start = this.localSessionStore.watchSession(
+      record.providerSessionId,
+      () => {
+        const current = getThreadRecordById(this.db, record.id);
+        if (
+          !current ||
+          current.source !== 'local_codex_import' ||
+          current.isConnected !== false
+        ) {
+          this.stopLocalImportWatcher(record.id);
+          return;
+        }
+        this.invalidateThreadDetailCache(record.id);
+        this.emitThreadEvent('thread.updated', record.id, {
+          reason: 'external_session_updated',
+        });
+      },
+    ).then((stop) => {
+      const current = getThreadRecordById(this.db, record.id);
+      if (
+        !current ||
+        current.source !== 'local_codex_import' ||
+        current.isConnected !== false
+      ) {
+        stop();
+        return;
+      }
+      this.localImportWatcherStops.set(record.id, stop);
+    }).finally(() => {
+      this.localImportWatcherStarts.delete(record.id);
+    });
+    this.localImportWatcherStarts.set(record.id, start);
+    await start;
+  }
+
+  private stopLocalImportWatcher(localThreadId: string) {
+    this.localImportWatcherStops.get(localThreadId)?.();
+    this.localImportWatcherStops.delete(localThreadId);
   }
 
   private shouldPreserveCompletedPendingSteer(localThreadId: string) {

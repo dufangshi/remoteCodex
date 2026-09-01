@@ -255,7 +255,7 @@ describe('threadDetailModel', () => {
     expect(result).toBeNull();
   });
 
-  it('keeps live agent timestamps when materialized turns only have fallback turn time', () => {
+  it('keeps live event timestamps when materialized turns only have fallback turn time', () => {
     const turnStartedAt = '2026-05-24T00:00:00.000Z';
     const liveAgentCreatedAt = '2026-05-24T00:00:21.000Z';
 
@@ -271,6 +271,13 @@ describe('threadDetailModel', () => {
               text: 'streamed answer text',
               createdAt: turnStartedAt,
             },
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              createdAt: turnStartedAt,
+            },
           ],
         },
       ],
@@ -278,12 +285,19 @@ describe('threadDetailModel', () => {
         turnId: 'turn-1',
         updatedAt: liveAgentCreatedAt,
         items: [
-          {
-            id: 'agent-1',
+            {
+              id: 'agent-1',
             kind: 'agentMessage',
             text: 'streamed answer',
-            createdAt: liveAgentCreatedAt,
-          },
+              createdAt: liveAgentCreatedAt,
+            },
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              createdAt: '2026-05-24T00:00:13.000Z',
+            },
         ],
       },
     );
@@ -291,6 +305,10 @@ describe('threadDetailModel', () => {
     expect(turns[0]?.items[0]).toMatchObject({
       id: 'agent-1',
       createdAt: liveAgentCreatedAt,
+    });
+    expect(turns[0]?.items[1]).toMatchObject({
+      id: 'command-1',
+      createdAt: '2026-05-24T00:00:13.000Z',
     });
   });
 

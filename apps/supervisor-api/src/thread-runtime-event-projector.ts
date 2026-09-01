@@ -380,8 +380,17 @@ export class ThreadRuntimeEventProjector {
           event.item.id,
         );
         const eventTimestamp = new Date().toISOString();
+        const stableCreatedAt = liveState.recordTurnItemCreatedAt(
+          record.id,
+          displayTurnId,
+          event.item.id,
+          event.item.createdAt ?? eventTimestamp,
+        );
         const orderedLiveItem = {
-          ...withHistoryItemCreatedAt(event.item, eventTimestamp),
+          ...withHistoryItemCreatedAt(
+            event.item,
+            stableCreatedAt,
+          ),
           sequence,
         };
         const transportLiveItem = deferHistoryItemDetailForTransport(orderedLiveItem);
@@ -442,7 +451,12 @@ export class ThreadRuntimeEventProjector {
           displayTurnId,
           event.itemId,
         );
-        const createdAt = new Date().toISOString();
+        const createdAt = liveState.recordTurnItemCreatedAt(
+          record.id,
+          displayTurnId,
+          event.itemId,
+          event.createdAt ?? new Date().toISOString(),
+        );
         callbacks.appendLiveAgentMessageDelta({
           localThreadId: record.id,
           turnId: displayTurnId,

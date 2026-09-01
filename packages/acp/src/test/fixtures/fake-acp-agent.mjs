@@ -25,6 +25,7 @@ const agentKind = process.env.REMOTE_CODEX_FAKE_ACP_AGENT_KIND ?? 'fixture';
 const supportsFork = process.env.REMOTE_CODEX_FAKE_ACP_FORK === '1';
 const noSessionCleanup = process.env.REMOTE_CODEX_FAKE_ACP_NO_SESSION_CLEANUP === '1';
 const noSessionDelete = process.env.REMOTE_CODEX_FAKE_ACP_NO_SESSION_DELETE === '1';
+const legacyModels = process.env.REMOTE_CODEX_FAKE_ACP_LEGACY_MODELS === '1';
 const goalVersion = process.env.REMOTE_CODEX_FAKE_ACP_GOAL_VERSION ?? '1';
 const goalActions = (process.env.REMOTE_CODEX_FAKE_ACP_GOAL_ACTIONS ?? 'get,set,clear')
   .split(',')
@@ -90,6 +91,38 @@ function modes(session) {
 }
 
 function responseState(session) {
+  if (legacyModels) {
+    return {
+      models: {
+        currentModelId: session.config.model,
+        availableModels: [
+          {
+            modelId: 'fixture-model',
+            name: 'Fixture model',
+            _meta: {
+              reasoningEffort: session.config.thought,
+              reasoningEfforts: [
+                { id: 'high', value: 'high', label: 'High', default: true },
+                { id: 'medium', value: 'medium', label: 'Medium' },
+                { id: 'low', value: 'low', label: 'Low' },
+              ],
+            },
+          },
+          {
+            modelId: 'fixture-fast',
+            name: 'Fixture fast model',
+            _meta: {
+              reasoningEffort: session.config.thought,
+              reasoningEfforts: [
+                { id: 'high', value: 'high', label: 'High', default: true },
+                { id: 'low', value: 'low', label: 'Low' },
+              ],
+            },
+          },
+        ],
+      },
+    };
+  }
   return {
     modes: modes(session),
     configOptions: configOptions(session),
@@ -290,13 +323,20 @@ acp.agent({ name: 'remote-codex-fake-acp-agent' })
   }))
   .onRequest(acp.methods.agent.session.new, async (context) => {
     const now = new Date().toISOString();
+    const config = defaultConfig();
+    if (
+      legacyModels &&
+      typeof context.params._meta?.reasoningEffort === 'string'
+    ) {
+      config.thought = context.params._meta.reasoningEffort;
+    }
     const session = {
       sessionId: randomUUID(),
       cwd: path.resolve(context.params.cwd),
       title: 'Fixture session',
       createdAt: now,
       updatedAt: now,
-      config: defaultConfig(),
+      config,
       turns: [],
       pendingPrompt: null,
     };
@@ -315,6 +355,12 @@ acp.agent({ name: 'remote-codex-fake-acp-agent' })
   }))
   .onRequest(acp.methods.agent.session.load, async (context) => {
     const session = requireSession(context.params.sessionId);
+    if (
+      legacyModels &&
+      typeof context.params._meta?.reasoningEffort === 'string'
+    ) {
+      session.config.thought = context.params._meta.reasoningEffort;
+    }
     await replaySession(context.client, session);
     return responseState(session);
   })
@@ -348,7 +394,15 @@ acp.agent({ name: 'remote-codex-fake-acp-agent' })
   })
   .onRequest(acp.methods.agent.session.setMode, async (context) => {
     const session = requireSession(context.params.sessionId);
-    session.config.mode = context.params.modeId;
+    if (legacyModels) session.config.thought = context.params.modeId;
+    else session.config.mode = context.params.modeId;
+    session.updatedAt = new Date().toISOString();
+    await saveState();
+    return {};
+  })
+  .onRequest('session/set_model', (params) => params, async (context) => {
+    const session = requireSession(context.params.sessionId);
+    session.config.model = context.params.modelId;
     session.updatedAt = new Date().toISOString();
     await saveState();
     return {};

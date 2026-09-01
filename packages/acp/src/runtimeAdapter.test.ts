@@ -9,6 +9,10 @@ import type {
   AgentRuntimeEvent,
 } from '../../agent-runtime/src/index';
 import { AcpRuntimeAdapter } from './runtimeAdapter';
+import {
+  codexAcpHarnessAdapter,
+  grokAcpHarnessAdapter,
+} from './harness-adapters';
 
 const adapters: AcpRuntimeAdapter[] = [];
 const fixture = path.resolve('src/test/fixtures/fake-acp-agent.mjs');
@@ -350,6 +354,116 @@ describe('AcpRuntimeAdapter', () => {
     await expect(adapter.listSessions()).resolves.toEqual([]);
   });
 
+  it('reads reasoning options from a loaded close-only agent session', async () => {
+    const adapter = new AcpRuntimeAdapter({
+      command: `"${process.execPath}" "${fixture}"`,
+      env: { REMOTE_CODEX_FAKE_ACP_NO_SESSION_DELETE: '1' },
+      startupTimeoutMs: 5_000,
+    });
+    adapters.push(adapter);
+    await adapter.start();
+
+    const started = await adapter.startSession({
+      cwd: process.cwd(),
+      model: 'fixture-model',
+      reasoningEffort: 'high',
+      approvalMode: 'yolo',
+    });
+
+    await expect(adapter.inspectModelOptions(process.cwd())).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+        model: 'fixture-model',
+        supportedReasoningEfforts: [
+          expect.objectContaining({ reasoningEffort: 'low' }),
+          expect.objectContaining({ reasoningEffort: 'medium' }),
+          expect.objectContaining({ reasoningEffort: 'high' }),
+        ],
+        defaultReasoningEffort: 'high',
+      }),
+        expect.objectContaining({ model: 'fixture-fast' }),
+      ]),
+    );
+    await expect(adapter.listSessions()).resolves.toEqual([
+      expect.objectContaining({ providerSessionId: started.providerSessionId }),
+    ]);
+  });
+
+  it('maps and writes Grok-style legacy model reasoning metadata', async () => {
+    const adapter = new AcpRuntimeAdapter({
+      command: `"${process.execPath}" "${fixture}"`,
+      harnessAdapter: grokAcpHarnessAdapter,
+      env: {
+        REMOTE_CODEX_FAKE_ACP_NO_SESSION_DELETE: '1',
+        REMOTE_CODEX_FAKE_ACP_LEGACY_MODELS: '1',
+        REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',
+      },
+      startupTimeoutMs: 5_000,
+    });
+    adapters.push(adapter);
+    await adapter.start();
+
+    const started = await adapter.startSession({
+      cwd: process.cwd(),
+      model: 'fixture-fast',
+      reasoningEffort: 'low',
+      approvalMode: 'yolo',
+    });
+
+    expect(started).toMatchObject({
+      model: 'fixture-fast',
+      reasoningEffort: 'low',
+      rawSession: {
+        models: {
+          availableModels: [
+            expect.objectContaining({
+              _meta: expect.objectContaining({ reasoningEffort: 'low' }),
+            }),
+            expect.anything(),
+          ],
+        },
+      },
+    });
+    await expect(adapter.inspectModelOptions(process.cwd())).resolves.toEqual([
+      expect.objectContaining({
+        model: 'fixture-model',
+        supportedReasoningEfforts: [
+          expect.objectContaining({ reasoningEffort: 'high' }),
+          expect.objectContaining({ reasoningEffort: 'medium' }),
+          expect.objectContaining({ reasoningEffort: 'low' }),
+        ],
+      }),
+      expect.objectContaining({
+        model: 'fixture-fast',
+        defaultReasoningEffort: 'low',
+        supportedReasoningEfforts: [
+          expect.objectContaining({ reasoningEffort: 'high' }),
+          expect.objectContaining({ reasoningEffort: 'low' }),
+        ],
+      }),
+    ]);
+
+    const completed = new Promise<void>((resolve) => {
+      adapter.on('event', (event: AgentRuntimeEvent) => {
+        if (event.type === 'turn.completed') resolve();
+      });
+    });
+    await adapter.startTurn({
+      providerSessionId: started.providerSessionId,
+      prompt: 'Verify changed effort.',
+      reasoningEffort: 'high',
+    });
+    await completed;
+    await expect(adapter.inspectModelOptions(process.cwd())).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'fixture-fast',
+          defaultReasoningEffort: 'high',
+        }),
+      ]),
+    );
+  });
+
   it('deletes temporary model-probe sessions', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
@@ -398,6 +512,7 @@ describe('AcpRuntimeAdapter', () => {
   it('cleans compact control listeners when the hidden turn cannot start', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
+      harnessAdapter: codexAcpHarnessAdapter,
       env: {
         REMOTE_CODEX_FAKE_ACP_AGENT_KIND: 'codex',
         REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',
@@ -468,6 +583,7 @@ describe('AcpRuntimeAdapter', () => {
   it('adapts Codex legacy steering, goal, and compact controls on one ACP owner', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
+      harnessAdapter: codexAcpHarnessAdapter,
       env: {
         REMOTE_CODEX_FAKE_ACP_AGENT_KIND: 'codex',
         REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',

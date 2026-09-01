@@ -84,6 +84,7 @@ export class RelayTunnelClient {
     }, RELAY_CONNECT_TIMEOUT_MS);
 
     socket.addEventListener('open', () => {
+      console.log(`Relay tunnel connected to ${url.origin}.`);
       this.clearConnectTimeout();
       this.reconnectDelayMs = RELAY_RECONNECT_INITIAL_DELAY_MS;
       this.sendHeartbeat();
@@ -94,11 +95,24 @@ export class RelayTunnelClient {
       }, RELAY_HEARTBEAT_INTERVAL_MS);
     });
 
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event) => {
+      if (this.stopped || this.socket !== socket) {
+        return;
+      }
+      const closeEvent = event as CloseEvent | undefined;
+      const reason = closeEvent?.reason?.trim() || 'no reason provided';
+      const code = closeEvent?.code ?? 'unknown';
+      console.error(
+        `Relay tunnel closed (code ${code}: ${reason}); reconnecting.`,
+      );
       this.closeAndReconnect(socket);
     });
 
     socket.addEventListener('error', () => {
+      if (this.stopped || this.socket !== socket) {
+        return;
+      }
+      console.error('Relay tunnel websocket error; reconnecting.');
       this.closeAndReconnect(socket);
     });
 
@@ -282,6 +296,7 @@ export class RelayTunnelClient {
       this.reconnectHandle = null;
       this.start();
     }, delayMs);
+    console.error(`Relay tunnel reconnect scheduled in ${delayMs} ms.`);
   }
 
   private clearReconnect() {

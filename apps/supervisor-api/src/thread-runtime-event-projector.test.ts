@@ -105,5 +105,41 @@ describe('ThreadRuntimeEventProjector harness extensions', () => {
       .listPersistedHistoryItemsByTurnId(thread.id)
       .get('turn-1')?.[0];
     expect(JSON.stringify(stored)).not.toContain('sensitiveDetailNotPersisted');
+
+    await projector.handleRuntimeEvent({
+      type: 'item.started',
+      provider: 'acp',
+      providerSessionId: thread.providerSessionId!,
+      providerTurnId: 'turn-timing',
+      item: {
+        id: 'timed-tool',
+        kind: 'toolCall',
+        text: 'Timed tool',
+        status: 'running',
+        createdAt: '2026-09-01T04:00:01.000Z',
+      },
+    });
+    liveState.setLiveItems(thread.id, null);
+    await projector.handleRuntimeEvent({
+      type: 'item.completed',
+      provider: 'acp',
+      providerSessionId: thread.providerSessionId!,
+      providerTurnId: 'turn-timing',
+      item: {
+        id: 'timed-tool',
+        kind: 'toolCall',
+        text: 'Timed tool',
+        status: 'completed',
+      },
+    });
+
+    expect(
+      persistence.listPersistedHistoryItemsByTurnId(thread.id)
+        .get('turn-timing')?.[0],
+    ).toMatchObject({
+      id: 'timed-tool',
+      status: 'completed',
+      createdAt: '2026-09-01T04:00:01.000Z',
+    });
   });
 });

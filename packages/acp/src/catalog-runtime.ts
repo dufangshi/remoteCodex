@@ -33,6 +33,7 @@ import {
 import { snapshotAcpAgentCapabilities } from './capabilities';
 import { AcpRuntimeAdapter } from './runtimeAdapter';
 import { loadCodexAcpEnvironment } from './codex-environment';
+import { acpHarnessAdapterFor } from './harness-adapters';
 
 interface AcpCatalogRuntimeOptions {
   customCommand?: string | null;
@@ -255,7 +256,21 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
       if (models.length === 1 && models[0]?.model === 'default') {
         const commandModels = await this.catalog.listCommandModels(agentId);
         if (commandModels.length > 0) {
-          models = commandModels;
+          const discoveredDefaults = models[0];
+          models = commandModels.map((model) => ({
+            ...model,
+            supportsPerformanceMode:
+              model.supportsPerformanceMode ??
+              discoveredDefaults.supportsPerformanceMode ??
+              false,
+            supportedReasoningEfforts:
+              model.supportedReasoningEfforts.length > 0
+                ? model.supportedReasoningEfforts
+                : discoveredDefaults.supportedReasoningEfforts,
+            defaultReasoningEffort:
+              model.defaultReasoningEffort ??
+              discoveredDefaults.defaultReasoningEffort,
+          }));
         }
       }
       this.modelCache.set(cacheKey, { at: Date.now(), models });
@@ -381,6 +396,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
         ? input.model
         : probedDefaultModel ?? input.model;
     this.refreshAgentSessionCapabilities(agentId, agent);
+    this.modelCache.clear();
     const session = scopedSession(agentId, response.session);
     return {
       ...response,
@@ -407,6 +423,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
       throw error;
     }
     this.refreshAgentSessionCapabilities(owner.agentId, agent);
+    this.modelCache.clear();
     const session = scopedSession(owner.agentId, response.session);
     return {
       ...response,
@@ -652,6 +669,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
       : undefined;
     const agent = new AcpRuntimeAdapter({
       command: entry.serverCommand,
+      harnessAdapter: acpHarnessAdapterFor(entry.id),
       ...(env ? { env } : {}),
       ...(this.options.startupTimeoutMs !== undefined
         ? { startupTimeoutMs: this.options.startupTimeoutMs }

@@ -45,7 +45,11 @@ import type { EffectiveRelayAccess } from './relay-store';
 
 interface SupervisorConnection extends DeviceConnectionStatus {
   deviceId: string;
-  socket: { send: (message: string) => void; readyState: number };
+  socket: {
+    send: (message: string) => void;
+    close: (code?: number, reason?: string) => void;
+    readyState: number;
+  };
   requestBroker: RelayRequestBroker;
   clientSockets: Map<
     string,
@@ -75,6 +79,8 @@ interface AuthenticatedRelayRequest extends FastifyRequest {
 const RELAY_REQUEST_TIMEOUT_MS = 30_000;
 const RELAY_PORTAL_METADATA_TIMEOUT_MS = 900;
 const WEBSOCKET_OPEN = 1;
+const SUPERVISOR_REPLACED_CLOSE_CODE = 1012;
+const SUPERVISOR_REPLACED_CLOSE_REASON = 'Supervisor connection replaced.';
 const hostedBootstrapPromises = new Map<string, Promise<void>>();
 const RELAY_COOKIE_NAME = 'remote_codex_relay_session';
 const threadAccessSchema = z.enum(['read', 'control']);
@@ -1186,15 +1192,15 @@ export function buildRelayServer(
 
         const connectedAt = new Date().toISOString();
         const existing = state.supervisors.get(deviceId);
-        existing?.socket.send(
-          JSON.stringify({
-            type: 'relay.connected',
-            timestamp: connectedAt,
-            deviceId,
-          } satisfies RelaySupervisorEnvelope),
-        );
         existing?.clientSockets.forEach((clientConnection) =>
           clientConnection.socket.close(),
+        );
+        // A superseded tunnel must be closed explicitly. Leaving it open makes
+        // that supervisor believe it is still registered after the replacement
+        // disconnects, so it never reconnects and the device remains offline.
+        existing?.socket.close(
+          SUPERVISOR_REPLACED_CLOSE_CODE,
+          SUPERVISOR_REPLACED_CLOSE_REASON,
         );
 
         const connection: SupervisorConnection = {

@@ -121,6 +121,39 @@ describe('ACP supervisor history fixture', () => {
       'agentMessage',
     ]);
 
+    persistence.persistLiveHistoryItem(
+      fixture.thread.id,
+      'acp-final-snapshot-turn',
+      {
+        id: 'acp-final-snapshot-agent',
+        kind: 'agentMessage',
+        text: 'streamed response',
+        status: 'running',
+        sequence: 7,
+        createdAt: '2026-09-01T04:00:07.000Z',
+      },
+    );
+    persistence.persistHydratedTurns(fixture.thread.id, [{
+      providerTurnId: 'acp-final-snapshot-turn',
+      startedAt: '2026-09-01T04:00:00.000Z',
+      status: 'completed',
+      error: null,
+      items: [{
+        id: 'acp-final-snapshot-agent',
+        kind: 'agentMessage',
+        text: 'streamed response complete',
+        status: 'completed',
+      }],
+    }]);
+    expect(
+      persistence.listPersistedHistoryItemsByTurnId(fixture.thread.id)
+        .get('acp-final-snapshot-turn')?.[0],
+    ).toMatchObject({
+      sequence: 7,
+      createdAt: '2026-09-01T04:00:07.000Z',
+      status: 'completed',
+    });
+
     persistence.checkpointLiveAgentMessage(
       fixture.thread.id,
       'acp-live-turn',

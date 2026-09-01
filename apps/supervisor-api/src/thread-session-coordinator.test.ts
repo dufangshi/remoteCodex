@@ -197,5 +197,17 @@ describe('ThreadSessionCoordinator scoped capabilities', () => {
     expect(runtime.startSession).toHaveBeenLastCalledWith(
       expect.not.objectContaining({ performanceMode: expect.anything() }),
     );
+
+    await expect(coordinator.resolveThreadSettings({
+      provider: 'acp',
+      agentId: 'basic',
+      workspacePath: '/tmp/basic',
+      currentModel: 'basic-model',
+      currentReasoningEffort: null,
+      currentFastMode: false,
+      currentCollaborationMode: 'default',
+      currentSandboxMode: 'workspace-write',
+      settings: { fastMode: true },
+    })).rejects.toThrow('Current model does not support fast mode.');
   });
 });

@@ -63,7 +63,7 @@ describe('agentTurnToThreadTurnDto', () => {
           createdAt: explicitItemCreatedAt,
         },
         {
-          id: '019d70d59dc870008000000000000000',
+          id: 'msg_019d70d5-9dc8-7000-8000-000000000000',
           kind: 'agentMessage',
           text: 'Final answer',
         },
@@ -82,14 +82,14 @@ describe('agentTurnToThreadTurnDto', () => {
         createdAt: explicitItemCreatedAt,
       },
       {
-        id: '019d70d59dc870008000000000000000',
+        id: 'msg_019d70d5-9dc8-7000-8000-000000000000',
         createdAt: uuidV7ItemCreatedAt,
       },
       {
         id: 'legacy-item',
-        createdAt: turnStartedAt,
       },
     ]);
+    expect(agentTurnToThreadTurnDto(turn).items[2]).not.toHaveProperty('createdAt');
   });
 
   it('uses persisted live timestamps for final agent messages without provider timestamps', () => {
@@ -111,7 +111,7 @@ describe('agentTurnToThreadTurnDto', () => {
       ],
     });
 
-    expect(normalizedTurn.items[0]?.createdAt).toBe(turnStartedAt);
+    expect(normalizedTurn.items[0]).not.toHaveProperty('createdAt');
 
     const mergedTurns = mergePersistedHistoryItemsIntoTurns(
       [normalizedTurn],
@@ -136,6 +136,53 @@ describe('agentTurnToThreadTurnDto', () => {
     expect(mergedTurns[0]?.items[0]).toMatchObject({
       id: 'msg-final',
       createdAt: persistedAgentCreatedAt,
+      sequence: 1,
+    });
+  });
+
+  it('replaces legacy turn-start fallbacks with persisted timestamps for every item kind', () => {
+    const turnStartedAt = '2026-04-09T06:01:00.000Z';
+    const commandCreatedAt = '2026-04-09T06:01:09.000Z';
+
+    const mergedTurns = mergePersistedHistoryItemsIntoTurns(
+      [
+        {
+          id: 'turn-1',
+          startedAt: turnStartedAt,
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              createdAt: turnStartedAt,
+            },
+          ],
+        },
+      ],
+      new Map([
+        [
+          'turn-1',
+          [
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              createdAt: commandCreatedAt,
+              sequence: 1,
+            },
+          ],
+        ],
+      ]),
+      new Map(),
+    );
+
+    expect(mergedTurns[0]?.items[0]).toMatchObject({
+      id: 'command-1',
+      createdAt: commandCreatedAt,
       sequence: 1,
     });
   });

@@ -244,7 +244,7 @@ async function runRelaySupervisor() {
     return;
   }
   if (action === 'start' && shouldStartRelaySupervisorInTmux()) {
-    startRelaySupervisorTmux();
+    await startRelaySupervisorTmux();
     return;
   }
   runRelaySupervisorForeground();
@@ -683,7 +683,7 @@ function shouldStartRelaySupervisorInTmux() {
   return commandExists('tmux');
 }
 
-function startRelaySupervisorTmux() {
+async function startRelaySupervisorTmux() {
   persistRelaySupervisorRuntimeConfig();
   if (tmuxSessionExists(relaySupervisorTmuxSession)) {
     console.log(`remote-codex relay-supervisor is already running in tmux session: ${relaySupervisorTmuxSession}`);
@@ -691,6 +691,8 @@ function startRelaySupervisorTmux() {
     return;
   }
 
+  fs.mkdirSync(path.dirname(relaySupervisorLogPath), { recursive: true });
+  rotateRelaySupervisorLog();
   const command = relaySupervisorTmuxCommand();
   const result = spawnSync('tmux', ['new-session', '-d', '-s', relaySupervisorTmuxSession, command], {
     cwd: packageRoot,
@@ -708,6 +710,17 @@ function startRelaySupervisorTmux() {
     return;
   }
 
+  const startupDeadline = Date.now() + 1_000;
+  while (Date.now() < startupDeadline) {
+    if (!tmuxSessionExists(relaySupervisorTmuxSession)) {
+      console.error('relay-supervisor exited immediately after tmux launched it.');
+      console.error('Restarting in foreground to show the startup error.');
+      runRelaySupervisorForeground();
+      return;
+    }
+    await sleep(100);
+  }
+
   console.log(`Started remote-codex relay-supervisor in tmux session: ${relaySupervisorTmuxSession}`);
   printRelaySupervisorTmuxCommands();
 }
@@ -716,7 +729,7 @@ function relaySupervisorTmuxCommand() {
   const envPrefix = nonEmptyEnv('REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG')
     ? `REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG=${shellQuote(process.env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG)}`
     : '';
-  const command = `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} relay-supervisor run`;
+  const command = `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} relay-supervisor run 2>&1 | tee -a ${shellQuote(relaySupervisorLogPath)}`;
   return envPrefix ? `${envPrefix} ${command}` : command;
 }
 
@@ -771,6 +784,7 @@ function stopRelaySupervisorTmux() {
 
 function printRelaySupervisorTmuxCommands() {
   console.log(`Attach logs: tmux attach -t ${shellQuote(relaySupervisorTmuxSession)}`);
+  console.log(`Persistent logs: ${relaySupervisorLogPath}`);
   console.log('Status:      remote-codex relay-supervisor status');
   console.log('Stop:        remote-codex relay-supervisor stop');
 }

@@ -124,6 +124,9 @@ export class ThreadHistoryPersistenceCoordinator {
   }
 
   persistHydratedTurns(localThreadId: string, turns: AgentTurn[]) {
+    const existingItemsByTurnId = this.listPersistedHistoryItemsByTurnId(
+      localThreadId,
+    );
     for (const turn of turns) {
       if (turn.startedAt) {
         upsertThreadTurnMetadata(this.db, {
@@ -136,14 +139,18 @@ export class ThreadHistoryPersistenceCoordinator {
         if (!shouldPersistRuntimeFinalHistoryItem(item)) {
           return;
         }
-        const createdAt = item.createdAt ?? turn.startedAt;
+        const existingItem = existingItemsByTurnId
+          .get(turn.providerTurnId)
+          ?.find((candidate) => candidate.id === item.id);
+        const createdAt =
+          item.createdAt ?? existingItem?.createdAt ?? turn.startedAt;
         this.persistProjectedHistoryItem(
           localThreadId,
           turn.providerTurnId,
           {
             ...item,
             ...(createdAt ? { createdAt } : {}),
-            sequence: item.sequence ?? index,
+            sequence: existingItem?.sequence ?? item.sequence ?? index,
             ...(item.kind === 'agentMessage' && !item.sourceTurnId
               ? { sourceTurnId: turn.providerTurnId }
               : {}),

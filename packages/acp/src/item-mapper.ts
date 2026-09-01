@@ -17,10 +17,25 @@ export interface AcpMappedPlanUpdate {
 
 export interface AcpMappedSessionUpdate {
   itemUpdates: AcpMappedItemUpdate[];
-  outputDeltas: Array<{ itemId: string; delta: string }>;
+  outputDeltas: Array<{ itemId: string; delta: string; createdAt?: string }>;
   planUpdate: AcpMappedPlanUpdate | null;
   title: string | null | undefined;
   usage: { used: number; size: number; cost?: acp.Cost | null } | null;
+}
+
+export function acpUpdateCreatedAt(update: unknown) {
+  if (!update || typeof update !== 'object') {
+    return null;
+  }
+  const meta = (update as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== 'object') {
+    return null;
+  }
+  const raw = (meta as Record<string, unknown>).agentTimestampMs;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    return null;
+  }
+  return new Date(raw).toISOString();
 }
 
 export type AcpMappingMode = 'hydrate' | 'live';
@@ -236,12 +251,19 @@ export class AcpTurnItemMapper {
     }
   }
 
-  appendUserMessage(content: acp.ContentBlock, itemId: string) {
+  appendUserMessage(
+    content: acp.ContentBlock,
+    itemId: string,
+    createdAt?: string | null,
+  ) {
     const current = this.items.get(itemId);
     const item: AgentHistoryItem = {
       ...(current ?? { id: itemId, kind: 'userMessage' as const }),
       text: `${current?.text ?? ''}${acpContentBlockText(content)}`,
       status: modeStatus(this.mode),
+      ...(current?.createdAt ?? createdAt
+        ? { createdAt: current?.createdAt ?? createdAt! }
+        : {}),
     };
     this.upsert(item);
     return item;
@@ -275,13 +297,19 @@ export class AcpTurnItemMapper {
           `${this.turnId}:agent:${++this.agentMessageIndex}`;
         this.currentAgentMessageId = itemId;
         const current = this.items.get(itemId);
+        const createdAt = current?.createdAt ?? acpUpdateCreatedAt(update);
         const item: AgentHistoryItem = {
           ...(current ?? { id: itemId, kind: 'agentMessage' as const }),
           text: `${current?.text ?? ''}${delta}`,
           status: 'running',
+          ...(createdAt ? { createdAt } : {}),
         };
         this.upsert(item);
-        result.outputDeltas.push({ itemId, delta });
+        result.outputDeltas.push({
+          itemId,
+          delta,
+          ...(createdAt ? { createdAt } : {}),
+        });
         return result;
       }
       case 'agent_thought_chunk': {
@@ -291,10 +319,12 @@ export class AcpTurnItemMapper {
           `${this.turnId}:thought:${++this.thoughtIndex}`;
         this.currentThoughtId = itemId;
         const current = this.items.get(itemId);
+        const createdAt = current?.createdAt ?? acpUpdateCreatedAt(update);
         const item: AgentHistoryItem = {
           ...(current ?? { id: itemId, kind: 'reasoning' as const }),
           text: `${current?.text ?? ''}${delta}`,
           status: 'running',
+          ...(createdAt ? { createdAt } : {}),
         };
         this.upsert(item);
         result.itemUpdates.push({ item, completed: false });
@@ -307,7 +337,12 @@ export class AcpTurnItemMapper {
           title: update.title || update.name || 'Tool call',
         };
         this.tools.set(tool.toolCallId, tool);
-        const item = acpToolCallToHistoryItem(tool);
+        const item = {
+          ...acpToolCallToHistoryItem(tool),
+          ...(acpUpdateCreatedAt(update)
+            ? { createdAt: acpUpdateCreatedAt(update)! }
+            : {}),
+        };
         this.upsert(item);
         result.itemUpdates.push({ item, completed: tool.status === 'completed' || tool.status === 'failed' });
         return result;
@@ -321,13 +356,19 @@ export class AcpTurnItemMapper {
         const tool = mergeDefined(previous, update) as StoredToolCall;
         tool.title ||= tool.name || 'Tool call';
         this.tools.set(tool.toolCallId, tool);
-        const item = acpToolCallToHistoryItem(tool);
+        const currentItem = this.items.get(tool.toolCallId);
+        const createdAt = currentItem?.createdAt ?? acpUpdateCreatedAt(update);
+        const item = {
+          ...acpToolCallToHistoryItem(tool),
+          ...(createdAt ? { createdAt } : {}),
+        };
         this.upsert(item);
         result.itemUpdates.push({ item, completed: tool.status === 'completed' || tool.status === 'failed' });
         return result;
       }
       case 'plan': {
         result.itemUpdates.push(...this.finishOpenText());
+        const current = this.items.get(`${this.turnId}:plan`);
         const item: AgentHistoryItem = {
           id: `${this.turnId}:plan`,
           kind: 'plan',
@@ -336,6 +377,9 @@ export class AcpTurnItemMapper {
           status: update.entries.every((entry) => entry.status === 'completed')
             ? 'completed'
             : 'running',
+          ...(current?.createdAt ?? acpUpdateCreatedAt(update)
+            ? { createdAt: current?.createdAt ?? acpUpdateCreatedAt(update)! }
+            : {}),
         };
         this.upsert(item);
         result.itemUpdates.push({ item, completed: item.status === 'completed' });

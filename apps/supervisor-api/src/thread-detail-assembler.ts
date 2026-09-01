@@ -54,6 +54,8 @@ export interface ThreadDetailRecord {
   provider?: string | null;
   providerSessionId: string | null;
   providerTurnId?: string | null;
+  source?: string | null;
+  isConnected?: boolean | null;
   collaborationMode: string | null;
   model: string | null;
   reasoningEffort: string | null;
@@ -202,10 +204,11 @@ export class ThreadDetailAssembler {
       return cached;
     }
 
-    let remoteSession = await this.input.callbacks.readRemoteSession(
-      input.record,
-      options,
-    );
+    let remoteSession =
+      input.record.source === 'local_codex_import' &&
+      input.record.isConnected === false
+        ? null
+        : await this.input.callbacks.readRemoteSession(input.record, options);
 
     if (!remoteSession) {
       return this.buildLocalFallbackEntry({
@@ -590,7 +593,7 @@ function conversationMatchScore(
   }
   const userScore = remoteUser === persistedUser
     ? 2
-    : Math.min(remoteUser.length, persistedUser.length) >= 16 &&
+    : Math.min(remoteUser.length, persistedUser.length) >= 8 &&
         (remoteUser.includes(persistedUser) || persistedUser.includes(remoteUser))
       ? 1
       : 0;
@@ -630,7 +633,10 @@ function historyItemMatchScore(
     return 50;
   }
   if (
-    (remote.kind === 'agentMessage' || remote.kind === 'reasoning') &&
+    (remote.kind === 'userMessage' ||
+      remote.kind === 'agentMessage' ||
+      remote.kind === 'reasoning') &&
+    Math.min(remoteText.length, persistedText.length) >= 8 &&
     (remoteText.includes(persistedText) || persistedText.includes(remoteText))
   ) {
     return 40;
@@ -653,7 +659,11 @@ function alignHydratedItems(
         score: historyItemMatchScore(remote, persisted),
       }))
       .filter((candidate) => candidate.score > 0)
-      .sort((left, right) => right.score - left.score || left.index - right.index)[0];
+      .sort((left, right) =>
+        Number(left.persisted.id.startsWith('acp-hydrated:')) -
+          Number(right.persisted.id.startsWith('acp-hydrated:')) ||
+        right.score - left.score ||
+        left.index - right.index)[0];
     if (!match) {
       return remote.sourceTurnId
         ? { ...remote, sourceTurnId: turnId }
@@ -663,6 +673,20 @@ function alignHydratedItems(
     return {
       ...remote,
       id: match.persisted.id,
+      ...(remote.createdAt ?? match.persisted.createdAt
+        ? { createdAt: remote.createdAt ?? match.persisted.createdAt! }
+        : {}),
+      ...(match.persisted.sequence !== undefined
+        ? { sequence: match.persisted.sequence }
+        : {}),
+      ...(remote.kind === 'userMessage'
+        ? {
+            text: match.persisted.text,
+            ...(match.persisted.detailText !== undefined
+              ? { detailText: match.persisted.detailText }
+              : {}),
+          }
+        : {}),
       ...(remote.sourceTurnId || remote.kind === 'agentMessage'
         ? { sourceTurnId: turnId }
         : {}),
@@ -692,14 +716,20 @@ export function alignHydratedAcpTurnsWithPersistedHistory(
         score: conversationMatchScore(turn, items),
       }))
       .filter((candidate) => candidate.score > 0)
-      .sort((left, right) => right.score - left.score || left.index - right.index)[0];
+      .sort((left, right) =>
+        Number(left.turnId.startsWith('acp-hydrated:')) -
+          Number(right.turnId.startsWith('acp-hydrated:')) ||
+        right.score - left.score ||
+        left.index - right.index)[0];
     if (!match) {
       return turn;
     }
     used.add(match.turnId);
+    const persistedStartedAt = earliestItemCreatedAt(match.items);
     return {
       ...turn,
       providerTurnId: match.turnId,
+      ...(persistedStartedAt ? { startedAt: persistedStartedAt } : {}),
       items: alignHydratedItems(turn.items, match.items, match.turnId),
     };
   });
@@ -718,6 +748,22 @@ function appendPersistedTurnsIfMissing(
   const missingTurns: ThreadTurnDto[] = [];
   for (const [turnId, items] of persistedItemsByTurnId.entries()) {
     if (existingTurnIds.has(turnId)) {
+      continue;
+    }
+    if (
+      turns.some((turn) =>
+        conversationMatchScore(
+          {
+            providerTurnId: turn.id,
+            startedAt: turn.startedAt,
+            status: turn.status,
+            error: turn.error ? { message: turn.error } : null,
+            items: turn.items,
+          },
+          items,
+        ) > 0,
+      )
+    ) {
       continue;
     }
     const status = persistedAcpTurnStatus(items);

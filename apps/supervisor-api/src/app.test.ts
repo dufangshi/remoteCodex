@@ -1172,6 +1172,7 @@ describe('supervisor api', () => {
     model?: string;
     includeStateRow?: boolean;
     prompt?: string;
+    complete?: boolean;
   }) {
     const sessionsDir = path.join(codexHome, 'sessions', '2026', '04', '10');
     await fs.mkdir(sessionsDir, { recursive: true });
@@ -1216,15 +1217,19 @@ describe('supervisor api', () => {
             phase: 'final_answer'
           }
         }),
-        JSON.stringify({
-          timestamp: '2026-04-10T00:00:04.000Z',
-          type: 'event_msg',
-          payload: {
-            type: 'task_complete',
-            turn_id: 'turn-imported-1',
-            last_agent_message: 'imported reply'
-          }
-        })
+        ...(options.complete === false
+          ? []
+          : [
+              JSON.stringify({
+                timestamp: '2026-04-10T00:00:04.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  turn_id: 'turn-imported-1',
+                  last_agent_message: 'imported reply'
+                }
+              }),
+            ])
       ].join('\n')
     );
 
@@ -6455,6 +6460,56 @@ describe('supervisor api', () => {
           ]
         }
       ]
+    });
+  });
+
+  it('keeps a disconnected local import running when another app server reports not loaded', async () => {
+    const sessionId = '019d6fb7-7033-7a30-a2c7-74d0919e87d6';
+    const importedWorkspace = path.join(tempDir, 'externally-running-project');
+    await fs.mkdir(importedWorkspace);
+    await createLocalCodexFixture({
+      sessionId,
+      cwd: importedWorkspace,
+      title: 'Externally running session',
+      complete: false,
+    });
+    fakeCodexManager.threads.set(sessionId, {
+      id: sessionId,
+      preview: 'imported prompt',
+      createdAt: 1_765_411_200,
+      updatedAt: 1_765_411_204,
+      status: { type: 'notLoaded' },
+      cwd: importedWorkspace,
+      name: 'Externally running session',
+      turns: [],
+    });
+
+    const importResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/import',
+      payload: { sessionId },
+    });
+
+    expect(importResponse.statusCode).toBe(200);
+    expect(importResponse.json().thread).toMatchObject({
+      source: 'local_codex_import',
+      status: 'running',
+      activeTurnId: 'turn-imported-1',
+      isLoaded: false,
+    });
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(
+      listResponse.json().find((thread: { providerSessionId: string }) =>
+        thread.providerSessionId === sessionId),
+    ).toMatchObject({
+      status: 'running',
+      activeTurnId: 'turn-imported-1',
+      isLoaded: false,
     });
   });
 

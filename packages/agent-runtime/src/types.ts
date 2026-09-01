@@ -496,6 +496,7 @@ export interface AgentRuntimeOutputDeltaEvent {
   providerTurnId: string;
   itemId: string;
   delta: string;
+  createdAt?: string | null;
 }
 
 export interface AgentRuntimeTurnCompletedEvent {

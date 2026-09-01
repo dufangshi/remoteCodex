@@ -132,4 +132,34 @@ describe('AcpSessionHydrator', () => {
       ],
     }]);
   });
+
+  it('preserves provider event timestamps during replay hydration', () => {
+    const hydrator = new AcpSessionHydrator('session-timestamps');
+    hydrator.apply({
+      sessionUpdate: 'user_message_chunk',
+      messageId: 'timestamp-user',
+      content: { type: 'text', text: 'Timestamp prompt' },
+      _meta: { agentTimestampMs: 1_788_230_400_123 },
+    });
+    hydrator.apply({
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'timestamp-agent',
+      content: { type: 'text', text: 'Timestamp response' },
+      _meta: { agentTimestampMs: 1_788_230_405_456 },
+    });
+
+    expect(hydrator.complete()).toMatchObject([{
+      startedAt: '2026-09-01T02:40:00.123Z',
+      items: [
+        {
+          id: 'timestamp-user',
+          createdAt: '2026-09-01T02:40:00.123Z',
+        },
+        {
+          id: 'timestamp-agent',
+          createdAt: '2026-09-01T02:40:05.456Z',
+        },
+      ],
+    }]);
+  });
 });

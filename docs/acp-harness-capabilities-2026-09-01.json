@@ -1,0 +1,99 @@
+{
+  "capturedAt": "2026-09-01",
+  "platform": "macOS arm64",
+  "architecture": {
+    "core": "packages/acp/src/runtimeAdapter.ts",
+    "adapterRegistry": "packages/acp/src/harness-adapters/index.ts",
+    "selectionRule": "Harness-specific behavior is selected only by the adapter registry."
+  },
+  "harnesses": {
+    "grok": {
+      "baseVersion": "1.0.13",
+      "protocolVersion": 1,
+      "standardCore": [
+        "session/list",
+        "session/load",
+        "session/resume",
+        "session/close",
+        "session/prompt",
+        "session/cancel"
+      ],
+      "adapter": "grok",
+      "adapterResponsibilities": [
+        "legacy models projection",
+        "per-model reasoning effort",
+        "session/new and session/load reasoningEffort metadata",
+        "legacy session/set_model"
+      ],
+      "realE2E": {
+        "multiTurn": true,
+        "reasoningEfforts": ["xhigh", "high", "low"],
+        "providerEffortConfirmed": true,
+        "providerTimestampsConfirmed": true,
+        "duplicateItems": 0
+      }
+    },
+    "cursor": {
+      "baseVersion": "2026.08.11-e8db854",
+      "protocolVersion": 1,
+      "standardCore": [
+        "session/list",
+        "session/load",
+        "session/prompt",
+        "session/cancel",
+        "session/set_config_option"
+      ],
+      "adapter": "cursor",
+      "adapterResponsibilities": [
+        "parameterizedModelPicker client capability",
+        "cursor/list_available_models catalog",
+        "foreground-subagent prompt constraint"
+      ],
+      "realE2E": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high",
+        "fastMode": true,
+        "providerConfigConfirmed": true,
+        "runtimeSeconds": 115,
+        "itemCount": 82,
+        "finalAnswerCharacters": 8531,
+        "duplicateItems": 0
+      }
+    },
+    "deepseek": {
+      "baseVersion": "0.1.2-alpha.2",
+      "serverCommand": "dsh --profile acp",
+      "protocolVersion": 1,
+      "standardCore": [
+        "session/list",
+        "session/resume",
+        "session/close",
+        "session/prompt",
+        "session/cancel",
+        "session/set_config_option"
+      ],
+      "adapter": "deepseek",
+      "adapterResponsibilities": [],
+      "modelsConfirmed": [
+        "DeepSeek-V4-Flash",
+        "DeepSeek-V4-Pro",
+        "DeepSeek-V4-Flash-Vision-Exp"
+      ],
+      "reasoningEffortsConfirmed": ["none", "low", "high", "max"],
+      "fastMode": "unsupported",
+      "realE2E": {
+        "providerConfigConfirmed": true,
+        "failureProjectionConfirmed": true,
+        "runtimeSeconds": 34,
+        "itemCount": 16,
+        "finalAnswerCharacters": 5705,
+        "duplicateItems": 0
+      }
+    }
+  },
+  "security": {
+    "containsCredentials": false,
+    "containsSessionIds": false,
+    "containsMessageContent": false
+  }
+}

@@ -28,6 +28,10 @@ export class ThreadLiveStateStore {
   private readonly threadLivePlans = new Map<string, ThreadLivePlanDto>();
   private readonly threadLiveItems = new Map<string, ThreadLiveItemsDto>();
   private readonly threadTurnItemOrder = new Map<string, Map<string, Map<string, number>>>();
+  private readonly threadTurnItemCreatedAt = new Map<
+    string,
+    Map<string, Map<string, string>>
+  >();
   private readonly threadNextTurnItemSequence = new Map<string, Map<string, number>>();
   private readonly threadMaterializedAgentMessageCounts = new Map<string, Map<string, number>>();
   private readonly threadAgentMessageOrderingHints = new Map<
@@ -121,12 +125,14 @@ export class ThreadLiveStateStore {
 
   resetRecordedTurnItemOrder(localThreadId: string, turnId: string) {
     this.threadTurnItemOrder.get(localThreadId)?.delete(turnId);
+    this.threadTurnItemCreatedAt.get(localThreadId)?.delete(turnId);
     this.threadNextTurnItemSequence.get(localThreadId)?.delete(turnId);
     this.threadAgentMessageOrderingHints.get(localThreadId)?.delete(turnId);
   }
 
   clearRecordedTurnItemOrders(localThreadId: string) {
     this.threadTurnItemOrder.delete(localThreadId);
+    this.threadTurnItemCreatedAt.delete(localThreadId);
     this.threadNextTurnItemSequence.delete(localThreadId);
     this.threadAgentMessageOrderingHints.delete(localThreadId);
   }
@@ -159,6 +165,30 @@ export class ThreadLiveStateStore {
     threadSequences.set(turnId, sequence + 1);
     turnOrder.set(itemId, sequence);
     return sequence;
+  }
+
+  recordTurnItemCreatedAt(
+    localThreadId: string,
+    turnId: string,
+    itemId: string,
+    createdAt: string,
+  ) {
+    let threadTimestamps = this.threadTurnItemCreatedAt.get(localThreadId);
+    if (!threadTimestamps) {
+      threadTimestamps = new Map();
+      this.threadTurnItemCreatedAt.set(localThreadId, threadTimestamps);
+    }
+    let turnTimestamps = threadTimestamps.get(turnId);
+    if (!turnTimestamps) {
+      turnTimestamps = new Map();
+      threadTimestamps.set(turnId, turnTimestamps);
+    }
+    const existing = turnTimestamps.get(itemId);
+    if (existing) {
+      return existing;
+    }
+    turnTimestamps.set(itemId, createdAt);
+    return createdAt;
   }
 
   turnItemOrderSnapshot(localThreadId: string): TurnItemOrderSnapshot {
@@ -346,7 +376,25 @@ export class ThreadLiveStateStore {
     const current = this.threadLiveItems.get(input.localThreadId);
     const currentItems =
       current?.turnId === input.turnId ? current.items : [];
-    const existing = currentItems.find((entry) => entry.id === input.itemId);
+    const currentExisting = currentItems.find(
+      (entry) => entry.id === input.itemId,
+    );
+    const existing = currentExisting ??
+      (() => {
+        const hint = this.threadAgentMessageOrderingHints
+          .get(input.localThreadId)
+          ?.get(input.turnId)
+          ?.get(input.itemId);
+        return hint
+          ? {
+              id: hint.id,
+              kind: 'agentMessage' as const,
+              text: hint.text,
+              sequence: hint.sequence,
+              ...(hint.createdAt ? { createdAt: hint.createdAt } : {}),
+            }
+          : undefined;
+      })();
     const nextItem: ThreadHistoryItemDto =
       existing?.kind === 'agentMessage'
         ? {
@@ -371,7 +419,7 @@ export class ThreadLiveStateStore {
     this.setLiveItems(input.localThreadId, {
       turnId: input.turnId,
       items: sortHistoryItemsBySequence(
-        existing
+        currentExisting
           ? currentItems.map((entry) =>
               entry.id === input.itemId ? nextItem : entry,
             )

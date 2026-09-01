@@ -1,4 +1,9 @@
-import type { Dirent } from 'node:fs';
+import {
+  unwatchFile,
+  watchFile,
+  type Dirent,
+  type Stats,
+} from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -10,6 +15,15 @@ import {
   ThreadTurnDto,
   truncateAutoThreadTitle,
 } from '../../shared/src/index';
+import {
+  agentTurnToThreadTurnDto,
+  codexTurnToAgentTurn,
+} from './historyItems';
+import type {
+  CodexTurnError,
+  CodexTurnItem,
+  CodexTurnStatus,
+} from './types';
 
 interface LocalStateThreadRow {
   id: string;
@@ -23,6 +37,27 @@ interface ParsedTranscript {
   cwd: string | null;
   title: string | null;
   turns: ThreadTurnDto[];
+}
+
+interface PaginatedTurnRow {
+  turnId: string;
+  rolloutOrdinal: number;
+  status: string;
+  errorJson: string | null;
+  startedAt: number | null;
+}
+
+interface PaginatedItemRow {
+  turnId: string;
+  rolloutOrdinal: number;
+  createdAtMs: number;
+  itemType: string;
+  itemJson: string;
+}
+
+interface LocalCodexSessionStoreOptions {
+  watchIntervalMs?: number;
+  watchThrottleMs?: number;
 }
 
 export interface LocalCodexSessionRecord {
@@ -74,6 +109,113 @@ function createHistoryItemId(turnId: string, prefix: string, index: number) {
   return `${turnId}-${prefix}-${index}`;
 }
 
+function transcriptMessageText(payload: any) {
+  if (!Array.isArray(payload?.content)) {
+    return null;
+  }
+
+  const text = payload.content
+    .filter(
+      (content: any) =>
+        (content?.type === 'input_text' || content?.type === 'output_text') &&
+        typeof content.text === 'string' &&
+        content.text.trim(),
+    )
+    .map((content: any) => content.text)
+    .join('\n\n');
+
+  return text || null;
+}
+
+function camelCaseKey(key: string) {
+  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function camelCaseValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(camelCaseValue);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      camelCaseKey(key),
+      camelCaseValue(entry),
+    ]),
+  );
+}
+
+function completedRolloutHistoryItem(
+  payload: any,
+  timestamp: string | null | undefined,
+) {
+  if (!payload?.item || typeof payload.item !== 'object') {
+    return null;
+  }
+  const normalized = camelCaseValue(payload.item) as Record<string, unknown>;
+  if (typeof normalized.id !== 'string' || typeof normalized.type !== 'string') {
+    return null;
+  }
+  const normalizedType =
+    normalized.type.charAt(0).toLowerCase() + normalized.type.slice(1);
+  if (normalizedType === 'userMessage' || normalizedType === 'agentMessage') {
+    return null;
+  }
+  if (normalizedType === 'reasoning') {
+    const summaryText = normalized.summaryText;
+    normalized.summary = Array.isArray(summaryText)
+      ? summaryText.filter((entry): entry is string => typeof entry === 'string')
+      : typeof summaryText === 'string' && summaryText.trim()
+        ? [summaryText]
+        : [];
+    const rawContent = normalized.rawContent;
+    normalized.text = Array.isArray(rawContent)
+      ? rawContent
+        .map((entry) =>
+          typeof entry === 'string'
+            ? entry
+            : entry && typeof entry === 'object' && typeof (entry as any).text === 'string'
+              ? (entry as any).text
+              : '',
+        )
+        .filter(Boolean)
+        .join('\n')
+      : '';
+  }
+
+  const createdAtCandidate =
+    typeof payload.started_at_ms === 'number'
+      ? payload.started_at_ms
+      : timestamp ?? null;
+  const agentTurn = codexTurnToAgentTurn({
+    id: typeof payload.turn_id === 'string' ? payload.turn_id : 'rollout-turn',
+    status: 'inProgress',
+    error: null,
+    items: [
+      {
+        ...normalized,
+        id: normalized.id,
+        type: normalizedType,
+        createdAt: createdAtCandidate,
+      } as unknown as CodexTurnItem,
+    ],
+  });
+  const historyItem = agentTurn.items[0] ?? null;
+  return historyItem?.kind === 'reasoning' && historyItem.text.trim().length === 0
+    ? null
+    : historyItem;
+}
+
+function appendUniqueTurnItem(turn: MutableTurn, item: ThreadHistoryItemDto) {
+  const existingIndex = turn.items.findIndex((entry) => entry.id === item.id);
+  if (existingIndex >= 0) {
+    turn.items[existingIndex] = item;
+    return;
+  }
+  turn.items.push(item);
+}
+
 function finalizeTurn(turn: MutableTurn | null, turns: ThreadTurnDto[]) {
   if (!turn || turn.items.length === 0) {
     return;
@@ -88,7 +230,129 @@ function finalizeTurn(turn: MutableTurn | null, turns: ThreadTurnDto[]) {
   });
 }
 
+function isoTimestampFromEpochSeconds(value: number | null) {
+  return value === null || !Number.isFinite(value)
+    ? null
+    : new Date(value * 1_000).toISOString();
+}
+
+function normalizePaginatedTurnStatus(status: string): CodexTurnStatus {
+  switch (status) {
+    case 'completed':
+    case 'interrupted':
+    case 'failed':
+    case 'inProgress':
+      return status;
+    default:
+      return 'inProgress';
+  }
+}
+
+function parsePaginatedTurnError(value: string | null): CodexTurnError | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Record<string, unknown>).message === 'string'
+    ) {
+      return parsed as CodexTurnError;
+    }
+    return { message: value };
+  } catch {
+    return { message: value };
+  }
+}
+
+function mergeSessionTurns(
+  paginatedTurns: ThreadTurnDto[],
+  transcriptTurns: ThreadTurnDto[],
+) {
+  if (paginatedTurns.length === 0) {
+    return transcriptTurns;
+  }
+
+  const transcriptById = new Map(
+    transcriptTurns.map((turn) => [turn.id, turn]),
+  );
+  const merged = paginatedTurns.map((turn) => {
+    const transcriptTurn = transcriptById.get(turn.id);
+    if (!transcriptTurn) {
+      return turn;
+    }
+    transcriptById.delete(turn.id);
+
+    const paginatedItemIds = new Set(turn.items.map((item) => item.id));
+    const missingTranscriptItems = transcriptTurn.items.filter(
+      (item) => !paginatedItemIds.has(item.id),
+    );
+    const items = [...turn.items, ...missingTranscriptItems]
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => {
+        const leftMillis = Date.parse(left.item.createdAt ?? '');
+        const rightMillis = Date.parse(right.item.createdAt ?? '');
+        if (Number.isFinite(leftMillis) && Number.isFinite(rightMillis)) {
+          const delta = leftMillis - rightMillis;
+          return delta === 0 ? left.index - right.index : delta;
+        }
+        if (Number.isFinite(leftMillis)) return -1;
+        if (Number.isFinite(rightMillis)) return 1;
+        return left.index - right.index;
+      })
+      .map((entry, transcriptOrder) => ({
+        ...entry.item,
+        transcriptOrder,
+      }));
+
+    return {
+      ...turn,
+      startedAt: turn.startedAt ?? transcriptTurn.startedAt,
+      status: transcriptTurn.status,
+      error: transcriptTurn.error ?? turn.error,
+      items,
+    };
+  });
+
+  merged.push(...transcriptById.values());
+  return merged.sort((left, right) =>
+    (left.startedAt ?? '').localeCompare(right.startedAt ?? ''),
+  );
+}
+
 function parseTranscript(contents: string): ParsedTranscript {
+  const entries = contents
+    .split('\n')
+    .filter((line) => line.trim())
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+  let transcriptSegmentIndex = -1;
+  const indexedEntries = entries.map((entry: any) => {
+    if (
+      entry.type === 'event_msg' &&
+      entry.payload?.type === 'task_started'
+    ) {
+      transcriptSegmentIndex += 1;
+    }
+    return { entry, segmentIndex: transcriptSegmentIndex };
+  });
+  const legacyMessageSegments = new Set(
+    indexedEntries
+      .filter(
+        ({ entry }) =>
+          entry.type === 'event_msg' &&
+          (entry.payload?.type === 'user_message' ||
+            entry.payload?.type === 'agent_message'),
+      )
+      .map(({ segmentIndex }) => segmentIndex),
+  );
   const turns: ThreadTurnDto[] = [];
   let cwd: string | null = null;
   let currentTurn: MutableTurn | null = null;
@@ -114,22 +378,50 @@ function parseTranscript(contents: string): ParsedTranscript {
     return currentTurn;
   };
 
-  for (const line of contents.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    let entry: any;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
+  for (const { entry, segmentIndex } of indexedEntries) {
     if (entry.type === 'session_meta') {
       const payload = entry.payload ?? {};
       if (typeof payload.cwd === 'string' && payload.cwd.trim()) {
         cwd = payload.cwd;
+      }
+      continue;
+    }
+
+    if (
+      !legacyMessageSegments.has(segmentIndex) &&
+      entry.type === 'response_item' &&
+      entry.payload?.type === 'message'
+    ) {
+      const payload = entry.payload;
+      const text = transcriptMessageText(payload);
+      if (!text || (payload.role !== 'user' && payload.role !== 'assistant')) {
+        continue;
+      }
+
+      const turn = ensureCurrentTurn(entry.timestamp);
+      if (payload.role === 'user') {
+        userItemCount += 1;
+        turn.items.push({
+          id:
+            typeof payload.id === 'string' && payload.id.trim()
+              ? payload.id
+              : createHistoryItemId(turn.id, 'user', userItemCount),
+          kind: 'userMessage',
+          text,
+          createdAt: entry.timestamp ?? null,
+        });
+      } else {
+        agentItemCount += 1;
+        turn.items.push({
+          id:
+            typeof payload.id === 'string' && payload.id.trim()
+              ? payload.id
+              : createHistoryItemId(turn.id, 'agent', agentItemCount),
+          kind: 'agentMessage',
+          text,
+          status: typeof payload.phase === 'string' ? payload.phase : null,
+          createdAt: entry.timestamp ?? null,
+        });
       }
       continue;
     }
@@ -165,6 +457,7 @@ function parseTranscript(contents: string): ParsedTranscript {
         id: createHistoryItemId(turn.id, 'user', userItemCount),
         kind: 'userMessage',
         text: payload.message,
+        createdAt: entry.timestamp ?? null,
       });
       continue;
     }
@@ -177,7 +470,19 @@ function parseTranscript(contents: string): ParsedTranscript {
         kind: 'agentMessage',
         text: payload.message,
         status: typeof payload.phase === 'string' ? payload.phase : null,
+        createdAt: entry.timestamp ?? null,
       });
+      continue;
+    }
+
+    if (payloadType === 'item_completed') {
+      const item = completedRolloutHistoryItem(
+        payload,
+        typeof entry.timestamp === 'string' ? entry.timestamp : null,
+      );
+      if (item) {
+        appendUniqueTurnItem(ensureCurrentTurn(entry.timestamp), item);
+      }
       continue;
     }
 
@@ -218,7 +523,16 @@ async function fileExists(filePath: string) {
 }
 
 export class LocalCodexSessionStore {
-  constructor(private readonly codexHome: string) {}
+  private readonly watchIntervalMs: number;
+  private readonly watchThrottleMs: number;
+
+  constructor(
+    private readonly codexHome: string,
+    options: LocalCodexSessionStoreOptions = {},
+  ) {
+    this.watchIntervalMs = options.watchIntervalMs ?? 500;
+    this.watchThrottleMs = options.watchThrottleMs ?? 1_500;
+  }
 
   async findSession(
     sessionId: string,
@@ -231,6 +545,7 @@ export class LocalCodexSessionStore {
     const transcript = transcriptPath
       ? parseTranscript(await fs.readFile(transcriptPath, 'utf8'))
       : null;
+    const paginatedTurns = await this.findPaginatedTurns(sessionId);
     const cwd = stateRecord?.cwd ?? transcript?.cwd ?? null;
 
     if (!cwd) {
@@ -246,7 +561,65 @@ export class LocalCodexSessionStore {
         basenameFromPath(cwd),
       model: stateRecord?.model ?? null,
       rolloutPath: transcriptPath,
-      turns: transcript?.turns ?? [],
+      turns: mergeSessionTurns(paginatedTurns, transcript?.turns ?? []),
+    };
+  }
+
+  async watchSession(
+    sessionId: string,
+    onChange: () => void,
+  ): Promise<() => void> {
+    const stateRecord = await this.findSessionInStateDatabases(sessionId);
+    const transcriptPath = await this.resolveTranscriptPath(
+      stateRecord?.rolloutPath ?? null,
+      sessionId,
+    );
+    if (!transcriptPath) {
+      return () => {};
+    }
+
+    let stopped = false;
+    let lastEmittedAt = 0;
+    let pending: NodeJS.Timeout | null = null;
+    const emit = () => {
+      pending = null;
+      if (stopped) {
+        return;
+      }
+      lastEmittedAt = Date.now();
+      onChange();
+    };
+    const schedule = () => {
+      if (stopped || pending) {
+        return;
+      }
+      const delay = Math.max(
+        0,
+        this.watchThrottleMs - (Date.now() - lastEmittedAt),
+      );
+      pending = setTimeout(emit, delay);
+    };
+    const listener = (current: Stats, previous: Stats) => {
+      if (
+        current.size !== previous.size ||
+        current.mtimeMs !== previous.mtimeMs
+      ) {
+        schedule();
+      }
+    };
+
+    watchFile(
+      transcriptPath,
+      { persistent: false, interval: this.watchIntervalMs },
+      listener,
+    );
+    return () => {
+      stopped = true;
+      if (pending) {
+        clearTimeout(pending);
+        pending = null;
+      }
+      unwatchFile(transcriptPath, listener);
     };
   }
 
@@ -283,35 +656,44 @@ export class LocalCodexSessionStore {
   private async findSessionInStateDatabases(
     sessionId: string,
   ): Promise<LocalStateThreadRow | null> {
-    let entries: string[];
-    try {
-      entries = await fs.readdir(this.codexHome);
-    } catch {
-      return null;
-    }
+    const stateFiles = (
+      await Promise.all(
+        [this.codexHome, path.join(this.codexHome, 'sqlite')].map(
+          async (directory) => {
+            let entries: string[];
+            try {
+              entries = await fs.readdir(directory);
+            } catch {
+              return [];
+            }
 
-    const stateFiles = await Promise.all(
-      entries
-        .filter((entry) => /^state_\d+\.sqlite$/i.test(entry))
-        .map(async (entry) => {
-          const absPath = path.join(this.codexHome, entry);
-          const stats = await fs.stat(absPath);
-          return {
-            absPath,
-            mtimeMs: stats.mtimeMs,
-          };
-        }),
-    );
+            return Promise.all(
+              entries
+                .filter((entry) => /^state_\d+\.sqlite$/i.test(entry))
+                .map(async (entry) => {
+                  const absPath = path.join(directory, entry);
+                  const stats = await fs.stat(absPath);
+                  return {
+                    absPath,
+                    mtimeMs: stats.mtimeMs,
+                  };
+                }),
+            );
+          },
+        ),
+      )
+    ).flat();
 
     stateFiles.sort((left, right) => right.mtimeMs - left.mtimeMs);
 
     for (const stateFile of stateFiles) {
-      const sqlite = new Database(stateFile.absPath, {
-        readonly: true,
-        fileMustExist: true,
-      });
+      let sqlite: Database.Database | null = null;
 
       try {
+        sqlite = new Database(stateFile.absPath, {
+          readonly: true,
+          fileMustExist: true,
+        });
         const row = sqlite
           .prepare(
             `
@@ -332,13 +714,99 @@ export class LocalCodexSessionStore {
           return row;
         }
       } catch {
-        // Ignore incompatible sqlite files and continue probing.
+        // A corrupt or incompatible index must not block rollout-file recovery.
       } finally {
-        sqlite.close();
+        sqlite?.close();
       }
     }
 
     return null;
+  }
+
+  private async findPaginatedTurns(sessionId: string) {
+    const databasePath = path.join(this.codexHome, 'thread_history_1.sqlite');
+    let sqlite: Database.Database | null = null;
+    try {
+      sqlite = new Database(databasePath, {
+        readonly: true,
+        fileMustExist: true,
+      });
+      const turnRows = sqlite.prepare(
+        `
+          SELECT
+            turn_id AS turnId,
+            rollout_ordinal AS rolloutOrdinal,
+            status,
+            error_json AS errorJson,
+            started_at AS startedAt
+          FROM thread_turns
+          WHERE thread_id = ?
+          ORDER BY rollout_ordinal ASC
+        `,
+      ).all(sessionId) as PaginatedTurnRow[];
+      if (turnRows.length === 0) {
+        return [];
+      }
+
+      const itemRows = sqlite.prepare(
+        `
+          SELECT
+            turn_id AS turnId,
+            rollout_ordinal AS rolloutOrdinal,
+            created_at_ms AS createdAtMs,
+            item_type AS itemType,
+            item_json AS itemJson
+          FROM thread_items
+          WHERE thread_id = ?
+          ORDER BY rollout_ordinal ASC
+        `,
+      ).all(sessionId) as PaginatedItemRow[];
+      const itemsByTurnId = new Map<string, CodexTurnItem[]>();
+      for (const row of itemRows) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(row.itemJson);
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          continue;
+        }
+        const parsedRecord = parsed as Record<string, unknown>;
+        if (typeof parsedRecord.id !== 'string' || !parsedRecord.id.trim()) {
+          continue;
+        }
+        const item = {
+          ...parsedRecord,
+          id: parsedRecord.id,
+          type:
+            typeof parsedRecord.type === 'string'
+              ? parsedRecord.type
+              : row.itemType,
+          createdAt: row.createdAtMs,
+        } as unknown as CodexTurnItem;
+        const turnItems = itemsByTurnId.get(row.turnId) ?? [];
+        turnItems.push(item);
+        itemsByTurnId.set(row.turnId, turnItems);
+      }
+
+      return turnRows.map((row) => {
+        const agentTurn = codexTurnToAgentTurn({
+          id: row.turnId,
+          status: normalizePaginatedTurnStatus(row.status),
+          error: parsePaginatedTurnError(row.errorJson),
+          items: itemsByTurnId.get(row.turnId) ?? [],
+        });
+        return agentTurnToThreadTurnDto({
+          ...agentTurn,
+          startedAt: isoTimestampFromEpochSeconds(row.startedAt),
+        });
+      });
+    } catch {
+      return [];
+    } finally {
+      sqlite?.close();
+    }
   }
 
   private async resolveTranscriptPath(

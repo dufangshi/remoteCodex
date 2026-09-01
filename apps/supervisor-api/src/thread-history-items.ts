@@ -17,31 +17,40 @@ const DEFERRED_HOOK_DETAIL_TITLE = 'Hook Details';
 export type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
 
 function parseUuidV7Timestamp(id: string): string | null {
-  const normalized = id.replace(/-/g, '');
-  if (!/^[0-9a-f]{32}$/i.test(normalized) || normalized[12]?.toLowerCase() !== '7') {
-    return null;
+  const candidates = [
+    id,
+    ...(id.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}/gi,
+    ) ?? []),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = candidate.replace(/-/g, '');
+    if (
+      !/^[0-9a-f]{32}$/i.test(normalized) ||
+      normalized[12]?.toLowerCase() !== '7'
+    ) {
+      continue;
+    }
+
+    const millis = Number.parseInt(normalized.slice(0, 12), 16);
+    if (Number.isFinite(millis)) {
+      return new Date(millis).toISOString();
+    }
   }
 
-  const millis = Number.parseInt(normalized.slice(0, 12), 16);
-  if (!Number.isFinite(millis)) {
-    return null;
-  }
-
-  return new Date(millis).toISOString();
+  return null;
 }
 
 function normalizeHistoryItemCreatedAt(
   item: ThreadHistoryItemDto,
-  fallback: string | null,
 ): ThreadHistoryItemDto {
   if (item.createdAt) {
     return item;
   }
 
-  return {
-    ...item,
-    createdAt: parseUuidV7Timestamp(item.id) ?? fallback,
-  };
+  const inferredCreatedAt = parseUuidV7Timestamp(item.id);
+  return inferredCreatedAt ? { ...item, createdAt: inferredCreatedAt } : item;
 }
 
 function summarizeText(text: string, fallback: string) {
@@ -353,7 +362,7 @@ function copyPersistedOrderingHints(
   if (
     persistedItem.createdAt &&
     (!nextItem.createdAt ||
-      (nextItem.kind === 'agentMessage' && nextItem.createdAt === turnStartedAt))
+      nextItem.createdAt === turnStartedAt)
   ) {
     nextItem = { ...nextItem, createdAt: persistedItem.createdAt };
   }
@@ -514,6 +523,26 @@ function shouldAppendPersistedMissingItem(
   turn: ThreadTurnDto,
   item: ThreadHistoryItemDto,
 ) {
+  if (
+    item.kind === 'userMessage' ||
+    item.kind === 'reasoning'
+  ) {
+    const persistedText = item.text.replace(/\s+/g, ' ').trim();
+    const duplicate = turn.items.some((turnItem) => {
+      if (turnItem.kind !== item.kind) {
+        return false;
+      }
+      const turnText = turnItem.text.replace(/\s+/g, ' ').trim();
+      return (
+        turnText === persistedText ||
+        (Math.min(turnText.length, persistedText.length) >= 8 &&
+          (turnText.includes(persistedText) || persistedText.includes(turnText)))
+      );
+    });
+    if (duplicate) {
+      return false;
+    }
+  }
   if (item.kind !== 'agentMessage') {
     return true;
   }
@@ -577,6 +606,9 @@ export function mergePersistedHistoryItemsIntoTurns(
 
       const persistedItemWithTranscriptOrder = {
         ...persistedItem,
+        ...(turn.status === 'completed' && persistedItem.status === 'running'
+          ? { status: 'completed' as const }
+          : {}),
         transcriptOrder: transcriptIndex,
       };
       if (shouldUsePersistedUserMessageText(item, persistedItemWithTranscriptOrder)) {
@@ -636,7 +668,6 @@ export function agentTurnToThreadTurnDto(
         item.transcriptOrder === transcriptIndex
           ? item
           : { ...item, transcriptOrder: transcriptIndex },
-        startedAt,
       ),
     ),
   };
