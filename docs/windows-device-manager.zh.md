@@ -34,11 +34,14 @@
 - 检查 `codex login status`，未登录时打开临时终端完成用户登录；
 - 在 `%LOCALAPPDATA%\RemoteCodex\app` 安装固定版本的私有 Remote Codex；
 - 通过现有 CLI 写 Relay 配置并收紧 `%USERPROFILE%\.remote-codex` ACL；
+- 将 Windows Device Manager 标记为受管启动源，并确保 Codex 与 ACP provider 均已启用；
 - 启动后台 Relay Supervisor 并验证生命周期状态。
 
 托盘的 **Supervisor running** 表示本机 Supervisor 已经通过身份校验并保持 Relay 自动重连。Relay 服务端是否已接受当前 token，仍以 Relay Portal 的 **Online** 状态为最终依据；失效或已撤销的 token 不会被本地进程状态误称为 Online。
 
 已有的健康 Node.js 22 和 Codex 会直接复用。已有的其他 Node.js 大版本不会被卸载、覆盖或写入 PATH；应用会并存安装自己的 Node.js 22。私有 Remote Codex 第二次运行时会验证并跳过重复安装。
+
+Device Manager 与 Remote Codex runtime 使用独立版本。EXE 只承载设备配置、进程管理和 runtime 更新能力；ACP、provider 与 Supervisor 业务修复应优先通过 npm runtime 发布，并由 EXE 内的 **Check for updates** / **Install update** 完成升级。只有安装器、运行时管理协议或 Windows 原生集成发生不兼容变化时，才需要重新发布 EXE。
 
 ## 托盘行为
 
@@ -53,6 +56,8 @@
 - **Exit and take device offline**：停止 Supervisor 后退出托盘应用。
 
 应用每 10 秒检查一次 Supervisor。只要用户没有点 **Disconnect** 或退出应用，进程异常停止后会自动拉起。开机启动使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不要求管理员权限，也不会把 Device token 写进启动参数。
+
+升级自早期只启用 Codex 的 Device Manager 时，新版 Remote Codex runtime 会识别默认安装位置并把旧 provider 配置迁移为 `codex,acp`。手工启动且使用自定义配置路径的 Supervisor 不会应用这项兼容迁移。
 
 ## 敏感数据与文件位置
 
