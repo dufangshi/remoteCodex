@@ -41,6 +41,8 @@
 
 已有的健康 Node.js 22 和 Codex 会直接复用。已有的其他 Node.js 大版本不会被卸载、覆盖或写入 PATH；应用会并存安装自己的 Node.js 22。私有 Remote Codex 第二次运行时会验证并跳过重复安装。
 
+Device Manager 与 Remote Codex runtime 使用独立版本。EXE 只承载设备配置、进程管理和 runtime 更新能力；ACP、provider 与 Supervisor 业务修复应优先通过 npm runtime 发布，并由 EXE 内的 **Check for updates** / **Install update** 完成升级。只有安装器、运行时管理协议或 Windows 原生集成发生不兼容变化时，才需要重新发布 EXE。
+
 ## 托盘行为
 
 主窗口关闭或最小化后，应用只隐藏到通知区域，Device 继续运行。托盘菜单提供：
