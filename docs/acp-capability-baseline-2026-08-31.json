@@ -1,0 +1,93 @@
+{
+  "capturedAt": "2026-08-31",
+  "sourceCommit": "ea4764b3c08343f9720b773830dc45b9b9b980fd",
+  "runtimeVersions": {
+    "codex": "codex-cli 0.150.1",
+    "codexAcp": "@agentclientprotocol/codex-acp 1.6.2",
+    "node": "v24.16.0",
+    "pnpm": "10.11.1"
+  },
+  "negotiated": {
+    "protocolVersion": 1,
+    "agentInfo": {
+      "name": "@agentclientprotocol/codex-acp",
+      "title": "Codex",
+      "version": "1.6.2"
+    },
+    "agentCapabilities": {
+      "auth": {
+        "logout": {}
+      },
+      "providers": {},
+      "loadSession": true,
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "resume": {},
+        "list": {},
+        "close": {},
+        "delete": {},
+        "additionalDirectories": {}
+      },
+      "mcpCapabilities": {
+        "acp": false,
+        "http": true,
+        "sse": false
+      }
+    },
+    "legacyExtensions": {
+      "steering": {
+        "supported": true
+      },
+      "goal": {
+        "version": 1,
+        "controlMethod": "_session/goal",
+        "actions": [
+          "set",
+          "pause",
+          "resume",
+          "clear"
+        ]
+      }
+    }
+  },
+  "approvedDeclaredCapabilityDifferences": [
+    "sessions.importLocal",
+    "turns.steer",
+    "turns.compact",
+    "branching.fork",
+    "branching.hardRollback",
+    "controls.sandboxMode",
+    "controls.performanceMode",
+    "controls.goals",
+    "management.models",
+    "management.mcpStatus",
+    "management.skills",
+    "management.hooks",
+    "management.hookTrust",
+    "management.hostConfigFiles"
+  ],
+  "nativeCodexDeclaredCapabilities": {
+    "sessions": { "list": true, "read": true, "resume": true, "importLocal": true },
+    "turns": { "start": true, "streamInput": false, "steer": true, "interrupt": true, "compact": true },
+    "branching": { "fork": true, "hardRollback": true, "resumeAt": false, "rewindFiles": false },
+    "controls": { "planMode": true, "permissionRequests": true, "sandboxMode": false, "performanceMode": true, "goals": true },
+    "management": { "models": true, "mcpStatus": true, "skills": true, "hooks": true, "hookTrust": true, "hostConfigFiles": true, "providerSettings": false },
+    "usage": { "contextWindow": true, "tokenUsage": true, "costUsd": false }
+  },
+  "codexAcpEffectiveCapabilities": {
+    "sessions": { "list": true, "read": true, "resume": true, "importLocal": false, "load": true, "close": true, "delete": true },
+    "turns": { "start": true, "streamInput": false, "steer": false, "interrupt": true, "compact": false },
+    "branching": { "fork": false, "hardRollback": false, "resumeAt": false, "rewindFiles": false },
+    "controls": { "planMode": true, "permissionRequests": true, "sandboxMode": true, "performanceMode": false, "goals": false },
+    "management": { "models": false, "mcpStatus": false, "skills": false, "hooks": false, "hookTrust": false, "hostConfigFiles": false, "providerSettings": false },
+    "usage": { "contextWindow": true, "tokenUsage": true, "costUsd": false }
+  },
+  "security": {
+    "containsCredentials": false,
+    "containsSessionIds": false,
+    "containsMessageContent": false
+  }
+}

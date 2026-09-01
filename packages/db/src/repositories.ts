@@ -42,7 +42,7 @@ export interface CreateThreadRecordInput {
   approvalMode: string;
   sandboxMode?: string | null;
   summaryText?: string | null;
-  source?: 'supervisor' | 'local_codex_import';
+  source?: 'supervisor' | 'local_codex_import' | 'local_provider_import';
   isConnected?: boolean;
 }
 
@@ -73,6 +73,7 @@ export interface UpdateThreadRecordInput {
 export interface UpsertThreadTurnMetadataInput {
   threadId: string;
   turnId: string;
+  createdAt?: string;
   model?: string | null;
   reasoningEffort?: string | null;
   reasoningEffortAvailable?: boolean | null;
@@ -423,7 +424,7 @@ export function upsertThreadTurnMetadata(
       pricingTierKey: input.pricingTierKey ?? null,
       tokenUsageJson: input.tokenUsageJson ?? null,
       displayPrompt: input.displayPrompt ?? null,
-      createdAt: now,
+      createdAt: input.createdAt ?? now,
       updatedAt: now,
     })
     .run();

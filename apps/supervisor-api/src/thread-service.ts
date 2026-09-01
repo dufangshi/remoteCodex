@@ -73,7 +73,6 @@ import {
   ProviderRequestCoordinator,
 } from './provider-request-coordinator';
 import {
-  normalizePricingTier,
   ThreadUsageAccounting,
 } from './thread-usage-accounting';
 import {
@@ -222,7 +221,6 @@ export class ThreadService {
     this.importCoordinator = new ThreadImportCoordinator(
       db,
       this.sessionCoordinator,
-      workspaceRoot,
     );
     this.promptTurnCoordinator = new ThreadPromptTurnCoordinator(
       db,
@@ -277,6 +275,12 @@ export class ThreadService {
         },
         syncAfterRemoteSession: (localThreadId, remoteSession) => {
           const updated = getThreadRecordById(this.db, localThreadId)!;
+          if (updated.provider === 'acp') {
+            this.historyPersistence.persistHydratedTurns(
+              updated.id,
+              remoteSession.turns,
+            );
+          }
           this.syncPendingPlanDecisionRequest(
             updated.id,
             updated.collaborationMode,
@@ -298,6 +302,11 @@ export class ThreadService {
         this.emitThreadEvent(type, threadId, payload),
       requireProviderSessionId: (record) => this.requireProviderSessionId(record),
       runtimeForProvider: (provider) => this.runtimeForProvider(provider),
+      capabilitiesForRecord: (record) => this.providerRuntime.resolveCapabilitiesFor({
+        provider: record.provider,
+        agentId: record.agentId ?? null,
+        providerSessionId: record.providerSessionId ?? null,
+      }),
       appendGoalActivityNote: (threadId, objective) =>
         this.auxiliaryState.appendActivityNote(threadId, {
           kind: 'goal',
@@ -333,6 +342,8 @@ export class ThreadService {
       this.liveState,
       this.auxiliaryState,
       {
+        clearHistoryPersistence: (localThreadId) =>
+          this.historyPersistence.clearThread(localThreadId),
         invalidateThreadDetailCache: (localThreadId) =>
           this.invalidateThreadDetailCache(localThreadId),
       },
@@ -352,8 +363,8 @@ export class ThreadService {
       {
         buildThreadPatch: (remoteSession, model, reasoningEffort) =>
           buildThreadPatch(remoteSession, model, reasoningEffort),
-        fastModeForProvider: (provider, fastMode) =>
-          this.fastModeForProvider(provider, fastMode),
+        fastModeForProvider: (provider, fastMode, scope) =>
+          this.fastModeForProvider(provider, fastMode, scope),
         getThreadDetail: (localThreadId) => this.getThreadDetail(localThreadId),
         invalidateThreadDetailCache: (localThreadId) =>
           this.invalidateThreadDetailCache(localThreadId),
@@ -377,6 +388,7 @@ export class ThreadService {
             input.delta,
             input.sequence,
             input.createdAt,
+            input.checkpoint,
           ),
         clearPendingPlanDecisionRequests: (localThreadId, emitEvents) =>
           this.clearPendingPlanDecisionRequests(localThreadId, emitEvents),
@@ -532,16 +544,12 @@ export class ThreadService {
     );
   }
 
-  private runtimeSupportsFastMode(provider: string | null | undefined): boolean {
-    return this.providerRuntime.runtimeSupportsFastMode(provider);
-  }
-
-  private fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean {
-    return this.providerRuntime.fastModeForProvider(provider, fastMode);
-  }
-
-  private performanceModeForRecord(record: { provider?: string | null; fastMode?: unknown }) {
-    return this.providerRuntime.performanceModeForRecord(record);
+  private fastModeForProvider(
+    provider: string | null | undefined,
+    fastMode: unknown,
+    scope: { agentId?: string | null; providerSessionId?: string | null } = {},
+  ): boolean {
+    return this.providerRuntime.fastModeForProvider(provider, fastMode, scope);
   }
 
   private async handleProviderRequest(request: AgentProviderRequest) {
@@ -653,7 +661,7 @@ export class ThreadService {
     updateThreadRecord(this.db, created.id, {
       ...buildThreadPatch(
         session.response.session,
-        input.model,
+        session.response.model ?? input.model,
         session.response.reasoningEffort ?? session.reasoningEffort
       ),
       title:
@@ -671,6 +679,10 @@ export class ThreadService {
   async importThread(input: ImportThreadInput): Promise<ThreadDetailDto> {
     const localThreadId = await this.importCoordinator.importLocalThread(input);
     return this.getThreadDetail(localThreadId);
+  }
+
+  async listImportCandidates(provider?: string | null, agentId?: string | null) {
+    return this.importCoordinator.listImportCandidates(provider, agentId);
   }
 
   async getThreadDetail(
@@ -1138,6 +1150,7 @@ export class ThreadService {
 
     await this.sessionCoordinator.compactThreadSession({
       provider: record.provider,
+      agentId: record.agentId,
       providerSessionId,
     });
 
@@ -1339,7 +1352,12 @@ export class ThreadService {
 
     const providerSessionId = this.requireProviderSessionId(record);
     const runtime = this.runtimeForProvider(record.provider);
-    if (!runtime.sendInput) {
+    const capabilities = this.providerRuntime.capabilitiesFor({
+      provider: record.provider,
+      agentId: record.agentId ?? null,
+      providerSessionId,
+    });
+    if (!runtime.sendInput || !capabilities.turns.steer) {
       throw new HttpError(409, {
         code: 'conflict',
         message: 'This backend does not support steering an active turn.',
@@ -1468,11 +1486,6 @@ export class ThreadService {
     await this.runtimeEventProjector.handleRuntimeEvent(event);
   }
 
-  private runtimeSupportsLiveRunningTurnInput(provider: string | null | undefined) {
-    const runtime = this.runtimeForProvider(provider);
-    return Boolean(runtime.sendInput && runtime.capabilities.turns.steer);
-  }
-
   private shouldPreserveCompletedPendingSteer(localThreadId: string) {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record) {
@@ -1581,8 +1594,8 @@ export class ThreadService {
 
   private toThreadDto(record: any, loadedIds: Set<string>): ThreadDto {
     return threadRecordToThreadDto(record, loadedIds, {
-      fastModeForProvider: (provider, fastMode) =>
-        this.fastModeForProvider(provider, fastMode),
+      fastModeForProvider: (provider, fastMode, scope) =>
+        this.fastModeForProvider(provider, fastMode, scope),
       getThreadContextUsage: (localThreadId) =>
         this.getThreadContextUsage(localThreadId),
     });
@@ -1615,8 +1628,9 @@ export class ThreadService {
     delta: string,
     sequence: number,
     createdAt?: string | null | undefined,
+    checkpoint = false,
   ) {
-    this.liveState.appendLiveAgentMessageDelta({
+    const item = this.liveState.appendLiveAgentMessageDelta({
       localThreadId,
       turnId,
       itemId,
@@ -1624,6 +1638,13 @@ export class ThreadService {
       sequence,
       createdAt,
     });
+    if (checkpoint) {
+      this.historyPersistence.checkpointLiveAgentMessage(
+        localThreadId,
+        turnId,
+        item,
+      );
+    }
   }
 
   private createPendingPlanDecisionRequest(
@@ -1710,7 +1731,7 @@ interface QueuedTurnConfig {
   normalizedReasoning: ReasoningEffortDto | null;
   collaborationMode: CollaborationModeDto;
   sandboxMode: SandboxModeDto;
-  performanceMode: 'fast' | 'standard';
+  performanceMode: 'fast' | 'standard' | null;
   startNewTurn: boolean;
 }
 

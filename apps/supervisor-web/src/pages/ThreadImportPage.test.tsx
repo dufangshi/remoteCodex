@@ -29,6 +29,39 @@ describe('ThreadImportPage', () => {
             ],
           });
         }
+        if (url.endsWith('/api/agent-runtimes/acp/agents') && !init?.method) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{
+              id: 'codex',
+              model: 'codex',
+              displayName: 'OpenAI Codex',
+              description: '',
+              isDefault: true,
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+              selectionKind: 'agent',
+              acpAgent: { availability: 'ready' },
+            }],
+          });
+        }
+        if (url.includes('/api/threads/import-candidates') && !init?.method) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{
+              provider: 'claude',
+              agentId: null,
+              sessionId: 'claude-session-ready',
+              cwd: '/tmp/claude-session-ready',
+              title: 'Ready Claude session',
+              preview: 'Ready to import',
+              createdAt: null,
+              updatedAt: null,
+              historyStatus: 'unknown',
+            }],
+          });
+        }
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -64,7 +97,7 @@ describe('ThreadImportPage', () => {
       expect(screen.getByText('Imported Thread Ready')).toBeInTheDocument();
     });
 
-    const [, importCall] = vi.mocked(fetch).mock.calls;
+    const importCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST');
     const [input, init] = importCall!;
     expect(String(input)).toContain('/api/threads/import');
     expect(init?.method).toBe('POST');

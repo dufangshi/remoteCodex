@@ -104,11 +104,23 @@ relay_login_token() {
 register_device() {
   mkdir -p "$(dirname "$REGISTRATION_FILE")"
   token="$(relay_login_token)"
-  curl -sS -H "Authorization: Bearer $token" \
+  device_response="$(curl -sS -H "Authorization: Bearer $token" \
     -H 'Content-Type: application/json' \
     -d '{"name":"Android relay E2E backend"}' \
-    "$RELAY_URL/relay/devices" |
-    RELAY_TOKEN="$token" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); const out={relayToken:process.env.RELAY_TOKEN,deviceId:j.device.id,deviceToken:j.token}; console.log(JSON.stringify(out,null,2));})' > "$REGISTRATION_FILE"
+    "$RELAY_URL/relay/devices")"
+  if ! printf '%s' "$device_response" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);process.exit(j.token&&(j.id||j.device?.id)?0:1)})'; then
+    suffix="$(date +%s)"
+    register_response="$(curl -sS -H 'Content-Type: application/json' \
+      -d "{\"email\":\"android-relay-$suffix@example.test\",\"username\":\"android-relay-$suffix\",\"password\":\"relay-user-password\"}" \
+      "$RELAY_URL/relay/auth/register")"
+    token="$(printf '%s' "$register_response" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).token??""))')"
+    device_response="$(curl -sS -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"Android relay E2E backend"}' \
+      "$RELAY_URL/relay/devices")"
+  fi
+  printf '%s' "$device_response" |
+    RELAY_TOKEN="$token" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); const out={relayToken:process.env.RELAY_TOKEN,deviceId:j.device?.id??j.id,deviceToken:j.token}; console.log(JSON.stringify(out,null,2));})' > "$REGISTRATION_FILE"
   sed -E 's/"(relayToken|deviceToken)": "[^"]+"/"\1": "[redacted]"/g' "$REGISTRATION_FILE"
 }
 

@@ -2,9 +2,20 @@ import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import type { AgentBackendDto, AgentBackendIdDto } from '@remote-codex/shared';
+import type {
+  AgentBackendDto,
+  AgentBackendIdDto,
+  ImportThreadCandidateDto,
+  ModelOptionDto,
+} from '@remote-codex/shared';
 import { agentBackendMetadata, defaultAgentBackendId } from '@remote-codex/shared';
-import { ApiError, fetchAgentBackends, importThread } from '../lib/api';
+import {
+  ApiError,
+  fetchAgentBackends,
+  fetchAgentBackendAgents,
+  fetchImportThreadCandidates,
+  importThread,
+} from '../lib/api';
 import { currentThreadHref } from '../lib/relayRoutes';
 
 export function ThreadImportPage() {
@@ -13,6 +24,12 @@ export function ThreadImportPage() {
   const [provider, setProvider] = useState<AgentBackendIdDto>(defaultAgentBackendId);
   const [backends, setBackends] = useState<AgentBackendDto[]>([]);
   const [backendsLoading, setBackendsLoading] = useState(true);
+  const [agents, setAgents] = useState<ModelOptionDto[]>([]);
+  const [agentId, setAgentId] = useState<string | null>(null);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [candidates, setCandidates] = useState<ImportThreadCandidateDto[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(true);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +63,77 @@ export function ThreadImportPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (provider !== 'acp') {
+      setAgents([]);
+      setAgentId(null);
+      setAgentsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setAgentsLoading(true);
+    fetchAgentBackendAgents('acp')
+      .then((loaded) => {
+        if (cancelled) return;
+        setAgents(loaded);
+        setAgentId((current) => {
+          if (current && loaded.some((agent) => agent.id === current)) {
+            return current;
+          }
+          return loaded.find((agent) => agent.acpAgent?.availability === 'ready')?.id ?? null;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAgents([]);
+          setAgentId(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (provider === 'acp' && !agentId) {
+      setCandidates([]);
+      setCandidatesLoading(agentsLoading);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setCandidatesLoading(true);
+    setCandidatesError(null);
+    fetchImportThreadCandidates(provider, agentId)
+      .then((loaded) => {
+        if (!cancelled) {
+          setCandidates(loaded);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setCandidates([]);
+          setCandidatesError(
+            caught instanceof Error ? caught.message : 'Unable to list local sessions.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCandidatesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, agentsLoading, provider]);
+
   const backendOptions = useMemo(() => {
     if (backends.length > 0) {
       return backends;
@@ -58,6 +146,9 @@ export function ThreadImportPage() {
       } as AgentBackendDto,
     ];
   }, [backends]);
+  const selectedCandidate = candidates.find(
+    (candidate) => candidate.sessionId === sessionId.trim(),
+  ) ?? null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,7 +202,10 @@ export function ThreadImportPage() {
           <select
             id="backend-provider"
             value={provider}
-            onChange={(event) => setProvider(event.target.value as AgentBackendIdDto)}
+            onChange={(event) => {
+              setProvider(event.target.value as AgentBackendIdDto);
+              setSessionId('');
+            }}
             disabled={busy || backendsLoading}
             className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
           >
@@ -122,6 +216,77 @@ export function ThreadImportPage() {
               </option>
             ))}
           </select>
+        </div>
+        {provider === 'acp' && (
+          <div>
+            <label htmlFor="acp-agent" className="host-form-label text-sm font-medium">
+              ACP agent
+            </label>
+            <select
+              id="acp-agent"
+              value={agentId ?? ''}
+              onChange={(event) => {
+                setAgentId(event.target.value || null);
+                setSessionId('');
+              }}
+              disabled={busy || agentsLoading || agents.length === 0}
+              className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+            >
+              <option value="">
+                {agentsLoading ? 'Loading agents...' : 'No ready ACP agent'}
+              </option>
+              {agents.map((agent) => (
+                <option
+                  key={agent.id}
+                  value={agent.id}
+                  disabled={agent.acpAgent?.availability !== 'ready'}
+                >
+                  {agent.displayName}
+                  {agent.acpAgent?.availability === 'ready'
+                    ? ''
+                    : ` (${agent.acpAgent?.availability ?? 'unavailable'})`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="available-session" className="host-form-label text-sm font-medium">
+            Available sessions
+          </label>
+          <select
+            id="available-session"
+            value={selectedCandidate?.sessionId ?? ''}
+            onChange={(event) => setSessionId(event.target.value)}
+            disabled={busy || candidatesLoading || candidates.length === 0}
+            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+          >
+            <option value="">
+              {candidatesLoading
+                ? 'Loading sessions...'
+                : candidates.length === 0
+                  ? 'No unmanaged sessions found'
+                  : 'Select a session'}
+            </option>
+            {candidates.map((candidate) => (
+              <option key={candidate.sessionId} value={candidate.sessionId}>
+                {candidate.title} · {candidate.sessionId}
+              </option>
+            ))}
+          </select>
+          {selectedCandidate && (
+            <div className="host-muted mt-2 space-y-1 text-xs">
+              <p className="break-all">{selectedCandidate.cwd}</p>
+              {selectedCandidate.preview && (
+                <p className="line-clamp-2">{selectedCandidate.preview}</p>
+              )}
+            </div>
+          )}
+          {candidatesError && (
+            <p className="host-muted mt-2 text-xs">
+              Session discovery unavailable. Manual import is still available.
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor="session-id" className="host-form-label text-sm font-medium">

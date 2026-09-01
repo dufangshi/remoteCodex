@@ -13,7 +13,12 @@ import {
 } from './dto';
 import { HttpError } from './app';
 import type { ThreadSessionCoordinator } from './thread-session-coordinator';
-import { normalizeAgentBackendId, type ImportThreadInput } from '../../../packages/shared/src/index';
+import {
+  normalizeAgentBackendId,
+  type AgentBackendIdDto,
+  type ImportThreadCandidateDto,
+  type ImportThreadInput,
+} from '../../../packages/shared/src/index';
 
 async function pathExists(absPath: string) {
   try {
@@ -56,8 +61,39 @@ export class ThreadImportCoordinator {
   constructor(
     private readonly db: DatabaseClient,
     private readonly sessionCoordinator: ThreadSessionCoordinator,
-    _workspaceRoot: string,
   ) {}
+
+  async listImportCandidates(
+    providerInput: string | null | undefined,
+    agentId?: string | null,
+  ): Promise<ImportThreadCandidateDto[]> {
+    const provider = normalizeAgentBackendId(providerInput ?? 'codex') ?? 'codex';
+    const sessions = await this.sessionCoordinator.listImportSessions(provider, agentId);
+    return sessions
+      .filter((session) =>
+        Boolean(session.providerSessionId.trim()) &&
+        path.isAbsolute(session.cwd) &&
+        !getThreadRecordByProviderSessionId(
+          this.db,
+          provider,
+          session.providerSessionId,
+        ))
+      .map((session) => ({
+        provider: provider as AgentBackendIdDto,
+        agentId: session.agentId ?? null,
+        sessionId: session.providerSessionId,
+        cwd: session.cwd,
+        title: session.title?.trim() || session.preview?.trim() || 'Untitled session',
+        preview: session.preview,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        historyStatus: 'unknown' as const,
+      }))
+      .sort((left, right) =>
+        (right.updatedAt ?? right.createdAt ?? '').localeCompare(
+          left.updatedAt ?? left.createdAt ?? '',
+        ));
+  }
 
   async importLocalThread(input: ImportThreadInput) {
     const normalizedSessionId = input.sessionId.trim();
@@ -102,6 +138,7 @@ export class ThreadImportCoordinator {
     const created = createThreadRecord(this.db, {
       workspaceId: workspace.id,
       provider: importSession.provider,
+      agentId: importSession.agentId ?? null,
       providerSessionId: importSession.sessionId,
       title: importSession.title,
       model: importSession.model,
@@ -124,7 +161,7 @@ export class ThreadImportCoordinator {
     provider?: string | null;
     listLoadedProviderSessionIds(provider: string | null | undefined): Promise<Set<string>>;
   }) {
-    if (input.source !== 'local_codex_import') {
+    if (input.source !== 'local_codex_import' && input.source !== 'local_provider_import') {
       return;
     }
 
@@ -145,7 +182,7 @@ export class ThreadImportCoordinator {
     listLoadedProviderSessionIds(provider: string | null | undefined): Promise<Set<string>>;
     resumeThread(input: { model?: string }): Promise<unknown>;
   }) {
-    if (input.source !== 'local_codex_import') {
+    if (input.source !== 'local_codex_import' && input.source !== 'local_provider_import') {
       return;
     }
 

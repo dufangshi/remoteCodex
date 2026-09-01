@@ -38,6 +38,7 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     delta: string;
     sequence: number;
     createdAt?: string | null | undefined;
+    checkpoint: boolean;
   }): void;
   clearPendingPlanDecisionRequests(localThreadId: string, emitEvents: boolean): void;
   clearPendingSteersForTurn(localThreadId: string, turnId: string): void;
@@ -59,7 +60,11 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     threadId: string,
     payload: ThreadEventPayloadMap[Type],
   ): void;
-  fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean;
+  fastModeForProvider(
+    provider: string | null | undefined,
+    fastMode: unknown,
+    scope?: { agentId?: string | null; providerSessionId?: string | null },
+  ): boolean;
   hasPendingAskUserQuestion(localThreadId: string): boolean;
   invalidateThreadDetailCache(localThreadId: string): void;
   listThreadGoalHistory(localThreadId: string): ThreadGoalDto[];
@@ -294,7 +299,10 @@ export class ThreadRuntimeEventProjector {
         }
         const pricingSnapshot = buildThreadTurnPricingSnapshot(
           record.model,
-          callbacks.fastModeForProvider(record.provider, record.fastMode),
+          callbacks.fastModeForProvider(record.provider, record.fastMode, {
+            agentId: record.agentId ?? null,
+            providerSessionId: record.providerSessionId ?? null,
+          }),
         );
         upsertThreadTurnMetadata(db, {
           threadId: record.id,
@@ -442,6 +450,7 @@ export class ThreadRuntimeEventProjector {
           delta: event.delta,
           sequence,
           createdAt,
+          checkpoint: event.provider === 'acp',
         });
         callbacks.invalidateThreadDetailCache(record.id);
         callbacks.emitThreadEvent('thread.output.delta', record.id, {
@@ -450,6 +459,39 @@ export class ThreadRuntimeEventProjector {
           sequence,
           delta: event.delta,
           createdAt,
+        });
+        return;
+      }
+      case 'harness.extension': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
+        if (!record || !event.providerTurnId || !event.providerItemId) {
+          return;
+        }
+        const turnId =
+          liveState.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
+        const item: ThreadHistoryItemDto = {
+          id: event.providerItemId,
+          kind: 'other',
+          text: `${event.extensionId}: ${event.event}`,
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          sequence: liveState.recordTurnItemOrder(
+            record.id,
+            turnId,
+            event.providerItemId,
+          ),
+          sourceTurnId: event.providerTurnId,
+        };
+        callbacks.persistLiveHistoryItem(record.id, turnId, item);
+        liveState.upsertLiveItem(record.id, turnId, item);
+        callbacks.invalidateThreadDetailCache(record.id);
+        callbacks.emitThreadEvent('thread.item.completed', record.id, {
+          turnId,
+          item,
         });
         return;
       }

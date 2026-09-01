@@ -82,7 +82,7 @@ interface ResolvedPromptTurnConfig {
   normalizedReasoning: ReasoningEffortDto | null;
   collaborationMode: CollaborationModeDto;
   sandboxMode: SandboxModeDto;
-  performanceMode: 'fast' | 'standard';
+  performanceMode: 'fast' | 'standard' | null;
   supportsRunningTurnInput: boolean;
 }
 
@@ -99,6 +99,7 @@ interface ForkThreadSessionResult {
 
 export interface LocalImportSessionResult {
   provider: AgentProviderId;
+  agentId?: string | null;
   source: ThreadSourceDto;
   sessionId: string;
   cwd: string;
@@ -160,26 +161,38 @@ export class ThreadSessionCoordinator {
       agentId: input.threadInput.agentId,
       workspacePath: input.workspacePath,
     }).catch(() => []);
+    const effectiveModel = input.threadInput.model === 'default'
+      ? modelRecords.find((model) => model.isDefault)?.model ?? input.threadInput.model
+      : input.threadInput.model;
     const reasoningEffort = this.providerRuntime.normalizeReasoningForModel(
       modelRecords,
-      input.threadInput.model,
+      effectiveModel,
       input.threadInput.reasoningEffort ?? null,
     );
     const sandboxMode = defaultSandboxModeForApprovalMode(input.threadInput.approvalMode);
-    const fastMode = this.providerRuntime.runtimeSupportsFastMode(provider)
+    const capabilityScope = {
+      agentId: input.threadInput.agentId ?? null,
+    };
+    const supportsFastMode = this.providerRuntime.runtimeSupportsFastMode(
+      provider,
+      capabilityScope,
+    );
+    const fastMode = supportsFastMode
       ? this.performanceModeSettings.readFastMode()
       : false;
-    if (this.providerRuntime.runtimeSupportsFastMode(provider)) {
-      ensureFastModeSupported(input.threadInput.model, fastMode, modelRecords);
+    if (supportsFastMode) {
+      ensureFastModeSupported(effectiveModel, fastMode, modelRecords);
     }
     const response = await runtime.startSession({
       cwd: input.workspacePath,
       ...(input.threadInput.agentId ? { agentId: input.threadInput.agentId } : {}),
-      model: input.threadInput.model,
+      model: effectiveModel,
       reasoningEffort,
       approvalMode: input.threadInput.approvalMode,
       sandboxMode,
-      performanceMode: performanceModeForFastMode(fastMode),
+      ...(supportsFastMode
+        ? { performanceMode: performanceModeForFastMode(fastMode) }
+        : {}),
     });
 
     return {
@@ -232,6 +245,16 @@ export class ThreadSessionCoordinator {
     });
   }
 
+  async listImportSessions(
+    provider: string | null | undefined,
+    agentId?: string | null,
+  ) {
+    const runtime = this.providerRuntime.runtimeForProvider(provider);
+    return runtime.listImportSessions
+      ? runtime.listImportSessions(agentId)
+      : runtime.listSessions();
+  }
+
   private async resolveRuntimeImportSession(
     provider: AgentBackendIdDto,
     sessionId: string,
@@ -245,13 +268,17 @@ export class ThreadSessionCoordinator {
       }
       return {
         provider,
-        source: 'supervisor',
+        agentId: session.agentId ?? null,
+        source: 'local_provider_import',
         sessionId,
         cwd: session.cwd,
         title: session.title?.trim() || session.preview?.trim() || 'Untitled imported session',
         model: null,
         summaryText: session.preview,
-        fastMode: this.providerRuntime.runtimeSupportsFastMode(provider)
+        fastMode: this.providerRuntime.runtimeSupportsFastMode(provider, {
+          agentId: session.agentId ?? null,
+          providerSessionId: sessionId,
+        })
           ? this.performanceModeSettings.readFastMode()
           : false,
       };
@@ -305,12 +332,24 @@ export class ThreadSessionCoordinator {
       input.resumeInput.sandboxMode ??
       normalizeSandboxMode(input.currentSandboxMode) ??
       defaultSandboxModeForApprovalMode(input.approvalMode);
-    const fastMode = this.providerRuntime.fastModeForProvider(input.provider, input.fastMode);
     const modelRecords = await this.listSessionModels({
       provider: input.provider,
       agentId: input.agentId,
       workspacePath: input.workspacePath,
     }).catch(() => []);
+    const capabilityScope = {
+      agentId: input.agentId ?? null,
+      providerSessionId: input.providerSessionId,
+    };
+    const supportsFastMode = this.providerRuntime.runtimeSupportsFastMode(
+      input.provider,
+      capabilityScope,
+    );
+    const fastMode = this.providerRuntime.fastModeForProvider(
+      input.provider,
+      input.fastMode,
+      capabilityScope,
+    );
     let response: StartAgentSessionResult;
     try {
       ensureFastModeSupported(
@@ -322,7 +361,9 @@ export class ThreadSessionCoordinator {
         providerSessionId: input.providerSessionId,
         model: input.resumeInput.model ?? input.currentModel ?? null,
         sandboxMode,
-        performanceMode: performanceModeForFastMode(fastMode),
+        ...(supportsFastMode
+          ? { performanceMode: performanceModeForFastMode(fastMode) }
+          : {}),
       });
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
@@ -353,10 +394,12 @@ export class ThreadSessionCoordinator {
 
   async compactThreadSession(input: {
     provider: string | null | undefined;
+    agentId?: string | null;
     providerSessionId: string;
   }): Promise<void> {
     const runtime = this.providerRuntime.runtimeForProvider(input.provider);
-    if (!runtime.compactSession) {
+    const capabilities = this.providerRuntime.capabilitiesFor(input);
+    if (!runtime.compactSession || !capabilities.turns.compact) {
       throw new HttpError(409, {
         code: 'conflict',
         message: 'This backend does not support context compaction.',
@@ -367,6 +410,7 @@ export class ThreadSessionCoordinator {
 
   async forkThreadSession(input: {
     provider: string | null | undefined;
+    agentId?: string | null;
     providerSessionId: string;
     mode: 'latest' | 'turn';
     turnId?: string;
@@ -385,10 +429,23 @@ export class ThreadSessionCoordinator {
     }
 
     const runtime = this.providerRuntime.runtimeForProvider(input.provider);
-    if (!runtime.forkSession) {
+    const capabilities = this.providerRuntime.capabilitiesFor(input);
+    if (!runtime.forkSession || !capabilities.branching.fork) {
       throw new HttpError(409, {
         code: 'conflict',
         message: 'This backend does not support session fork.',
+      });
+    }
+
+    const turnsToRollback =
+      selectedTurn == null
+        ? 0
+        : Math.max(0, input.turnOptions.length - selectedTurn.turnIndex);
+    const rollbackSession = runtime.rollbackSession?.bind(runtime);
+    if (turnsToRollback > 0 && !rollbackSession) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend supports latest-session fork only.',
       });
     }
 
@@ -396,18 +453,8 @@ export class ThreadSessionCoordinator {
       providerSessionId: input.providerSessionId,
       atTurnId: selectedTurn?.turnId ?? null,
     });
-    const turnsToRollback =
-      selectedTurn == null
-        ? 0
-        : Math.max(0, input.turnOptions.length - selectedTurn.turnIndex);
     if (turnsToRollback > 0) {
-      if (!runtime.rollbackSession) {
-        throw new HttpError(409, {
-          code: 'conflict',
-          message: 'This backend does not support rollback after fork.',
-        });
-      }
-      forkedSession = await runtime.rollbackSession({
+      forkedSession = await rollbackSession!({
         providerSessionId: forkedSession.providerSessionId,
         count: turnsToRollback,
       });
@@ -465,10 +512,18 @@ export class ThreadSessionCoordinator {
       workspacePath: input.workspacePath,
     });
     const fallbackModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
-    const supportsFastMode = this.providerRuntime.runtimeSupportsFastMode(input.provider);
+    const capabilityScope = {
+      agentId: input.agentId ?? null,
+      providerSessionId: null,
+    };
+    const supportsFastMode = this.providerRuntime.runtimeSupportsFastMode(
+      input.provider,
+      capabilityScope,
+    );
     const currentFastMode = this.providerRuntime.fastModeForProvider(
       input.provider,
       input.currentFastMode,
+      capabilityScope,
     );
     const nextFastMode =
       supportsFastMode && input.settings.fastMode !== undefined
@@ -551,9 +606,15 @@ export class ThreadSessionCoordinator {
         ? normalizeSandboxMode(input.promptInput.sandboxMode)
         : normalizeSandboxMode(input.currentSandboxMode)) ??
       defaultSandboxModeForApprovalMode(input.approvalMode);
+    const capabilities = this.providerRuntime.capabilitiesFor({
+      provider: input.provider,
+      agentId: input.agentId ?? null,
+    });
+    const supportsFastMode = capabilities.controls.performanceMode;
     const fastMode = this.providerRuntime.fastModeForProvider(
       input.provider,
       input.currentFastMode,
+      { agentId: input.agentId ?? null },
     );
     ensureFastModeSupported(effectiveModel, fastMode, modelRecords);
 
@@ -562,8 +623,10 @@ export class ThreadSessionCoordinator {
       normalizedReasoning,
       collaborationMode,
       sandboxMode,
-      performanceMode: performanceModeForFastMode(fastMode),
-      supportsRunningTurnInput: Boolean(runtime.sendInput && runtime.capabilities.turns.steer),
+      performanceMode: supportsFastMode
+        ? performanceModeForFastMode(fastMode)
+        : null,
+      supportsRunningTurnInput: Boolean(runtime.sendInput && capabilities.turns.steer),
     };
   }
 }

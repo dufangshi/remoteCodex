@@ -1,5 +1,6 @@
 import type {
   AgentModel,
+  AgentProviderCapabilities,
   AgentProviderId,
   AgentRuntime,
   AgentRuntimeRegistry,
@@ -111,17 +112,63 @@ export class ThreadProviderRuntimeCoordinator {
     return this.providerForRecord({ provider }) === 'codex';
   }
 
-  runtimeSupportsFastMode(provider: string | null | undefined): boolean {
-    return this.optionalRuntimeForProvider(provider)?.capabilities.controls.performanceMode ?? false;
+  capabilitiesFor(input: {
+    provider: string | null | undefined;
+    agentId?: string | null;
+    providerSessionId?: string | null;
+  }): AgentProviderCapabilities {
+    const runtime = this.runtimeForProvider(input.provider);
+    return runtime.getScopedCapabilities?.({
+      agentId: input.agentId ?? null,
+      providerSessionId: input.providerSessionId ?? null,
+    }) ?? runtime.capabilities;
   }
 
-  fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean {
-    return this.runtimeSupportsFastMode(provider) ? normalizeFastMode(fastMode) : false;
+  async resolveCapabilitiesFor(input: {
+    provider: string | null | undefined;
+    agentId?: string | null;
+    providerSessionId?: string | null;
+  }): Promise<AgentProviderCapabilities> {
+    const runtime = this.runtimeForProvider(input.provider);
+    if (input.agentId && runtime.getAgentCapabilitySnapshot) {
+      const snapshot = await runtime.getAgentCapabilitySnapshot(input.agentId);
+      if (snapshot.effectiveCapabilities) {
+        return snapshot.effectiveCapabilities;
+      }
+    }
+    return this.capabilitiesFor(input);
   }
 
-  performanceModeForRecord(record: { provider?: string | null; fastMode?: unknown }) {
+  runtimeSupportsFastMode(
+    provider: string | null | undefined,
+    scope: { agentId?: string | null; providerSessionId?: string | null } = {},
+  ): boolean {
+    const runtime = this.optionalRuntimeForProvider(provider);
+    if (!runtime) return false;
+    return (
+      runtime.getScopedCapabilities?.({
+        agentId: scope.agentId ?? null,
+        providerSessionId: scope.providerSessionId ?? null,
+      }) ?? runtime.capabilities
+    ).controls.performanceMode;
+  }
+
+  fastModeForProvider(
+    provider: string | null | undefined,
+    fastMode: unknown,
+    scope: { agentId?: string | null; providerSessionId?: string | null } = {},
+  ): boolean {
+    return this.runtimeSupportsFastMode(provider, scope) ? normalizeFastMode(fastMode) : false;
+  }
+
+  performanceModeForRecord(record: {
+    provider?: string | null;
+    agentId?: string | null;
+    providerSessionId?: string | null;
+    fastMode?: unknown;
+  }) {
     return performanceModeForFastMode(
-      this.fastModeForProvider(record.provider, record.fastMode),
+      this.fastModeForProvider(record.provider, record.fastMode, record),
     );
   }
 

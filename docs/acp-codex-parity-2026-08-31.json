@@ -1,0 +1,36 @@
+{
+  "capturedAt": "2026-08-31",
+  "sourceCommit": "ea4764b3c08343f9720b773830dc45b9b9b980fd plus current worktree changes",
+  "runtimeVersions": {
+    "codex": "codex-cli 0.150.1",
+    "codexAcp": "@agentclientprotocol/codex-acp 1.6.2",
+    "acpProtocol": 1
+  },
+  "implementedThroughSingleAcpOwner": {
+    "sessions": ["list", "load", "resume", "close", "delete"],
+    "promptContent": ["text", "image", "audio", "resource", "resource_link"],
+    "turns": ["start", "interrupt", "steer", "compact"],
+    "controls": ["permission", "model", "reasoning", "mode", "fast", "goal-set", "goal-pause", "goal-resume", "goal-clear"],
+    "journal": ["hydrate", "live", "partial-checkpoint", "usage", "extension-event"]
+  },
+  "approvedNativeFallbacks": {
+    "branching.fork": "codex-acp 1.6.2 advertises no fork method or extension; keep native Codex as the owner for workflows requiring fork.",
+    "branching.hardRollback": "codex-acp 1.6.2 advertises no rollback or file-rewind contract; keep native Codex to avoid ambiguous transcript and filesystem semantics.",
+    "management.mcpStatus": "ACP mcpCapabilities describe server transport accepted at session creation, not host MCP status or management APIs.",
+    "management.skills": "codex-acp 1.6.2 exposes no skills management method.",
+    "management.hooks": "codex-acp 1.6.2 exposes no hooks management or hook event method.",
+    "management.hookTrust": "codex-acp 1.6.2 exposes no hook trust method.",
+    "management.hostConfigFiles": "codex-acp 1.6.2 exposes no host config archive or edit method.",
+    "structuredQuestionsAndMcpElicitation": "Standard ACP permission is mapped; Codex-native structured question and MCP elicitation requests remain native until a negotiated ACP request contract exists.",
+    "fastServiceTierMetadata": "Fast mode is acknowledged through session config and subsequent usage is observed, but ACP does not expose provider billing tier metadata."
+  },
+  "deferredToLaterPhase": {
+    "sessions.importLocal": "Phase 5 will build capability-based adopt/import from session list, load, cwd, stable ID, and usable history."
+  },
+  "unapprovedRegressions": [],
+  "security": {
+    "containsCredentials": false,
+    "containsSessionIds": false,
+    "containsMessageContent": false
+  }
+}

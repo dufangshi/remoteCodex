@@ -1689,6 +1689,11 @@ final class RemoteCodexUITests: XCTestCase {
     @MainActor
     func testLiveLocalAcpThreadShowsAgentAndSubmitsPrompt() async throws {
         let baseURL = try await Self.liveLocalBaseURL()
+        let acp = Self.liveAcpConfiguration()
+        let agentId = acp.agentId
+        let model = acp.model
+        let agentLabel = acp.agentLabel
+        let marker = acp.marker
         let workspacePath = try Self.makeLiveWorkspaceDirectory()
         let workspace = try await Self.createLiveWorkspace(
             baseURL: baseURL,
@@ -1698,10 +1703,10 @@ final class RemoteCodexUITests: XCTestCase {
         let thread = try await Self.createLiveThread(
             baseURL: baseURL,
             workspaceId: workspace.id,
-            title: "iOS ACP Grok Thread",
+            title: "iOS ACP \(agentId) Thread",
             provider: "acp",
-            agentId: "grok",
-            model: "grok-4.6"
+            agentId: agentId,
+            model: model
         )
 
         let app = XCUIApplication()
@@ -1715,10 +1720,12 @@ final class RemoteCodexUITests: XCTestCase {
         app.launch()
 
         assertThreadWebViewReady(app, title: thread.title, timeout: 25)
-        XCTAssertTrue(scrollUntilElement(containing: "Grok Build", in: app, timeout: 20))
-        XCTAssertTrue(scrollUntilElement(containing: "grok-4.6", in: app, timeout: 20))
+        XCTAssertTrue(scrollUntilElement(containing: agentLabel, in: app, timeout: 20))
+        if model != "default" {
+            XCTAssertTrue(scrollUntilElement(containing: model, in: app, timeout: 20))
+        }
 
-        let prompt = "Reply with IOS_ACP_PARITY_OK only."
+        let prompt = "Reply with \(marker) only."
         XCTAssertTrue(typeIntoWebPrompt(prompt, in: app))
         let sendButton = webElement("Send Prompt", in: app).firstMatch
         if sendButton.waitForExistence(timeout: 3) {
@@ -1729,9 +1736,22 @@ final class RemoteCodexUITests: XCTestCase {
         try await Self.waitForLiveThreadText(
             baseURL: baseURL,
             threadId: thread.id,
-            text: "IOS_ACP_PARITY_OK"
+            text: marker
         )
-        XCTAssertTrue(scrollUntilElement(containing: "IOS_ACP_PARITY_OK", in: app, timeout: 40))
+        XCTAssertTrue(scrollUntilElement(containing: marker, in: app, timeout: 40))
+
+        app.terminate()
+        let relaunched = XCUIApplication()
+        relaunched.launchArguments = [
+            "--reset-settings",
+            "--ui-test-live-local-connection",
+            "--use-ios-thread-webview",
+        ]
+        relaunched.launchEnvironment["REMOTE_CODEX_IOS_E2E_BASE_URL"] = baseURL.absoluteString
+        relaunched.launchEnvironment["REMOTE_CODEX_IOS_E2E_THREAD_ID"] = thread.id
+        relaunched.launch()
+        assertThreadWebViewReady(relaunched, title: thread.title, timeout: 25)
+        XCTAssertTrue(scrollUntilElement(containing: marker, in: relaunched, timeout: 30))
     }
 
     @MainActor
@@ -2577,6 +2597,41 @@ extension RemoteCodexUITests {
 
     struct LiveRelayPortal: Decodable {
         let devices: [LiveRelayDevice]
+    }
+
+    struct LiveAcpConfiguration: Decodable {
+        let agentId: String
+        let model: String
+        let agentLabel: String
+        let marker: String
+    }
+
+    static func liveAcpConfiguration() -> LiveAcpConfiguration {
+        let environment = ProcessInfo.processInfo.environment
+        if let agentId = environment["REMOTE_CODEX_IOS_E2E_ACP_AGENT"]?.trimmedNonEmpty {
+            return LiveAcpConfiguration(
+                agentId: agentId,
+                model: environment["REMOTE_CODEX_IOS_E2E_ACP_MODEL"]?.trimmedNonEmpty ?? "default",
+                agentLabel: environment["REMOTE_CODEX_IOS_E2E_ACP_AGENT_LABEL"]?.trimmedNonEmpty ?? agentId,
+                marker: environment["REMOTE_CODEX_IOS_E2E_ACP_MARKER"]?.trimmedNonEmpty ?? "IOS_ACP_PARITY_OK"
+            )
+        }
+        let file = repoRoot()
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("ios-e2e", isDirectory: true)
+            .appendingPathComponent("acp-agent.json")
+        if
+            let data = try? Data(contentsOf: file),
+            let decoded = try? JSONDecoder().decode(LiveAcpConfiguration.self, from: data)
+        {
+            return decoded
+        }
+        return LiveAcpConfiguration(
+            agentId: "grok",
+            model: "grok-4.6",
+            agentLabel: "Grok Build",
+            marker: "IOS_ACP_PARITY_OK"
+        )
     }
 
     static func liveLocalBaseURL() async throws -> URL {

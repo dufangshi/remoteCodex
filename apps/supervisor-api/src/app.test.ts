@@ -6540,6 +6540,20 @@ describe('supervisor api', () => {
       rawSession: null,
     });
 
+    const candidatesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/threads/import-candidates?provider=claude',
+    });
+    expect(candidatesResponse.statusCode).toBe(200);
+    expect(candidatesResponse.json()).toMatchObject([{
+      provider: 'claude',
+      agentId: null,
+      sessionId: 'claude-session-import-1',
+      cwd: importedWorkspace,
+      title: 'Imported Claude session',
+      historyStatus: 'unknown',
+    }]);
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/threads/import',
@@ -6554,7 +6568,7 @@ describe('supervisor api', () => {
       thread: {
         provider: 'claude',
         providerSessionId: 'claude-session-import-1',
-        source: 'supervisor',
+        source: 'local_provider_import',
         title: 'Imported Claude session',
         isLoaded: false,
       },
@@ -6579,6 +6593,13 @@ describe('supervisor api', () => {
         },
       ],
     });
+
+    const candidatesAfterImport = await app.inject({
+      method: 'GET',
+      url: '/api/threads/import-candidates?provider=claude',
+    });
+    expect(candidatesAfterImport.statusCode).toBe(200);
+    expect(candidatesAfterImport.json()).toEqual([]);
   });
 
   it('imports a Claude runtime session whose workspace is outside WORKSPACE_ROOT', async () => {
@@ -6617,7 +6638,7 @@ describe('supervisor api', () => {
         thread: {
           provider: 'claude',
           providerSessionId: 'claude-session-external-import-1',
-          source: 'supervisor',
+          source: 'local_provider_import',
         },
         workspace: {
           absPath: expectedWorkspacePath,

@@ -23,6 +23,8 @@ export interface AcpMappedSessionUpdate {
   usage: { used: number; size: number; cost?: acp.Cost | null } | null;
 }
 
+export type AcpMappingMode = 'hydrate' | 'live';
+
 interface StoredToolCall extends acp.ToolCall {
   title: string;
 }
@@ -227,10 +229,22 @@ export class AcpTurnItemMapper {
   constructor(
     readonly turnId: string,
     initialItems: AgentHistoryItem[] = [],
+    readonly mode: AcpMappingMode = 'live',
   ) {
     for (const item of initialItems) {
       this.upsert(item);
     }
+  }
+
+  appendUserMessage(content: acp.ContentBlock, itemId: string) {
+    const current = this.items.get(itemId);
+    const item: AgentHistoryItem = {
+      ...(current ?? { id: itemId, kind: 'userMessage' as const }),
+      text: `${current?.text ?? ''}${acpContentBlockText(content)}`,
+      status: modeStatus(this.mode),
+    };
+    this.upsert(item);
+    return item;
   }
 
   turn(status: AgentTurn['status'] = 'inProgress', error: string | null = null): AgentTurn {
@@ -257,7 +271,8 @@ export class AcpTurnItemMapper {
       case 'agent_message_chunk': {
         result.itemUpdates.push(...this.finishThought());
         const delta = acpContentBlockText(update.content);
-        const itemId = this.currentAgentMessageId ?? `${this.turnId}:agent:${++this.agentMessageIndex}`;
+        const itemId = this.currentAgentMessageId ?? messageId(update) ??
+          `${this.turnId}:agent:${++this.agentMessageIndex}`;
         this.currentAgentMessageId = itemId;
         const current = this.items.get(itemId);
         const item: AgentHistoryItem = {
@@ -272,7 +287,8 @@ export class AcpTurnItemMapper {
       case 'agent_thought_chunk': {
         result.itemUpdates.push(...this.finishAgentMessage());
         const delta = acpContentBlockText(update.content);
-        const itemId = this.currentThoughtId ?? `${this.turnId}:thought:${++this.thoughtIndex}`;
+        const itemId = this.currentThoughtId ?? messageId(update) ??
+          `${this.turnId}:thought:${++this.thoughtIndex}`;
         this.currentThoughtId = itemId;
         const current = this.items.get(itemId);
         const item: AgentHistoryItem = {
@@ -470,4 +486,14 @@ export class AcpTurnItemMapper {
   private finishOpenText() {
     return [...this.finishAgentMessage(), ...this.finishThought()];
   }
+}
+
+function messageId(update: { messageId?: unknown }) {
+  return typeof update.messageId === 'string' && update.messageId.trim()
+    ? update.messageId.trim()
+    : null;
+}
+
+function modeStatus(mode: AcpMappingMode) {
+  return mode === 'hydrate' ? 'completed' : 'running';
 }

@@ -2,6 +2,7 @@ import type {
   ApplyProviderHostConfigArchiveResultDto,
   AgentBackendDto,
   AgentBackendIdDto,
+  AgentCapabilitySnapshotDto,
   AgentSubscriptionUsageDto,
   ApiErrorShape,
   AuthLoginResultDto,
@@ -39,6 +40,7 @@ import type {
   RelayEffectiveAccessDto,
   CreateWorkspaceInput,
   HealthDto,
+  ImportThreadCandidateDto,
   ImportThreadInput,
   ImportPluginInput,
   InterruptTurnInput,
@@ -1125,6 +1127,16 @@ export function fetchAgentBackendAgents(provider: AgentBackendIdDto) {
   );
 }
 
+export function fetchAgentCapabilitySnapshot(
+  provider: AgentBackendIdDto,
+  agentId: string,
+) {
+  return request<AgentCapabilitySnapshotDto>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/capabilities?agentId=${encodeURIComponent(agentId)}`,
+    { cache: 'no-store' },
+  );
+}
+
 export function fetchProviderHostFile(
   provider: AgentBackendIdDto,
   name: string,
@@ -1455,6 +1467,19 @@ export function importThread(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export function fetchImportThreadCandidates(
+  provider: AgentBackendIdDto,
+  agentId?: string | null,
+) {
+  const query = new URLSearchParams({ provider });
+  if (agentId) {
+    query.set('agentId', agentId);
+  }
+  return request<ImportThreadCandidateDto[]>(
+    `/api/threads/import-candidates?${query.toString()}`,
+  );
 }
 
 export function createThreadShell(
