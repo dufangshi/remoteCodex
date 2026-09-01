@@ -9,6 +9,7 @@ import {
   enableRelayMode,
   fetchRelaySession,
   relayLogin,
+  relayLogout,
   relayRegister,
 } from '../lib/api';
 import { RelayUserMenu } from '../components/RelayUserMenu';
@@ -36,12 +37,13 @@ export function RelayPortalPage() {
     try {
       enableRelayMode();
       const nextSession = await fetchRelaySession();
+      if (nextSession.authenticated && nextSession.user?.role === 'admin') {
+        const signedOutSession = await relayLogout();
+        setSession(signedOutSession);
+        return;
+      }
       setSession(nextSession);
       if (nextSession.authenticated) {
-        if (nextSession.user?.role === 'admin') {
-          navigate('/relay-admin', { replace: true });
-          return;
-        }
         navigate('/relay-devices', { replace: true });
         return;
       }
@@ -60,8 +62,9 @@ export function RelayPortalPage() {
     enableRelayMode();
     const nextSession = await fetchRelaySession();
     if (nextSession.user?.role === 'admin') {
-      navigate('/relay-admin', { replace: true });
-      return;
+      const signedOutSession = await relayLogout();
+      setSession(signedOutSession);
+      throw new Error('This portal accepts relay user accounts only.');
     }
     navigate('/relay-devices', { replace: true });
   }

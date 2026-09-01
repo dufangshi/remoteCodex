@@ -539,7 +539,10 @@ function withAuthInit(
 
   return {
     ...init,
-    credentials: init.credentials ?? 'same-origin',
+    credentials:
+      authMode === 'relay-admin'
+        ? 'omit'
+        : (init.credentials ?? 'same-origin'),
     headers,
   };
 }
@@ -637,6 +640,7 @@ export async function relayAdminLogin(input: {
     '/relay/auth/login',
     {
       method: 'POST',
+      credentials: 'omit',
       body: JSON.stringify({
         identifier: input.username,
         password: input.password,

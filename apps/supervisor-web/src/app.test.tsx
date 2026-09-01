@@ -238,6 +238,60 @@ describe('App', () => {
     ).toBe(true);
   });
 
+  it('keeps a legacy admin user token from hijacking the devices route', async () => {
+    window.history.pushState({}, '', '/relay-devices');
+    window.localStorage.setItem('remote-codex-relay-mode', 'true');
+    window.localStorage.setItem('remote-codex-relay-token', 'legacy-admin-token');
+    window.localStorage.setItem('remote-codex-relay-admin-token', 'admin-token');
+    let signedOut = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/relay/auth/session') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              authenticated: !signedOut,
+              user: signedOut
+                ? null
+                : {
+                    id: 'admin-user',
+                    username: 'admin',
+                    email: 'admin@example.test',
+                    role: 'admin',
+                    enabled: true,
+                    createdAt: '2026-07-04T00:00:00.000Z',
+                  },
+              registrationEnabled: true,
+            }),
+          } satisfies Partial<Response>);
+        }
+        if (url === '/relay/auth/logout' && init?.method === 'POST') {
+          signedOut = true;
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              authenticated: false,
+              user: null,
+              registrationEnabled: true,
+            }),
+          } satisfies Partial<Response>);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/relay-portal');
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBeNull();
+    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBe(
+      'admin-token',
+    );
+  });
+
   it('renders the relay guide outside supervisor auth', async () => {
     window.history.pushState({}, '', '/relay-guide');
     vi.stubGlobal('fetch', vi.fn());

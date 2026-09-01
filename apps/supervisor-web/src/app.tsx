@@ -482,7 +482,7 @@ function RelayGate({ children }: { children: React.ReactNode }) {
           return;
         }
         setState(
-          session.authenticated
+          session.authenticated && session.user?.role !== 'admin'
             ? { status: 'authenticated', session }
             : { status: 'loginRequired' },
         );
@@ -506,11 +506,7 @@ function RelayGate({ children }: { children: React.ReactNode }) {
   }
 
   if (state.status === 'loginRequired') {
-    return <Navigate to="/" replace />;
-  }
-
-  if (state.session.user?.role === 'admin') {
-    return <Navigate to="/relay-admin" replace />;
+    return <Navigate to="/relay-portal" replace />;
   }
 
   return children;

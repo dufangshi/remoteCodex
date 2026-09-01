@@ -98,7 +98,7 @@ describe('api request helper', () => {
     expect(call?.[0]).toBe('/relay/admin');
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer admin-token');
-    expect(call?.[1]?.credentials).toBe('same-origin');
+    expect(call?.[1]?.credentials).toBe('omit');
   });
 
   it('stores admin login separately from the normal relay token', async () => {
@@ -138,7 +138,7 @@ describe('api request helper', () => {
     }));
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.has('Authorization')).toBe(false);
-    expect(call?.[1]?.credentials).toBe('same-origin');
+    expect(call?.[1]?.credentials).toBe('omit');
   });
 
   it('sends same-origin cookies for relay OAuth sessions while keeping bearer login support', async () => {

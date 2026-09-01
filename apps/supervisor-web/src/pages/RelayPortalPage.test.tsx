@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { RelayUserDto } from '@remote-codex/shared';
 import { RelayPortalPage } from './RelayPortalPage';
 
 const relayUser = {
@@ -59,10 +60,10 @@ describe('RelayPortalPage', () => {
     expect(fetch).not.toHaveBeenCalledWith('/relay/portal', expect.anything());
   });
 
-  it('redirects an authenticated admin to the relay admin panel', async () => {
+  it('clears a legacy admin user session instead of exposing the admin route', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === '/relay/auth/session') {
           return Promise.resolve({
@@ -70,6 +71,16 @@ describe('RelayPortalPage', () => {
             json: async () => ({
               authenticated: true,
               user: { ...relayUser, role: 'admin' },
+              registrationEnabled: true,
+            }),
+          } satisfies Partial<Response>);
+        }
+        if (url === '/relay/auth/logout' && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              authenticated: false,
+              user: null,
               registrationEnabled: true,
             }),
           } satisfies Partial<Response>);
@@ -89,14 +100,86 @@ describe('RelayPortalPage', () => {
       <MemoryRouter initialEntries={['/relay-portal']}>
         <Routes>
           <Route path="/relay-portal" element={<RelayPortalPage />} />
-          <Route path="/relay-admin" element={<div>Relay admin</div>} />
         </Routes>
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('Relay admin')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.queryByText('Relay admin')).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      '/relay/auth/logout',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('rejects admin credentials at the normal portal without navigating to admin', async () => {
+    let sessionUser: RelayUserDto | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/relay/auth/session') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              authenticated: sessionUser !== null,
+              user: sessionUser,
+              registrationEnabled: true,
+            }),
+          } satisfies Partial<Response>);
+        }
+        if (url === '/relay/auth/login' && init?.method === 'POST') {
+          sessionUser = { ...relayUser, username: 'admin', role: 'admin' };
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              token: 'admin-token-in-user-slot',
+              session: {
+                authenticated: true,
+                user: sessionUser,
+                registrationEnabled: true,
+              },
+            }),
+          } satisfies Partial<Response>);
+        }
+        if (url === '/relay/auth/logout' && init?.method === 'POST') {
+          sessionUser = null;
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              authenticated: false,
+              user: null,
+              registrationEnabled: true,
+            }),
+          } satisfies Partial<Response>);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/relay-portal']}>
+        <Routes>
+          <Route path="/relay-portal" element={<RelayPortalPage />} />
+          <Route path="/relay-devices" element={<div>Relay devices</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Email or username'), {
+      target: { value: 'admin' },
     });
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'secret-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(
+      await screen.findByText('This portal accepts relay user accounts only.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Relay devices')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('remote-codex-relay-token')).toBeNull();
+    expect(window.localStorage.getItem('remote-codex-relay-admin-token')).toBeNull();
   });
 
   it('signs in from the portal and opens relay devices', async () => {
