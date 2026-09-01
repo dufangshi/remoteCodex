@@ -471,7 +471,7 @@ describe('AcpRuntimeAdapter', () => {
       env: {
         REMOTE_CODEX_FAKE_ACP_AGENT_KIND: 'codex',
         REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',
-        REMOTE_CODEX_FAKE_ACP_STREAM_DELAY_MS: '100',
+        REMOTE_CODEX_FAKE_ACP_STREAM_DELAY_MS: '1000',
       },
       startupTimeoutMs: 5_000,
     });
@@ -500,10 +500,23 @@ describe('AcpRuntimeAdapter', () => {
         });
       },
     );
+    const partialStarted = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Steerable fixture partial timed out.')), 10_000);
+      const onEvent = (event: AgentRuntimeEvent) => {
+        if (event.type !== 'output.delta' || !event.delta.includes('FAKE_ACP_PARTIAL')) {
+          return;
+        }
+        clearTimeout(timer);
+        adapter.off('event', onEvent);
+        resolve();
+      };
+      adapter.on('event', onEvent);
+    });
     const running = await adapter.startTurn({
       providerSessionId: session.providerSessionId,
       prompt: 'Start a steerable fixture turn.',
     });
+    await partialStarted;
     await expect(adapter.sendInput({
       providerSessionId: session.providerSessionId,
       providerTurnId: running.providerTurnId,

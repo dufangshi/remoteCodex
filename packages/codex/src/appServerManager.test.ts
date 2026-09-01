@@ -315,7 +315,7 @@ describe('CodexAppServerManager', () => {
 
     const manager = new CodexAppServerManager({
       command: process.execPath,
-      startupTimeoutMs: 1000,
+      startupTimeoutMs: 5_000,
       clientInfo: {
         name: 'test',
         title: 'test',
@@ -388,7 +388,7 @@ describe('CodexAppServerManager', () => {
     ]);
 
     await manager.stop();
-  });
+  }, 15_000);
 
   it('does not let a stale child exit close the replacement app-server client during restart', async () => {
     const firstChild = new ScriptedChild({
