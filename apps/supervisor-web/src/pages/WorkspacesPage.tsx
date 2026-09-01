@@ -1,5 +1,6 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { KeyboardEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Pencil, Pin, Trash2 } from 'lucide-react';
 
 import type { RuntimeConfigDto, WorkspaceDto } from '@remote-codex/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -14,61 +15,21 @@ import {
   updateWorkspace,
   updateWorkspaceFavorite,
 } from '../lib/api';
-import {
-  currentRelayScopedPath,
-  currentThreadsHref,
-} from '../lib/relayRoutes';
+import { currentRelayScopedPath, currentThreadsHref } from '../lib/relayRoutes';
 
-function workspaceSortTimestamp(workspace: WorkspaceDto) {
-  return Date.parse(workspace.lastOpenedAt ?? workspace.createdAt);
-}
-
-function compareWorkspaces(left: WorkspaceDto, right: WorkspaceDto) {
+function sortWorkspaces(left: WorkspaceDto, right: WorkspaceDto) {
   if (left.isFavorite !== right.isFavorite) {
     return left.isFavorite ? -1 : 1;
   }
-
-  return workspaceSortTimestamp(right) - workspaceSortTimestamp(left);
+  return Date.parse(right.lastOpenedAt ?? right.createdAt) - Date.parse(left.lastOpenedAt ?? left.createdAt);
 }
 
-function formatRecentLabel(timestamp: string | null) {
-  if (!timestamp) {
-    return 'Never opened';
-  }
-
-  return new Date(timestamp).toLocaleString();
+function truncatePath(absPath: string, maxLength = 28) {
+  return absPath.length <= maxLength ? absPath : `...${absPath.slice(-(maxLength - 3))}`;
 }
 
-function truncatePathFromFront(absPath: string, maxLength = 28) {
-  if (absPath.length <= maxLength) {
-    return absPath;
-  }
-
-  return `...${absPath.slice(-(maxLength - 3))}`;
-}
-
-function PinIcon({ active }: { active: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className={`h-3.5 w-3.5 fill-current ${active ? 'rotate-[18deg]' : 'rotate-[8deg]'}`}
-    >
-      <path d="M10.7 1.75c.34 0 .62.28.62.63v1.24l1.43 1.42c.24.24.24.62 0 .86l-1.1 1.1v2.02c0 .17-.07.33-.19.45l-1.5 1.5v2.28c0 .28-.18.53-.44.6a.62.62 0 0 1-.69-.24L7.2 12.4l-2.83 2.83a.625.625 0 1 1-.88-.88l2.83-2.83-2.2-1.62a.62.62 0 0 1-.24-.69c.08-.26.32-.44.6-.44h2.28l1.5-1.5a.64.64 0 0 1 .45-.18h2.02l1.1-1.11-1.42-1.42H9.07a.63.63 0 0 1-.62-.63c0-.34.28-.62.62-.62h1.63Z" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-current"
-    >
-      <path d="M6.1 1.75h3.8c.75 0 1.4.52 1.57 1.25h2.03c.35 0 .63.28.63.63 0 .34-.28.62-.63.62h-.66l-.62 8.03c-.08 1.09-.99 1.97-2.08 1.97H5.86c-1.09 0-2-.88-2.08-1.97l-.62-8.03H2.5a.62.62 0 1 1 0-1.25h2.03c.17-.73.82-1.25 1.57-1.25Zm0 1.25c-.07 0-.14.03-.19.08A.26.26 0 0 0 5.84 3h4.32a.26.26 0 0 0-.07-.17.26.26 0 0 0-.19-.08H6.1Zm-1.07 1.25.61 7.93c.03.44.4.79.84.79h3.04c.44 0 .81-.35.84-.79l.61-7.93H5.03Zm1.53 1.32c.35 0 .62.28.62.62v4.19a.62.62 0 1 1-1.24 0V6.19c0-.34.28-.62.62-.62Zm2.82 0c.34 0 .62.28.62.62v4.19a.62.62 0 1 1-1.24 0V6.19c0-.34.28-.62.62-.62Z" />
-    </svg>
-  );
+function errorText(caught: unknown, fallback: string) {
+  return caught instanceof Error ? caught.message : fallback;
 }
 
 export function WorkspacesPage() {
@@ -94,13 +55,14 @@ export function WorkspacesPage() {
       result.reason instanceof ApiError &&
       result.reason.payload.details?.reason === 'hosted_sandbox_starting';
 
-    const loadUntilConnected = async () => {
+    const load = async () => {
       const [workspaceResult, runtimeResult] = await Promise.allSettled([
         fetchWorkspaces(),
-        fetchRuntimeConfig()
+        fetchRuntimeConfig(),
       ]);
-      if (cancelled) return;
-
+      if (cancelled) {
+        return;
+      }
       if (
         (workspaceResult.status === 'rejected' && isVmStarting(workspaceResult)) ||
         (runtimeResult.status === 'rejected' && isVmStarting(runtimeResult))
@@ -110,138 +72,97 @@ export function WorkspacesPage() {
         setError(null);
         setRuntimeError(null);
         setWakeAttempt((current) => current + 1);
-        retryTimer = setTimeout(() => void loadUntilConnected(), 1_500);
+        retryTimer = setTimeout(() => void load(), 1_500);
         return;
       }
-
       setVmStarting(false);
       setLoading(false);
       if (workspaceResult.status === 'fulfilled') {
         setWorkspaces(workspaceResult.value);
         setError(null);
       } else {
-        setError(
-          workspaceResult.reason instanceof Error
-            ? workspaceResult.reason.message
-            : 'Unable to load workspaces.'
-        );
+        setError(errorText(workspaceResult.reason, 'Unable to load workspaces.'));
       }
       if (runtimeResult.status === 'fulfilled') {
         setRuntimeConfig(runtimeResult.value);
         setRuntimeError(null);
       } else {
-        setRuntimeError(
-          runtimeResult.reason instanceof Error
-            ? runtimeResult.reason.message
-            : 'Unable to load supervisor config.'
-        );
+        setRuntimeError(errorText(runtimeResult.reason, 'Unable to load supervisor config.'));
       }
     };
 
-    void loadUntilConnected();
+    void load();
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
     };
   }, []);
 
+  const sortedWorkspaces = useMemo(() => [...workspaces].sort(sortWorkspaces), [workspaces]);
+
   async function handleFavorite(workspace: WorkspaceDto) {
-    const optimisticWorkspace = {
-      ...workspace,
-      isFavorite: !workspace.isFavorite,
-    };
-
+    const nextFavorite = !workspace.isFavorite;
     setWorkspaces((current) =>
-      current.map((item) =>
-        item.id === workspace.id ? optimisticWorkspace : item,
-      ),
+      current.map((item) => (item.id === workspace.id ? { ...item, isFavorite: nextFavorite } : item)),
     );
-
     try {
-      const updated = await updateWorkspaceFavorite(workspace.id, {
-        isFavorite: !workspace.isFavorite
-      });
-      setWorkspaces((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item))
-      );
+      const updated = await updateWorkspaceFavorite(workspace.id, { isFavorite: nextFavorite });
+      setWorkspaces((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (caught) {
-      setWorkspaces((current) =>
-        current.map((item) => (item.id === workspace.id ? workspace : item)),
-      );
-      setError(caught instanceof Error ? caught.message : 'Unable to update workspace.');
+      setWorkspaces((current) => current.map((item) => (item.id === workspace.id ? workspace : item)));
+      setError(errorText(caught, 'Unable to update workspace.'));
     }
   }
 
   async function handleRenameWorkspace(workspaceId: string) {
-    const normalizedLabel = draftLabel.trim();
-    if (!normalizedLabel) {
+    const label = draftLabel.trim();
+    if (!label) {
       return;
     }
-
     setSavingWorkspaceId(workspaceId);
     try {
-      const updated = await updateWorkspace(workspaceId, {
-        label: normalizedLabel
-      });
-      setWorkspaces((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item))
-      );
+      const updated = await updateWorkspace(workspaceId, { label });
+      setWorkspaces((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setEditingWorkspaceId(null);
       setDraftLabel('');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to rename workspace.');
+      setError(errorText(caught, 'Unable to rename workspace.'));
     } finally {
       setSavingWorkspaceId(null);
     }
-  }
-
-  function beginRenameWorkspace(workspace: WorkspaceDto) {
-    setEditingWorkspaceId(workspace.id);
-    setDraftLabel(workspace.label);
-  }
-
-  function cancelRenameWorkspace() {
-    setEditingWorkspaceId(null);
-    setDraftLabel('');
-  }
-
-  function openWorkspaceThreads(workspaceId: string) {
-    navigate(currentThreadsHref(workspaceId));
   }
 
   async function handleDeleteWorkspace() {
     if (!deletingWorkspace) {
       return;
     }
-
     setDeletingWorkspaceBusy(true);
     try {
       await deleteWorkspace(deletingWorkspace.id, {
         confirmWorkspaceId: deletingWorkspace.id,
         confirmLabel: deletingWorkspace.label,
       });
-      setWorkspaces((current) =>
-        current.filter((workspace) => workspace.id !== deletingWorkspace.id),
-      );
+      setWorkspaces((current) => current.filter((item) => item.id !== deletingWorkspace.id));
       setDeletingWorkspace(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to delete workspace.');
+      setError(errorText(caught, 'Unable to delete workspace.'));
     } finally {
       setDeletingWorkspaceBusy(false);
     }
   }
 
+  function openWorkspace(workspaceId: string) {
+    navigate(currentThreadsHref(workspaceId));
+  }
+
   function handleWorkspaceKeyDown(event: KeyboardEvent<HTMLElement>, workspaceId: string) {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      openWorkspaceThreads(workspaceId);
+      openWorkspace(workspaceId);
     }
   }
-
-  const sortedWorkspaces = useMemo(
-    () => [...workspaces].sort(compareWorkspaces),
-    [workspaces],
-  );
 
   return (
     <div className="space-y-4">
@@ -261,9 +182,7 @@ export function WorkspacesPage() {
             Create
           </Link>
           <div className="min-w-0 flex-1 text-right">
-            <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">
-              Workspaces
-            </p>
+            <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">Workspaces</p>
           </div>
         </div>
       </div>
@@ -285,131 +204,115 @@ export function WorkspacesPage() {
               <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
                 <div className="h-full w-1/3 animate-pulse bg-[var(--theme-accent-solid)]" />
               </div>
-              <p className="px-5 py-3 text-xs text-[var(--theme-fg-muted)]">
-                Connection check {wakeAttempt}
-              </p>
+              <p className="px-5 py-3 text-xs text-[var(--theme-fg-muted)]">Connection check {wakeAttempt}</p>
             </div>
           ) : loading ? (
-            <div className="host-empty-state rounded-lg border px-6 py-12 text-center">
-              Loading workspace registry...
-            </div>
+            <div className="host-empty-state rounded-lg border px-6 py-12 text-center">Loading workspace registry...</div>
           ) : null}
 
-          {error && (
-            <div className="host-error rounded-lg border px-4 py-4">
-              {error}
-            </div>
-          )}
+          {error ? <div className="host-error rounded-lg border px-4 py-4">{error}</div> : null}
 
-          {!loading && !error && workspaces.length === 0 && (
+          {!loading && !error && workspaces.length === 0 ? (
             <div className="host-empty-state rounded-lg border border-dashed px-6 py-12 text-center">
               <p className="host-page-title text-lg font-medium">No workspaces yet</p>
               <p className="host-muted mt-2 text-sm">
-                Add a local directory inside the configured workspace root to start building the
-                registry.
+                Add a local directory inside the configured workspace root to start building the registry.
               </p>
             </div>
-          )}
+          ) : null}
 
-          {!loading && sortedWorkspaces.length > 0 && (
+          {!loading && sortedWorkspaces.length > 0 ? (
             <div className="space-y-2 overflow-x-hidden">
               {sortedWorkspaces.map((workspace) => (
-            <article
-              key={workspace.id}
-              role="link"
-              tabIndex={0}
-              onClick={() => openWorkspaceThreads(workspace.id)}
-              onKeyDown={(event) => handleWorkspaceKeyDown(event, workspace.id)}
-              className="host-card relative overflow-hidden rounded-lg border px-4 py-3 transition"
-            >
-              <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
-                <button
-                  type="button"
-                  aria-label={`Delete workspace ${workspace.label}`}
-                  title="Delete workspace"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setDeletingWorkspace(workspace);
-                  }}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-border)]"
+                <article
+                  key={workspace.id}
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => openWorkspace(workspace.id)}
+                  onKeyDown={(event) => handleWorkspaceKeyDown(event, workspace.id)}
+                  className="host-card relative overflow-hidden rounded-lg border px-4 py-3 transition"
                 >
-                  <TrashIcon />
-                </button>
-                <button
-                  type="button"
-                  aria-label={
-                    workspace.isFavorite
-                      ? `Unpin workspace ${workspace.label}`
-                      : `Pin workspace ${workspace.label}`
-                  }
-                  title={workspace.isFavorite ? 'Unpin workspace' : 'Pin workspace'}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleFavorite(workspace);
-                  }}
-                  className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${
-                    workspace.isFavorite
-                      ? 'host-warning-pill'
-                      : 'host-icon-button'
-                  }`}
-                >
-                  <PinIcon active={workspace.isFavorite} />
-                </button>
-              </div>
-              <div className="flex min-w-0 items-start gap-3 pr-[4.6rem]">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1">
-                    <p
-                      className="host-page-title min-w-0 max-w-full truncate text-base font-semibold sm:text-lg"
-                      title={workspace.label}
+                  <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+                    <IconButton
+                      label={`Delete workspace ${workspace.label}`}
+                      className="border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-border)]"
+                      onClick={() => setDeletingWorkspace(workspace)}
                     >
-                      {workspace.label}
-                    </p>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                    <IconButton
+                      label={workspace.isFavorite ? `Unpin workspace ${workspace.label}` : `Pin workspace ${workspace.label}`}
+                      className={workspace.isFavorite ? 'host-warning-pill' : 'host-icon-button'}
+                      onClick={() => void handleFavorite(workspace)}
+                    >
+                      <Pin className={`h-3.5 w-3.5 ${workspace.isFavorite ? 'rotate-[18deg]' : 'rotate-[8deg]'}`} />
+                    </IconButton>
+                  </div>
+                  <div className="min-w-0 pr-[4.6rem]">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <p className="host-page-title min-w-0 max-w-full truncate text-base font-semibold sm:text-lg" title={workspace.label}>
+                        {workspace.label}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingWorkspaceId(workspace.id);
+                          setDraftLabel(workspace.label);
+                        }}
+                        aria-label={`Rename workspace ${workspace.label}`}
+                        className="host-muted inline-flex h-4 w-4 shrink-0 items-center justify-center transition hover:text-[var(--theme-fg)]"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
                     <button
                       type="button"
+                      aria-label={workspace.absPath}
+                      title={workspace.absPath}
                       onClick={(event) => {
                         event.stopPropagation();
-                        beginRenameWorkspace(workspace);
+                        setExpandedPath(workspace.absPath);
                       }}
-                      aria-label={`Rename workspace ${workspace.label}`}
-                      className="host-muted inline-flex h-4 w-4 shrink-0 items-center justify-center transition hover:text-[var(--theme-fg)]"
+                      className="host-muted mt-1 inline-block max-w-full overflow-hidden whitespace-nowrap text-left text-[9px] leading-4 transition hover:text-[var(--theme-fg-soft)]"
                     >
-                      <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3 fill-current">
-                        <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
-                      </svg>
+                      {truncatePath(workspace.absPath)}
                     </button>
+                    <p className="host-muted mt-2 text-xs">
+                      Last opened: {workspace.lastOpenedAt ? new Date(workspace.lastOpenedAt).toLocaleString() : 'Never opened'}
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    aria-label={workspace.absPath}
-                    title={workspace.absPath}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setExpandedPath(workspace.absPath);
-                    }}
-                    className="host-muted mt-1 inline-block max-w-full overflow-hidden whitespace-nowrap text-left text-[9px] leading-4 transition hover:text-[var(--theme-fg-soft)]"
-                  >
-                    {truncatePathFromFront(workspace.absPath)}
-                  </button>
-                  <div className="host-muted mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="min-w-0 truncate">
-                      Last opened: {formatRecentLabel(workspace.lastOpenedAt)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </article>
+                </article>
               ))}
             </div>
-          )}
+          ) : null}
         </section>
 
-        <WorkspaceRuntimeSidebar
-          config={runtimeConfig}
-          error={runtimeError}
-          vmStarting={vmStarting}
-          workspaceCount={workspaces.length}
-        />
+        <aside className="space-y-3 xl:sticky xl:top-[calc(env(safe-area-inset-top)+4.25rem)] xl:self-start">
+          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">Supervisor</p>
+            <dl className="mt-4 space-y-3">
+              <RuntimeFact label="Workspace root" value={runtimeConfig?.workspaceRoot ?? (vmStarting ? 'VM is starting…' : 'Loading...')} />
+              <RuntimeFact
+                label="Environment"
+                value={
+                  runtimeConfig
+                    ? `${runtimeConfig.environment} · ${runtimeConfig.host}:${runtimeConfig.port}`
+                    : vmStarting
+                      ? 'Connecting automatically…'
+                      : runtimeError ?? 'Loading...'
+                }
+              />
+              <RuntimeFact label="Version" value={runtimeConfig ? `${runtimeConfig.appName} ${runtimeConfig.appVersion}` : 'Loading...'} />
+              <RuntimeFact label="Workspaces" value={String(workspaces.length)} />
+            </dl>
+          </section>
+          {runtimeError && !vmStarting ? (
+            <section className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
+              Runtime metadata is unavailable. Workspace actions may still work if a relay device is connected.
+            </section>
+          ) : null}
+        </aside>
       </div>
 
       <RenameDialog
@@ -419,8 +322,11 @@ export function WorkspacesPage() {
         value={draftLabel}
         busy={savingWorkspaceId !== null}
         onChange={setDraftLabel}
-        onCancel={cancelRenameWorkspace}
-        onSubmit={() => editingWorkspaceId ? handleRenameWorkspace(editingWorkspaceId) : undefined}
+        onCancel={() => {
+          setEditingWorkspaceId(null);
+          setDraftLabel('');
+        }}
+        onSubmit={() => (editingWorkspaceId ? handleRenameWorkspace(editingWorkspaceId) : undefined)}
       />
       <LongTextDialog
         open={expandedPath !== null}
@@ -449,63 +355,38 @@ export function WorkspacesPage() {
   );
 }
 
-function WorkspaceRuntimeSidebar({
-  config,
-  error,
-  vmStarting,
-  workspaceCount,
+function IconButton({
+  label,
+  className,
+  onClick,
+  children,
 }: {
-  config: RuntimeConfigDto | null;
-  error: string | null;
-  vmStarting: boolean;
-  workspaceCount: number;
+  label: string;
+  className: string;
+  onClick: () => void;
+  children: ReactNode;
 }) {
   return (
-    <aside className="space-y-3 xl:sticky xl:top-[calc(env(safe-area-inset-top)+4.25rem)] xl:self-start">
-      <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
-          Supervisor
-        </p>
-        <dl className="mt-4 space-y-3">
-          <RuntimeFact
-            label="Workspace root"
-            value={config?.workspaceRoot ?? (vmStarting ? 'VM is starting…' : 'Loading...')}
-          />
-          <RuntimeFact
-            label="Environment"
-            value={
-              config
-                ? `${config.environment} · ${config.host}:${config.port}`
-                : vmStarting
-                  ? 'Connecting automatically…'
-                  : error ?? 'Loading...'
-            }
-          />
-          <RuntimeFact
-            label="Version"
-            value={config ? `${config.appName} ${config.appVersion}` : 'Loading...'}
-          />
-          <RuntimeFact label="Workspaces" value={String(workspaceCount)} />
-        </dl>
-      </section>
-      {error && !vmStarting ? (
-        <section className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4 text-sm text-[var(--status-warning-fg)]">
-          Runtime metadata is unavailable. Workspace actions may still work if a relay device is connected.
-        </section>
-      ) : null}
-    </aside>
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${className}`}
+    >
+      {children}
+    </button>
   );
 }
 
 function RuntimeFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
-        {label}
-      </dt>
-      <dd className="mt-1 break-words font-mono text-xs leading-5 text-[var(--theme-fg)]">
-        {value}
-      </dd>
+      <dt className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-xs leading-5 text-[var(--theme-fg)]">{value}</dd>
     </div>
   );
 }

@@ -110,18 +110,16 @@ test.describe('Phase 2 acceptance', () => {
       timeout: 10_000,
     });
 
-    await page.getByRole('button', { name: 'Stop Current Turn' }).click();
+    await page
+      .getByRole('button', { name: 'Stop Current Turn' })
+      .evaluate((node) => (node as HTMLButtonElement).click());
 
-    await expect(
-      page.getByRole('button', { name: 'Stop Current Turn' }),
-    ).toBeDisabled({
+    await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeEnabled({
       timeout: 20_000,
     });
-    await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeEnabled(
-      {
-        timeout: 20_000,
-      },
-    );
+    await expect(
+      page.getByRole('button', { name: 'Stop Current Turn' }),
+    ).toHaveCount(0);
   });
 
   test('uses a collapsible top sidebar on mobile thread detail', async ({

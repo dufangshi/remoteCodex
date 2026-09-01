@@ -1,0 +1,680 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+pub const APP_NAME: &str = "remote-codex";
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Local,
+    Server,
+    Relay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Codex,
+    Claude,
+    Opencode,
+    Acp,
+}
+
+impl Provider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+            Self::Opencode => "opencode",
+            Self::Acp => "acp",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+impl ApiError {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+            details: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthDto {
+    pub status: String,
+    pub timestamp: String,
+    pub active_turn_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionDto {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeConfigDto {
+    pub app_name: String,
+    pub app_version: String,
+    pub mode: Mode,
+    pub host: String,
+    pub port: u16,
+    pub workspace_root: String,
+    pub environment: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub architecture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<PlatformCapabilitiesDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilitiesDto {
+    pub terminal: bool,
+    pub tmux: bool,
+    pub managed_signals: bool,
+    pub windows_task_scheduler: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSessionDto {
+    pub authenticated: bool,
+    pub username: Option<String>,
+    pub expires_at: Option<String>,
+    pub mode: Mode,
+    pub auth_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub host_id: String,
+    pub label: String,
+    pub abs_path: String,
+    pub is_favorite: bool,
+    pub created_at: String,
+    pub last_opened_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceInput {
+    #[serde(default)]
+    pub abs_path: Option<String>,
+    #[serde(default)]
+    pub git_url: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSettingsDto {
+    pub workspace_root: String,
+    pub dev_home: String,
+    pub default_backend: Provider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadWorkspaceTreeNodeDto {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_children: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children_loaded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<ThreadWorkspaceTreeNodeDto>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadWorkspaceFilePreviewDto {
+    pub path: String,
+    pub name: String,
+    pub content: String,
+    pub language: String,
+    pub size: u64,
+    pub truncated: bool,
+    pub next_offset: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub provider: Provider,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    pub provider_session_id: Option<String>,
+    pub source: String,
+    pub title: String,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode: bool,
+    pub collaboration_mode: String,
+    pub approval_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_mode: Option<String>,
+    pub status: String,
+    pub summary_text: Option<String>,
+    pub last_error: Option<String>,
+    pub active_turn_id: Option<String>,
+    pub is_loaded: bool,
+    pub is_pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryItemDto {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    pub kind: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadTurnDto {
+    pub id: String,
+    pub started_at: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<Value>,
+    pub items: Vec<ThreadHistoryItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadActionRequestDto {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub turn_id: Option<String>,
+    pub item_id: Option<String>,
+    pub created_at: String,
+    pub questions: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPendingSteerDto {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub display_prompt: String,
+    pub submitted_prompt: String,
+    pub delivery: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadDetailDto {
+    pub thread: ThreadDto,
+    pub workspace: WorkspaceDto,
+    pub workspace_path_status: String,
+    pub turns: Vec<ThreadTurnDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_turn_count: Option<u32>,
+    pub pending_requests: Vec<ThreadActionRequestDto>,
+    pub pending_steers: Vec<ThreadPendingSteerDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_notes: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateThreadInput {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub provider: Option<Provider>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default = "default_approval")]
+    pub approval_mode: String,
+}
+
+fn default_approval() -> String {
+    "yolo".into()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendThreadPromptInput {
+    pub prompt: String,
+    #[serde(default)]
+    pub client_request_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub collaboration_mode: Option<String>,
+    #[serde(default)]
+    pub images: Vec<PromptImageDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptImageDto {
+    pub mime_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptTurnInput {
+    #[serde(default)]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCaps {
+    pub list: bool,
+    pub read: bool,
+    pub resume: bool,
+    pub import_local: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnCaps {
+    pub start: bool,
+    pub stream_input: bool,
+    pub steer: bool,
+    pub interrupt: bool,
+    pub compact: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCaps {
+    pub fork: bool,
+    pub hard_rollback: bool,
+    pub resume_at: bool,
+    pub rewind_files: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlCaps {
+    pub plan_mode: bool,
+    pub permission_requests: bool,
+    pub sandbox_mode: bool,
+    pub performance_mode: bool,
+    pub goals: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagementCaps {
+    pub models: bool,
+    pub mcp_status: bool,
+    pub skills: bool,
+    pub hooks: bool,
+    pub hook_trust: bool,
+    pub host_config_files: bool,
+    pub provider_settings: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCaps {
+    pub context_window: bool,
+    pub token_usage: bool,
+    pub cost_usd: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderCapabilitiesDto {
+    pub sessions: SessionCaps,
+    pub turns: TurnCaps,
+    pub branching: BranchCaps,
+    pub controls: ControlCaps,
+    pub management: ManagementCaps,
+    pub usage: UsageCaps,
+}
+
+impl AgentProviderCapabilitiesDto {
+    pub fn conversational() -> Self {
+        Self {
+            sessions: SessionCaps {
+                list: true,
+                read: true,
+                resume: true,
+                import_local: false,
+                load: Some(true),
+                close: Some(true),
+                delete: Some(false),
+            },
+            turns: TurnCaps {
+                start: true,
+                stream_input: false,
+                steer: false,
+                interrupt: true,
+                compact: false,
+            },
+            branching: BranchCaps {
+                fork: false,
+                hard_rollback: false,
+                resume_at: false,
+                rewind_files: false,
+            },
+            controls: ControlCaps {
+                plan_mode: true,
+                permission_requests: true,
+                sandbox_mode: true,
+                performance_mode: false,
+                goals: false,
+            },
+            management: ManagementCaps {
+                models: false,
+                mcp_status: false,
+                skills: false,
+                hooks: false,
+                hook_trust: false,
+                host_config_files: false,
+                provider_settings: false,
+            },
+            usage: UsageCaps {
+                context_window: true,
+                token_usage: true,
+                cost_usd: false,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeStatusDto {
+    pub state: String,
+    pub transport: String,
+    pub last_started_at: Option<String>,
+    pub last_error: Option<String>,
+    pub restart_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBackendInstallationDto {
+    pub package_name: Option<String>,
+    pub installed: bool,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub install_command: Option<String>,
+    pub update_command: Option<String>,
+    pub busy: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolboxItemDto {
+    pub action: String,
+    pub command: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panel: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBackendManagementSchemaDto {
+    pub host_config_files: Vec<Value>,
+    pub toolbox_items: Vec<ToolboxItemDto>,
+    pub hook_command_templates: Vec<Value>,
+    pub provider_config_format: String,
+    pub mcp_config_format: String,
+    pub config_archives: bool,
+    pub build_restart: bool,
+}
+
+pub fn toolbox_from_capabilities(caps: &AgentProviderCapabilitiesDto) -> Vec<ToolboxItemDto> {
+    let mut items = Vec::new();
+    if caps.controls.performance_mode {
+        items.push(ToolboxItemDto {
+            action: "fast".into(),
+            command: "/fast".into(),
+            label: "Fast mode".into(),
+            description: Some("Toggle fast / performance mode.".into()),
+            panel: None,
+        });
+    }
+    if caps.turns.compact {
+        items.push(ToolboxItemDto {
+            action: "compact".into(),
+            command: "/compact".into(),
+            label: "Compact context".into(),
+            description: Some("Compact the current session.".into()),
+            panel: None,
+        });
+    }
+    if caps.controls.goals {
+        items.push(ToolboxItemDto {
+            action: "goal".into(),
+            command: "/goal".into(),
+            label: "Goal".into(),
+            description: Some("Set or pause the session goal.".into()),
+            panel: None,
+        });
+    }
+    if caps.branching.fork {
+        items.push(ToolboxItemDto {
+            action: "fork".into(),
+            command: "/fork".into(),
+            label: "Fork".into(),
+            description: Some("Fork this session.".into()),
+            panel: Some("fork".into()),
+        });
+    }
+    if caps.management.skills {
+        items.push(ToolboxItemDto {
+            action: "skills".into(),
+            command: "/skills".into(),
+            label: "Skills".into(),
+            description: None,
+            panel: Some("skills".into()),
+        });
+    }
+    if caps.management.mcp_status {
+        items.push(ToolboxItemDto {
+            action: "mcp".into(),
+            command: "/mcp".into(),
+            label: "MCP".into(),
+            description: None,
+            panel: Some("mcp".into()),
+        });
+    }
+    if caps.management.hooks {
+        items.push(ToolboxItemDto {
+            action: "hooks".into(),
+            command: "/hooks".into(),
+            label: "Hooks".into(),
+            description: None,
+            panel: Some("hooks".into()),
+        });
+    }
+    items
+}
+
+impl Default for AgentBackendManagementSchemaDto {
+    fn default() -> Self {
+        Self {
+            host_config_files: vec![],
+            toolbox_items: Vec::new(),
+            hook_command_templates: vec![],
+            provider_config_format: "none".into(),
+            mcp_config_format: "none".into(),
+            config_archives: false,
+            build_restart: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBackendDto {
+    pub provider: Provider,
+    pub display_name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub is_default: bool,
+    pub status: AgentRuntimeStatusDto,
+    pub capabilities: AgentProviderCapabilitiesDto,
+    pub management_schema: AgentBackendManagementSchemaDto,
+    pub installation: AgentBackendInstallationDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOptionDto {
+    pub id: String,
+    pub model: String,
+    pub display_name: String,
+    pub description: String,
+    pub is_default: bool,
+    pub hidden: bool,
+    pub supported_reasoning_efforts: Vec<ReasoningEffortOptionDto>,
+    pub default_reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acp_agent: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningEffortOptionDto {
+    pub reasoning_effort: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapabilitySnapshotDto {
+    pub provider: Provider,
+    pub agent_id: String,
+    pub availability: String,
+    pub negotiated: Option<Value>,
+    pub effective_capabilities: Option<AgentProviderCapabilitiesDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDto {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub remote_codex: String,
+    pub capabilities: Value,
+    pub enabled: bool,
+    pub source: Option<String>,
+    pub available: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadEventEnvelope {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub thread_id: String,
+    pub timestamp: String,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupervisorConnectedEnvelope {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WsServerMessage {
+    Connected(SupervisorConnectedEnvelope),
+    Event(ThreadEventEnvelope),
+    Other(Value),
+}
+
+pub fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+pub fn truncate_title(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= 15 {
+        normalized
+    } else {
+        normalized.chars().take(15).collect()
+    }
+}

@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
 
   const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8787';
   const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET ?? 'ws://127.0.0.1:8787';
-  const threadUiRoot = path.resolve(__dirname, '../../../remote-codex-thread-ui');
+  const threadUiRoot = path.resolve(__dirname, '../../remote-codex-thread-ui');
   const xyzViewerRoot = path.join(threadUiRoot, 'packages/plugin-xyz-viewer');
   const xyzViewerEntry = path.join(xyzViewerRoot, 'src/index.ts');
   const xyzViewerFrontendEntry = path.join(xyzViewerRoot, 'src/frontend.ts');

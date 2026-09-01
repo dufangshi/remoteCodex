@@ -1,10 +1,5 @@
 packages:
-  - apps/*
-  - apps/android/thread-web
-  - apps/ios/WebThread
+  - apps/supervisor-web
   - packages/*
 allowBuilds:
-  '@homebridge/node-pty-prebuilt-multiarch': true
-  better-sqlite3: true
   esbuild: true
-  puppeteer: false

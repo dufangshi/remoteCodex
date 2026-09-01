@@ -1,0 +1,19 @@
+[package]
+name = "remote-codex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "remote-codex"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+remote-codex-relay.workspace = true
+remote-codex-runtime.workspace = true
+remote-codex-supervisor.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

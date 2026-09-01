@@ -1,15 +1,10 @@
-# Agent Notes
+# Agent notes
 
-## `@remote-codex/thread-ui` Build Boundary
+This branch is a Rust rewrite of the Remote Codex control plane.
 
-`apps/supervisor-web` consumes `@remote-codex/thread-ui` through the package entrypoint, which points at `packages/thread-ui/dist/index.js`. Local supervisor-web tests can therefore exercise the built `dist` output rather than freshly edited `packages/thread-ui/src` files.
-
-When changing anything under `packages/thread-ui/src`, always rebuild the package before validating supervisor-web behavior:
-
-```bash
-pnpm --filter @remote-codex/thread-ui build
-```
-
-Then run the relevant supervisor-web tests or build. Without this step, tests and local production builds may still use stale `thread-ui` output, which can make a source fix appear ineffective or make a deployment miss the intended UI behavior.
-
-The frontend Dockerfile does rebuild `@remote-codex/thread-ui` during deployment, so committed source changes are included online. The local validation step is still required before pushing.
+- Runtime and HTTP live under `crates/`. Do not reintroduce the TypeScript supervisor or the 15-coordinator split.
+- ACP is the default harness path. Add a thin adapter in `crates/runtime/src/acp.rs` for command/capability differences.
+- Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@remote-codex/shared`.
+- After changing `crates/`, run `cargo test --workspace`.
+- Web e2e: `REMOTE_CODEX_E2E_FAKE_RUNTIME=1 pnpm test:e2e`.
+- Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.

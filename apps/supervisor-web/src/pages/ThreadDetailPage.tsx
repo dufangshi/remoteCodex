@@ -419,6 +419,7 @@ export function ThreadDetailPage() {
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const promptSubmissionInFlightRef = useRef(false);
+  const interruptingRef = useRef(false);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
@@ -1483,6 +1484,9 @@ export function ThreadDetailPage() {
     let heartbeatIntervalId: number | null = null;
 
     const refreshThreadDetailSilently = () => {
+      if (interruptingRef.current) {
+        return;
+      }
       void loadThreadDetail({
         showLoading: false,
         clearError: false,
@@ -2612,15 +2616,17 @@ export function ThreadDetailPage() {
 
     setBusy(true);
     setError(null);
+    interruptingRef.current = true;
 
     try {
-      const thread = detail?.thread.activeTurnId
-        ? await interruptThread(id, { turnId: detail.thread.activeTurnId })
-        : await interruptThread(id);
-      setDetail((current) => (current ? { ...current, thread } : current));
-      setThreads((current) =>
-        current.map((entry) => (entry.id === thread.id ? thread : entry)),
-      );
+      await runDetailMutation(async () => {
+        if (detail?.thread.activeTurnId) {
+          await interruptThread(id, { turnId: detail.thread.activeTurnId });
+        } else {
+          await interruptThread(id);
+        }
+        return fetchThreadDetail(id);
+      });
       clearBufferedLiveOutput();
       setLiveOutput('');
     } catch (caught) {
@@ -2628,6 +2634,7 @@ export function ThreadDetailPage() {
         caught instanceof Error ? caught.message : 'Unable to interrupt turn.',
       );
     } finally {
+      interruptingRef.current = false;
       setBusy(false);
     }
   }

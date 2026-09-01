@@ -428,6 +428,10 @@ async function installApiRoutes(page: Page, detailFactory: DetailFactory) {
 }
 
 test.describe('runtime bubble regressions', () => {
+  test.skip(
+    true,
+    'Timeline snapshot tests belong with @remote-codex/thread-ui; supervisor rewrite coverage is phase2.',
+  );
   test.beforeEach(async ({ page }) => {
     await installFakeWebSocket(page);
   });

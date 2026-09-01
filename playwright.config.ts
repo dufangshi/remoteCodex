@@ -12,41 +12,35 @@ const e2eWorkspaceRoot = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/
 export default defineConfig({
   testDir: './e2e',
   timeout: 120_000,
-  expect: {
-    timeout: 20_000
-  },
+  expect: { timeout: 20_000 },
   fullyParallel: false,
   reporter: 'list',
   use: {
     baseURL: webBaseUrl,
-    trace: 'retain-on-failure'
+    trace: 'retain-on-failure',
   },
   webServer: [
     {
-      command: `PORT=${apiPort} DATABASE_URL=${e2eDatabaseUrl} WORKSPACE_ROOT=${e2eWorkspaceRoot} pnpm --filter @remote-codex/supervisor-api dev`,
+      command: `REMOTE_CODEX_MODE=local REMOTE_CODEX_E2E_FAKE_RUNTIME=1 PORT=${apiPort} DATABASE_URL=${e2eDatabaseUrl} WORKSPACE_ROOT=${e2eWorkspaceRoot} ./target/debug/remote-codex supervisor`,
       url: `${apiBaseUrl}/healthz`,
       reuseExistingServer: true,
-      timeout: 120_000
+      timeout: 180_000,
     },
     {
       command: `VITE_API_PROXY_TARGET=${apiBaseUrl} VITE_WS_PROXY_TARGET=ws://127.0.0.1:${apiPort} pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port ${webPort} --strictPort`,
       url: webBaseUrl,
       reuseExistingServer: true,
-      timeout: 120_000
-    }
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
       name: 'desktop-chromium',
-      use: {
-        ...devices['Desktop Chrome']
-      }
+      use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'mobile-chromium',
-      use: {
-        ...devices['Pixel 5']
-      }
-    }
-  ]
+      use: { ...devices['Pixel 5'] },
+    },
+  ],
 });

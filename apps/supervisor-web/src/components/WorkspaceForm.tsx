@@ -73,17 +73,10 @@ export function WorkspaceForm({
 
     setLocalError(null);
     const normalizedLabel = label.trim();
-    const targetKey = isGitInput(rawTarget) ? 'gitUrl' : 'absPath';
-    await onSubmit(
-      normalizedLabel
-        ? {
-            [targetKey]: rawTarget,
-            label: normalizedLabel
-          } as { absPath: string; label: string } | { gitUrl: string; label: string }
-        : {
-            [targetKey]: rawTarget
-          } as { absPath: string } | { gitUrl: string }
-    );
+    const payload = isGitInput(rawTarget)
+      ? { gitUrl: rawTarget, ...(normalizedLabel ? { label: normalizedLabel } : {}) }
+      : { absPath: rawTarget, ...(normalizedLabel ? { label: normalizedLabel } : {}) };
+    await onSubmit(payload);
   }
 
   const formClassName = surface

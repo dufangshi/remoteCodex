@@ -1,8 +1,11 @@
 node_modules
 dist
 coverage
+remote-codex-thread-ui
 .DS_Store
 .local
+target/
+.worktrees/
 .env
 .env.local
 .env.*.local
