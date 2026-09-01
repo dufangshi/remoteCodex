@@ -3336,6 +3336,50 @@ describe('supervisor api', () => {
     });
   });
 
+  it('treats Codex 0.152 paginated bootstrap reads as an empty new thread', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Codex 0.152 bootstrap thread'
+      }
+    });
+    const createdThread = createResponse.json();
+    fakeCodexManager.readThreadErrors.set(
+      createdThread.providerSessionId,
+      new JsonRpcClientError(
+        'list_turns is not supported yet',
+        'remote_error',
+        { code: -32601 },
+      ),
+    );
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        title: 'Codex 0.152 bootstrap thread'
+      },
+      totalTurnCount: 0,
+      turns: []
+    });
+  });
+
   it('recreates an unmaterialized Codex thread when resume follows a process restart', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

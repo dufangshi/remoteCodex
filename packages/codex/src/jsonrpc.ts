@@ -97,6 +97,19 @@ export class JsonRpcClient extends EventEmitter {
     });
   }
 
+  notify<TParams = unknown>(method: string, params: TParams) {
+    if (this.closed) {
+      throw new JsonRpcClientError('JSON-RPC client is closed.', 'client_closed');
+    }
+
+    const payload: JsonRpcNotification<TParams> = {
+      jsonrpc: '2.0',
+      method,
+      params,
+    };
+    this.output.write(`${JSON.stringify(payload)}\n`);
+  }
+
   close() {
     if (this.closed) {
       return;

@@ -40,6 +40,20 @@ describe('JsonRpcClient', () => {
     });
   });
 
+  it('sends notifications without allocating a request id', () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const client = new JsonRpcClient(input, output);
+
+    client.notify('initialized', {});
+
+    expect(JSON.parse(output.read()?.toString().trim() ?? '{}')).toEqual({
+      jsonrpc: '2.0',
+      method: 'initialized',
+      params: {},
+    });
+  });
+
   it('times out pending requests', async () => {
     vi.useFakeTimers();
 

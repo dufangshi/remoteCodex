@@ -48,6 +48,22 @@ describe('codex runtime error helpers', () => {
         ),
       ),
     ).toBe(true);
+
+    expect(
+      isRemoteThreadBootstrapError(
+        new AgentRuntimeError(
+          'list_turns is not supported yet',
+          'codex',
+          'remote_error',
+          { code: -32601 },
+          new JsonRpcClientError(
+            'list_turns is not supported yet',
+            'remote_error',
+            { code: -32601 },
+          ),
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('parses Codex steer races from wrapped runtime errors', () => {

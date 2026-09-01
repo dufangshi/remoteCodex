@@ -141,12 +141,17 @@ export interface CodexTurnRecord {
 
 export interface CodexThreadRecord {
   id: string;
+  sessionId?: string;
+  historyMode?: 'legacy' | 'paginated' | null;
+  path?: string | null;
+  cliVersion?: string | null;
   preview: string;
   createdAt: number;
   updatedAt: number;
   status: CodexThreadStatus;
   cwd: string;
   name: string | null;
+  totalTurnCount?: number | null;
   turns: CodexTurnRecord[];
 }
 

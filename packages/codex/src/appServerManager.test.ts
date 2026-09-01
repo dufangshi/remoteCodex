@@ -122,6 +122,114 @@ describe('CodexAppServerManager', () => {
     await manager.stop();
   });
 
+  it('creates legacy-history threads and masks the unmaterialized read window', async () => {
+    const requests: any[] = [];
+    const script = [
+      "const readline=require('node:readline');",
+      "const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      "rl.on('line',(line)=>{",
+      " const msg=JSON.parse(line); process.stderr.write(JSON.stringify(msg)+'\\n');",
+      " if(msg.method==='initialize') process.stdout.write(JSON.stringify({id:msg.id,result:{userAgent:'codex-cli 0.152.0',codexHome:'/tmp',platformFamily:'unix',platformOs:'linux'}})+'\\n');",
+      " else if(msg.method==='thread/start'){",
+      "  if(msg.params?.historyMode!=='legacy') process.stdout.write(JSON.stringify({id:msg.id,error:{code:-32602,message:'historyMode must be legacy'}})+'\\n');",
+      "  else process.stdout.write(JSON.stringify({id:msg.id,result:{thread:{id:'thread-new',sessionId:'thread-new',historyMode:'legacy',path:'/tmp/rollout.jsonl',cliVersion:'0.152.0',preview:'',createdAt:1,updatedAt:1,status:{type:'idle'},cwd:'/tmp',name:null,turns:[]},model:'gpt-5.6-terra'}})+'\\n');",
+      " } else if(msg.method==='thread/read') process.stdout.write(JSON.stringify({id:msg.id,error:{code:-32601,message:'list_turns is not supported yet'}})+'\\n');",
+      "});",
+    ].join('');
+    const manager = new CodexAppServerManager({
+      command: process.execPath,
+      startupTimeoutMs: 1_000,
+      clientInfo: { name: 'test', title: 'test', version: '0.1.0' },
+      spawnProcess: (command) => {
+        const child = spawn(command, ['-e', script], { stdio: 'pipe' });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+          const lines = stderr.split('\n');
+          stderr = lines.pop() ?? '';
+          for (const line of lines) {
+            if (line.trim()) requests.push(JSON.parse(line));
+          }
+        });
+        return child;
+      },
+    });
+
+    await manager.start();
+    const started = await manager.startThread({
+      cwd: '/tmp',
+      model: 'gpt-5.6-terra',
+      approvalPolicy: 'never',
+    });
+    const read = await manager.readThread(started.thread.id);
+    await waitForCondition(() => requests.some((request) => request.method === 'thread/read'));
+
+    expect(started.thread).toMatchObject({
+      id: 'thread-new',
+      sessionId: 'thread-new',
+      historyMode: 'legacy',
+      cliVersion: '0.152.0',
+    });
+    expect(read).toEqual(started.thread);
+    expect(requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'initialized', params: {} }),
+      expect.objectContaining({
+        method: 'thread/start',
+        params: expect.objectContaining({ historyMode: 'legacy' }),
+      }),
+    ]));
+
+    await manager.stop();
+  });
+
+  it('retries thread creation without historyMode for older Codex versions', async () => {
+    const requests: any[] = [];
+    const script = [
+      "const readline=require('node:readline');",
+      "const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      "rl.on('line',(line)=>{",
+      " const msg=JSON.parse(line);",
+      " if(msg.method==='initialize') process.stdout.write(JSON.stringify({id:msg.id,result:{userAgent:'codex-cli 0.150.0',codexHome:'/tmp',platformFamily:'unix',platformOs:'linux'}})+'\\n');",
+      " else if(msg.method==='thread/start'){ process.stderr.write(JSON.stringify(msg)+'\\n');",
+      "  if('historyMode' in msg.params) process.stdout.write(JSON.stringify({id:msg.id,error:{code:-32602,message:'unknown field `historyMode`'}})+'\\n');",
+      "  else process.stdout.write(JSON.stringify({id:msg.id,result:{thread:{id:'thread-old',preview:'',createdAt:1,updatedAt:1,status:{type:'idle'},cwd:'/tmp',name:null,turns:[]},model:'gpt-5.2'}})+'\\n');",
+      " }",
+      "});",
+    ].join('');
+    const manager = new CodexAppServerManager({
+      command: process.execPath,
+      startupTimeoutMs: 1_000,
+      clientInfo: { name: 'test', title: 'test', version: '0.1.0' },
+      spawnProcess: (command) => {
+        const child = spawn(command, ['-e', script], { stdio: 'pipe' });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+          const lines = stderr.split('\n');
+          stderr = lines.pop() ?? '';
+          for (const line of lines) {
+            if (line.trim()) requests.push(JSON.parse(line));
+          }
+        });
+        return child;
+      },
+    });
+
+    await manager.start();
+    await expect(manager.startThread({
+      cwd: '/tmp',
+      model: 'gpt-5.2',
+      approvalPolicy: 'never',
+    })).resolves.toMatchObject({ thread: { id: 'thread-old' } });
+    await waitForCondition(() => requests.length === 2);
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.params).toHaveProperty('historyMode', 'legacy');
+    expect(requests[1]?.params).not.toHaveProperty('historyMode');
+
+    await manager.stop();
+  });
+
   windowsIt('starts an npm-style Codex command shim from a path with spaces', async () => {
     const directory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'remote-codex app server shim '),

@@ -48,6 +48,15 @@ export interface CodexAppServerManagerOptions {
 function mapThread(record: any): CodexThreadRecord {
   return {
     id: record.id,
+    sessionId:
+      typeof record.sessionId === 'string' ? record.sessionId : record.id,
+    historyMode:
+      record.historyMode === 'legacy' || record.historyMode === 'paginated'
+        ? record.historyMode
+        : null,
+    path: typeof record.path === 'string' ? record.path : null,
+    cliVersion:
+      typeof record.cliVersion === 'string' ? record.cliVersion : null,
     preview: record.preview ?? '',
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -62,7 +71,37 @@ function mapThread(record: any): CodexThreadRecord {
           ? record.turnsTotal
           : null,
     turns: Array.isArray(record.turns) ? record.turns.map(mapTurn) : []
-  } as CodexThreadRecord;
+  };
+}
+
+function isThreadHistoryModeUnsupported(error: unknown) {
+  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
+    return false;
+  }
+  const remoteCode = error.details?.code;
+  const message = error.message.toLowerCase();
+  return (
+    remoteCode === -32602 &&
+    (message.includes('historymode') ||
+      message.includes('history_mode') ||
+      message.includes('invalid params') ||
+      message.includes('unknown field'))
+  );
+}
+
+function isUnmaterializedThreadReadError(error: unknown) {
+  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('list_turns is not supported yet') ||
+    message.includes('includeTurns is unavailable before first user message'.toLowerCase()) ||
+    message.includes('is not materialized yet') ||
+    message.includes('no rollout found for thread id') ||
+    message.includes('failed to load rollout') ||
+    (message.includes('rollout at') && message.includes('is empty'))
+  );
 }
 
 function mapTurn(record: any): CodexTurnRecord {
@@ -245,6 +284,7 @@ export class CodexAppServerManager extends EventEmitter {
   };
   private startPromise: Promise<void> | null = null;
   private intentionalStop = false;
+  private readonly startedThreads = new Map<string, CodexThreadRecord>();
 
   constructor(private readonly options: CodexAppServerManagerOptions) {
     super();
@@ -284,6 +324,7 @@ export class CodexAppServerManager extends EventEmitter {
 
   async stop(): Promise<void> {
     this.intentionalStop = true;
+    this.startedThreads.clear();
     const client = this.client;
     const process = this.process;
 
@@ -414,19 +455,40 @@ export class CodexAppServerManager extends EventEmitter {
 
   async startThread(input: ThreadStartInput) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/start', {
+    const params = {
       cwd: input.cwd,
       model: input.model,
       effort: input.effort,
       serviceTier: input.serviceTier,
       approvalPolicy: input.approvalPolicy,
       sandbox: input.sandbox ?? null,
+      historyMode: 'legacy',
       experimentalRawEvents: false,
       persistExtendedHistory: true
-    });
+    };
+    let response: {
+      thread: any;
+      model: string;
+      reasoningEffort?: ReasoningEffort | null;
+      sandbox?: string | null;
+    };
+    try {
+      response = await this.client!.request('thread/start', params);
+    } catch (error) {
+      if (!isThreadHistoryModeUnsupported(error)) {
+        throw error;
+      }
+      response = await this.client!.request('thread/start', {
+        ...params,
+        historyMode: undefined,
+      });
+    }
+
+    const thread = mapThread(response.thread);
+    this.startedThreads.set(thread.id, thread);
 
     return {
-      thread: mapThread(response.thread),
+      thread,
       model: response.model,
       reasoningEffort: response.reasoningEffort ?? null,
       sandbox: response.sandbox ?? null,
@@ -435,13 +497,23 @@ export class CodexAppServerManager extends EventEmitter {
 
   async readThread(threadId: string, input: { limit?: number; beforeTurnId?: string | null } = {}) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any }>('thread/read', {
-      threadId,
-      includeTurns: true,
-      ...(input.limit !== undefined ? { limit: input.limit } : {}),
-      ...(input.beforeTurnId ? { beforeTurnId: input.beforeTurnId } : {}),
-    });
-    return mapThread(response.thread);
+    try {
+      const response = await this.client!.request<{ thread: any }>('thread/read', {
+        threadId,
+        includeTurns: true,
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        ...(input.beforeTurnId ? { beforeTurnId: input.beforeTurnId } : {}),
+      });
+      const thread = mapThread(response.thread);
+      this.startedThreads.set(thread.id, thread);
+      return thread;
+    } catch (error) {
+      const startedThread = this.startedThreads.get(threadId);
+      if (startedThread && isUnmaterializedThreadReadError(error)) {
+        return startedThread;
+      }
+      throw error;
+    }
   }
 
   async resumeThread(input: ThreadResumeInput) {
@@ -602,6 +674,7 @@ export class CodexAppServerManager extends EventEmitter {
       if (isCurrentClient) {
         this.client?.close();
         this.client = null;
+        this.startedThreads.clear();
       }
       if (isCurrentProcess) {
         this.process = null;
@@ -669,6 +742,8 @@ export class CodexAppServerManager extends EventEmitter {
       this.setStatus('failed', error instanceof Error ? error.message : String(error));
       throw error;
     });
+
+    client.notify('initialized', {});
 
     this.setStatus('ready', null);
   }
