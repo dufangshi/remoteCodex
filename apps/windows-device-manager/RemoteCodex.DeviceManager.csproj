@@ -17,7 +17,7 @@
     <PublishTrimmed>false</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>embedded</DebugType>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <AssemblyTitle>Remote Codex Device Manager</AssemblyTitle>
     <Product>Remote Codex Device Manager</Product>
     <Description>Windows tray application for a Remote Codex Relay Device.</Description>
