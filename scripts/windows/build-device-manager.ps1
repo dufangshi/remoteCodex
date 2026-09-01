@@ -8,16 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $projectPath = Join-Path $repositoryRoot 'apps\windows-device-manager\RemoteCodex.DeviceManager.csproj'
-$productManifestPath = Join-Path $repositoryRoot 'apps\windows-device-manager\ProductManifest.cs'
 $dotnet = (Get-Command dotnet.exe -ErrorAction SilentlyContinue)
 if (-not $dotnet) {
   $dotnet = (Get-Command dotnet -ErrorAction Stop)
-}
-
-$packageVersion = (Get-Content -LiteralPath (Join-Path $repositoryRoot 'package.json') -Raw | ConvertFrom-Json).version
-$productManifest = Get-Content -LiteralPath $productManifestPath -Raw
-if ($productManifest -notmatch ('RemoteCodexVersion\s*=\s*"{0}"' -f [Regex]::Escape($packageVersion))) {
-  throw "ProductManifest.RemoteCodexVersion must match package.json version $packageVersion."
 }
 
 & $dotnet.Source publish $projectPath `

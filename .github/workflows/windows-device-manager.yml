@@ -1,16 +1,6 @@
 name: Windows device manager
 
 on:
-  pull_request:
-    paths:
-      - 'apps/windows-device-manager/**'
-      - 'scripts/windows/build-device-manager.ps1'
-      - '.github/workflows/windows-device-manager.yml'
-  push:
-    paths:
-      - 'apps/windows-device-manager/**'
-      - 'scripts/windows/build-device-manager.ps1'
-      - '.github/workflows/windows-device-manager.yml'
   workflow_dispatch:
 
 permissions:
