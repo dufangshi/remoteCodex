@@ -190,6 +190,7 @@ export function RelayDevicesPage() {
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const hasLoadedPortalRef = useRef(false);
   const handledShareDeviceRequestRef = useRef<string | null>(null);
+  const copiedResetTimeoutRef = useRef<number | null>(null);
 
   const load = useCallback(
     async (options?: { showLoading?: boolean; clearError?: boolean }) => {
@@ -230,6 +231,12 @@ export function RelayDevicesPage() {
       window.clearInterval(intervalId);
     };
   }, [load]);
+
+  useEffect(() => () => {
+    if (copiedResetTimeoutRef.current !== null) {
+      window.clearTimeout(copiedResetTimeoutRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const requestedDeviceId = searchParams.get('shareDevice');
@@ -442,10 +449,14 @@ export function RelayDevicesPage() {
         relaySupervisorCommand(token, platform),
       );
       setCopiedDeviceId(device.id);
-      window.setTimeout(() => {
+      if (copiedResetTimeoutRef.current !== null) {
+        window.clearTimeout(copiedResetTimeoutRef.current);
+      }
+      copiedResetTimeoutRef.current = window.setTimeout(() => {
         setCopiedDeviceId((current) =>
           current === device.id ? null : current,
         );
+        copiedResetTimeoutRef.current = null;
       }, 1600);
     } catch {
       // Clipboard access can be unavailable in non-secure contexts.
