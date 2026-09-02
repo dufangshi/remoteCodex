@@ -1105,7 +1105,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async interruptTurn(input: InterruptAgentTurnInput): Promise<AgentTurn | null> {
     const state = this.sessions.get(input.providerSessionId);
-    if (!state?.activeMapper || state.activeMapper.turnId !== input.providerTurnId) {
+    if (!state?.activeMapper) {
       return null;
     }
     const mapper = state.activeMapper;

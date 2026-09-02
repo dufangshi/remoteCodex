@@ -32,9 +32,6 @@ export async function buildAcpPromptContent(input: {
 }): Promise<acp.ContentBlock[]> {
   if (input.content) {
     return input.content.map((block) => {
-      if (block.type === 'image' && input.promptCapabilities?.image !== true) {
-        throw new Error('The selected ACP agent does not support image prompts.');
-      }
       if (block.type === 'audio' && input.promptCapabilities?.audio !== true) {
         throw new Error('The selected ACP agent does not support audio prompts.');
       }
@@ -68,9 +65,6 @@ export async function buildAcpPromptContent(input: {
     );
     const uri = pathToFileURL(assetPath).toString();
     if (kind === 'PHOTO') {
-      if (input.promptCapabilities?.image !== true) {
-        throw new Error('The selected ACP agent does not support image prompts.');
-      }
       const stat = await fs.stat(assetPath);
       if (!stat.isFile() || stat.size > maxEmbeddedImageBytes) {
         throw new Error('ACP image attachment is missing or exceeds 20 MiB.');

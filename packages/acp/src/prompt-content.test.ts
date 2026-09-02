@@ -23,7 +23,7 @@ describe('ACP prompt content', () => {
     const blocks = await buildAcpPromptContent({
       prompt: 'Inspect [PHOTO ./pixel.png] and [FILE ./notes.txt] now.',
       workspacePath: workspace,
-      promptCapabilities: { image: true },
+      promptCapabilities: {},
     });
 
     expect(blocks).toMatchObject([
@@ -35,7 +35,7 @@ describe('ACP prompt content', () => {
     ]);
   });
 
-  it('rejects unsupported images and paths outside the workspace', async () => {
+  it('passes images through regardless of the advertised capability', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-acp-prompt-'));
     directories.push(workspace);
     await fs.writeFile(path.join(workspace, 'pixel.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -43,8 +43,19 @@ describe('ACP prompt content', () => {
     await expect(buildAcpPromptContent({
       prompt: '[PHOTO ./pixel.png]',
       workspacePath: workspace,
+      promptCapabilities: { image: false },
+    })).resolves.toMatchObject([{ type: 'image', data: 'iVBORw==' }]);
+    await expect(buildAcpPromptContent({
+      prompt: '',
+      workspacePath: workspace,
       promptCapabilities: {},
-    })).rejects.toThrow(/does not support image prompts/);
+      content: [{ type: 'image', data: 'iVBORw==', mimeType: 'image/png' }],
+    })).resolves.toMatchObject([{ type: 'image', data: 'iVBORw==' }]);
+  });
+
+  it('rejects attachment paths outside the workspace', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-acp-prompt-'));
+    directories.push(workspace);
     await expect(buildAcpPromptContent({
       prompt: '[FILE ../outside.txt]',
       workspacePath: workspace,

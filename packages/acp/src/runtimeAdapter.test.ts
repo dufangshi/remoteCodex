@@ -251,7 +251,7 @@ describe('AcpRuntimeAdapter', () => {
     });
   }, 15_000);
 
-  it('does not leave an active turn when prompt content validation fails', async () => {
+  it('passes an unadvertised image through and accepts the next text turn', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
       env: {
@@ -270,19 +270,33 @@ describe('AcpRuntimeAdapter', () => {
       approvalMode: 'yolo',
     });
 
-    await expect(adapter.startTurn({
+    const imageCompleted = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Image turn timed out.')), 10_000);
+        adapter.on('event', (event: AgentRuntimeEvent) => {
+          if (event.type === 'turn.completed') {
+            clearTimeout(timer);
+            resolve(event);
+          }
+        });
+      },
+    );
+    await adapter.startTurn({
       providerSessionId: session.providerSessionId,
       prompt: 'Inspect the image.',
       content: [{ type: 'image', data: 'iVBORw==', mimeType: 'image/png' }],
-    })).rejects.toThrow(/does not support image prompts/);
-
-    expect(events).not.toContainEqual(expect.objectContaining({ type: 'turn.started' }));
-    expect(await adapter.readSession(session.providerSessionId)).toMatchObject({
-      status: 'idle',
-      turns: [],
+    });
+    await expect(imageCompleted).resolves.toMatchObject({
+      turn: { status: 'completed' },
     });
 
-    const completed = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn.started' }));
+    expect(await adapter.readSession(session.providerSessionId)).toMatchObject({
+      status: 'idle',
+      turns: [expect.objectContaining({ status: 'completed' })],
+    });
+
+    const textCompleted = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
       (resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Retry turn timed out.')), 10_000);
         adapter.on('event', (event: AgentRuntimeEvent) => {
@@ -295,14 +309,14 @@ describe('AcpRuntimeAdapter', () => {
     );
     await adapter.startTurn({
       providerSessionId: session.providerSessionId,
-      prompt: 'Retry with text only.',
+      prompt: 'Continue with text only.',
     });
-    await expect(completed).resolves.toMatchObject({
+    await expect(textCompleted).resolves.toMatchObject({
       turn: { status: 'completed' },
     });
   }, 15_000);
 
-  it('allows an immediate next turn after interrupting a slow prompt', async () => {
+  it('cancels the session active turn despite a stale mapped turn id', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
       env: {
@@ -325,7 +339,7 @@ describe('AcpRuntimeAdapter', () => {
 
     await expect(adapter.interruptTurn({
       providerSessionId: session.providerSessionId,
-      providerTurnId: first.providerTurnId,
+      providerTurnId: 'stale-display-turn-id',
     })).resolves.toMatchObject({ status: 'interrupted' });
     expect(await adapter.readSession(session.providerSessionId)).toMatchObject({
       status: 'interrupted',
