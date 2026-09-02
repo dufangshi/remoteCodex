@@ -1053,6 +1053,21 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       input.performanceMode,
     );
 
+    const prompt = await buildAcpPromptContent({
+      prompt: input.prompt,
+      workspacePath: input.workspacePath ?? state.cwd,
+      promptCapabilities: this.initializeResponse?.agentCapabilities?.promptCapabilities,
+      ...(input.content ? { content: input.content } : {}),
+    });
+    const promptPreamble = [
+      this.harnessAdapter.promptPreamble,
+      input.developerInstructions?.trim(),
+    ].filter((value): value is string => Boolean(value));
+    if (promptPreamble.length > 0) {
+      prompt.unshift({ type: 'text', text: `${promptPreamble.join('\n\n')}\n\n` });
+    }
+    const context = await this.requireContext();
+
     const turnId = input.displayTurnId ?? randomUUID();
     const startedAt = new Date().toISOString();
     const initialItems: AgentHistoryItem[] = input.hidden
@@ -1076,24 +1091,12 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       turn: startedTurn,
     });
 
-    const prompt = await buildAcpPromptContent({
-      prompt: input.prompt,
-      workspacePath: input.workspacePath ?? state.cwd,
-      promptCapabilities: this.initializeResponse?.agentCapabilities?.promptCapabilities,
-      ...(input.content ? { content: input.content } : {}),
-    });
-    const promptPreamble = [
-      this.harnessAdapter.promptPreamble,
-      input.developerInstructions?.trim(),
-    ].filter((value): value is string => Boolean(value));
-    if (promptPreamble.length > 0) {
-      prompt.unshift({ type: 'text', text: `${promptPreamble.join('\n\n')}\n\n` });
-    }
-    const context = await this.requireContext();
-    void context.request(acp.methods.agent.session.prompt, {
-      sessionId: state.providerSessionId,
-      prompt,
-    }).then(
+    void Promise.resolve().then(() =>
+      context.request(acp.methods.agent.session.prompt, {
+        sessionId: state.providerSessionId,
+        prompt,
+      }),
+    ).then(
       (response) => this.completePrompt(state, mapper, response),
       (error) => this.failPrompt(state, mapper, error),
     );
@@ -1105,11 +1108,12 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (!state?.activeMapper || state.activeMapper.turnId !== input.providerTurnId) {
       return null;
     }
+    const mapper = state.activeMapper;
     const context = await this.requireContext();
     await context.notify(acp.methods.agent.session.cancel, {
       sessionId: input.providerSessionId,
     });
-    return state.activeMapper.turn('interrupted');
+    return this.finishPrompt(state, mapper, 'interrupted', null);
   }
 
   mapProviderRequest(
@@ -1609,44 +1613,36 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       });
     }
     const status = response.stopReason === 'cancelled' ? 'interrupted' : 'completed';
-    const completed = mapper.complete(status);
-    for (const itemUpdate of completed.updates) {
-      this.emitItemUpdate(state, mapper.turnId, itemUpdate);
-    }
-    const turn = {
-      ...completed.turn,
-      startedAt: state.turns.find((candidate) => candidate.providerTurnId === mapper.turnId)?.startedAt ?? null,
-      rawTurn: response,
-    };
-    this.replaceTurn(state, turn);
-    state.activeMapper = null;
-    state.status = status === 'interrupted' ? 'interrupted' : 'idle';
-    state.updatedAt = new Date().toISOString();
-    this.emitRuntimeEvent({
-      type: 'turn.completed',
-      provider: 'acp',
-      providerSessionId: state.providerSessionId,
-      turn,
-    });
+    this.finishPrompt(state, mapper, status, response);
   }
 
   private failPrompt(state: AcpSessionState, mapper: AcpTurnItemMapper, error: unknown) {
-    if (state.activeMapper !== mapper) {
-      return;
-    }
     const message = errorMessage(error);
-    const completed = mapper.complete('failed', message);
+    this.finishPrompt(state, mapper, 'failed', error, message);
+  }
+
+  private finishPrompt(
+    state: AcpSessionState,
+    mapper: AcpTurnItemMapper,
+    status: 'completed' | 'interrupted' | 'failed',
+    rawTurn: unknown,
+    error?: string,
+  ) {
+    if (state.activeMapper !== mapper) {
+      return mapper.turn(status);
+    }
+    const completed = mapper.complete(status, error);
     for (const itemUpdate of completed.updates) {
       this.emitItemUpdate(state, mapper.turnId, itemUpdate);
     }
     const turn = {
       ...completed.turn,
       startedAt: state.turns.find((candidate) => candidate.providerTurnId === mapper.turnId)?.startedAt ?? null,
-      rawTurn: error,
+      rawTurn,
     };
     this.replaceTurn(state, turn);
     state.activeMapper = null;
-    state.status = 'failed';
+    state.status = status === 'completed' ? 'idle' : status;
     state.updatedAt = new Date().toISOString();
     this.emitRuntimeEvent({
       type: 'turn.completed',
@@ -1654,6 +1650,7 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       providerSessionId: state.providerSessionId,
       turn,
     });
+    return turn;
   }
 
   private replaceTurn(state: AcpSessionState, turn: AgentTurn) {

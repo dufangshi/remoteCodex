@@ -251,6 +251,114 @@ describe('AcpRuntimeAdapter', () => {
     });
   }, 15_000);
 
+  it('does not leave an active turn when prompt content validation fails', async () => {
+    const adapter = new AcpRuntimeAdapter({
+      command: `"${process.execPath}" "${fixture}"`,
+      env: {
+        REMOTE_CODEX_FAKE_ACP_CAPABILITY_PROFILE: 'minimal',
+        REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',
+      },
+      startupTimeoutMs: 5_000,
+    });
+    adapters.push(adapter);
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event as AgentRuntimeEvent));
+    await adapter.start();
+    const session = await adapter.startSession({
+      cwd: process.cwd(),
+      model: 'fixture-model',
+      approvalMode: 'yolo',
+    });
+
+    await expect(adapter.startTurn({
+      providerSessionId: session.providerSessionId,
+      prompt: 'Inspect the image.',
+      content: [{ type: 'image', data: 'iVBORw==', mimeType: 'image/png' }],
+    })).rejects.toThrow(/does not support image prompts/);
+
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'turn.started' }));
+    expect(await adapter.readSession(session.providerSessionId)).toMatchObject({
+      status: 'idle',
+      turns: [],
+    });
+
+    const completed = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Retry turn timed out.')), 10_000);
+        adapter.on('event', (event: AgentRuntimeEvent) => {
+          if (event.type === 'turn.completed') {
+            clearTimeout(timer);
+            resolve(event);
+          }
+        });
+      },
+    );
+    await adapter.startTurn({
+      providerSessionId: session.providerSessionId,
+      prompt: 'Retry with text only.',
+    });
+    await expect(completed).resolves.toMatchObject({
+      turn: { status: 'completed' },
+    });
+  }, 15_000);
+
+  it('allows an immediate next turn after interrupting a slow prompt', async () => {
+    const adapter = new AcpRuntimeAdapter({
+      command: `"${process.execPath}" "${fixture}"`,
+      env: {
+        REMOTE_CODEX_FAKE_ACP_SKIP_PERMISSION: '1',
+        REMOTE_CODEX_FAKE_ACP_STREAM_DELAY_MS: '750',
+      },
+      startupTimeoutMs: 5_000,
+    });
+    adapters.push(adapter);
+    await adapter.start();
+    const session = await adapter.startSession({
+      cwd: process.cwd(),
+      model: 'fixture-model',
+      approvalMode: 'yolo',
+    });
+    const first = await adapter.startTurn({
+      providerSessionId: session.providerSessionId,
+      prompt: 'Start a slow turn.',
+    });
+
+    await expect(adapter.interruptTurn({
+      providerSessionId: session.providerSessionId,
+      providerTurnId: first.providerTurnId,
+    })).resolves.toMatchObject({ status: 'interrupted' });
+    expect(await adapter.readSession(session.providerSessionId)).toMatchObject({
+      status: 'interrupted',
+      turns: [expect.objectContaining({ status: 'interrupted' })],
+    });
+
+    const secondCompleted = new Promise<Extract<AgentRuntimeEvent, { type: 'turn.completed' }>>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Post-interrupt turn timed out.')), 10_000);
+        adapter.on('event', (event: AgentRuntimeEvent) => {
+          if (
+            event.type === 'turn.completed' &&
+            event.turn.providerTurnId !== first.providerTurnId
+          ) {
+            clearTimeout(timer);
+            resolve(event);
+          }
+        });
+      },
+    );
+    const second = await adapter.startTurn({
+      providerSessionId: session.providerSessionId,
+      prompt: 'Start immediately after cancellation.',
+    });
+    expect(second.providerTurnId).not.toBe(first.providerTurnId);
+    await expect(secondCompleted).resolves.toMatchObject({
+      turn: {
+        providerTurnId: second.providerTurnId,
+        status: 'completed',
+      },
+    });
+  }, 15_000);
+
   it('shares negotiated steering, goal, and session fork across non-Codex ACP agents', async () => {
     const adapter = new AcpRuntimeAdapter({
       command: `"${process.execPath}" "${fixture}"`,
