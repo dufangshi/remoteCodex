@@ -164,7 +164,11 @@ impl AgentRuntime for FakeRuntime {
         Ok(())
     }
 
-    async fn list_models(&self, _agent_id: Option<&str>) -> Result<Vec<ModelOptionDto>> {
+    async fn list_models(
+        &self,
+        _agent_id: Option<&str>,
+        _cwd: Option<&str>,
+    ) -> Result<Vec<ModelOptionDto>> {
         Ok(Self::models())
     }
 

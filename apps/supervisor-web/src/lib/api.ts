@@ -443,7 +443,8 @@ async function request<T>(
       if (wakeAttempt > 0) {
         emitHostedVmWake({ state: 'connected', attempt: wakeAttempt });
       }
-      return (await response.json()) as T;
+      const text = await response.text();
+      return (text ? JSON.parse(text) : {}) as T;
     }
     const payload = await readApiErrorPayload(response);
     const hostedVmStarting =

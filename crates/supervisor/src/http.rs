@@ -281,6 +281,7 @@ async fn agent_status(
 #[serde(rename_all = "camelCase")]
 struct AgentQuery {
     agent_id: Option<String>,
+    cwd: Option<String>,
 }
 
 async fn agent_models(
@@ -290,7 +291,7 @@ async fn agent_models(
 ) -> Result<Json<Value>, ApiErr> {
     let provider = parse_provider(&provider)?;
     let models = state
-        .list_models(provider, query.agent_id.as_deref())
+        .list_models(provider, query.agent_id.as_deref(), query.cwd.as_deref())
         .await
         .map_err(map_err)?;
     Ok(Json(serde_json::to_value(models).unwrap_or(json!([]))))
@@ -392,9 +393,9 @@ async fn patch_workspace(
 async fn delete_workspace(
     Path(id): Path<String>,
     State(state): State<AppState>,
-) -> Result<StatusCode, ApiErr> {
+) -> Result<Json<Value>, ApiErr> {
     state.delete_workspace(&id).map_err(map_err)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(json!({ "id": id })))
 }
 
 #[derive(Deserialize)]

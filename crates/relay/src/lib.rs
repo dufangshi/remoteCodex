@@ -8,7 +8,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
-use axum::http::{header, HeaderMap, Method};
+use axum::http::{header, HeaderMap, Method, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router};
@@ -157,6 +157,7 @@ pub async fn serve() -> Result<()> {
         .route("/relay/auth/logout", post(logout))
         .route("/relay/auth/session", get(session))
         .route("/relay/portal", get(portal))
+        .route("/relay/access", get(relay_access))
         .route("/relay/devices", get(list_devices).post(create_device))
         .route("/relay/devices/{device_id}", delete(delete_device))
         .route("/relay/shares", get(list_shares).post(create_share))
@@ -577,6 +578,117 @@ async fn list_devices(
     Json(json!({ "devices": list_user_devices(&state, &user.id).await })).into_response()
 }
 
+#[derive(Deserialize, Default)]
+#[allow(dead_code)]
+struct AccessQuery {
+    token: Option<String>,
+    #[serde(rename = "deviceToken")]
+    device_token: Option<String>,
+    #[serde(rename = "deviceId")]
+    device_id: Option<String>,
+    #[serde(rename = "threadId")]
+    thread_id: Option<String>,
+    #[serde(rename = "workspaceId")]
+    workspace_id: Option<String>,
+}
+
+impl AccessQuery {
+    fn token_query(&self) -> TokenQuery {
+        TokenQuery {
+            token: self.token.clone(),
+            device_token: self.device_token.clone(),
+        }
+    }
+}
+
+fn owner_access() -> Value {
+    json!({
+        "kind": "owner",
+        "grantId": Value::Null,
+        "shareId": Value::Null,
+        "scope": "owner",
+        "threadAccess": "control",
+        "workspaceAccess": "write",
+        "workspaceId": Value::Null,
+        "workspaceScope": Value::Null,
+        "canCreateThreads": true
+    })
+}
+
+async fn relay_access(
+    headers: HeaderMap,
+    Query(query): Query<AccessQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let user = {
+        let conn = state.store.conn.lock().await;
+        extract_bearer(&headers, &query.token_query())
+            .and_then(|token| load_user_by_session(&conn, &token))
+    };
+    let Some(user) = user else {
+        return unauthorized();
+    };
+    let Some(device_id) = query.device_id.filter(|value| !value.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": "bad_request", "message": "deviceId is required" })),
+        )
+            .into_response();
+    };
+    let conn = state.store.conn.lock().await;
+    let owned: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM devices WHERE id=?1 AND user_id=?2",
+            params![device_id, user.id],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    if owned.is_some() {
+        return Json(owner_access()).into_response();
+    }
+    let share: Option<(String, String, String, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT id, thread_access, workspace_access, thread_id, workspace_id
+             FROM shares
+             WHERE target_username=?1 AND device_id=?2 AND revoked_at IS NULL
+             ORDER BY created_at DESC LIMIT 1",
+            params![user.username, device_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .ok()
+        .flatten();
+    if let Some((id, thread_access, workspace_access, _thread_id, workspace_id)) = share {
+        return Json(json!({
+            "kind": "shared",
+            "grantId": Value::Null,
+            "shareId": id,
+            "scope": "thread",
+            "threadAccess": thread_access,
+            "workspaceAccess": workspace_access,
+            "workspaceId": workspace_id,
+            "workspaceScope": Value::Null,
+            "canCreateThreads": false
+        }))
+        .into_response();
+    }
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({ "code": "forbidden", "message": "Device access is not allowed." })),
+    )
+        .into_response()
+}
+
 async fn portal(
     headers: HeaderMap,
     Query(query): Query<TokenQuery>,
@@ -899,13 +1011,27 @@ async fn device_healthz(
 async fn device_api(
     Path((device_id, rest)): Path<(String, String)>,
     method: Method,
+    uri: Uri,
     Query(query): Query<TokenQuery>,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
     let _ = headers;
-    let path = format!("/api/{rest}");
+    let mut path = format!("/api/{rest}");
+    if let Some(raw) = uri.query() {
+        let filtered: Vec<&str> = raw
+            .split('&')
+            .filter(|part| {
+                let key = part.split('=').next().unwrap_or("");
+                key != "token" && key != "deviceToken"
+            })
+            .collect();
+        if !filtered.is_empty() {
+            path.push('?');
+            path.push_str(&filtered.join("&"));
+        }
+    }
     forward_device(
         state,
         device_id,

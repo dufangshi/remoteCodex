@@ -321,4 +321,14 @@ async fn named_workspace_and_backend_status_are_usable() {
     let abs = created["absPath"].as_str().unwrap();
     assert!(abs.ends_with("from-name"));
     assert!(ws_root.join("from-name").is_dir());
+
+    let deleted = json(
+        &client,
+        client.delete(format!(
+            "{base}/api/workspaces/{}",
+            created["id"].as_str().unwrap()
+        )),
+    )
+    .await;
+    assert_eq!(deleted["id"], created["id"]);
 }

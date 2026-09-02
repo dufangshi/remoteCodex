@@ -23,7 +23,7 @@ use crate::files::write_file;
 
 use super::adapter::adapter_for;
 use super::capabilities::{negotiate, NegotiatedCaps};
-use super::catalog::{builtin_agents, command_available, AcpAgentDef};
+use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
 use super::mapper::TurnMapper;
 use super::prompt::build_prompt_blocks;
 use super::rpc::AcpProcess;
@@ -46,6 +46,7 @@ struct LiveSession {
     model: Option<String>,
     reasoning_effort: Option<String>,
     active: Option<ActiveTurn>,
+    config_options: Value,
 }
 
 struct Inner {
@@ -121,8 +122,9 @@ impl AcpRuntime {
         yolo: bool,
         load_id: Option<&str>,
     ) -> Result<(String, LiveSession)> {
-        if !command_available(&def.server_command) && !command_available(&def.base_command) {
-            bail!("{} is not installed", def.display_name);
+        let availability = classify_availability(def);
+        if availability != "ready" {
+            bail!("{} is not available ({availability})", def.display_name);
         }
         let adapter = adapter_for(&def.id);
         let mut extra_env = Vec::new();
@@ -202,10 +204,12 @@ impl AcpRuntime {
         if session_id.is_empty() {
             bail!("ACP session id missing");
         }
-        if let Some(options) = raw_session.get("configOptions") {
-            if let Some(caps) = self.inner.caps_by_agent.lock().await.get_mut(&def.id) {
-                apply_config_option_caps(caps, options);
-            }
+        let config_options = raw_session
+            .get("configOptions")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        if let Some(caps) = self.inner.caps_by_agent.lock().await.get_mut(&def.id) {
+            apply_config_option_caps(caps, &config_options);
         }
         let scoped = Self::scoped_id(&def.id, &session_id);
         Ok((
@@ -221,8 +225,23 @@ impl AcpRuntime {
                 model: None,
                 reasoning_effort: None,
                 active: None,
+                config_options,
             },
         ))
+    }
+
+    async fn models_from_live(&self, agent_id: &str) -> Option<Vec<ModelOptionDto>> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .values()
+            .find(|session| session.adapter_id == agent_id)?;
+        let models = models_from_config_options(&live.config_options);
+        (!models.is_empty()).then_some(models)
+    }
+
+    async fn probe_models(&self, def: &AcpAgentDef, cwd: &str) -> Result<Vec<ModelOptionDto>> {
+        let (_scoped, live) = self.spawn_session(def, cwd, true, None).await?;
+        Ok(models_from_config_options(&live.config_options))
     }
 
     async fn caps_for(&self, agent_id: Option<&str>) -> AgentProviderCapabilitiesDto {
@@ -254,10 +273,11 @@ impl AgentRuntime for AcpRuntime {
         let started = self.started_at.try_lock().ok().and_then(|g| g.clone());
         let bound = self.bound_agent.clone().unwrap_or_else(|| "acp".into());
         let def = self.agent_def(Some(&bound)).ok();
-        let installed = def
+        let availability = def
             .as_ref()
-            .map(|d| command_available(&d.server_command) || command_available(&d.base_command))
-            .unwrap_or(false);
+            .map(classify_availability)
+            .unwrap_or("base_missing");
+        let installed = availability == "ready";
         let caps = self
             .inner
             .caps_by_agent
@@ -328,35 +348,35 @@ impl AgentRuntime for AcpRuntime {
         Ok(())
     }
 
-    async fn list_models(&self, agent_id: Option<&str>) -> Result<Vec<ModelOptionDto>> {
-        Ok(vec![ModelOptionDto {
-            id: "default".into(),
-            model: agent_id
-                .or(self.bound_agent.as_deref())
-                .unwrap_or("default")
-                .into(),
-            display_name: "Default".into(),
-            description: "Harness default model.".into(),
-            is_default: true,
-            hidden: false,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortOptionDto {
-                    reasoning_effort: "low".into(),
-                    description: "Low".into(),
-                },
-                ReasoningEffortOptionDto {
-                    reasoning_effort: "medium".into(),
-                    description: "Medium".into(),
-                },
-                ReasoningEffortOptionDto {
-                    reasoning_effort: "high".into(),
-                    description: "High".into(),
-                },
-            ],
-            default_reasoning_effort: Some("medium".into()),
-            selection_kind: Some("model".into()),
-            acp_agent: None,
-        }])
+    async fn list_models(
+        &self,
+        agent_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<Vec<ModelOptionDto>> {
+        let def = match self.agent_def(agent_id) {
+            Ok(def) => def,
+            Err(_) => return Ok(default_model_stub(agent_id.or(self.bound_agent.as_deref()))),
+        };
+        if classify_availability(&def) != "ready" {
+            return Ok(default_model_stub(Some(&def.id)));
+        }
+        if let Some(models) = self.models_from_live(&def.id).await {
+            if !models.is_empty() {
+                return Ok(models);
+            }
+        }
+        let command_models = list_command_models(&def);
+        if !command_models.is_empty() {
+            return Ok(command_models);
+        }
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            if let Ok(models) = self.probe_models(&def, cwd).await {
+                if !models.is_empty() {
+                    return Ok(models);
+                }
+            }
+        }
+        Ok(default_model_stub(Some(&def.id)))
     }
 
     async fn list_agents(&self) -> Result<Vec<ModelOptionDto>> {
@@ -366,8 +386,7 @@ impl AgentRuntime for AcpRuntime {
         Ok(builtin_agents(self.custom_command.as_deref())
             .into_iter()
             .map(|entry| {
-                let available = command_available(&entry.server_command)
-                    || command_available(&entry.base_command);
+                let availability = classify_availability(&entry);
                 ModelOptionDto {
                     id: entry.id.clone(),
                     model: entry.id.clone(),
@@ -381,9 +400,25 @@ impl AgentRuntime for AcpRuntime {
                     acp_agent: Some(json!({
                         "id": entry.id,
                         "displayName": entry.display_name,
-                        "availability": if available { "ready" } else { "missing" },
                         "transport": entry.transport,
+                        "availability": availability,
+                        "baseCommand": entry.base_command,
+                        "baseProbeCommand": format!("{} --version", entry.base_command),
+                        "serverCommand": entry.server_command,
+                        "serverProbeCommand": format!("{} --help", entry.server_command),
+                        "baseVersion": Value::Null,
+                        "serverVersion": Value::Null,
                         "installCommand": entry.install_command,
+                        "busy": false,
+                        "statusMessage": match availability {
+                            "ready" => "Ready".to_string(),
+                            "adapter_missing" => format!(
+                                "Base agent detected. Install its ACP adapter: {}",
+                                entry.install_command.as_deref().unwrap_or(entry.server_command.as_str())
+                            ),
+                            "base_missing" => format!("Install the base agent first: {}", entry.base_command),
+                            _ => format!("{} is unavailable.", entry.display_name),
+                        },
                     })),
                 }
             })
@@ -395,17 +430,12 @@ impl AgentRuntime for AcpRuntime {
             .map(str::to_string)
             .or_else(|| self.bound_agent.clone())
             .unwrap_or_else(|| "acp".into());
-        let installed = self
+        let availability = self
             .agent_def(Some(&id))
             .ok()
-            .map(|d| command_available(&d.server_command) || command_available(&d.base_command))
-            .unwrap_or(false);
-        let availability = if installed {
-            "ready"
-        } else {
-            "adapter_missing"
-        };
-        let effective = if installed {
+            .map(|def| classify_availability(&def))
+            .unwrap_or("base_missing");
+        let effective = if availability == "ready" {
             Some(self.caps_for(Some(&id)).await)
         } else {
             None
@@ -693,7 +723,18 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn fork_session(&self, session_id: &str) -> Result<StartSessionResult> {
-        let (process, raw_session, cwd, yolo, negotiated, adapter_id, goal, model, effort) = {
+        let (
+            process,
+            raw_session,
+            cwd,
+            yolo,
+            negotiated,
+            adapter_id,
+            goal,
+            model,
+            effort,
+            config_options,
+        ) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
                 .get(session_id)
@@ -711,6 +752,7 @@ impl AgentRuntime for AcpRuntime {
                 live.goal.clone(),
                 live.model.clone(),
                 live.reasoning_effort.clone(),
+                live.config_options.clone(),
             )
         };
         let response = process
@@ -742,6 +784,7 @@ impl AgentRuntime for AcpRuntime {
                 model: model.clone(),
                 reasoning_effort: effort.clone(),
                 active: None,
+                config_options,
             },
         );
         Ok(StartSessionResult {
@@ -1054,6 +1097,161 @@ async fn handle_agent_request(
         }
     }
     Ok(())
+}
+
+fn default_model_stub(agent_id: Option<&str>) -> Vec<ModelOptionDto> {
+    vec![ModelOptionDto {
+        id: "default".into(),
+        model: agent_id.unwrap_or("default").into(),
+        display_name: "Default".into(),
+        description: "Harness default model.".into(),
+        is_default: true,
+        hidden: false,
+        supported_reasoning_efforts: vec![
+            ReasoningEffortOptionDto {
+                reasoning_effort: "low".into(),
+                description: "Low".into(),
+            },
+            ReasoningEffortOptionDto {
+                reasoning_effort: "medium".into(),
+                description: "Medium".into(),
+            },
+            ReasoningEffortOptionDto {
+                reasoning_effort: "high".into(),
+                description: "High".into(),
+            },
+        ],
+        default_reasoning_effort: Some("medium".into()),
+        selection_kind: Some("model".into()),
+        acp_agent: None,
+    }]
+}
+
+fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
+    let Some(command) = def.model_list_command.as_deref() else {
+        return Vec::new();
+    };
+    let mut parts = command.split_whitespace();
+    let Some(exe) = parts.next() else {
+        return Vec::new();
+    };
+    let output = std::process::Command::new(exe).args(parts).output().ok();
+    let Some(output) = output.filter(|output| output.status.success()) else {
+        return Vec::new();
+    };
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_command_models(&text)
+        .into_iter()
+        .map(|(model, is_default)| ModelOptionDto {
+            id: model.clone(),
+            model: model.clone(),
+            display_name: model,
+            description: String::new(),
+            is_default,
+            hidden: false,
+            supported_reasoning_efforts: vec![],
+            default_reasoning_effort: None,
+            selection_kind: Some("model".into()),
+            acp_agent: None,
+        })
+        .collect()
+}
+
+fn models_from_config_options(options: &Value) -> Vec<ModelOptionDto> {
+    let Some(arr) = options.as_array() else {
+        return Vec::new();
+    };
+    let model_opt = arr.iter().find(|opt| {
+        opt.get("category").and_then(Value::as_str) == Some("model")
+            || opt
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.to_ascii_lowercase().contains("model"))
+    });
+    let Some(model_opt) = model_opt else {
+        return Vec::new();
+    };
+    let current = model_opt
+        .get("currentValue")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let efforts = reasoning_efforts_from_options(arr);
+    collect_select_options(model_opt)
+        .into_iter()
+        .filter_map(|entry| {
+            let value = entry.get("value").and_then(Value::as_str)?;
+            Some(ModelOptionDto {
+                id: value.to_string(),
+                model: value.to_string(),
+                display_name: entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(value)
+                    .to_string(),
+                description: entry
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                is_default: value == current,
+                hidden: false,
+                supported_reasoning_efforts: efforts.clone(),
+                default_reasoning_effort: efforts
+                    .iter()
+                    .find(|effort| effort.reasoning_effort == "medium")
+                    .or(efforts.first())
+                    .map(|effort| effort.reasoning_effort.clone()),
+                selection_kind: Some("model".into()),
+                acp_agent: None,
+            })
+        })
+        .collect()
+}
+
+fn collect_select_options(opt: &Value) -> Vec<&Value> {
+    let Some(options) = opt.get("options").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in options {
+        if entry.get("options").is_some() {
+            out.extend(collect_select_options(entry));
+        } else {
+            out.push(entry);
+        }
+    }
+    out
+}
+
+fn reasoning_efforts_from_options(options: &[Value]) -> Vec<ReasoningEffortOptionDto> {
+    let thought = options.iter().find(|opt| {
+        opt.get("category").and_then(Value::as_str) == Some("thought_level")
+            || opt.get("id").and_then(Value::as_str).is_some_and(|id| {
+                let id = id.to_ascii_lowercase();
+                id.contains("thought") || id.contains("reasoning") || id.contains("effort")
+            })
+    });
+    let Some(thought) = thought else {
+        return Vec::new();
+    };
+    collect_select_options(thought)
+        .into_iter()
+        .filter_map(|entry| {
+            let value = entry.get("value").and_then(Value::as_str)?;
+            Some(ReasoningEffortOptionDto {
+                reasoning_effort: value.to_string(),
+                description: entry
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or(value)
+                    .to_string(),
+            })
+        })
+        .collect()
 }
 
 fn apply_config_option_caps(caps: &mut AgentProviderCapabilitiesDto, options: &Value) {

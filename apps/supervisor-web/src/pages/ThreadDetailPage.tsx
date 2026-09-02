@@ -1203,9 +1203,10 @@ export function ThreadDetailPage() {
         seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex';
       const agentId = seedThread?.agentId ?? detailRef.current?.thread.agentId ?? null;
       const cwd = detailRef.current?.workspace.absPath ?? null;
-      const modelRequest = provider === 'acp' && agentId && cwd
-        ? fetchAgentBackendModelsFor(provider, { agentId, cwd })
-        : fetchAgentBackendModels(provider);
+      const modelRequest = fetchAgentBackendModelsFor(provider, {
+        ...(provider === 'acp' && agentId ? { agentId } : {}),
+        cwd,
+      });
       const agentRequest = provider === 'acp'
         ? fetchAgentBackendAgents(provider)
         : Promise.resolve([] as ModelOptionDto[]);

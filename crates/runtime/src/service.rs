@@ -1038,8 +1038,9 @@ impl Supervisor {
         &self,
         provider: Provider,
         agent_id: Option<&str>,
+        cwd: Option<&str>,
     ) -> Result<Vec<ModelOptionDto>> {
-        self.runtime(provider)?.list_models(agent_id).await
+        self.runtime(provider)?.list_models(agent_id, cwd).await
     }
 
     pub async fn list_agents(&self, provider: Provider) -> Result<Vec<ModelOptionDto>> {

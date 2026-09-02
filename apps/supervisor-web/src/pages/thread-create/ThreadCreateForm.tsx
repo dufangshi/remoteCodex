@@ -16,7 +16,6 @@ import {
   createThread,
   fetchAgentBackendAgents,
   fetchAgentBackends,
-  fetchAgentBackendModels,
   fetchAgentBackendModelsFor,
   fetchWorkspaces,
   installOrUpdateAgentBackend,
@@ -194,7 +193,9 @@ export function ThreadCreateForm({
     }
     setAgentOptions([]);
     setAgentId('');
-    fetchAgentBackendModels(provider)
+    fetchAgentBackendModelsFor(provider, {
+      cwd: selectedWorkspace?.absPath,
+    })
       .then((records) => {
         if (!cancelled) {
           applyModels(records);
@@ -209,7 +210,7 @@ export function ThreadCreateForm({
     return () => {
       cancelled = true;
     };
-  }, [provider, workspaceId]);
+  }, [provider, workspaceId, selectedWorkspace?.absPath]);
 
   useEffect(() => {
     if (provider !== 'acp' || !agentId || !selectedWorkspace) {

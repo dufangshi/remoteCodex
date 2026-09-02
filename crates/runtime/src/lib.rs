@@ -15,6 +15,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 pub async fn boot() -> Result<Arc<Supervisor>> {
+    crate::acp::augment_path();
     let config = RuntimeConfig::from_env();
     let db = Database::open(&config.database_url)?;
     let runtimes = bootstrap_runtimes(&config);

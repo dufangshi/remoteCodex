@@ -77,7 +77,11 @@ pub trait AgentRuntime: Send + Sync {
     fn provider(&self) -> Provider;
     fn descriptor(&self) -> AgentBackendDto;
     async fn start(&self) -> Result<()>;
-    async fn list_models(&self, agent_id: Option<&str>) -> Result<Vec<ModelOptionDto>>;
+    async fn list_models(
+        &self,
+        agent_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<Vec<ModelOptionDto>>;
     async fn list_agents(&self) -> Result<Vec<ModelOptionDto>>;
     async fn capabilities(&self, agent_id: Option<&str>) -> Result<AgentCapabilitySnapshotDto>;
     fn negotiated_caps(&self, _agent_id: Option<&str>) -> AgentProviderCapabilitiesDto {
