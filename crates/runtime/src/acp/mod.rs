@@ -1,6 +1,7 @@
 mod adapter;
 mod capabilities;
 mod catalog;
+mod grok;
 mod mapper;
 mod prompt;
 mod rpc;

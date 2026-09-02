@@ -631,6 +631,7 @@ async fn thread_settings(
                     body.collaboration_mode,
                     body.sandbox_mode,
                 )
+                .await
                 .map_err(map_err)?,
         )
         .unwrap(),

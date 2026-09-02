@@ -15,9 +15,6 @@ pub fn build_prompt_blocks(
 ) -> Result<Vec<Value>> {
     let mut blocks = expand_attachment_tokens(prompt, cwd, image_capable)?;
     for image in extra_images {
-        if !image_capable {
-            bail!("The selected ACP agent does not support image prompts.");
-        }
         blocks.push(json!({
             "type": "image",
             "mimeType": image.mime_type,
@@ -30,7 +27,7 @@ pub fn build_prompt_blocks(
     Ok(blocks)
 }
 
-fn expand_attachment_tokens(prompt: &str, cwd: &Path, image_capable: bool) -> Result<Vec<Value>> {
+fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> Result<Vec<Value>> {
     let mut blocks = Vec::new();
     let mut cursor = 0;
     let bytes = prompt.as_bytes();
@@ -60,9 +57,6 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, image_capable: bool) -> Re
         }
         let abs = assert_within(cwd, Path::new(requested))?;
         if kind == "PHOTO" {
-            if !image_capable {
-                bail!("The selected ACP agent does not support image prompts.");
-            }
             let file_bytes = std::fs::read(&abs)?;
             if file_bytes.len() > 20 * 1024 * 1024 {
                 bail!("ACP image attachment is missing or exceeds 20 MiB.");
@@ -133,10 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_image_when_not_capable() {
+    fn passes_images_through_when_capability_is_unadvertised() {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("red.png"), b"png").unwrap();
-        let err = build_prompt_blocks("[PHOTO red.png]", dir.path(), false, &[]).unwrap_err();
-        assert!(err.to_string().contains("does not support image"));
+        let blocks = build_prompt_blocks("[PHOTO red.png]", dir.path(), false, &[]).unwrap();
+        assert_eq!(blocks[0]["type"], "image");
     }
 }

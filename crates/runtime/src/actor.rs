@@ -132,6 +132,14 @@ pub trait AgentRuntime: Send + Sync {
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {
         remote_codex_protocol::toolbox_from_capabilities(&self.negotiated_caps(agent_id))
     }
+    async fn apply_session_settings(
+        &self,
+        _session_id: &str,
+        _model: Option<&str>,
+        _effort: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
+    }
     async fn install(&self, _agent_id: Option<&str>) -> Result<AgentBackendDto> {
         Ok(self.descriptor())
     }

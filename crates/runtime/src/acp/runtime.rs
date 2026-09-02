@@ -21,7 +21,7 @@ use crate::actor::{
 };
 use crate::files::write_file;
 
-use super::adapter::adapter_for;
+use super::adapter::{adapter_for, SessionSettingOp};
 use super::capabilities::{negotiate, NegotiatedCaps};
 use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
 use super::mapper::TurnMapper;
@@ -47,6 +47,8 @@ struct LiveSession {
     reasoning_effort: Option<String>,
     active: Option<ActiveTurn>,
     config_options: Value,
+    harness_state: Value,
+    harness_models: Vec<ModelOptionDto>,
 }
 
 struct Inner {
@@ -121,6 +123,7 @@ impl AcpRuntime {
         cwd: &str,
         yolo: bool,
         load_id: Option<&str>,
+        reasoning_effort: Option<&str>,
     ) -> Result<(String, LiveSession)> {
         let availability = classify_availability(def);
         if availability != "ready" {
@@ -151,7 +154,10 @@ impl AcpRuntime {
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "clientCapabilities": {
-                        "fs": { "readTextFile": true, "writeTextFile": true },
+                        "fs": {
+                            "readTextFile": adapter.fs_read_text_file(),
+                            "writeTextFile": adapter.fs_write_text_file()
+                        },
                         "terminal": true,
                         "session": { "compaction": {}, "configOptions": { "boolean": {} } },
                         "plan": {},
@@ -192,8 +198,18 @@ impl AcpRuntime {
                 bail!("ACP agent does not support session/load or session/resume");
             }
         } else {
+            let extra_meta = adapter.session_new_meta(reasoning_effort);
+            let mut meta = json!({ "yoloMode": yolo });
+            if let Some(map) = extra_meta.as_object() {
+                for (key, value) in map {
+                    meta[key] = value.clone();
+                }
+            }
             process
-                .request("session/new", json!({ "cwd": cwd, "mcpServers": [] }))
+                .request(
+                    "session/new",
+                    json!({ "cwd": cwd, "mcpServers": [], "_meta": meta }),
+                )
                 .await?
         };
         let session_id = raw_session
@@ -211,6 +227,16 @@ impl AcpRuntime {
         if let Some(caps) = self.inner.caps_by_agent.lock().await.get_mut(&def.id) {
             apply_config_option_caps(caps, &config_options);
         }
+        let projection = adapter.project_session(&raw_session);
+        let (harness_state, harness_models, model, reasoning_effort) =
+            if let Some(proj) = projection {
+                if let Some(caps) = self.inner.caps_by_agent.lock().await.get_mut(&def.id) {
+                    caps.management.models = true;
+                }
+                (proj.state, proj.models, proj.model, proj.reasoning_effort)
+            } else {
+                (json!({}), Vec::new(), None, None)
+            };
         let scoped = Self::scoped_id(&def.id, &session_id);
         Ok((
             scoped,
@@ -222,10 +248,12 @@ impl AcpRuntime {
                 negotiated,
                 adapter_id: def.id.clone(),
                 goal: None,
-                model: None,
-                reasoning_effort: None,
+                model,
+                reasoning_effort,
                 active: None,
                 config_options,
+                harness_state,
+                harness_models,
             },
         ))
     }
@@ -235,13 +263,135 @@ impl AcpRuntime {
         let live = sessions
             .values()
             .find(|session| session.adapter_id == agent_id)?;
+        if !live.harness_models.is_empty() {
+            return Some(live.harness_models.clone());
+        }
         let models = models_from_config_options(&live.config_options);
         (!models.is_empty()).then_some(models)
     }
 
     async fn probe_models(&self, def: &AcpAgentDef, cwd: &str) -> Result<Vec<ModelOptionDto>> {
-        let (_scoped, live) = self.spawn_session(def, cwd, true, None).await?;
+        let (_scoped, live) = self.spawn_session(def, cwd, true, None, None).await?;
+        if !live.harness_models.is_empty() {
+            return Ok(live.harness_models);
+        }
         Ok(models_from_config_options(&live.config_options))
+    }
+
+    async fn apply_setting_op(
+        process: &AcpProcess,
+        live: &mut LiveSession,
+        op: SessionSettingOp,
+    ) -> Result<()> {
+        match op {
+            SessionSettingOp::SetConfig { config_id, value } => {
+                let response = process
+                    .request(
+                        "session/set_config_option",
+                        json!({
+                            "sessionId": live.session_id,
+                            "configId": config_id,
+                            "value": value
+                        }),
+                    )
+                    .await?;
+                if let Some(options) = response.get("configOptions") {
+                    live.config_options = options.clone();
+                }
+                if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
+                    apply_projection(live, proj);
+                }
+            }
+            SessionSettingOp::SetModel { model_id } => {
+                let response = process
+                    .request(
+                        "session/set_model",
+                        json!({
+                            "sessionId": live.session_id,
+                            "modelId": model_id
+                        }),
+                    )
+                    .await
+                    .ok();
+                live.model = Some(model_id.clone());
+                if let Some(obj) = live.harness_state.as_object_mut() {
+                    obj.insert("currentModelId".into(), json!(model_id));
+                }
+                if let Some(response) = response {
+                    if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
+                        apply_projection(live, proj);
+                    }
+                }
+            }
+            SessionSettingOp::LoadWithMeta { meta } => {
+                let response = process
+                    .request(
+                        "session/load",
+                        json!({
+                            "sessionId": live.session_id,
+                            "cwd": live.cwd,
+                            "mcpServers": [],
+                            "_meta": meta
+                        }),
+                    )
+                    .await?;
+                if let Some(id) = response.get("sessionId").and_then(Value::as_str) {
+                    live.session_id = id.to_string();
+                }
+                if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
+                    apply_projection(live, proj);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_live_settings(
+        &self,
+        session_key: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<()> {
+        let mut sessions = self.inner.sessions.lock().await;
+        let Some(live) = sessions.get_mut(session_key) else {
+            return Ok(());
+        };
+        let adapter = adapter_for(&live.adapter_id);
+        if let Some(model) = model.filter(|value| !value.is_empty() && *value != "default") {
+            if live.model.as_deref() != Some(model) {
+                if let Some(op) = adapter.apply_model(model, &live.harness_state) {
+                    Self::apply_setting_op(&live.process.clone(), live, op).await?;
+                } else {
+                    Self::apply_setting_op(
+                        &live.process.clone(),
+                        live,
+                        SessionSettingOp::SetConfig {
+                            config_id: "model".into(),
+                            value: model.to_string(),
+                        },
+                    )
+                    .await?;
+                }
+            }
+        }
+        if let Some(effort) = effort.filter(|value| !value.is_empty() && *value != "auto") {
+            if live.reasoning_effort.as_deref() != Some(effort) {
+                if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
+                    Self::apply_setting_op(&live.process.clone(), live, op).await?;
+                } else {
+                    Self::apply_setting_op(
+                        &live.process.clone(),
+                        live,
+                        SessionSettingOp::SetConfig {
+                            config_id: "thought-level".into(),
+                            value: effort.to_string(),
+                        },
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn caps_for(&self, agent_id: Option<&str>) -> AgentProviderCapabilitiesDto {
@@ -365,16 +515,16 @@ impl AgentRuntime for AcpRuntime {
                 return Ok(models);
             }
         }
-        let command_models = list_command_models(&def);
-        if !command_models.is_empty() {
-            return Ok(command_models);
-        }
         if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
             if let Ok(models) = self.probe_models(&def, cwd).await {
                 if !models.is_empty() {
                     return Ok(models);
                 }
             }
+        }
+        let command_models = list_command_models(&def);
+        if !command_models.is_empty() {
+            return Ok(command_models);
         }
         Ok(default_model_stub(Some(&def.id)))
     }
@@ -452,30 +602,51 @@ impl AgentRuntime for AcpRuntime {
     async fn start_session(&self, input: StartSessionInput) -> Result<StartSessionResult> {
         let def = self.agent_def(input.agent_id.as_deref())?;
         let (scoped, mut live) = self
-            .spawn_session(&def, &input.cwd, input.approval_mode == "yolo", None)
+            .spawn_session(
+                &def,
+                &input.cwd,
+                input.approval_mode == "yolo",
+                None,
+                input.reasoning_effort.as_deref(),
+            )
             .await?;
+        let adapter = adapter_for(&live.adapter_id);
         if !input.model.is_empty() && input.model != "default" {
-            let _ = live
-                .process
-                .notify(
-                    "session/set_config_option",
-                    json!({ "sessionId": live.session_id, "configId": "model", "value": input.model }),
-                )
-                .await;
-            live.model = Some(input.model.clone());
+            if let Some(op) = adapter.apply_model(&input.model, &live.harness_state) {
+                let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
+            } else {
+                let _ = live
+                    .process
+                    .request(
+                        "session/set_config_option",
+                        json!({ "sessionId": live.session_id, "configId": "model", "value": input.model }),
+                    )
+                    .await;
+                live.model = Some(input.model.clone());
+            }
         }
-        if let Some(effort) = &input.reasoning_effort {
-            let _ = live
-                .process
-                .notify(
-                    "session/set_config_option",
-                    json!({ "sessionId": live.session_id, "configId": "thought-level", "value": effort }),
-                )
-                .await;
-            live.reasoning_effort = Some(effort.clone());
+        if let Some(effort) = input
+            .reasoning_effort
+            .as_deref()
+            .filter(|value| !value.is_empty() && *value != "auto")
+        {
+            if live.reasoning_effort.as_deref() != Some(effort) {
+                if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
+                    let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
+                } else {
+                    let _ = live
+                        .process
+                        .request(
+                            "session/set_config_option",
+                            json!({ "sessionId": live.session_id, "configId": "thought-level", "value": effort }),
+                        )
+                        .await;
+                    live.reasoning_effort = Some(effort.to_string());
+                }
+            }
         }
-        let model = input.model.clone();
-        let effort = input.reasoning_effort.clone();
+        let model = live.model.clone().or(Some(input.model.clone()));
+        let effort = live.reasoning_effort.clone();
         self.inner
             .sessions
             .lock()
@@ -483,7 +654,7 @@ impl AgentRuntime for AcpRuntime {
             .insert(scoped.clone(), live);
         Ok(StartSessionResult {
             provider_session_id: scoped,
-            model: Some(model),
+            model,
             reasoning_effort: effort,
         })
     }
@@ -512,7 +683,9 @@ impl AgentRuntime for AcpRuntime {
                     .map(|p| p.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| ".".into());
-        let (scoped, live) = self.spawn_session(&def, &cwd, true, Some(raw)).await?;
+        let (scoped, live) = self
+            .spawn_session(&def, &cwd, true, Some(raw), None)
+            .await?;
         self.inner
             .sessions
             .lock()
@@ -531,6 +704,13 @@ impl AgentRuntime for AcpRuntime {
         bus: EventBus,
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>> {
+        let _ = self
+            .apply_live_settings(
+                &input.provider_session_id,
+                input.model.as_deref(),
+                input.reasoning_effort.as_deref(),
+            )
+            .await;
         let (process, session_id, cwd, image_capable) = {
             let mut sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -734,6 +914,8 @@ impl AgentRuntime for AcpRuntime {
             model,
             effort,
             config_options,
+            harness_state,
+            harness_models,
         ) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -753,6 +935,8 @@ impl AgentRuntime for AcpRuntime {
                 live.model.clone(),
                 live.reasoning_effort.clone(),
                 live.config_options.clone(),
+                live.harness_state.clone(),
+                live.harness_models.clone(),
             )
         };
         let response = process
@@ -785,6 +969,8 @@ impl AgentRuntime for AcpRuntime {
                 reasoning_effort: effort.clone(),
                 active: None,
                 config_options,
+                harness_state,
+                harness_models,
             },
         );
         Ok(StartSessionResult {
@@ -894,6 +1080,15 @@ impl AgentRuntime for AcpRuntime {
             .into();
         }
         Ok(live.goal.clone())
+    }
+
+    async fn apply_session_settings(
+        &self,
+        session_id: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<()> {
+        self.apply_live_settings(session_id, model, effort).await
     }
 
     async fn install(&self, agent_id: Option<&str>) -> Result<AgentBackendDto> {
@@ -1097,6 +1292,13 @@ async fn handle_agent_request(
         }
     }
     Ok(())
+}
+
+fn apply_projection(live: &mut LiveSession, proj: super::adapter::HarnessProjection) {
+    live.harness_state = proj.state;
+    live.harness_models = proj.models;
+    live.model = proj.model.or(live.model.clone());
+    live.reasoning_effort = proj.reasoning_effort.or(live.reasoning_effort.clone());
 }
 
 fn default_model_stub(agent_id: Option<&str>) -> Vec<ModelOptionDto> {

@@ -1,7 +1,23 @@
-use remote_codex_protocol::AgentProviderCapabilitiesDto;
+use remote_codex_protocol::{AgentProviderCapabilitiesDto, ModelOptionDto};
 use serde_json::{json, Value};
 
 use super::capabilities::NegotiatedCaps;
+use super::grok;
+
+#[derive(Debug, Clone)]
+pub struct HarnessProjection {
+    pub state: Value,
+    pub models: Vec<ModelOptionDto>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum SessionSettingOp {
+    SetConfig { config_id: String, value: String },
+    SetModel { model_id: String },
+    LoadWithMeta { meta: Value },
+}
 
 /// Per-harness translator over a shared ACP client.
 /// Generic session/prompt/cancel/permission stay in the runtime.
@@ -13,6 +29,24 @@ pub trait HarnessAdapter: Send + Sync {
     }
     fn initialize_client_meta(&self) -> Value {
         json!({})
+    }
+    fn fs_read_text_file(&self) -> bool {
+        true
+    }
+    fn fs_write_text_file(&self) -> bool {
+        true
+    }
+    fn session_new_meta(&self, _reasoning_effort: Option<&str>) -> Value {
+        json!({})
+    }
+    fn project_session(&self, _response: &Value) -> Option<HarnessProjection> {
+        None
+    }
+    fn apply_model(&self, _model: &str, _state: &Value) -> Option<SessionSettingOp> {
+        None
+    }
+    fn apply_reasoning(&self, _effort: &str, _state: &Value) -> Option<SessionSettingOp> {
+        None
     }
     fn patch_capabilities(
         &self,
@@ -88,12 +122,31 @@ impl HarnessAdapter for GrokAdapter {
     fn id(&self) -> &'static str {
         "grok"
     }
+    fn fs_read_text_file(&self) -> bool {
+        false
+    }
+    fn session_new_meta(&self, reasoning_effort: Option<&str>) -> Value {
+        match grok::normalize_acp_effort(reasoning_effort) {
+            Some(effort) => json!({ "reasoningEffort": effort }),
+            None => json!({}),
+        }
+    }
+    fn project_session(&self, response: &Value) -> Option<HarnessProjection> {
+        grok::project_session(response)
+    }
+    fn apply_model(&self, model: &str, _state: &Value) -> Option<SessionSettingOp> {
+        Some(grok::apply_model(model))
+    }
+    fn apply_reasoning(&self, effort: &str, state: &Value) -> Option<SessionSettingOp> {
+        grok::apply_reasoning(effort, state)
+    }
     fn patch_capabilities(
         &self,
         caps: &mut AgentProviderCapabilitiesDto,
         negotiated: &NegotiatedCaps,
     ) {
         apply_negotiated(caps, negotiated);
+        caps.management.models = true;
     }
 }
 
@@ -164,6 +217,7 @@ fn apply_negotiated(caps: &mut AgentProviderCapabilitiesDto, negotiated: &Negoti
 mod tests {
     use super::*;
     use remote_codex_protocol::toolbox_from_capabilities;
+    use serde_json::json;
 
     fn base() -> AgentProviderCapabilitiesDto {
         AgentProviderCapabilitiesDto::conversational()
@@ -232,5 +286,34 @@ mod tests {
             assert!(!caps.branching.fork);
             assert!(!caps.management.mcp_status);
         }
+    }
+
+    #[test]
+    fn grok_disables_fs_read_and_projects_session_models() {
+        let adapter = GrokAdapter;
+        assert!(!adapter.fs_read_text_file());
+        assert_eq!(
+            adapter.session_new_meta(Some("high")),
+            json!({ "reasoningEffort": "high" })
+        );
+        let projected = adapter
+            .project_session(&json!({
+                "models": {
+                    "currentModelId": "grok-4.6",
+                    "availableModels": [{
+                        "modelId": "grok-4.6",
+                        "_meta": {
+                            "reasoningEffort": "high",
+                            "reasoningEfforts": [
+                                { "value": "low" },
+                                { "value": "high" }
+                            ]
+                        }
+                    }]
+                }
+            }))
+            .expect("grok projection");
+        assert_eq!(projected.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(projected.models[0].supported_reasoning_efforts.len(), 2);
     }
 }

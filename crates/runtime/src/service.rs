@@ -362,8 +362,8 @@ impl Supervisor {
                     input.agent_id,
                     started.provider_session_id,
                     title,
-                    input.model,
-                    input.reasoning_effort,
+                    started.model.clone().unwrap_or(input.model.clone()),
+                    started.reasoning_effort.clone(),
                     input.approval_mode,
                     now
                 ],
@@ -784,7 +784,7 @@ impl Supervisor {
         })
     }
 
-    pub fn update_settings(
+    pub async fn update_settings(
         &self,
         id: &str,
         model: Option<String>,
@@ -793,6 +793,13 @@ impl Supervisor {
         collab: Option<String>,
         sandbox: Option<String>,
     ) -> Result<ThreadDto> {
+        let thread = self.get_thread(id)?;
+        if let Some(session) = thread.provider_session_id.as_deref() {
+            let _ = self
+                .runtime(thread.provider)?
+                .apply_session_settings(session, model.as_deref(), effort.as_deref())
+                .await;
+        }
         self.db.with(|conn| {
             if let Some(model) = model {
                 conn.execute(
