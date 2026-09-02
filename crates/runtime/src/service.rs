@@ -6,10 +6,10 @@ use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use remote_codex_protocol::{
     now_rfc3339, truncate_title, AgentBackendDto, AgentCapabilitySnapshotDto, CreateThreadInput,
-    CreateWorkspaceInput, ModelOptionDto, Provider, SendThreadPromptInput, ThreadDetailDto,
-    ThreadDto, ThreadHistoryItemDto, ThreadPendingSteerDto, ThreadTurnDto,
-    ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
-    WorkspaceDto, WorkspaceSettingsDto,
+    CreateWorkspaceInput, ImportThreadCandidateDto, ImportThreadInput, ModelOptionDto, Provider,
+    SendThreadPromptInput, ThreadDetailDto, ThreadDto, ThreadHistoryItemDto, ThreadPendingSteerDto,
+    ThreadTurnDto, ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto,
+    UpdateWorkspaceSettingsInput, WorkspaceDto, WorkspaceSettingsDto,
 };
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
@@ -17,10 +17,18 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::actor::{EventBus, PromptImage, SharedRuntime, StartSessionInput, StartTurnInput};
+use crate::actor::{
+    EventBus, ImportSessionMeta, PromptImage, SessionSettings, SharedRuntime, StartSessionInput,
+    StartTurnInput,
+};
 use crate::config::RuntimeConfig;
 use crate::db::Database;
 use crate::files;
+use crate::history::summarize_completed_turn;
+use crate::import_id::{
+    bind_import_target, parse_session_ref, scoped_session_id, session_ids_match,
+};
+use crate::local_sessions::{find_local_session, list_local_sessions, LocalSessionHomes};
 
 struct LiveTurn {
     cancel: CancellationToken,
@@ -32,6 +40,7 @@ pub struct Supervisor {
     pub bus: EventBus,
     runtimes: HashMap<Provider, SharedRuntime>,
     live: Mutex<HashMap<String, LiveTurn>>,
+    local_session_homes: LocalSessionHomes,
 }
 
 impl Supervisor {
@@ -46,7 +55,13 @@ impl Supervisor {
             bus: EventBus::new(),
             runtimes: map,
             live: Mutex::new(HashMap::new()),
+            local_session_homes: LocalSessionHomes::from_env(),
         }
+    }
+
+    pub fn with_local_session_homes(mut self, homes: LocalSessionHomes) -> Self {
+        self.local_session_homes = homes;
+        self
     }
 
     pub fn runtime(&self, provider: Provider) -> Result<&SharedRuntime> {
@@ -278,7 +293,7 @@ impl Supervisor {
     }
 
     pub fn list_threads(&self, workspace_id: Option<&str>) -> Result<Vec<ThreadDto>> {
-        self.db.with(|conn| {
+        let mut rows = self.db.with(|conn| {
             let mut sql = String::from(
                 "SELECT id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
                         reasoning_effort, fast_mode, collaboration_mode, approval_mode, sandbox_mode, status,
@@ -301,7 +316,11 @@ impl Supervisor {
                 stmt.query_map([], map_row)?.filter_map(|r| r.ok()).collect()
             };
             Ok(rows)
-        })
+        })?;
+        for thread in &mut rows {
+            self.apply_loaded_flag(thread);
+        }
+        Ok(rows)
     }
 
     pub fn get_thread(&self, id: &str) -> Result<ThreadDto> {
@@ -373,7 +392,285 @@ impl Supervisor {
         self.get_thread(&id)
     }
 
+    pub async fn list_import_candidates(
+        &self,
+        provider: Option<Provider>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<ImportThreadCandidateDto>> {
+        let provider = provider.unwrap_or_else(|| self.default_provider());
+        if provider == Provider::Acp
+            && agent_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            return Ok(Vec::new());
+        }
+        let agent = agent_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| crate::import_id::default_agent_for_provider(provider))
+            .to_string();
+        let mut sessions = list_local_sessions(&self.local_session_homes, &agent);
+        if let Ok(runtime) = self.runtime(provider) {
+            match runtime.list_import_sessions(Some(&agent)).await {
+                Ok(listed) => sessions.extend(listed),
+                Err(err) => tracing::warn!(error = %err, "import candidate listing failed"),
+            }
+        }
+        let existing = self.list_threads(None).unwrap_or_default();
+        let mut out = Vec::new();
+        for session in sessions {
+            if session.session_id.trim().is_empty() || !Path::new(&session.cwd).is_absolute() {
+                continue;
+            }
+            if existing.iter().any(|thread| {
+                thread
+                    .provider_session_id
+                    .as_deref()
+                    .map(|stored| session_ids_match(stored, &session.session_id))
+                    .unwrap_or(false)
+            }) {
+                continue;
+            }
+            if out.iter().any(|candidate: &ImportThreadCandidateDto| {
+                session_ids_match(&candidate.session_id, &session.session_id)
+            }) {
+                continue;
+            }
+            out.push(ImportThreadCandidateDto {
+                provider,
+                agent_id: Some(session.agent_id.clone()),
+                session_id: crate::import_id::raw_session_id(&session.session_id).to_string(),
+                cwd: session.cwd,
+                title: session.title,
+                preview: session.preview,
+                created_at: session.created_at,
+                updated_at: session.updated_at,
+                history_status: "unknown".into(),
+            });
+        }
+        out.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.created_at.cmp(&left.created_at))
+        });
+        Ok(out)
+    }
+
+    pub async fn import_thread(&self, input: ImportThreadInput) -> Result<ThreadDetailDto> {
+        let parsed = parse_session_ref(&input.session_id);
+        if parsed.raw_id.is_empty() {
+            bail!("Session id is required.");
+        }
+        let selected_provider = input.provider.unwrap_or_else(|| self.default_provider());
+        let enabled: Vec<Provider> = self.runtimes.keys().copied().collect();
+        let (provider, agent_id) = bind_import_target(
+            selected_provider,
+            input.agent_id.as_deref(),
+            parsed.agent_id.as_deref(),
+            &enabled,
+        );
+        if let Some(existing) = self.find_thread_by_session(&parsed.raw_id)? {
+            return self.get_thread_detail(&existing.id, None).await;
+        }
+
+        let mut session = find_local_session(&self.local_session_homes, &agent_id, &parsed.raw_id);
+        if session.is_none() {
+            if let Ok(runtime) = self.runtime(provider) {
+                session = runtime
+                    .resolve_import_session(Some(&agent_id), &parsed.raw_id)
+                    .await?;
+            }
+        }
+        let Some(session) = session else {
+            bail!("Session not found on this machine.");
+        };
+        if !Path::new(&session.cwd).is_absolute() {
+            bail!("Imported session path must be absolute.");
+        }
+
+        let workspace = self.ensure_workspace_at(&session.cwd)?;
+        let source = if agent_id == "codex" {
+            "local_codex_import"
+        } else {
+            "local_provider_import"
+        };
+        let scoped = scoped_session_id(&agent_id, &parsed.raw_id);
+        let now = now_rfc3339();
+        let thread_id = Uuid::new_v4().to_string();
+        let title = truncate_title(&session.title);
+        let summary = session.preview.clone();
+        let model = session
+            .model
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "default".into());
+        self.db.with(|conn| {
+            conn.execute(
+                "INSERT INTO threads(id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
+                    reasoning_effort, collaboration_mode, approval_mode, status, summary_text, created_at, updated_at, is_connected)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,'default','yolo','idle',?9,?10,?10,0)",
+                params![
+                    thread_id,
+                    workspace.id,
+                    provider.as_str(),
+                    agent_id,
+                    scoped,
+                    source,
+                    title,
+                    model,
+                    summary,
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.persist_imported_turns(&thread_id, &session)?;
+        self.get_thread_detail(&thread_id, None).await
+    }
+
+    fn find_thread_by_session(&self, session_id: &str) -> Result<Option<ThreadDto>> {
+        Ok(self.list_threads(None)?.into_iter().find(|thread| {
+            thread
+                .provider_session_id
+                .as_deref()
+                .map(|stored| session_ids_match(stored, session_id))
+                .unwrap_or(false)
+        }))
+    }
+
+    fn ensure_workspace_at(&self, abs_path: &str) -> Result<WorkspaceDto> {
+        let path = PathBuf::from(abs_path);
+        if !path.is_absolute() {
+            bail!("Imported session path must be absolute.");
+        }
+        let resolved = if path.exists() {
+            path.canonicalize()?
+        } else {
+            path
+        };
+        if let Some(existing) = self
+            .list_workspaces()?
+            .into_iter()
+            .find(|workspace| PathBuf::from(&workspace.abs_path) == resolved)
+        {
+            return Ok(existing);
+        }
+        let id = Uuid::new_v4().to_string();
+        let now = now_rfc3339();
+        let label = resolved
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "workspace".into());
+        let stored = resolved.to_string_lossy().into_owned();
+        self.db.with(|conn| {
+            conn.execute(
+                "INSERT INTO workspaces(id, host_id, label, abs_path, is_favorite, created_at, last_opened_at)
+                 VALUES (?1,?2,?3,?4,0,?5,?5)",
+                params![id, self.db.host_id, label, stored, now],
+            )?;
+            Ok(())
+        })?;
+        self.get_workspace(&id)
+    }
+
+    fn persist_imported_turns(&self, thread_id: &str, session: &ImportSessionMeta) -> Result<()> {
+        if session.turns.is_empty() {
+            return Ok(());
+        }
+        let now = now_rfc3339();
+        self.db.with(|conn| {
+            for (index, turn) in session.turns.iter().enumerate() {
+                let turn_id = if turn.id.trim().is_empty() {
+                    format!("imported-{thread_id}-{}", index + 1)
+                } else {
+                    turn.id.clone()
+                };
+                conn.execute(
+                    "INSERT INTO thread_turns(id, thread_id, status, error, model, reasoning_effort, started_at, ordinal)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    params![
+                        turn_id,
+                        thread_id,
+                        if turn.status.trim().is_empty() {
+                            "completed".to_string()
+                        } else {
+                            turn.status.clone()
+                        },
+                        turn.error.clone(),
+                        turn.model.clone(),
+                        turn.reasoning_effort.clone(),
+                        turn.started_at.clone(),
+                        (index as i64) + 1
+                    ],
+                )?;
+                for item in &turn.items {
+                    conn.execute(
+                        "INSERT OR REPLACE INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+                         VALUES (?1,?2,?3,?4,?5,?6,?6)",
+                        params![
+                            Uuid::new_v4().to_string(),
+                            thread_id,
+                            turn_id,
+                            item.id,
+                            serde_json::to_string(item)?,
+                            item.created_at.clone().unwrap_or_else(|| now.clone())
+                        ],
+                    )?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    pub fn ensure_prompt_allowed(&self, thread: &ThreadDto) -> Result<()> {
+        if thread.source != "local_codex_import" && thread.source != "local_provider_import" {
+            return Ok(());
+        }
+        let loaded = thread
+            .provider_session_id
+            .as_deref()
+            .and_then(|session| {
+                self.runtime(thread.provider)
+                    .ok()
+                    .map(|runtime| runtime.session_loaded(session))
+            })
+            .unwrap_or(false);
+        if loaded {
+            Ok(())
+        } else {
+            bail!("Resume / Connect this imported session before sending a new prompt.")
+        }
+    }
+
+    fn apply_loaded_flag(&self, thread: &mut ThreadDto) {
+        if thread.source != "local_codex_import" && thread.source != "local_provider_import" {
+            return;
+        }
+        thread.is_loaded = thread
+            .provider_session_id
+            .as_deref()
+            .and_then(|session| {
+                self.runtime(thread.provider)
+                    .ok()
+                    .map(|runtime| runtime.session_loaded(session))
+            })
+            .unwrap_or(false);
+    }
+
     pub async fn get_thread_detail(&self, id: &str, limit: Option<u32>) -> Result<ThreadDetailDto> {
+        self.get_thread_detail_view(id, limit, false).await
+    }
+
+    pub async fn get_thread_detail_view(
+        &self,
+        id: &str,
+        limit: Option<u32>,
+        summary_only: bool,
+    ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
         let mut turns = self.load_turns(id)?;
@@ -382,6 +679,9 @@ impl Supervisor {
             if turns.len() > limit as usize {
                 turns = turns.split_off(turns.len() - limit as usize);
             }
+        }
+        if summary_only {
+            turns = turns.into_iter().map(summarize_completed_turn).collect();
         }
         let pending_steers = self.load_steers(id)?;
         let present = Path::new(&workspace.abs_path).exists();
@@ -440,7 +740,7 @@ impl Supervisor {
             let mut out = Vec::new();
             for (id, status, error, model, effort, started_at) in turns {
                 let mut item_stmt = conn.prepare(
-                    "SELECT item_json FROM thread_history_items WHERE thread_id=?1 AND turn_id=?2 ORDER BY created_at ASC",
+                    "SELECT item_json FROM thread_history_items WHERE thread_id=?1 AND turn_id=?2 ORDER BY created_at ASC, rowid ASC",
                 )?;
                 let items = item_stmt
                     .query_map(params![thread_id, id], |row| row.get::<_, String>(0))?
@@ -455,11 +755,45 @@ impl Supervisor {
                     model,
                     reasoning_effort: effort,
                     token_usage: None,
+                    has_deferred_items: None,
+                    deferred_item_count: None,
                     items,
                 });
             }
             Ok(out)
         })
+    }
+
+    pub fn get_thread_turn_detail(&self, id: &str, turn_id: &str) -> Result<ThreadTurnDto> {
+        let mut turn = self
+            .load_turns(id)?
+            .into_iter()
+            .find(|turn| turn.id == turn_id)
+            .ok_or_else(|| anyhow!("turn not found"))?;
+        turn.has_deferred_items = Some(false);
+        turn.deferred_item_count = Some(0);
+        Ok(turn)
+    }
+
+    pub fn get_history_item_detail(&self, id: &str, item_id: &str) -> Result<serde_json::Value> {
+        for turn in self.load_turns(id)? {
+            if let Some(item) = turn.items.into_iter().find(|item| item.id == item_id) {
+                return Ok(json!({
+                    "id": item.id,
+                    "kind": item.kind,
+                    "title": item.preview_text.unwrap_or_else(|| item.text.clone()),
+                    "text": item.text,
+                }));
+            }
+        }
+        bail!("history item not found");
+    }
+
+    pub fn thread_image(&self, id: &str, rel: &str) -> Result<(Vec<u8>, &'static str)> {
+        let thread = self.get_thread(id)?;
+        let workspace = self.get_workspace(&thread.workspace_id)?;
+        let (path, bytes) = files::read_bytes(Path::new(&workspace.abs_path), rel)?;
+        Ok((bytes, files::image_mime(&path)))
     }
 
     fn load_steers(&self, thread_id: &str) -> Result<Vec<ThreadPendingSteerDto>> {
@@ -489,6 +823,7 @@ impl Supervisor {
         input: SendThreadPromptInput,
     ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(thread_id)?;
+        self.ensure_prompt_allowed(&thread)?;
         let images: Vec<PromptImage> = input
             .images
             .into_iter()
@@ -626,6 +961,9 @@ impl Supervisor {
                     prompt,
                     model,
                     reasoning_effort: effort,
+                    sandbox_mode: thread.sandbox_mode.clone(),
+                    collaboration_mode: Some(thread.collaboration_mode.clone()),
+                    approval_mode: Some(thread.approval_mode.clone()),
                     thread_id: thread.id.clone(),
                     turn_id: turn_id.clone(),
                     hidden: false,
@@ -797,7 +1135,16 @@ impl Supervisor {
         if let Some(session) = thread.provider_session_id.as_deref() {
             let _ = self
                 .runtime(thread.provider)?
-                .apply_session_settings(session, model.as_deref(), effort.as_deref())
+                .apply_session_settings(
+                    session,
+                    SessionSettings {
+                        model: model.clone(),
+                        effort: effort.clone(),
+                        sandbox_mode: sandbox.clone(),
+                        collaboration_mode: collab.clone(),
+                        approval_mode: None,
+                    },
+                )
                 .await;
         }
         self.db.with(|conn| {
@@ -934,9 +1281,19 @@ impl Supervisor {
             .ok()
             .map(|ws| ws.abs_path);
         if let Some(session) = &thread.provider_session_id {
-            let _ = self
-                .runtime(thread.provider)?
-                .resume_session(session, cwd.as_deref())
+            let runtime = self.runtime(thread.provider)?;
+            let _ = runtime.resume_session(session, cwd.as_deref()).await;
+            let _ = runtime
+                .apply_session_settings(
+                    session,
+                    SessionSettings {
+                        model: thread.model.clone(),
+                        effort: thread.reasoning_effort.clone(),
+                        sandbox_mode: thread.sandbox_mode.clone(),
+                        collaboration_mode: Some(thread.collaboration_mode.clone()),
+                        approval_mode: Some(thread.approval_mode.clone()),
+                    },
+                )
                 .await;
         }
         self.get_thread_detail(id, None).await
@@ -1019,10 +1376,16 @@ impl Supervisor {
         })) }))
     }
 
-    pub async fn respond_request(&self, id: &str, request_id: &str, allow: bool) -> Result<()> {
+    pub async fn respond_request(
+        &self,
+        id: &str,
+        request_id: &str,
+        allow: bool,
+        answer: Option<&str>,
+    ) -> Result<()> {
         let thread = self.get_thread(id)?;
         self.runtime(thread.provider)?
-            .respond_permission(request_id, allow)
+            .respond_permission(request_id, allow, answer)
             .await?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
             event_type: "thread.request.resolved".into(),

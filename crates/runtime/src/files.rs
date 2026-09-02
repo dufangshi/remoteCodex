@@ -84,8 +84,54 @@ pub fn preview_file(root: &Path, rel: &str, limit: usize) -> Result<ThreadWorksp
     })
 }
 
+pub fn read_bytes(root: &Path, rel: &str) -> Result<(PathBuf, Vec<u8>)> {
+    let path = assert_within(root, Path::new(rel))?;
+    let bytes = std::fs::read(&path)?;
+    Ok((path, bytes))
+}
+
+pub fn image_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        _ => "application/octet-stream",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteScope {
+    Workspace,
+    Unrestricted,
+}
+
 pub fn write_file(root: &Path, rel: &str, content: &str) -> Result<()> {
-    let path = if Path::new(rel).is_absolute() {
+    write_file_with_scope(root, rel, content, WriteScope::Workspace)
+}
+
+pub fn write_file_with_scope(
+    root: &Path,
+    rel: &str,
+    content: &str,
+    scope: WriteScope,
+) -> Result<()> {
+    let path = if scope == WriteScope::Unrestricted {
+        if Path::new(rel).is_absolute() {
+            PathBuf::from(rel)
+        } else {
+            root.join(rel)
+        }
+    } else if Path::new(rel).is_absolute() {
         assert_within(root, Path::new(rel))?
     } else {
         let joined = root.join(rel);
@@ -129,4 +175,37 @@ fn language_for(name: &str) -> String {
         _ => "text",
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn workspace_write_rejects_escape() {
+        let dir = std::env::temp_dir().join(format!("rc-files-{}", std::process::id()));
+        let root = dir.join("ws");
+        fs::create_dir_all(&root).unwrap();
+        let err = write_file(&root, "../escape.txt", "no").unwrap_err();
+        assert!(err.to_string().contains("outside"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unrestricted_write_allows_absolute_outside() {
+        let dir = std::env::temp_dir().join(format!("rc-files-full-{}", std::process::id()));
+        let root = dir.join("ws");
+        let outside = dir.join("outside.txt");
+        fs::create_dir_all(&root).unwrap();
+        write_file_with_scope(
+            &root,
+            outside.to_str().unwrap(),
+            "ok",
+            WriteScope::Unrestricted,
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "ok");
+        fs::remove_dir_all(&dir).ok();
+    }
 }

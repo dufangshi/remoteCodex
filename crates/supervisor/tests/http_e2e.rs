@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use remote_codex_protocol::Provider;
-use remote_codex_runtime::actor::SharedRuntime;
+use remote_codex_protocol::{Provider, ThreadHistoryItemDto, ThreadTurnDto};
+use remote_codex_runtime::actor::{ImportSessionMeta, SharedRuntime};
 use remote_codex_runtime::config::RuntimeConfig;
 use remote_codex_runtime::db::Database;
 use remote_codex_runtime::fake::FakeRuntime;
+use remote_codex_runtime::local_sessions::LocalSessionHomes;
 use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
 use tempfile::tempdir;
@@ -13,6 +14,13 @@ use tokio::net::TcpListener;
 
 async fn spawn_supervisor(
     providers: Vec<Provider>,
+) -> (tempfile::TempDir, u16, std::path::PathBuf) {
+    spawn_supervisor_seeded(providers, |_| {}).await
+}
+
+async fn spawn_supervisor_seeded(
+    providers: Vec<Provider>,
+    seed: impl Fn(&FakeRuntime),
 ) -> (tempfile::TempDir, u16, std::path::PathBuf) {
     let dir = tempdir().unwrap();
     let ws_root = dir.path().join("workspaces");
@@ -38,11 +46,25 @@ async fn spawn_supervisor(
         fake_runtime: true,
     };
     let db = Database::open(&config.database_url).unwrap();
-    let runtimes: Vec<SharedRuntime> = providers
+    let fakes: Vec<Arc<FakeRuntime>> = providers
         .into_iter()
-        .map(|provider| Arc::new(FakeRuntime::new(provider)) as SharedRuntime)
+        .map(|provider| {
+            let fake = Arc::new(FakeRuntime::new(provider));
+            seed(&fake);
+            fake
+        })
         .collect();
-    let state = Arc::new(Supervisor::new(config, db, runtimes));
+    let runtimes: Vec<SharedRuntime> = fakes
+        .iter()
+        .map(|fake| fake.clone() as SharedRuntime)
+        .collect();
+    let state = Arc::new(
+        Supervisor::new(config, db, runtimes).with_local_session_homes(LocalSessionHomes {
+            codex_home: dir.path().join("codex-home"),
+            grok_home: dir.path().join("grok-home"),
+            claude_home: dir.path().join("claude-home"),
+        }),
+    );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -106,6 +128,17 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
     std::fs::create_dir_all(proj.join("src")).unwrap();
     std::fs::write(proj.join("README.md"), "# files\n").unwrap();
     std::fs::write(proj.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(
+        proj.join("dot.png"),
+        [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ],
+    )
+    .unwrap();
 
     let workspace = json(
         &client,
@@ -229,6 +262,46 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
             "{provider} {texts:?}"
         );
 
+        if provider == "codex" {
+            let turn_id = detail["turns"][0]["id"].as_str().unwrap();
+            let summary = json(
+                &client,
+                client.get(format!("{base}/api/threads/{thread_id}?view=summary")),
+            )
+            .await;
+            assert!(summary["turns"][0]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "userMessage"));
+            let turn_detail = json(
+                &client,
+                client.get(format!(
+                    "{base}/api/threads/{thread_id}/turns/{turn_id}/detail"
+                )),
+            )
+            .await;
+            assert_eq!(turn_detail["id"], turn_id);
+            assert_eq!(turn_detail["hasDeferredItems"], false);
+            let image = client
+                .get(format!(
+                    "{base}/api/threads/{thread_id}/assets/image?path=dot.png"
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(image.status(), 200);
+            assert_eq!(image.headers().get("content-type").unwrap(), "image/png");
+            let escaped_image = client
+                .get(format!(
+                    "{base}/api/threads/{thread_id}/assets/image?path=../secret.png"
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(escaped_image.status(), 400);
+        }
+
         let html = client
             .get(format!("{base}/api/threads/{thread_id}/exports/html"))
             .send()
@@ -331,4 +404,117 @@ async fn named_workspace_and_backend_status_are_usable() {
     )
     .await;
     assert_eq!(deleted["id"], created["id"]);
+}
+
+#[tokio::test]
+async fn import_extracts_codex_uri_and_hydrates_history() {
+    let dir = tempdir().unwrap();
+    let cwd = dir.path().join("imported-project");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let session = ImportSessionMeta {
+        session_id: "01a0634a-23df-7191-acd2-1fca43a10418".into(),
+        agent_id: "codex".into(),
+        cwd: cwd.to_string_lossy().into(),
+        title: "Imported writer session".into(),
+        preview: Some("imported prompt".into()),
+        created_at: None,
+        updated_at: Some("2026-09-01T00:00:00.000Z".into()),
+        model: Some("gpt-5.4".into()),
+        turns: vec![ThreadTurnDto {
+            id: "turn-imported-1".into(),
+            started_at: None,
+            status: "completed".into(),
+            error: None,
+            model: None,
+            reasoning_effort: None,
+            token_usage: None,
+            has_deferred_items: None,
+            deferred_item_count: None,
+            items: vec![
+                ThreadHistoryItemDto {
+                    id: "u1".into(),
+                    created_at: None,
+                    kind: "userMessage".into(),
+                    text: "imported prompt".into(),
+                    preview_text: None,
+                    status: Some("completed".into()),
+                    sequence: None,
+                    source_turn_id: Some("turn-imported-1".into()),
+                    artifact: None,
+                },
+                ThreadHistoryItemDto {
+                    id: "a1".into(),
+                    created_at: None,
+                    kind: "agentMessage".into(),
+                    text: "imported reply".into(),
+                    preview_text: None,
+                    status: Some("completed".into()),
+                    sequence: None,
+                    source_turn_id: Some("turn-imported-1".into()),
+                    artifact: None,
+                },
+            ],
+        }],
+    };
+    let (_keep, port, _) = spawn_supervisor_seeded(vec![Provider::Codex, Provider::Acp], {
+        let session = session.clone();
+        move |fake| fake.seed_import_session(session.clone())
+    })
+    .await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let candidates = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads/import-candidates?provider=codex"
+        )),
+    )
+    .await;
+    assert_eq!(
+        candidates[0]["sessionId"],
+        "01a0634a-23df-7191-acd2-1fca43a10418"
+    );
+
+    let imported = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/import"))
+            .json(&json!({
+                "sessionId": "codex://threads/01a0634a-23df-7191-acd2-1fca43a10418",
+                "provider": "claude"
+            })),
+    )
+    .await;
+    assert_eq!(imported["thread"]["provider"], "codex");
+    assert_eq!(
+        imported["thread"]["providerSessionId"],
+        "codex::01a0634a-23df-7191-acd2-1fca43a10418"
+    );
+    assert_eq!(imported["thread"]["source"], "local_codex_import");
+    assert_eq!(imported["thread"]["isLoaded"], false);
+    assert_eq!(imported["turns"][0]["items"][0]["text"], "imported prompt");
+
+    let duplicate = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/import"))
+            .json(&json!({
+                "sessionId": "01a0634a-23df-7191-acd2-1fca43a10418",
+                "provider": "codex"
+            })),
+    )
+    .await;
+    assert_eq!(duplicate["thread"]["id"], imported["thread"]["id"]);
+
+    let blocked = client
+        .post(format!(
+            "{base}/api/threads/{}/prompt",
+            imported["thread"]["id"].as_str().unwrap()
+        ))
+        .json(&json!({ "prompt": "hello" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), reqwest::StatusCode::CONFLICT);
 }

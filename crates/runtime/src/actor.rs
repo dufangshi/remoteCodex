@@ -4,7 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use remote_codex_protocol::{
     AgentBackendDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto, ModelOptionDto,
-    Provider, ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ToolboxItemDto,
+    Provider, ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadTurnDto,
+    ToolboxItemDto,
 };
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -52,10 +53,22 @@ pub struct StartTurnInput {
     pub prompt: String,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub sandbox_mode: Option<String>,
+    pub collaboration_mode: Option<String>,
+    pub approval_mode: Option<String>,
     pub thread_id: String,
     pub turn_id: String,
     pub hidden: bool,
     pub images: Vec<PromptImage>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SessionSettings {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub sandbox_mode: Option<String>,
+    pub collaboration_mode: Option<String>,
+    pub approval_mode: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +83,19 @@ pub struct GoalState {
     pub status: String,
     pub tokens_used: u32,
     pub time_used_seconds: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ImportSessionMeta {
+    pub session_id: String,
+    pub agent_id: String,
+    pub cwd: String,
+    pub title: String,
+    pub preview: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub model: Option<String>,
+    pub turns: Vec<ThreadTurnDto>,
 }
 
 #[async_trait]
@@ -100,7 +126,12 @@ pub trait AgentRuntime: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>>;
     async fn interrupt(&self, session_id: &str, turn_id: &str) -> Result<()>;
-    async fn respond_permission(&self, request_id: &str, allow: bool) -> Result<()>;
+    async fn respond_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+        answer: Option<&str>,
+    ) -> Result<()>;
     async fn pending_requests(&self, _thread_id: &str) -> Vec<ThreadActionRequestDto> {
         Vec::new()
     }
@@ -135,13 +166,32 @@ pub trait AgentRuntime: Send + Sync {
     async fn apply_session_settings(
         &self,
         _session_id: &str,
-        _model: Option<&str>,
-        _effort: Option<&str>,
+        _settings: SessionSettings,
     ) -> Result<()> {
         Ok(())
     }
     async fn install(&self, _agent_id: Option<&str>) -> Result<AgentBackendDto> {
         Ok(self.descriptor())
+    }
+    async fn list_import_sessions(
+        &self,
+        _agent_id: Option<&str>,
+    ) -> Result<Vec<ImportSessionMeta>> {
+        Ok(Vec::new())
+    }
+    async fn resolve_import_session(
+        &self,
+        agent_id: Option<&str>,
+        session_id: &str,
+    ) -> Result<Option<ImportSessionMeta>> {
+        Ok(self
+            .list_import_sessions(agent_id)
+            .await?
+            .into_iter()
+            .find(|session| crate::import_id::session_ids_match(&session.session_id, session_id)))
+    }
+    fn session_loaded(&self, _session_id: &str) -> bool {
+        false
     }
 }
 

@@ -17,14 +17,21 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::actor::{
-    AgentRuntime, EventBus, GoalState, StartSessionInput, StartSessionResult, StartTurnInput,
+    AgentRuntime, EventBus, GoalState, ImportSessionMeta, SessionSettings, StartSessionInput,
+    StartSessionResult, StartTurnInput,
 };
-use crate::files::write_file;
+use crate::files::{write_file_with_scope, WriteScope};
+use crate::import_id::session_ids_match;
 
 use super::adapter::{adapter_for, SessionSettingOp};
 use super::capabilities::{negotiate, NegotiatedCaps};
 use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
 use super::mapper::TurnMapper;
+use super::modes::{
+    parse_available_modes, parse_permission_choices, permission_questions, permission_title,
+    resolve_mode, resolve_mode_config_value, select_permission_option, PermissionChoice,
+    ProductSessionPolicy, SessionMode,
+};
 use super::prompt::build_prompt_blocks;
 use super::rpc::AcpProcess;
 use super::terminal::AgentTerminals;
@@ -40,6 +47,8 @@ struct LiveSession {
     session_id: String,
     cwd: PathBuf,
     yolo: bool,
+    sandbox_mode: Option<String>,
+    collaboration_mode: Option<String>,
     negotiated: NegotiatedCaps,
     adapter_id: String,
     goal: Option<GoalState>,
@@ -49,11 +58,18 @@ struct LiveSession {
     config_options: Value,
     harness_state: Value,
     harness_models: Vec<ModelOptionDto>,
+    available_modes: Vec<SessionMode>,
+    current_mode_id: Option<String>,
+}
+
+struct PendingPermission {
+    tx: tokio::sync::oneshot::Sender<String>,
+    options: Vec<PermissionChoice>,
 }
 
 struct Inner {
     sessions: Mutex<HashMap<String, LiveSession>>,
-    pending_permissions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    pending_permissions: Mutex<HashMap<String, PendingPermission>>,
     pending_dtos: Mutex<HashMap<String, Vec<ThreadActionRequestDto>>>,
     caps_by_agent: Mutex<HashMap<String, AgentProviderCapabilitiesDto>>,
     updates: broadcast::Sender<Value>,
@@ -121,21 +137,17 @@ impl AcpRuntime {
         &self,
         def: &AcpAgentDef,
         cwd: &str,
-        yolo: bool,
+        policy: ProductSessionPolicy,
         load_id: Option<&str>,
         reasoning_effort: Option<&str>,
     ) -> Result<(String, LiveSession)> {
+        let yolo = policy.auto_approve();
         let availability = classify_availability(def);
         if availability != "ready" {
             bail!("{} is not available ({availability})", def.display_name);
         }
         let adapter = adapter_for(&def.id);
-        let mut extra_env = Vec::new();
-        if def.id == "codex" {
-            if let Ok(home) = std::env::var("CODEX_HOME") {
-                extra_env.push(("CODEX_HOME", home));
-            }
-        }
+        let extra_env = extra_env_for(def);
         let (process, updates_rx, requests_rx) = tokio::time::timeout(
             self.startup_timeout,
             AcpProcess::spawn(&def.server_command, cwd, &extra_env),
@@ -237,25 +249,124 @@ impl AcpRuntime {
             } else {
                 (json!({}), Vec::new(), None, None)
             };
+        let (current_mode_id, available_modes) = parse_available_modes(&raw_session);
         let scoped = Self::scoped_id(&def.id, &session_id);
-        Ok((
-            scoped,
-            LiveSession {
-                process,
-                session_id,
-                cwd: PathBuf::from(cwd),
-                yolo,
-                negotiated,
-                adapter_id: def.id.clone(),
-                goal: None,
-                model,
-                reasoning_effort,
-                active: None,
-                config_options,
-                harness_state,
-                harness_models,
-            },
-        ))
+        let mut live = LiveSession {
+            process,
+            session_id,
+            cwd: PathBuf::from(cwd),
+            yolo,
+            sandbox_mode: policy.sandbox_mode.clone(),
+            collaboration_mode: policy.collaboration_mode.clone(),
+            negotiated,
+            adapter_id: def.id.clone(),
+            goal: None,
+            model,
+            reasoning_effort,
+            active: None,
+            config_options,
+            harness_state,
+            harness_models,
+            available_modes,
+            current_mode_id,
+        };
+        if let Err(err) = Self::apply_product_mode(&live.process.clone(), &mut live).await {
+            tracing::warn!(error = %err, "failed to apply ACP session mode on spawn");
+        }
+        Ok((scoped, live))
+    }
+
+    async fn list_agent_sessions(&self, def: &AcpAgentDef) -> Result<Vec<ImportSessionMeta>> {
+        let cwd = std::env::temp_dir();
+        let extra_env = extra_env_for(def);
+        let adapter = adapter_for(&def.id);
+        let (process, _updates_rx, _requests_rx) = tokio::time::timeout(
+            self.startup_timeout,
+            AcpProcess::spawn(&def.server_command, &cwd.to_string_lossy(), &extra_env),
+        )
+        .await
+        .map_err(|_| anyhow!("ACP spawn timeout"))??;
+        let init = process
+            .request(
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientInfo": {
+                        "name": "remote-codex",
+                        "title": "Remote Codex",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "clientCapabilities": {
+                        "fs": {
+                            "readTextFile": adapter.fs_read_text_file(),
+                            "writeTextFile": adapter.fs_write_text_file()
+                        },
+                        "terminal": true,
+                        "session": { "compaction": {}, "configOptions": { "boolean": {} } },
+                        "plan": {},
+                        "_meta": adapter.initialize_client_meta()
+                    }
+                }),
+            )
+            .await?;
+        let negotiated = negotiate(&init);
+        if !negotiated.list {
+            return Ok(Vec::new());
+        }
+        let mut sessions = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut params = json!({});
+            if let Some(cursor) = &cursor {
+                params["cursor"] = json!(cursor);
+            }
+            let response = process.request("session/list", params).await?;
+            if let Some(items) = response.get("sessions").and_then(Value::as_array) {
+                for info in items {
+                    let Some(session_id) = info.get("sessionId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let cwd = info
+                        .get("cwd")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if cwd.is_empty() || !PathBuf::from(&cwd).is_absolute() {
+                        continue;
+                    }
+                    sessions.push(ImportSessionMeta {
+                        session_id: session_id.to_string(),
+                        agent_id: def.id.clone(),
+                        cwd,
+                        title: info
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .filter(|value| !value.trim().is_empty())
+                            .unwrap_or_else(|| "Untitled session".into()),
+                        preview: None,
+                        created_at: info
+                            .get("createdAt")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        updated_at: info
+                            .get("updatedAt")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        model: None,
+                        turns: Vec::new(),
+                    });
+                }
+            }
+            cursor = response
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(sessions)
     }
 
     async fn models_from_live(&self, agent_id: &str) -> Option<Vec<ModelOptionDto>> {
@@ -271,7 +382,18 @@ impl AcpRuntime {
     }
 
     async fn probe_models(&self, def: &AcpAgentDef, cwd: &str) -> Result<Vec<ModelOptionDto>> {
-        let (_scoped, live) = self.spawn_session(def, cwd, true, None, None).await?;
+        let (_scoped, live) = self
+            .spawn_session(
+                def,
+                cwd,
+                ProductSessionPolicy {
+                    approval_mode: Some("yolo".into()),
+                    ..ProductSessionPolicy::default()
+                },
+                None,
+                None,
+            )
+            .await?;
         if !live.harness_models.is_empty() {
             return Ok(live.harness_models);
         }
@@ -300,6 +422,24 @@ impl AcpRuntime {
                 }
                 if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
                     apply_projection(live, proj);
+                }
+            }
+            SessionSettingOp::SetMode { mode_id } => {
+                let params = json!({
+                    "sessionId": live.session_id,
+                    "modeId": mode_id
+                });
+                let response = match process.request("session/set_mode", params.clone()).await {
+                    Ok(response) => response,
+                    Err(_) => process.request("session/setMode", params).await?,
+                };
+                live.current_mode_id = Some(mode_id.clone());
+                let (current, available) = parse_available_modes(&response);
+                if !available.is_empty() {
+                    live.available_modes = available;
+                }
+                if current.is_some() {
+                    live.current_mode_id = current;
                 }
             }
             SessionSettingOp::SetModel { model_id } => {
@@ -346,16 +486,63 @@ impl AcpRuntime {
         Ok(())
     }
 
+    fn policy_from_live(live: &LiveSession) -> ProductSessionPolicy {
+        ProductSessionPolicy {
+            collaboration_mode: live.collaboration_mode.clone(),
+            sandbox_mode: live.sandbox_mode.clone(),
+            approval_mode: Some(if live.yolo {
+                "yolo".into()
+            } else {
+                "guarded".into()
+            }),
+        }
+    }
+
+    async fn apply_product_mode(process: &AcpProcess, live: &mut LiveSession) -> Result<()> {
+        let policy = Self::policy_from_live(live);
+        if let Some(mode_id) = resolve_mode(&live.available_modes, &policy) {
+            if live.current_mode_id.as_deref() != Some(mode_id.as_str()) {
+                Self::apply_setting_op(process, live, SessionSettingOp::SetMode { mode_id })
+                    .await?;
+            }
+            return Ok(());
+        }
+        if let Some((config_id, value)) = resolve_mode_config_value(&live.config_options, &policy) {
+            Self::apply_setting_op(
+                process,
+                live,
+                SessionSettingOp::SetConfig { config_id, value },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn apply_live_settings(
         &self,
         session_key: &str,
         model: Option<&str>,
         effort: Option<&str>,
+        sandbox: Option<&str>,
+        collab: Option<&str>,
+        approval: Option<&str>,
     ) -> Result<()> {
         let mut sessions = self.inner.sessions.lock().await;
         let Some(live) = sessions.get_mut(session_key) else {
             return Ok(());
         };
+        if sandbox.is_some() {
+            live.sandbox_mode = sandbox.map(str::to_string);
+        }
+        if collab.is_some() {
+            live.collaboration_mode = collab.map(str::to_string);
+        }
+        if let Some(approval) = approval {
+            live.yolo =
+                approval == "yolo" || live.sandbox_mode.as_deref() == Some("danger-full-access");
+        } else {
+            live.yolo = live.yolo || live.sandbox_mode.as_deref() == Some("danger-full-access");
+        }
         let adapter = adapter_for(&live.adapter_id);
         if let Some(model) = model.filter(|value| !value.is_empty() && *value != "default") {
             if live.model.as_deref() != Some(model) {
@@ -389,6 +576,11 @@ impl AcpRuntime {
                     )
                     .await?;
                 }
+            }
+        }
+        if sandbox.is_some() || collab.is_some() || approval.is_some() {
+            if let Err(err) = Self::apply_product_mode(&live.process.clone(), live).await {
+                tracing::warn!(error = %err, "failed to apply ACP session mode");
             }
         }
         Ok(())
@@ -439,6 +631,8 @@ impl AgentRuntime for AcpRuntime {
                 adapter_for(&bound).patch_capabilities(&mut caps, &NegotiatedCaps::default());
                 caps
             });
+        let mut caps = caps;
+        caps.sessions.import_local = true;
         let mut schema = AgentBackendManagementSchemaDto::default();
         schema.toolbox_items = toolbox_from_capabilities(&caps);
         AgentBackendDto {
@@ -605,7 +799,11 @@ impl AgentRuntime for AcpRuntime {
             .spawn_session(
                 &def,
                 &input.cwd,
-                input.approval_mode == "yolo",
+                ProductSessionPolicy {
+                    collaboration_mode: None,
+                    sandbox_mode: input.sandbox_mode.clone(),
+                    approval_mode: Some(input.approval_mode.clone()),
+                },
                 None,
                 input.reasoning_effort.as_deref(),
             )
@@ -664,17 +862,30 @@ impl AgentRuntime for AcpRuntime {
         session_id: &str,
         cwd: Option<&str>,
     ) -> Result<StartSessionResult> {
-        if self.inner.sessions.lock().await.contains_key(session_id) {
-            return Ok(StartSessionResult {
-                provider_session_id: session_id.into(),
-                model: None,
-                reasoning_effort: None,
-            });
+        {
+            let sessions = self.inner.sessions.lock().await;
+            if let Some(existing) = sessions
+                .keys()
+                .find(|key| session_ids_match(key, session_id))
+                .cloned()
+            {
+                return Ok(StartSessionResult {
+                    provider_session_id: existing,
+                    model: None,
+                    reasoning_effort: None,
+                });
+            }
         }
-        let (agent_id, raw) = session_id
-            .split_once("::")
-            .ok_or_else(|| anyhow!("malformed ACP session id"))?;
-        let def = self.agent_def(Some(agent_id))?;
+        let (agent_id, raw) = match session_id.split_once("::") {
+            Some((agent, rest)) if !agent.is_empty() && !rest.is_empty() => {
+                (agent.to_string(), rest.to_string())
+            }
+            _ => (
+                self.bound_agent.clone().unwrap_or_else(|| "codex".into()),
+                session_id.to_string(),
+            ),
+        };
+        let def = self.agent_def(Some(&agent_id))?;
         let cwd = cwd
             .map(str::to_string)
             .or_else(|| {
@@ -684,7 +895,16 @@ impl AgentRuntime for AcpRuntime {
             })
             .unwrap_or_else(|| ".".into());
         let (scoped, live) = self
-            .spawn_session(&def, &cwd, true, Some(raw), None)
+            .spawn_session(
+                &def,
+                &cwd,
+                ProductSessionPolicy {
+                    approval_mode: Some("yolo".into()),
+                    ..ProductSessionPolicy::default()
+                },
+                Some(raw.as_str()),
+                None,
+            )
             .await?;
         self.inner
             .sessions
@@ -709,6 +929,9 @@ impl AgentRuntime for AcpRuntime {
                 &input.provider_session_id,
                 input.model.as_deref(),
                 input.reasoning_effort.as_deref(),
+                input.sandbox_mode.as_deref(),
+                input.collaboration_mode.as_deref(),
+                input.approval_mode.as_deref(),
             )
             .await;
         let (process, session_id, cwd, image_capable) = {
@@ -845,15 +1068,28 @@ impl AgentRuntime for AcpRuntime {
         Ok(())
     }
 
-    async fn respond_permission(&self, request_id: &str, allow: bool) -> Result<()> {
-        if let Some(tx) = self
+    async fn respond_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+        answer: Option<&str>,
+    ) -> Result<()> {
+        if let Some(pending) = self
             .inner
             .pending_permissions
             .lock()
             .await
             .remove(request_id)
         {
-            let _ = tx.send(allow);
+            let option =
+                select_permission_option(&pending.options, allow, answer).unwrap_or_else(|| {
+                    if allow {
+                        "allow-once".into()
+                    } else {
+                        "cancelled".into()
+                    }
+                });
+            let _ = pending.tx.send(option);
         }
         for list in self.inner.pending_dtos.lock().await.values_mut() {
             list.retain(|item| item.id != request_id);
@@ -890,6 +1126,9 @@ impl AgentRuntime for AcpRuntime {
                     prompt: prompt.into(),
                     model: None,
                     reasoning_effort: None,
+                    sandbox_mode: None,
+                    collaboration_mode: None,
+                    approval_mode: None,
                     thread_id: thread_id.into(),
                     turn_id: format!("compact-{}", Uuid::new_v4()),
                     hidden: true,
@@ -908,6 +1147,8 @@ impl AgentRuntime for AcpRuntime {
             raw_session,
             cwd,
             yolo,
+            sandbox_mode,
+            collaboration_mode,
             negotiated,
             adapter_id,
             goal,
@@ -916,6 +1157,8 @@ impl AgentRuntime for AcpRuntime {
             config_options,
             harness_state,
             harness_models,
+            available_modes,
+            current_mode_id,
         ) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -929,6 +1172,8 @@ impl AgentRuntime for AcpRuntime {
                 live.session_id.clone(),
                 live.cwd.clone(),
                 live.yolo,
+                live.sandbox_mode.clone(),
+                live.collaboration_mode.clone(),
                 live.negotiated.clone(),
                 live.adapter_id.clone(),
                 live.goal.clone(),
@@ -937,6 +1182,8 @@ impl AgentRuntime for AcpRuntime {
                 live.config_options.clone(),
                 live.harness_state.clone(),
                 live.harness_models.clone(),
+                live.available_modes.clone(),
+                live.current_mode_id.clone(),
             )
         };
         let response = process
@@ -962,6 +1209,8 @@ impl AgentRuntime for AcpRuntime {
                 session_id: new_id,
                 cwd,
                 yolo,
+                sandbox_mode,
+                collaboration_mode,
                 negotiated,
                 adapter_id,
                 goal,
@@ -971,6 +1220,8 @@ impl AgentRuntime for AcpRuntime {
                 config_options,
                 harness_state,
                 harness_models,
+                available_modes,
+                current_mode_id,
             },
         );
         Ok(StartSessionResult {
@@ -1085,10 +1336,17 @@ impl AgentRuntime for AcpRuntime {
     async fn apply_session_settings(
         &self,
         session_id: &str,
-        model: Option<&str>,
-        effort: Option<&str>,
+        settings: SessionSettings,
     ) -> Result<()> {
-        self.apply_live_settings(session_id, model, effort).await
+        self.apply_live_settings(
+            session_id,
+            settings.model.as_deref(),
+            settings.effort.as_deref(),
+            settings.sandbox_mode.as_deref(),
+            settings.collaboration_mode.as_deref(),
+            settings.approval_mode.as_deref(),
+        )
+        .await
     }
 
     async fn install(&self, agent_id: Option<&str>) -> Result<AgentBackendDto> {
@@ -1107,6 +1365,37 @@ impl AgentRuntime for AcpRuntime {
         }
         Ok(self.descriptor())
     }
+
+    async fn list_import_sessions(&self, agent_id: Option<&str>) -> Result<Vec<ImportSessionMeta>> {
+        let def = match self.agent_def(agent_id) {
+            Ok(def) => def,
+            Err(_) => return Ok(Vec::new()),
+        };
+        if classify_availability(&def) != "ready" {
+            return Ok(Vec::new());
+        }
+        match self.list_agent_sessions(&def).await {
+            Ok(sessions) => Ok(sessions),
+            Err(err) => {
+                tracing::warn!(error = %err, agent = %def.id, "ACP session list failed");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    fn session_loaded(&self, session_id: &str) -> bool {
+        self.inner
+            .sessions
+            .try_lock()
+            .ok()
+            .map(|sessions| {
+                sessions.iter().any(|(key, live)| {
+                    session_ids_match(key, session_id)
+                        || session_ids_match(&live.session_id, session_id)
+                })
+            })
+            .unwrap_or(false)
+    }
 }
 
 fn spawn_mux(
@@ -1119,6 +1408,7 @@ fn spawn_mux(
         loop {
             tokio::select! {
                 Some(update) = updates.recv() => {
+                    apply_mode_update(&inner, &update).await;
                     let _ = inner.updates.send(update);
                 }
                 Some((req_id, method, params)) = requests.recv() => {
@@ -1144,48 +1434,57 @@ async fn handle_agent_request(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let (cwd, yolo, active) = {
+    let (cwd, policy, active) = {
         let sessions = inner.sessions.lock().await;
         let live = sessions.values().find(|s| s.session_id == raw_session);
         match live {
             Some(live) => (
                 live.cwd.clone(),
-                live.yolo,
+                AcpRuntime::policy_from_live(live),
                 live.active
                     .as_ref()
                     .map(|a| (a.thread_id.clone(), a.turn_id.clone(), a.bus.clone())),
             ),
-            None => (PathBuf::from("."), true, None),
+            None => (PathBuf::from("."), ProductSessionPolicy::default(), None),
         }
     };
     match method {
         "session/request_permission" => {
-            if yolo {
+            let choices = parse_permission_choices(&params);
+            if policy.auto_approve() {
+                let option = select_permission_option(&choices, true, None)
+                    .unwrap_or_else(|| "allow-once".into());
                 process
                     .respond(
                         req_id,
-                        json!({ "outcome": { "outcome": "selected", "optionId": "allow-once" } }),
+                        json!({ "outcome": { "outcome": "selected", "optionId": option } }),
                     )
                     .await?;
                 return Ok(());
             }
             let request_id = format!("perm-{req_id}");
             let (tx, rx) = tokio::sync::oneshot::channel();
-            inner
-                .pending_permissions
-                .lock()
-                .await
-                .insert(request_id.clone(), tx);
+            inner.pending_permissions.lock().await.insert(
+                request_id.clone(),
+                PendingPermission {
+                    tx,
+                    options: choices.clone(),
+                },
+            );
+            let title = permission_title(&params);
             if let Some((thread_id, turn_id, bus)) = &active {
                 let dto = ThreadActionRequestDto {
                     id: request_id.clone(),
                     kind: "requestUserInput".into(),
-                    title: "Permission required".into(),
+                    title: title.clone(),
                     description: Some(params.to_string()),
                     turn_id: Some(turn_id.clone()),
-                    item_id: None,
+                    item_id: params
+                        .pointer("/toolCall/toolCallId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     created_at: now_rfc3339(),
-                    questions: vec![],
+                    questions: permission_questions(&title, &choices),
                 };
                 inner
                     .pending_dtos
@@ -1201,24 +1500,33 @@ async fn handle_agent_request(
                     payload: json!({ "request": dto }),
                 });
             }
-            let allow = tokio::time::timeout(Duration::from_secs(300), rx)
+            let selected = tokio::time::timeout(Duration::from_secs(300), rx)
                 .await
                 .ok()
-                .and_then(Result::ok)
-                .unwrap_or(false);
-            let option = if allow { "allow-once" } else { "reject" };
-            process
-                .respond(
-                    req_id,
-                    json!({ "outcome": { "outcome": "selected", "optionId": option } }),
-                )
-                .await?;
+                .and_then(Result::ok);
+            if let Some(option) = selected {
+                process
+                    .respond(
+                        req_id,
+                        json!({ "outcome": { "outcome": "selected", "optionId": option } }),
+                    )
+                    .await?;
+            } else {
+                process
+                    .respond(req_id, json!({ "outcome": { "outcome": "cancelled" } }))
+                    .await?;
+            }
         }
         "fs/read_text_file" => {
             let path = params.get("path").and_then(Value::as_str).unwrap_or("");
-            let content = tokio::fs::read_to_string(cwd.join(path))
-                .await
-                .unwrap_or_default();
+            let content = tokio::fs::read_to_string(
+                PathBuf::from(path)
+                    .is_absolute()
+                    .then(|| PathBuf::from(path))
+                    .unwrap_or_else(|| cwd.join(path)),
+            )
+            .await
+            .unwrap_or_default();
             process
                 .respond(req_id, json!({ "content": content }))
                 .await?;
@@ -1226,8 +1534,21 @@ async fn handle_agent_request(
         "fs/write_text_file" => {
             let path = params.get("path").and_then(Value::as_str).unwrap_or("");
             let content = params.get("content").and_then(Value::as_str).unwrap_or("");
-            let _ = write_file(&cwd, path, content);
-            process.respond(req_id, json!({})).await?;
+            if policy.rejects_writes() {
+                process
+                    .respond_error(req_id, "writes are disabled in the current session mode")
+                    .await?;
+            } else {
+                let scope = if policy.allows_writes_outside_workspace() {
+                    WriteScope::Unrestricted
+                } else {
+                    WriteScope::Workspace
+                };
+                match write_file_with_scope(&cwd, path, content, scope) {
+                    Ok(()) => process.respond(req_id, json!({})).await?,
+                    Err(err) => process.respond_error(req_id, &err.to_string()).await?,
+                }
+            }
         }
         "terminal/create" => {
             let command = params
@@ -1292,6 +1613,46 @@ async fn handle_agent_request(
         }
     }
     Ok(())
+}
+
+async fn apply_mode_update(inner: &Inner, update: &Value) {
+    let body = update.get("update").unwrap_or(update);
+    if body.get("sessionUpdate").and_then(Value::as_str) != Some("current_mode_update") {
+        return;
+    }
+    let mode_id = body
+        .get("modeId")
+        .or_else(|| body.get("currentModeId"))
+        .and_then(Value::as_str);
+    let Some(mode_id) = mode_id else {
+        return;
+    };
+    let session_id = update
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut sessions = inner.sessions.lock().await;
+    if let Some(live) = sessions
+        .values_mut()
+        .find(|session| session.session_id == session_id)
+    {
+        live.current_mode_id = Some(mode_id.to_string());
+    }
+}
+
+fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
+    let key = match def.id.as_str() {
+        "codex" => "CODEX_HOME",
+        "grok" => "GROK_HOME",
+        "claude" => "CLAUDE_CONFIG_DIR",
+        "opencode" => "OPENCODE_HOME",
+        _ => return Vec::new(),
+    };
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| vec![(key, value)])
+        .unwrap_or_default()
 }
 
 fn apply_projection(live: &mut LiveSession, proj: super::adapter::HarnessProjection) {

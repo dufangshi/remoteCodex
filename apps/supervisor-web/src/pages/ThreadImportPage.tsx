@@ -16,6 +16,7 @@ import {
   fetchImportThreadCandidates,
   importThread,
 } from '../lib/api';
+import { parseSessionRef, providerForImportedAgent } from '../lib/importSessionId';
 import { currentThreadHref } from '../lib/relayRoutes';
 
 export function ThreadImportPage() {
@@ -146,13 +147,37 @@ export function ThreadImportPage() {
       } as AgentBackendDto,
     ];
   }, [backends]);
+  const parsedSession = parseSessionRef(sessionId);
   const selectedCandidate = candidates.find(
-    (candidate) => candidate.sessionId === sessionId.trim(),
+    (candidate) => candidate.sessionId === parsedSession.rawId,
   ) ?? null;
+
+  function applyPastedSession(value: string) {
+    const parsed = parseSessionRef(value);
+    const looksComplete =
+      Boolean(parsed.rawId) &&
+      parsed.rawId !== value.trim() &&
+      /[0-9a-f]{8}-[0-9a-f-]{4,}/i.test(parsed.rawId);
+    setSessionId(looksComplete ? parsed.rawId : value);
+    if (!parsed.agentId || !looksComplete) {
+      return;
+    }
+    const nextProvider = providerForImportedAgent(
+      parsed.agentId,
+      backendOptions.map((backend) => backend.provider),
+    );
+    if (nextProvider && nextProvider !== provider) {
+      setProvider(nextProvider);
+    }
+    if (nextProvider === 'acp' || provider === 'acp') {
+      setAgentId(parsed.agentId);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const normalizedSessionId = sessionId.trim();
+    const parsed = parseSessionRef(sessionId);
+    const normalizedSessionId = parsed.rawId;
     if (!normalizedSessionId) {
       setError('Session ID is required.');
       return;
@@ -165,6 +190,7 @@ export function ThreadImportPage() {
       const imported = await importThread({
         sessionId: normalizedSessionId,
         provider,
+        agentId: provider === 'acp' ? agentId : provider,
       });
       navigate(currentThreadHref(imported.thread.id));
     } catch (caught) {
@@ -184,9 +210,13 @@ export function ThreadImportPage() {
         <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">Import Session</p>
         <h2 className="host-page-title mt-2 text-3xl font-semibold">Bring in a local backend session</h2>
         <p className="host-page-description mt-3 max-w-3xl text-sm leading-6">
-          Select the backend and paste a session ID from this machine. Supervisor will recover the workspace path, reuse
-          an existing workspace when possible, or create one with the last folder name as the
-          default label.
+          Select the backend and paste a session ID from this machine. Copied harness links such as
+          {' '}
+          <code>codex://threads/&lt;id&gt;</code>
+          {' '}
+          or Grok/Claude prefixes are accepted — Supervisor extracts the id automatically. It will
+          recover the workspace path, reuse an existing workspace when possible, or create one with
+          the last folder name as the default label.
         </p>
         <p className="host-muted mt-2 max-w-3xl text-sm leading-6">
           Imported history appears immediately, but sending a new prompt still requires a manual
@@ -295,8 +325,8 @@ export function ThreadImportPage() {
           <input
             id="session-id"
             value={sessionId}
-            onChange={(event) => setSessionId(event.target.value)}
-            placeholder="019d6fb7-7033-7a30-a2c7-74d0919e87d4"
+            onChange={(event) => applyPastedSession(event.target.value)}
+            placeholder="codex://threads/01a0634a-23df-7191-acd2-1fca43a10418"
             className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
           />
         </div>

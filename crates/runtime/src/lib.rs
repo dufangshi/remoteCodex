@@ -4,6 +4,9 @@ pub mod config;
 pub mod db;
 pub mod fake;
 pub mod files;
+pub mod history;
+pub mod import_id;
+pub mod local_sessions;
 pub mod service;
 
 pub use actor::{EventBus, SharedRuntime};

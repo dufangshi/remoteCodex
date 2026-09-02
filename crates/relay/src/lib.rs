@@ -211,6 +211,8 @@ struct TokenQuery {
     token: Option<String>,
     #[serde(rename = "deviceToken")]
     device_token: Option<String>,
+    #[serde(rename = "relaySession")]
+    relay_session: Option<String>,
 }
 
 impl TokenQuery {
@@ -218,6 +220,7 @@ impl TokenQuery {
         self.token
             .clone()
             .filter(|value| !value.is_empty())
+            .or_else(|| self.relay_session.clone().filter(|value| !value.is_empty()))
             .or_else(|| self.device_token.clone().filter(|value| !value.is_empty()))
     }
 }
@@ -597,6 +600,7 @@ impl AccessQuery {
         TokenQuery {
             token: self.token.clone(),
             device_token: self.device_token.clone(),
+            relay_session: None,
         }
     }
 }
@@ -1024,7 +1028,7 @@ async fn device_api(
             .split('&')
             .filter(|part| {
                 let key = part.split('=').next().unwrap_or("");
-                key != "token" && key != "deviceToken"
+                key != "token" && key != "deviceToken" && key != "relaySession"
             })
             .collect();
         if !filtered.is_empty() {

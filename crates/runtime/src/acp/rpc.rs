@@ -116,6 +116,19 @@ impl AcpProcess {
         .await
     }
 
+    pub async fn respond_error(&self, id: i64, message: &str) -> Result<()> {
+        let mut stdin = self.stdin.lock().await;
+        write_message(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32000, "message": message }
+            }),
+        )
+        .await
+    }
+
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
         write_message(

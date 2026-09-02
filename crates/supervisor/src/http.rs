@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{
     now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput, HealthDto,
-    PlatformCapabilitiesDto, Provider, RuntimeConfigDto, SendThreadPromptInput,
+    ImportThreadInput, PlatformCapabilitiesDto, Provider, RuntimeConfigDto, SendThreadPromptInput,
     SupervisorConnectedEnvelope, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
     VersionDto, APP_NAME, APP_VERSION,
 };
@@ -77,6 +77,15 @@ pub fn router(state: AppState) -> Router {
             "/api/threads/{id}",
             get(get_thread).patch(rename_thread).delete(delete_thread),
         )
+        .route(
+            "/api/threads/{id}/turns/{turnId}/detail",
+            get(thread_turn_detail),
+        )
+        .route(
+            "/api/threads/{id}/items/{itemId}/detail",
+            get(thread_item_detail),
+        )
+        .route("/api/threads/{id}/assets/image", get(thread_image))
         .route("/api/threads/{id}/settings", patch(thread_settings))
         .route("/api/threads/{id}/prompt", post(thread_prompt))
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
@@ -137,6 +146,8 @@ fn map_err(e: anyhow::Error) -> ApiErr {
     let message = e.to_string();
     if message.contains("not found") {
         err(StatusCode::NOT_FOUND, "not_found", message)
+    } else if message.contains("Resume / Connect") {
+        err(StatusCode::CONFLICT, "conflict", message)
     } else if message.contains("not installed") || message.contains("not enabled") {
         err(StatusCode::BAD_REQUEST, "harness_unavailable", message)
     } else {
@@ -549,21 +560,42 @@ async fn start_thread(
     ))
 }
 
-async fn import_thread() -> Result<Json<Value>, ApiErr> {
-    Err(err(
-        StatusCode::BAD_REQUEST,
-        "bad_request",
-        "import is not available for ACP-only sessions",
+async fn import_thread(
+    State(state): State<AppState>,
+    Json(body): Json<ImportThreadInput>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.import_thread(body).await.map_err(map_err)?).unwrap(),
     ))
 }
 
-async fn import_candidates() -> Json<Value> {
-    Json(json!([]))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportCandidatesQuery {
+    provider: Option<String>,
+    agent_id: Option<String>,
+}
+
+async fn import_candidates(
+    Query(query): Query<ImportCandidatesQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    let provider = query.provider.as_deref().and_then(Provider::from_name);
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .list_import_candidates(provider, query.agent_id.as_deref())
+                .await
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
 #[derive(Deserialize)]
 struct DetailQuery {
     limit: Option<u32>,
+    view: Option<String>,
 }
 
 async fn get_thread(
@@ -571,15 +603,63 @@ async fn get_thread(
     Query(query): Query<DetailQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
+    let summary_only = query.view.as_deref() == Some("summary");
     Ok(Json(
         serde_json::to_value(
             state
-                .get_thread_detail(&id, query.limit)
+                .get_thread_detail_view(&id, query.limit, summary_only)
                 .await
                 .map_err(map_err)?,
         )
         .unwrap(),
     ))
+}
+
+async fn thread_turn_detail(
+    Path((id, turn_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .get_thread_turn_detail(&id, &turn_id)
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
+}
+
+async fn thread_item_detail(
+    Path((id, item_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        state
+            .get_history_item_detail(&id, &item_id)
+            .map_err(map_err)?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ImageQuery {
+    path: String,
+}
+
+async fn thread_image(
+    Path(id): Path<String>,
+    Query(query): Query<ImageQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiErr> {
+    let (bytes, mime) = state.thread_image(&id, &query.path).map_err(map_err)?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::CACHE_CONTROL, "private, max-age=60"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -712,6 +792,8 @@ async fn thread_prompt(
         serde_json::from_slice::<SendThreadPromptInput>(&bytes)
             .map_err(|e| err(StatusCode::BAD_REQUEST, "bad_request", e.to_string()))?
     };
+    let thread = state.get_thread(&id).map_err(map_err)?;
+    state.ensure_prompt_allowed(&thread).map_err(map_err)?;
     let background = state.clone();
     let background_id = id.clone();
     tokio::spawn(async move {
@@ -846,8 +928,25 @@ struct RespondBody {
     #[serde(default)]
     allow: Option<bool>,
     #[serde(default)]
-    #[allow(dead_code)]
     answers: Option<Value>,
+}
+
+fn selected_request_answer(answers: &Option<Value>) -> Option<String> {
+    let obj = answers.as_ref()?.as_object()?;
+    for value in obj.values() {
+        if let Some(text) = value
+            .get("answers")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_str)
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
 }
 
 async fn thread_respond(
@@ -855,9 +954,15 @@ async fn thread_respond(
     State(state): State<AppState>,
     body: Option<Json<RespondBody>>,
 ) -> Result<Json<Value>, ApiErr> {
-    let allow = body.map(|Json(b)| b.allow.unwrap_or(true)).unwrap_or(true);
+    let (allow, answer) = match body {
+        Some(Json(body)) => (
+            body.allow.unwrap_or(true),
+            selected_request_answer(&body.answers),
+        ),
+        None => (true, None),
+    };
     state
-        .respond_request(&id, &request_id, allow)
+        .respond_request(&id, &request_id, allow, answer.as_deref())
         .await
         .map_err(map_err)?;
     Ok(Json(json!({ "ok": true, "requestId": request_id })))

@@ -16,6 +16,7 @@ pub struct HarnessProjection {
 pub enum SessionSettingOp {
     SetConfig { config_id: String, value: String },
     SetModel { model_id: String },
+    SetMode { mode_id: String },
     LoadWithMeta { meta: Value },
 }
 

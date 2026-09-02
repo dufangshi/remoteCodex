@@ -34,7 +34,8 @@ export function RelayHomePage() {
     };
   }, []);
 
-  const authenticated = session?.authenticated === true;
+  const authenticated =
+    session?.authenticated === true && session.user?.role !== 'admin';
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">

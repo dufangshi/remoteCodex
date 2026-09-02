@@ -30,6 +30,16 @@ impl Provider {
             Self::Acp => "acp",
         }
     }
+
+    pub fn from_name(raw: &str) -> Option<Self> {
+        match raw {
+            "codex" => Some(Self::Codex),
+            "claude" => Some(Self::Claude),
+            "opencode" => Some(Self::Opencode),
+            "acp" => Some(Self::Acp),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +247,10 @@ pub struct ThreadTurnDto {
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_deferred_items: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_item_count: Option<u32>,
     pub items: Vec<ThreadHistoryItemDto>,
 }
 
@@ -301,6 +315,30 @@ pub struct CreateThreadInput {
 
 fn default_approval() -> String {
     "yolo".into()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportThreadInput {
+    pub session_id: String,
+    #[serde(default)]
+    pub provider: Option<Provider>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportThreadCandidateDto {
+    pub provider: Provider,
+    pub agent_id: Option<String>,
+    pub session_id: String,
+    pub cwd: String,
+    pub title: String,
+    pub preview: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub history_status: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1171,6 +1171,8 @@ export interface ThreadTurnDto {
   reasoningEffortAvailable?: boolean | null;
   tokenUsage?: ThreadTurnTokenUsageDto | null;
   priceEstimate?: ThreadTurnPriceEstimateDto | null;
+  hasDeferredItems?: boolean | null;
+  deferredItemCount?: number | null;
   items: ThreadHistoryItemDto[];
 }
 
@@ -1657,6 +1659,7 @@ export interface UpdateThreadInput {
 export interface ImportThreadInput {
   sessionId: string;
   provider?: AgentBackendIdDto;
+  agentId?: string | null;
 }
 
 export interface ImportThreadCandidateDto {

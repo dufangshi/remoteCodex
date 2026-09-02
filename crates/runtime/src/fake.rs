@@ -17,14 +17,17 @@ use uuid::Uuid;
 
 use crate::acp::{adapter_for, NegotiatedCaps};
 use crate::actor::{
-    AgentRuntime, EventBus, GoalState, StartSessionInput, StartSessionResult, StartTurnInput,
+    AgentRuntime, EventBus, GoalState, ImportSessionMeta, StartSessionInput, StartSessionResult,
+    StartTurnInput,
 };
+use crate::import_id::session_ids_match;
 
 pub struct FakeRuntime {
     provider: Provider,
     sessions: Mutex<HashMap<String, String>>,
     started_at: Mutex<Option<String>>,
     goal: Mutex<Option<GoalState>>,
+    import_sessions: Mutex<Vec<ImportSessionMeta>>,
 }
 
 impl FakeRuntime {
@@ -34,7 +37,12 @@ impl FakeRuntime {
             sessions: Mutex::new(HashMap::new()),
             started_at: Mutex::new(None),
             goal: Mutex::new(None),
+            import_sessions: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn seed_import_session(&self, session: ImportSessionMeta) {
+        self.import_sessions.lock().unwrap().push(session);
     }
 
     fn agent_id(&self) -> &'static str {
@@ -64,6 +72,7 @@ impl FakeRuntime {
             },
         };
         adapter_for(self.agent_id()).patch_capabilities(&mut caps, &negotiated);
+        caps.sessions.import_local = true;
         caps
     }
 
@@ -299,7 +308,12 @@ impl AgentRuntime for FakeRuntime {
         Ok(())
     }
 
-    async fn respond_permission(&self, _request_id: &str, _allow: bool) -> Result<()> {
+    async fn respond_permission(
+        &self,
+        _request_id: &str,
+        _allow: bool,
+        _answer: Option<&str>,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -358,6 +372,26 @@ impl AgentRuntime for FakeRuntime {
         };
         *self.goal.lock().unwrap() = next.clone();
         Ok(next)
+    }
+
+    async fn list_import_sessions(&self, agent_id: Option<&str>) -> Result<Vec<ImportSessionMeta>> {
+        let wanted = agent_id.unwrap_or(self.agent_id());
+        Ok(self
+            .import_sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|session| session.agent_id == wanted || session.agent_id == self.agent_id())
+            .cloned()
+            .collect())
+    }
+
+    fn session_loaded(&self, session_id: &str) -> bool {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.contains_key(session_id)
+            || sessions
+                .keys()
+                .any(|stored| session_ids_match(stored, session_id))
     }
 }
 
