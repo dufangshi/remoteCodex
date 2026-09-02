@@ -175,6 +175,7 @@ const respondThreadRequestSchema = z.object({
 const threadDetailQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
   beforeTurnId: z.string().min(1).optional(),
+  view: z.enum(['summary', 'full']).optional(),
 });
 
 const exportThreadPdfSchema = z.object({
@@ -443,6 +444,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
       ...(query.beforeTurnId !== undefined
         ? { beforeTurnId: query.beforeTurnId }
         : {}),
+      ...(query.view === 'summary' ? { summaryOnly: true } : {}),
     });
   });
 
@@ -515,6 +517,17 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     return app.services.threadService.getThreadHistoryItemDetail(
       params.id,
       params.itemId,
+    );
+  });
+
+  app.get('/api/threads/:id/turns/:turnId/detail', async (request) => {
+    const params = z.object({
+      id: z.string().uuid(),
+      turnId: z.string().min(1),
+    }).parse(request.params);
+    return app.services.threadService.getThreadTurnDetail(
+      params.id,
+      params.turnId,
     );
   });
 

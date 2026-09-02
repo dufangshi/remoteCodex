@@ -6,10 +6,15 @@ describe('ACP harness adapters', () => {
   it('keeps unknown harnesses on the standard ACP contract', () => {
     expect(acpHarnessAdapterFor('unknown')).toMatchObject({ id: 'standard' });
     expect(acpHarnessAdapterFor('unknown').initializeClientMeta).toBeUndefined();
+    expect(acpHarnessAdapterFor('unknown').fsCapabilities).toBeUndefined();
   });
 
   it('projects Grok legacy model metadata without leaking it into ACP core', () => {
     const adapter = acpHarnessAdapterFor('grok');
+    expect(adapter.fsCapabilities).toEqual({
+      readTextFile: false,
+      writeTextFile: true,
+    });
     const projected = adapter.projectSession?.({
       models: {
         currentModelId: 'grok-4.6',

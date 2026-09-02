@@ -99,6 +99,10 @@ function projection(state: GrokModelState): AcpHarnessSessionProjection {
 
 export const grokAcpHarnessAdapter: AcpHarnessAdapter = {
   id: 'grok',
+  fsCapabilities: {
+    readTextFile: false,
+    writeTextFile: true,
+  },
   sessionNewMeta: ({ reasoningEffort }) =>
     reasoningEffort ? { reasoningEffort } : {},
   projectSession: (response) => {

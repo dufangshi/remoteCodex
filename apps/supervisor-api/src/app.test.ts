@@ -3487,6 +3487,96 @@ describe('supervisor api', () => {
     expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
   });
 
+  it('returns completed turn summaries and loads process items on demand', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { absPath: path.join(tempDir, 'workspace') },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Lazy turn details',
+      },
+    });
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId)!;
+    remoteThread.status = { type: 'idle' };
+    remoteThread.turns = [{
+      id: 'turn-lazy-1',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'user-lazy-1',
+          type: 'userMessage',
+          content: [{ type: 'text', text: 'Inspect the workspace.' }],
+        },
+        {
+          id: 'reason-lazy-1',
+          type: 'reasoning',
+          summary: ['Planning the inspection.'],
+        },
+        {
+          id: 'command-lazy-1',
+          type: 'commandExecution',
+          command: 'pwd',
+          aggregatedOutput: tempDir,
+          status: 'completed',
+          exitCode: 0,
+        },
+        {
+          id: 'agent-lazy-final',
+          type: 'agentMessage',
+          text: 'Inspection complete.',
+          phase: 'final_answer',
+        },
+      ],
+    }] as any;
+
+    const summaryResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}?view=summary`,
+    });
+    expect(summaryResponse.statusCode).toBe(200);
+    expect(summaryResponse.json().turns[0]).toMatchObject({
+      id: 'turn-lazy-1',
+      hasDeferredItems: true,
+      deferredItemCount: 2,
+      items: [
+        { id: 'user-lazy-1' },
+        { id: 'agent-lazy-final' },
+      ],
+    });
+    expect(
+      summaryResponse.json().turns[0].items.map((item: { id: string }) => item.id),
+    ).toEqual(['user-lazy-1', 'agent-lazy-final']);
+    expect(JSON.stringify(summaryResponse.json())).not.toContain(
+      'Planning the inspection.',
+    );
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/turns/turn-lazy-1/detail`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      id: 'turn-lazy-1',
+      hasDeferredItems: false,
+      deferredItemCount: 0,
+    });
+    expect(detailResponse.json().items.map((item: { id: string }) => item.id)).toEqual([
+      'user-lazy-1',
+      'reason-lazy-1',
+      'command-lazy-1',
+      'agent-lazy-final',
+    ]);
+  });
+
   it('slices paged detail responses when a runtime ignores paging options', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

@@ -14,6 +14,10 @@ export interface AcpHarnessSessionProjection {
 export interface AcpHarnessAdapter {
   readonly id: string;
   readonly initializeClientMeta?: Readonly<Record<string, unknown>>;
+  readonly fsCapabilities?: Readonly<{
+    readTextFile: boolean;
+    writeTextFile: boolean;
+  }>;
   readonly promptPreamble?: string;
   listModels?(context: acp.ClientContext): Promise<AgentModel[] | null>;
   sessionNewMeta?(input: {

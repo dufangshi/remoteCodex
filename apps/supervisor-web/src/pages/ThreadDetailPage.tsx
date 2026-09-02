@@ -60,6 +60,7 @@ import {
   fetchRelayAccess,
   fetchRelayPortal,
   fetchThreadHistoryItemDetail,
+  fetchThreadTurnDetail,
   fetchThreadShellState,
   fetchSupervisorHealth,
   fetchThreads,
@@ -2763,6 +2764,11 @@ export function ThreadDetailPage() {
     [id],
   );
 
+  const handleLoadTurnDetail = useCallback(
+    (turnId: string) => fetchThreadTurnDetail(id, turnId),
+    [id],
+  );
+
   const handleCancelPendingSteer = useCallback(
     async (threadId: string, pendingSteerId: string) => {
       setError(null);
@@ -3443,6 +3449,7 @@ export function ThreadDetailPage() {
         ? { updateSettings: handleUpdateThreadSettings }
         : {}),
       loadHistoryItemDetail: handleLoadHistoryItemDetail,
+      loadTurnDetail: handleLoadTurnDetail,
       getImageAssetUrl: getCurrentThreadImageAssetUrl,
       openWorkspaceFile: handleOpenWorkspaceFile,
       workspace: workspaceAdapter,
@@ -3458,6 +3465,7 @@ export function ThreadDetailPage() {
       handleSteerPendingPrompt,
       handleInterrupt,
       handleLoadHistoryItemDetail,
+      handleLoadTurnDetail,
       handleOpenWorkspaceFile,
       handlePrompt,
       handleRenameThread,

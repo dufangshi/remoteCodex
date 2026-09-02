@@ -497,7 +497,10 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
       const initialize = this.context.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {
-          fs: { readTextFile: true, writeTextFile: true },
+          fs: this.harnessAdapter.fsCapabilities ?? {
+            readTextFile: true,
+            writeTextFile: true,
+          },
           terminal: true,
           session: {
             compaction: {},

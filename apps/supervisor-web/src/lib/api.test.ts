@@ -23,6 +23,7 @@ import {
   enableRelayMode,
   fetchRelayAdmin,
   fetchRelaySession,
+  fetchThreadTurnDetail,
   relayLogin,
   relayAdminLogin,
   renameProviderHostConfigArchive,
@@ -267,6 +268,34 @@ describe('api request helper', () => {
       }),
     ).toBe(
       '/relay/devices/device-1/api/workspaces/workspace-1/files/raw?path=screenshots%2Fimage+1.png',
+    );
+  });
+
+  it('adds bearer tokens to browser image URLs that cannot set request headers', () => {
+    enableRelayMode();
+    setSelectedRelayDeviceId('device-1');
+    window.localStorage.setItem('remote-codex-relay-token', 'relay-token');
+    expect(
+      buildThreadImageAssetUrl('thread-1', { path: 'image.png' }),
+    ).toBe(
+      '/relay/devices/device-1/api/threads/thread-1/assets/image?path=image.png&relaySession=relay-token',
+    );
+
+    window.localStorage.clear();
+    window.history.pushState(null, '', '/threads/thread-1');
+    window.localStorage.setItem('remote-codex-auth-token', 'server-token');
+    expect(
+      buildThreadImageAssetUrl('thread-1', { path: 'image.png' }),
+    ).toBe(
+      '/api/threads/thread-1/assets/image?path=image.png&token=server-token',
+    );
+  });
+
+  it('loads full turn details from the dedicated endpoint', async () => {
+    await fetchThreadTurnDetail('thread-1', 'turn/with spaces');
+
+    expect(vi.mocked(fetch).mock.calls.at(-1)?.[0]).toBe(
+      '/api/threads/thread-1/turns/turn%2Fwith%20spaces/detail',
     );
   });
 

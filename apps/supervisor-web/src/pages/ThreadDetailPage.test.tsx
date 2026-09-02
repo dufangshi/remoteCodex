@@ -810,7 +810,9 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(requestedUrls).toContain('/api/threads/thread-1?limit=3');
+      expect(requestedUrls).toContain(
+        '/api/threads/thread-1?view=summary&limit=3',
+      );
     });
 
     expect(requestedUrls).not.toContain('/api/threads');
@@ -2044,7 +2046,9 @@ describe('ThreadDetailPage', () => {
       expect(screen.getByText(/Showing 3 of 15 turns/)).toBeInTheDocument();
     });
 
-    expect(detailUrls[0]).toContain('/api/threads/thread-1?limit=3');
+    expect(detailUrls[0]).toContain(
+      '/api/threads/thread-1?view=summary&limit=3',
+    );
     expect(screen.queryByText('Prompt 12')).not.toBeInTheDocument();
     expect(screen.getByText('Prompt 15')).toBeInTheDocument();
     expect(detailUrls).toHaveLength(1);

@@ -77,6 +77,7 @@ import {
 } from './thread-usage-accounting';
 import {
   agentTurnToThreadTurnDto,
+  summarizeCompletedTurnForTransport,
 } from './thread-history-items';
 import {
   ThreadDetailAssembler,
@@ -746,7 +747,11 @@ export class ThreadService {
 
   async getThreadDetail(
     localThreadId: string,
-    options: { limit?: number; beforeTurnId?: string } = {},
+    options: {
+      limit?: number;
+      beforeTurnId?: string;
+      summaryOnly?: boolean;
+    } = {},
   ): Promise<ThreadDetailDto> {
     const record = this.requireThreadRecord(localThreadId);
     const workspace = this.requireWorkspaceForThread(record);
@@ -810,7 +815,9 @@ export class ThreadService {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: pagedTurns.turns,
+      turns: options.summaryOnly
+        ? pagedTurns.turns.map(summarizeCompletedTurnForTransport)
+        : pagedTurns.turns,
       totalTurnCount: cachedDetail.totalTurnCount,
       pendingRequests,
       pendingSteers: this.auxiliaryState.listPendingSteers(updated.id),
@@ -912,6 +919,40 @@ export class ThreadService {
     }
 
     return detail;
+  }
+
+  async getThreadTurnDetail(
+    localThreadId: string,
+    turnId: string,
+  ): Promise<ThreadTurnDto> {
+    const record = this.requireThreadRecord(localThreadId);
+    const workspace = this.requireWorkspaceForThread(record);
+    this.requireProviderSessionId(record);
+
+    const cachedDetail = await this.detailAssembler.buildCacheEntry({
+      localThreadId,
+      record,
+      turnMetadataById: listThreadTurnMetadataMap(this.db, localThreadId),
+    });
+    const enrichedTurns = this.pluginService?.enrichTurnsWithArtifacts({
+      threadId: record.id,
+      workspacePath: workspace.absPath,
+      turns: cachedDetail.turns,
+      deferredDetails: cachedDetail.deferredDetails,
+    }) ?? cachedDetail.turns;
+    const turn = enrichedTurns.find((entry) => entry.id === turnId);
+    if (!turn) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Turn detail was not found for this thread.',
+      });
+    }
+
+    return {
+      ...turn,
+      hasDeferredItems: false,
+      deferredItemCount: 0,
+    };
   }
 
   async preparePromptAttachments(

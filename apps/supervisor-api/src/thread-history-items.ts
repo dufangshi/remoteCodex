@@ -273,6 +273,38 @@ export function deferLargeHistoryItemDetails(
   };
 }
 
+export function summarizeCompletedTurnForTransport(
+  turn: ThreadTurnDto,
+): ThreadTurnDto {
+  if (turn.status === 'inProgress') {
+    return turn;
+  }
+
+  let finalAgentIndex = -1;
+  for (let index = turn.items.length - 1; index >= 0; index -= 1) {
+    const item = turn.items[index];
+    if (item?.kind === 'agentMessage' && item.text.trim()) {
+      finalAgentIndex = index;
+      break;
+    }
+  }
+
+  const items = turn.items.filter(
+    (item, index) => item.kind === 'userMessage' || index === finalAgentIndex,
+  );
+  const deferredItemCount = turn.items.length - items.length;
+  if (deferredItemCount <= 0) {
+    return turn;
+  }
+
+  return {
+    ...turn,
+    items,
+    hasDeferredItems: true,
+    deferredItemCount,
+  };
+}
+
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
     item.kind === 'userMessage' ||

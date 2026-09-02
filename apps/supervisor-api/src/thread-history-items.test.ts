@@ -4,7 +4,11 @@ import {
   markTransientAgentHistoryItem,
   type AgentTurn,
 } from '../../../packages/agent-runtime/src/index';
-import { agentTurnToThreadTurnDto, mergePersistedHistoryItemsIntoTurns } from './thread-history-items';
+import {
+  agentTurnToThreadTurnDto,
+  mergePersistedHistoryItemsIntoTurns,
+  summarizeCompletedTurnForTransport,
+} from './thread-history-items';
 import { shouldPersistLiveHistoryItem } from './thread-history-items';
 
 describe('agentTurnToThreadTurnDto', () => {
@@ -223,5 +227,50 @@ describe('agentTurnToThreadTurnDto', () => {
       id: 'user-photo',
       text: 'Inspect this [PHOTO ./.temp/threads/thread-1/photo.png]',
     });
+  });
+
+  it('summarizes completed turns without transporting intermediate activity', () => {
+    const summarized = summarizeCompletedTurnForTransport({
+      id: 'turn-1',
+      startedAt: '2026-09-02T12:00:00.000Z',
+      status: 'completed',
+      error: null,
+      items: [
+        { id: 'user-1', kind: 'userMessage', text: 'Inspect this.' },
+        { id: 'reason-1', kind: 'reasoning', text: 'Thinking.' },
+        { id: 'command-1', kind: 'commandExecution', text: 'pwd' },
+        { id: 'agent-progress', kind: 'agentMessage', text: 'Checking.' },
+        { id: 'agent-final', kind: 'agentMessage', text: 'Done.' },
+      ],
+    });
+
+    expect(summarized).toMatchObject({
+      hasDeferredItems: true,
+      deferredItemCount: 3,
+      items: [
+        { id: 'user-1' },
+        { id: 'agent-final' },
+      ],
+    });
+    expect(summarized.items.map((item) => item.id)).toEqual([
+      'user-1',
+      'agent-final',
+    ]);
+  });
+
+  it('does not summarize active turns', () => {
+    const turn = {
+      id: 'turn-live',
+      startedAt: '2026-09-02T12:00:00.000Z',
+      status: 'inProgress' as const,
+      error: null,
+      items: [
+        { id: 'user-1', kind: 'userMessage' as const, text: 'Inspect this.' },
+        { id: 'command-1', kind: 'commandExecution' as const, text: 'pwd' },
+        { id: 'agent-1', kind: 'agentMessage' as const, text: 'Working.' },
+      ],
+    };
+
+    expect(summarizeCompletedTurnForTransport(turn)).toBe(turn);
   });
 });

@@ -57,6 +57,7 @@ import type {
   ThreadDetailDto,
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
+  ThreadTurnDto,
   ThreadWorkspaceFilePreviewDto,
   ThreadWorkspaceTreeNodeDto,
   ThreadWorkspaceUploadResultDto,
@@ -287,6 +288,23 @@ function apiPath(path: string) {
 
 export function buildApiUrl(path: string) {
   return apiPath(path);
+}
+
+function buildBrowserMediaUrl(path: string) {
+  const resolvedPath = apiPath(path);
+  if (typeof window === 'undefined') {
+    return resolvedPath;
+  }
+
+  const url = new URL(resolvedPath, window.location.origin);
+  const relayToken = readStoredRelayToken();
+  const authToken = readStoredAuthToken();
+  if (relayModeEnabled() && relayToken) {
+    url.searchParams.set('relaySession', relayToken);
+  } else if (authToken) {
+    url.searchParams.set('token', authToken);
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export interface FileDownloadResult {
@@ -1285,7 +1303,7 @@ export function buildThreadImageAssetUrl(
   input: { path: string },
 ) {
   const params = new URLSearchParams({ path: input.path });
-  return buildApiUrl(
+  return buildBrowserMediaUrl(
     `/api/threads/${encodeURIComponent(threadId)}/assets/image?${params.toString()}`,
   );
 }
@@ -1340,6 +1358,7 @@ export function fetchThreadDetail(
   options: { limit?: number; beforeTurnId?: string } = {},
 ) {
   const params = new URLSearchParams();
+  params.set('view', 'summary');
   if (options.limit !== undefined) {
     params.set('limit', String(options.limit));
   }
@@ -1348,13 +1367,19 @@ export function fetchThreadDetail(
   }
 
   return request<ThreadDetailDto>(
-    `/api/threads/${id}${params.size > 0 ? `?${params.toString()}` : ''}`,
+    `/api/threads/${id}?${params.toString()}`,
   );
 }
 
 export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
   return request<ThreadHistoryItemDetailDto>(
     `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,
+  );
+}
+
+export function fetchThreadTurnDetail(id: string, turnId: string) {
+  return request<ThreadTurnDto>(
+    `/api/threads/${id}/turns/${encodeURIComponent(turnId)}/detail`,
   );
 }
 
