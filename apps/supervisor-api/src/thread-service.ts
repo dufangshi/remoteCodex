@@ -762,7 +762,7 @@ export class ThreadService {
       this.stopLocalImportWatcher(record.id);
     }
 
-    this.requireProviderSessionId(record);
+    const providerSessionId = this.requireProviderSessionId(record);
     const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
     const workspacePathStatus = (await pathExists(workspace.absPath)) ? 'present' : 'missing';
     const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
@@ -770,7 +770,16 @@ export class ThreadService {
       localThreadId,
       record,
       turnMetadataById,
-      options,
+      options: {
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        ...(options.beforeTurnId !== undefined
+          ? { beforeTurnId: options.beforeTurnId }
+          : {}),
+        ...(options.summaryOnly && record.provider === 'acp' &&
+        !loadedIds.has(providerSessionId)
+          ? { preferPersistedHistory: true }
+          : {}),
+      },
     });
     if (record.source === 'local_codex_import' && record.isConnected === false) {
       const statusPatch = localImportThreadStatusPatch(record, cachedDetail.turns);
@@ -779,28 +788,30 @@ export class ThreadService {
       }
     }
     const updated = getThreadRecordById(this.db, record.id)!;
-    const enrichedTurns = this.pluginService?.enrichTurnsWithArtifacts({
-      threadId: updated.id,
-      workspacePath: workspace.absPath,
-      turns: cachedDetail.turns,
-      deferredDetails: cachedDetail.deferredDetails,
-    }) ?? cachedDetail.turns;
     const pagedTurns =
       cachedDetail.isPaged &&
-      canUseRuntimePagedTurns(cachedDetail, enrichedTurns, options)
+      canUseRuntimePagedTurns(cachedDetail, cachedDetail.turns, options)
       ? {
-          turns: enrichedTurns,
+          turns: cachedDetail.turns,
           totalTurnCount: cachedDetail.totalTurnCount,
         }
-      : this.detailAssembler.sliceTurns(enrichedTurns, options);
+      : this.detailAssembler.sliceTurns(cachedDetail.turns, options);
+    const responseTurns = options.summaryOnly
+      ? pagedTurns.turns.map(summarizeCompletedTurnForTransport)
+      : this.pluginService?.enrichTurnsWithArtifacts({
+          threadId: updated.id,
+          workspacePath: workspace.absPath,
+          turns: pagedTurns.turns,
+          deferredDetails: cachedDetail.deferredDetails,
+        }) ?? pagedTurns.turns;
     this.syncPendingPlanDecisionRequestFromTurns(
       updated.id,
       updated.collaborationMode,
-      enrichedTurns,
+      cachedDetail.turns,
     );
     const liveItems = this.liveState.getLiveItems(
       updated.id,
-      enrichedTurns,
+      cachedDetail.turns,
       pagedTurns.turns,
     );
     const goalHistory = this.goalCoordinator.listThreadGoalHistory(updated.id);
@@ -815,9 +826,7 @@ export class ThreadService {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: options.summaryOnly
-        ? pagedTurns.turns.map(summarizeCompletedTurnForTransport)
-        : pagedTurns.turns,
+      turns: responseTurns,
       totalTurnCount: cachedDetail.totalTurnCount,
       pendingRequests,
       pendingSteers: this.auxiliaryState.listPendingSteers(updated.id),

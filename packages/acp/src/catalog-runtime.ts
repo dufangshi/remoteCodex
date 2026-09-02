@@ -369,7 +369,7 @@ export class AcpCatalogRuntimeAdapter extends EventEmitter implements AgentRunti
     const agent = await this.agentFor(owner.agentId);
     return scopedSession(
       owner.agentId,
-      await agent.readSession(owner.rawId),
+      await agent.readSession(owner.rawId, options),
     );
   }
 

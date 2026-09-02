@@ -26,6 +26,7 @@ import {
   type AgentSessionSummary,
   type AgentTurn,
   type InterruptAgentTurnInput,
+  type ReadAgentSessionOptions,
   type ResumeAgentSessionInput,
   type SendAgentInputInput,
   type SetAgentGoalInput,
@@ -302,7 +303,27 @@ function promptUsagePayload(usage: acp.Usage) {
   };
 }
 
-function sessionDetail(state: AcpSessionState): AgentSessionDetail {
+function sliceSessionTurns(
+  turns: AgentTurn[],
+  options: ReadAgentSessionOptions,
+) {
+  const limit = options.limit;
+  if (limit === undefined && !options.beforeTurnId) {
+    return turns;
+  }
+  const beforeIndex = options.beforeTurnId
+    ? turns.findIndex((turn) => turn.providerTurnId === options.beforeTurnId)
+    : -1;
+  const exclusiveEnd = beforeIndex >= 0 ? beforeIndex : turns.length;
+  const start = Math.max(0, exclusiveEnd - (limit ?? 10));
+  return turns.slice(start, exclusiveEnd);
+}
+
+function sessionDetail(
+  state: AcpSessionState,
+  options: ReadAgentSessionOptions = {},
+): AgentSessionDetail {
+  const turns = sliceSessionTurns(state.turns, options);
   return {
     provider: 'acp',
     providerSessionId: state.providerSessionId,
@@ -312,7 +333,7 @@ function sessionDetail(state: AcpSessionState): AgentSessionDetail {
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,
     status: state.status,
-    turns: state.turns.map((turn) => ({
+    turns: turns.map((turn) => ({
       ...turn,
       items: turn.items.map((item) => ({ ...item })),
     })),
@@ -942,10 +963,11 @@ export class AcpRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async readSession(
     providerSessionId: string,
+    options: ReadAgentSessionOptions = {},
   ): Promise<AgentSessionDetail> {
     const state = this.sessions.get(providerSessionId) ??
       await this.restoreSession(providerSessionId);
-    return sessionDetail(state);
+    return sessionDetail(state, options);
   }
 
   async startSession(input: StartAgentSessionInput): Promise<StartAgentSessionResult> {

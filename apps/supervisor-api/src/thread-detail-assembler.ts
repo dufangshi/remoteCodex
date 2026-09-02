@@ -65,6 +65,12 @@ interface LocalSessionLike {
   turns: ThreadTurnDto[];
 }
 
+interface ThreadDetailAssemblerOptions {
+  limit?: number;
+  beforeTurnId?: string;
+  preferPersistedHistory?: boolean;
+}
+
 interface ThreadDetailAssemblerCallbacks {
   buildThreadPatch(
     remoteSession: AgentSessionDetail,
@@ -78,7 +84,7 @@ interface ThreadDetailAssemblerCallbacks {
   materializeHiddenRuntimeTurns(localThreadId: string, turns: AgentTurn[]): void;
   readRemoteSession(
     record: ThreadDetailRecord,
-    options: { limit?: number; beforeTurnId?: string },
+    options: ThreadDetailAssemblerOptions,
   ): Promise<AgentSessionDetail | null>;
   resumeRemoteSession(record: ThreadDetailRecord): Promise<AgentSessionDetail>;
   syncAfterRemoteSession(localThreadId: string, remoteSession: AgentSessionDetail): void;
@@ -192,7 +198,7 @@ export class ThreadDetailAssembler {
     localThreadId: string;
     record: ThreadDetailRecord;
     turnMetadataById: Map<string, ThreadTurnMetadataRecord>;
-    options?: { limit?: number; beforeTurnId?: string };
+    options?: ThreadDetailAssemblerOptions;
   }): Promise<ThreadDetailCacheEntry> {
     const options = input.options ?? {};
     const shouldCacheFullDetail =
@@ -205,8 +211,9 @@ export class ThreadDetailAssembler {
     }
 
     let remoteSession =
-      input.record.source === 'local_codex_import' &&
-      input.record.isConnected === false
+      input.options?.preferPersistedHistory ||
+      (input.record.source === 'local_codex_import' &&
+      input.record.isConnected === false)
         ? null
         : await this.input.callbacks.readRemoteSession(input.record, options);
 
@@ -363,37 +370,38 @@ export class ThreadDetailAssembler {
     record: ThreadDetailRecord;
     turnMetadataById: Map<string, ThreadTurnMetadataRecord>;
     shouldCacheFullDetail: boolean;
-    options: { limit?: number; beforeTurnId?: string };
+    options: ThreadDetailAssemblerOptions;
   }): Promise<ThreadDetailCacheEntry> {
-    const localSession = await this.input.callbacks.findLocalSession(
-      input.record.providerSessionId!,
-    );
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const persistedItemsByTurnId = this.input.callbacks.listPersistedHistoryItemsByTurnId(
       input.localThreadId,
     );
+    const localSession =
+      input.options.preferPersistedHistory && persistedItemsByTurnId.size > 0
+        ? null
+        : await this.input.callbacks.findLocalSession(input.record.providerSessionId!);
     const fallbackMetadata = fallbackTurnMetadataForRecord(
       input.record,
       latestThreadTurnMetadata(input.turnMetadataById),
     );
     const localTurns =
       localSession?.turns ??
-      [...persistedItemsByTurnId.entries()].map(([turnId, items]) => {
-        const error = persistedTurnError(items);
-        return {
-          id: turnId,
-          startedAt: input.turnMetadataById.get(turnId)?.createdAt ?? null,
-          status: error ? ('failed' as const) : ('completed' as const),
-          error,
-          items: [],
-        };
-      });
+      appendPersistedTurnsIfMissing(
+        [],
+        persistedItemsByTurnId,
+        input.turnMetadataById,
+      );
+    const pagedLocalTurns = sliceTurnsForDetail(localTurns, input.options);
+    const selectedTurnIds = new Set(pagedLocalTurns.turns.map((turn) => turn.id));
+    const selectedPersistedItems = new Map(
+      [...persistedItemsByTurnId].filter(([turnId]) => selectedTurnIds.has(turnId)),
+    );
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
-        localTurns,
+        pagedLocalTurns.turns,
         this.input.liveState.turnItemOrderSnapshot(input.localThreadId),
       ),
-      persistedItemsByTurnId,
+      selectedPersistedItems,
       deferredDetails,
     ).map((turn) =>
       buildTurnDto(
@@ -404,7 +412,7 @@ export class ThreadDetailAssembler {
     const entry = {
       cachedAt: Date.now(),
       turns,
-      totalTurnCount: turns.length,
+      totalTurnCount: pagedLocalTurns.totalTurnCount,
       deferredDetails,
       isPaged: !input.shouldCacheFullDetail,
     };
@@ -751,14 +759,17 @@ function appendPersistedTurnsIfMissing(
       continue;
     }
     if (
-      turns.some((turn) =>
+      [...turns, ...missingTurns].some((turn) =>
         conversationMatchScore(
           {
             providerTurnId: turn.id,
             startedAt: turn.startedAt,
             status: turn.status,
             error: turn.error ? { message: turn.error } : null,
-            items: turn.items,
+            items:
+              turn.items.length > 0
+                ? turn.items
+                : persistedItemsByTurnId.get(turn.id) ?? [],
           },
           items,
         ) > 0,

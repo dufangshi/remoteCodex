@@ -128,6 +128,61 @@ describe('ThreadDetailAssembler', () => {
     }]);
   });
 
+  it('serves a paged ACP summary from persisted history without restoring the provider', async () => {
+    const persistedTurn = (id: string, createdAt: string): ThreadHistoryItemDto[] => [
+      {
+        id: `${id}:user`,
+        kind: 'userMessage',
+        text: `Prompt ${id}`,
+        createdAt,
+      },
+      {
+        id: `${id}:agent`,
+        kind: 'agentMessage',
+        text: `Reply ${id}`,
+        createdAt,
+        sourceTurnId: id,
+      },
+    ];
+    const { assembler, callbacks } = createAssembler(session([turn('remote-turn')]));
+    callbacks.listPersistedHistoryItemsByTurnId.mockReturnValue(
+      new Map([
+        ['persisted-1', persistedTurn('persisted-1', '2026-08-31T12:00:00.000Z')],
+        ['persisted-2', persistedTurn('persisted-2', '2026-08-31T12:01:00.000Z')],
+        [
+          'acp-hydrated:persisted-2',
+          persistedTurn('persisted-2', '2026-08-31T12:01:00.000Z').map((item) => ({
+            ...item,
+            id: `acp-hydrated:${item.id}`,
+            ...(item.kind === 'agentMessage'
+              ? { sourceTurnId: 'acp-hydrated:persisted-2' }
+              : {}),
+          })),
+        ],
+      ]),
+    );
+
+    const entry = await assembler.buildCacheEntry({
+      localThreadId: record.id,
+      record: { ...record, provider: 'acp' },
+      turnMetadataById: new Map(),
+      options: { limit: 1, preferPersistedHistory: true },
+    });
+
+    expect(callbacks.readRemoteSession).not.toHaveBeenCalled();
+    expect(callbacks.findLocalSession).not.toHaveBeenCalled();
+    expect(entry.totalTurnCount).toBe(2);
+    expect(entry.turns).toMatchObject([
+      {
+        id: 'persisted-2',
+        items: [
+          { kind: 'userMessage', text: 'Prompt persisted-2' },
+          { kind: 'agentMessage', text: 'Reply persisted-2' },
+        ],
+      },
+    ]);
+  });
+
   it('uses rollout history without reading an unconnected imported session', async () => {
     const { assembler, callbacks } = createAssembler(session([]));
     callbacks.findLocalSession.mockResolvedValue({

@@ -213,6 +213,15 @@ describe('AcpRuntimeAdapter', () => {
     });
     await nextCompleted;
     expect(resumed.session.turns).toHaveLength(hydratedTurnCount);
+    const allTurns = await second.readSession(started.providerSessionId);
+    const latestPage = await second.readSession(started.providerSessionId, { limit: 1 });
+    expect(latestPage.totalTurnCount).toBe(allTurns.turns.length);
+    expect(latestPage.turns).toEqual([allTurns.turns.at(-1)]);
+    const previousPage = await second.readSession(started.providerSessionId, {
+      limit: 1,
+      beforeTurnId: allTurns.turns.at(-1)!.providerTurnId,
+    });
+    expect(previousPage.turns).toEqual([allTurns.turns.at(-2)]);
     expect(await second.listLoadedSessions()).toContain(started.providerSessionId);
     await second.deleteSession(started.providerSessionId);
     expect(await second.listSessions()).toEqual([]);
