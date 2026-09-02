@@ -11,7 +11,9 @@ use serde_json::{json, Value};
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 
-async fn spawn_supervisor(providers: Vec<Provider>) -> (tempfile::TempDir, u16, std::path::PathBuf) {
+async fn spawn_supervisor(
+    providers: Vec<Provider>,
+) -> (tempfile::TempDir, u16, std::path::PathBuf) {
     let dir = tempdir().unwrap();
     let ws_root = dir.path().join("workspaces");
     std::fs::create_dir_all(&ws_root).unwrap();
@@ -117,7 +119,9 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
 
     let tree = json(
         &client,
-        client.get(format!("{base}/api/workspaces/{workspace_id}/files/tree?path=.")),
+        client.get(format!(
+            "{base}/api/workspaces/{workspace_id}/files/tree?path=."
+        )),
     )
     .await;
     assert_eq!(tree["kind"], "directory");
@@ -141,10 +145,12 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
 
     json(
         &client,
-        client.put(format!("{base}/api/workspaces/{workspace_id}/files")).json(&json!({
-            "path": "notes.txt",
-            "content": "hello-files"
-        })),
+        client
+            .put(format!("{base}/api/workspaces/{workspace_id}/files"))
+            .json(&json!({
+                "path": "notes.txt",
+                "content": "hello-files"
+            })),
     )
     .await;
     json(
@@ -176,22 +182,30 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
     let list = backends.as_array().cloned().unwrap_or_default();
     assert!(list.iter().any(|backend| backend["provider"] == "codex"));
     assert!(list.iter().any(|backend| backend["provider"] == "claude"));
-    let codex = list.iter().find(|backend| backend["provider"] == "codex").unwrap();
+    let codex = list
+        .iter()
+        .find(|backend| backend["provider"] == "codex")
+        .unwrap();
     assert_eq!(codex["capabilities"]["turns"]["compact"], true);
     assert_eq!(codex["capabilities"]["branching"]["fork"], false);
-    let claude = list.iter().find(|backend| backend["provider"] == "claude").unwrap();
+    let claude = list
+        .iter()
+        .find(|backend| backend["provider"] == "claude")
+        .unwrap();
     assert_eq!(claude["capabilities"]["branching"]["fork"], true);
 
     for provider in ["codex", "claude", "opencode", "acp"] {
         let thread = json(
             &client,
-            client.post(format!("{base}/api/threads/start")).json(&json!({
-                "workspaceId": workspace_id,
-                "title": format!("{provider} hello"),
-                "provider": provider,
-                "model": "ios-e2e-stream",
-                "approvalMode": "yolo"
-            })),
+            client
+                .post(format!("{base}/api/threads/start"))
+                .json(&json!({
+                    "workspaceId": workspace_id,
+                    "title": format!("{provider} hello"),
+                    "provider": provider,
+                    "model": "ios-e2e-stream",
+                    "approvalMode": "yolo"
+                })),
         )
         .await;
         let thread_id = thread["id"].as_str().unwrap().to_string();
@@ -228,18 +242,23 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
             .await
             .unwrap();
         assert_eq!(pdf.status(), 200);
-        assert_eq!(pdf.headers().get("content-type").unwrap(), "application/pdf");
+        assert_eq!(
+            pdf.headers().get("content-type").unwrap(),
+            "application/pdf"
+        );
     }
 
     let long = json(
         &client,
-        client.post(format!("{base}/api/threads/start")).json(&json!({
-            "workspaceId": workspace_id,
-            "title": "long",
-            "provider": "codex",
-            "model": "ios-e2e-stream",
-            "approvalMode": "yolo"
-        })),
+        client
+            .post(format!("{base}/api/threads/start"))
+            .json(&json!({
+                "workspaceId": workspace_id,
+                "title": "long",
+                "provider": "codex",
+                "model": "ios-e2e-stream",
+                "approvalMode": "yolo"
+            })),
     )
     .await;
     let long_id = long["id"].as_str().unwrap().to_string();
@@ -264,4 +283,42 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
     .await;
     let interrupted = wait_thread(&client, &base, &long_id).await;
     assert_ne!(interrupted["thread"]["status"], "running");
+}
+
+#[tokio::test]
+async fn named_workspace_and_backend_status_are_usable() {
+    let (_dir, port, ws_root) = spawn_supervisor(vec![Provider::Codex, Provider::Claude]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let backends = json(&client, client.get(format!("{base}/api/agent-runtimes"))).await;
+    let backends = backends.as_array().expect("backend list");
+    assert!(backends.iter().all(|backend| {
+        backend["enabled"] == true
+            && backend["capabilities"]["sessions"]["resume"] == true
+            && backend["capabilities"]["turns"]["start"] == true
+            && backend["capabilities"]["management"]["models"] == true
+    }));
+
+    let status = json(
+        &client,
+        client.get(format!("{base}/api/agent-runtimes/codex/status")),
+    )
+    .await;
+    assert_eq!(status["provider"], "codex");
+    assert_eq!(status["capabilities"]["sessions"]["resume"], true);
+    assert_eq!(status["capabilities"]["management"]["models"], true);
+    assert!(status["managementSchema"]["toolboxItems"].is_array());
+
+    let created = json(
+        &client,
+        client.post(format!("{base}/api/workspaces")).json(&json!({
+            "absPath": "from-name"
+        })),
+    )
+    .await;
+    assert_eq!(created["label"], "from-name");
+    let abs = created["absPath"].as_str().unwrap();
+    assert!(abs.ends_with("from-name"));
+    assert!(ws_root.join("from-name").is_dir());
 }

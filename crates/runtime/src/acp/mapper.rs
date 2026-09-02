@@ -94,7 +94,10 @@ impl TurnMapper {
                 mapped.goal = goal_from_update(update).or_else(|| goal_from_update(body));
             }
             "usage_update" => {
-                mapped.usage = body.get("used").cloned().or_else(|| body.get("usage").cloned());
+                mapped.usage = body
+                    .get("used")
+                    .cloned()
+                    .or_else(|| body.get("usage").cloned());
             }
             _ => {}
         }
@@ -102,7 +105,11 @@ impl TurnMapper {
     }
 
     pub fn finish(self, interrupted: bool) -> Vec<ThreadHistoryItemDto> {
-        let status = if interrupted { "interrupted" } else { "completed" };
+        let status = if interrupted {
+            "interrupted"
+        } else {
+            "completed"
+        };
         let mut items = Vec::new();
         if !self.thought_text.is_empty() {
             items.push(item(
@@ -161,7 +168,13 @@ fn tool_item(turn_id: &str, body: &Value) -> Option<ThreadHistoryItemDto> {
         "in_progress" => Some("running"),
         _ => Some("running"),
     };
-    Some(item(id, kind, title.to_string(), status.unwrap_or("running"), turn_id))
+    Some(item(
+        id,
+        kind,
+        title.to_string(),
+        status.unwrap_or("running"),
+        turn_id,
+    ))
 }
 
 fn plan_item(turn_id: &str, body: &Value) -> Option<ThreadHistoryItemDto> {
@@ -236,7 +249,10 @@ fn goal_from_update(update: &Value) -> Option<Option<GoalState>> {
             .unwrap_or("active")
             .into(),
         tokens_used: goal.get("tokensUsed").and_then(Value::as_u64).unwrap_or(0) as u32,
-        time_used_seconds: goal.get("timeUsedSeconds").and_then(Value::as_u64).unwrap_or(0) as u32,
+        time_used_seconds: goal
+            .get("timeUsedSeconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32,
     }))
 }
 

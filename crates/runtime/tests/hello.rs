@@ -76,7 +76,10 @@ async fn workspace_and_hello_turn() {
         )
         .await
         .unwrap();
-    let detail = supervisor.get_thread_detail(&thread.id, None).await.unwrap();
+    let detail = supervisor
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap();
     let texts: Vec<_> = detail
         .turns
         .iter()
@@ -185,10 +188,14 @@ async fn claude_fork_copies_history() {
         .await
         .unwrap();
     let forked = supervisor.fork_thread(&thread.id).await.unwrap();
-    let detail = supervisor.get_thread_detail(&forked.id, None).await.unwrap();
-    assert!(detail.turns.iter().any(|turn| {
-        turn.items.iter().any(|item| item.text == "hello")
-    }));
+    let detail = supervisor
+        .get_thread_detail(&forked.id, None)
+        .await
+        .unwrap();
+    assert!(detail
+        .turns
+        .iter()
+        .any(|turn| { turn.items.iter().any(|item| item.text == "hello") }));
 }
 
 #[tokio::test]
@@ -312,18 +319,24 @@ async fn file_browser_tree_preview_write_and_move() {
     let (_dir, supervisor, workspace, _thread) = seeded_thread(Provider::Codex).await;
     let tree = supervisor.workspace_tree(&workspace.id, ".").unwrap();
     assert!(tree.iter().any(|node| node.name == "README.md"));
-    let preview = supervisor.workspace_preview(&workspace.id, "README.md").unwrap();
+    let preview = supervisor
+        .workspace_preview(&workspace.id, "README.md")
+        .unwrap();
     assert!(preview.content.contains("# hi"));
     supervisor
         .workspace_write(&workspace.id, "src/hello.txt", "alpha")
         .unwrap();
-    let written = supervisor.workspace_preview(&workspace.id, "src/hello.txt").unwrap();
+    let written = supervisor
+        .workspace_preview(&workspace.id, "src/hello.txt")
+        .unwrap();
     assert_eq!(written.content, "alpha");
     let ws = supervisor.get_workspace(&workspace.id).unwrap();
     let from = std::path::Path::new(&ws.abs_path).join("src/hello.txt");
     let to = std::path::Path::new(&ws.abs_path).join("src/moved.txt");
     std::fs::rename(from, to).unwrap();
-    let moved = supervisor.workspace_preview(&workspace.id, "src/moved.txt").unwrap();
+    let moved = supervisor
+        .workspace_preview(&workspace.id, "src/moved.txt")
+        .unwrap();
     assert_eq!(moved.content, "alpha");
 }
 
@@ -368,7 +381,10 @@ async fn fake_providers_all_complete_a_hello_turn() {
             .prompt(&thread.id, prompt_input("hello, reply me with hello"))
             .await
             .unwrap();
-        let detail = supervisor.get_thread_detail(&thread.id, None).await.unwrap();
+        let detail = supervisor
+            .get_thread_detail(&thread.id, None)
+            .await
+            .unwrap();
         let texts: Vec<_> = detail
             .turns
             .iter()
@@ -381,4 +397,28 @@ async fn fake_providers_all_complete_a_hello_turn() {
         );
         assert_eq!(detail.thread.status, "idle");
     }
+}
+
+#[test]
+fn create_workspace_from_simple_name_under_dev_home() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("workspaces")).unwrap();
+    let config = test_config(dir.path());
+    let db = Database::open(&config.database_url).unwrap();
+    let runtime: SharedRuntime = Arc::new(FakeRuntime::new(Provider::Codex));
+    let supervisor = Supervisor::new(config, db, vec![runtime]);
+    let workspace = supervisor
+        .create_workspace(CreateWorkspaceInput {
+            abs_path: Some("named-app".into()),
+            git_url: None,
+            label: None,
+        })
+        .unwrap();
+    let expected = dir.path().join("workspaces").join("named-app");
+    assert_eq!(workspace.label, "named-app");
+    assert_eq!(
+        std::fs::canonicalize(&workspace.abs_path).unwrap(),
+        std::fs::canonicalize(&expected).unwrap()
+    );
+    assert!(expected.is_dir());
 }

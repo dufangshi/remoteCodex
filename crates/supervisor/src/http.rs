@@ -11,7 +11,8 @@ use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{
     now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput, HealthDto,
     PlatformCapabilitiesDto, Provider, RuntimeConfigDto, SendThreadPromptInput,
-    SupervisorConnectedEnvelope, ThreadWorkspaceTreeNodeDto, VersionDto, APP_NAME, APP_VERSION,
+    SupervisorConnectedEnvelope, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
+    VersionDto, APP_NAME, APP_VERSION,
 };
 use remote_codex_runtime::Supervisor;
 use serde::Deserialize;
@@ -26,7 +27,10 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
         .route("/api/config/runtime", get(runtime_config))
-        .route("/api/config/workspace-settings", get(workspace_settings).patch(workspace_settings))
+        .route(
+            "/api/config/workspace-settings",
+            get(workspace_settings).patch(patch_workspace_settings),
+        )
         .route("/api/auth/session", get(auth_session))
         .route("/api/auth/login", post(auth_login))
         .route("/api/auth/logout", post(auth_logout))
@@ -34,22 +38,45 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agent-runtimes/{provider}/status", get(agent_status))
         .route("/api/agent-runtimes/{provider}/models", get(agent_models))
         .route("/api/agent-runtimes/{provider}/agents", get(agent_agents))
-        .route("/api/agent-runtimes/{provider}/capabilities", get(agent_caps))
-        .route("/api/agent-runtimes/{provider}/install", post(agent_install))
-        .route("/api/agent-runtimes/{provider}/restart", post(agent_restart))
-        .route("/api/workspaces", get(list_workspaces).post(create_workspace))
-        .route("/api/workspaces/{id}", get(get_workspace).patch(patch_workspace).delete(delete_workspace))
+        .route(
+            "/api/agent-runtimes/{provider}/capabilities",
+            get(agent_caps),
+        )
+        .route(
+            "/api/agent-runtimes/{provider}/install",
+            post(agent_install),
+        )
+        .route(
+            "/api/agent-runtimes/{provider}/restart",
+            post(agent_restart),
+        )
+        .route(
+            "/api/workspaces",
+            get(list_workspaces).post(create_workspace),
+        )
+        .route(
+            "/api/workspaces/{id}",
+            get(get_workspace)
+                .patch(patch_workspace)
+                .delete(delete_workspace),
+        )
         .route("/api/workspaces/{id}/favorite", post(favorite_workspace))
         .route("/api/workspaces/{id}/open", post(open_workspace))
         .route("/api/workspaces/{id}/files/tree", get(workspace_tree))
         .route("/api/workspaces/{id}/files/preview", get(workspace_preview))
         .route("/api/workspaces/{id}/files/raw", get(workspace_raw))
-        .route("/api/workspaces/{id}/files", axum::routing::put(workspace_write).delete(workspace_delete_file))
+        .route(
+            "/api/workspaces/{id}/files",
+            axum::routing::put(workspace_write).delete(workspace_delete_file),
+        )
         .route("/api/threads", get(list_threads))
         .route("/api/threads/start", post(start_thread))
         .route("/api/threads/import", post(import_thread))
         .route("/api/threads/import-candidates", get(import_candidates))
-        .route("/api/threads/{id}", get(get_thread).patch(rename_thread).delete(delete_thread))
+        .route(
+            "/api/threads/{id}",
+            get(get_thread).patch(rename_thread).delete(delete_thread),
+        )
         .route("/api/threads/{id}/settings", patch(thread_settings))
         .route("/api/threads/{id}/prompt", post(thread_prompt))
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
@@ -57,21 +84,40 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/disconnect", post(thread_disconnect))
         .route("/api/threads/{id}/fork", post(thread_fork))
         .route("/api/threads/{id}/compact", post(thread_compact))
-        .route("/api/threads/{id}/goal", get(thread_goal).patch(thread_goal).delete(thread_goal_clear))
+        .route(
+            "/api/threads/{id}/goal",
+            get(thread_goal)
+                .patch(thread_goal)
+                .delete(thread_goal_clear),
+        )
         .route("/api/threads/{id}/skills", get(thread_skills))
         .route("/api/threads/{id}/mcp-servers", get(thread_mcp))
         .route("/api/threads/{id}/hooks", get(thread_hooks))
-        .route("/api/threads/{id}/requests/{requestId}/respond", post(thread_respond))
+        .route(
+            "/api/threads/{id}/requests/{requestId}/respond",
+            post(thread_respond),
+        )
         .route("/api/threads/{id}/export-turns", get(export_turns))
         .route("/api/threads/{id}/exports/pdf", get(export_pdf))
         .route("/api/threads/{id}/exports/html", get(export_html))
-        .route("/api/threads/{id}/shell", get(thread_shell).post(create_shell))
-        .route("/api/workspaces/{id}/files/download", get(workspace_download))
+        .route(
+            "/api/threads/{id}/shell",
+            get(thread_shell).post(create_shell),
+        )
+        .route(
+            "/api/workspaces/{id}/files/download",
+            get(workspace_download),
+        )
         .route("/api/workspaces/{id}/files/move", patch(workspace_move))
         .route("/api/plugins", get(list_plugins))
         .route("/ws", get(ws_upgrade))
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(state)
 }
 
@@ -145,6 +191,16 @@ async fn workspace_settings(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::to_value(state.workspace_settings()).unwrap_or(json!({})))
 }
 
+async fn patch_workspace_settings(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateWorkspaceSettingsInput>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.update_workspace_settings(body).map_err(map_err)?)
+            .unwrap_or(json!({})),
+    ))
+}
+
 async fn auth_session(State(state): State<AppState>) -> Json<AuthSessionDto> {
     Json(AuthSessionDto {
         authenticated: !state.config.auth_required,
@@ -165,14 +221,21 @@ struct LoginInput {
     password: Option<String>,
 }
 
-async fn auth_login(State(state): State<AppState>, Json(body): Json<LoginInput>) -> Result<Json<Value>, ApiErr> {
+async fn auth_login(
+    State(state): State<AppState>,
+    Json(body): Json<LoginInput>,
+) -> Result<Json<Value>, ApiErr> {
     if !state.config.auth_required {
         return Ok(Json(json!({ "ok": true, "token": "local" })));
     }
     let user = state.config.admin_username.as_deref().unwrap_or("admin");
     let pass = state.config.admin_password.as_deref().unwrap_or("");
     if body.username.as_deref() != Some(user) || body.password.as_deref() != Some(pass) {
-        return Err(err(StatusCode::UNAUTHORIZED, "unauthorized", "Invalid credentials"));
+        return Err(err(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Invalid credentials",
+        ));
     }
     Ok(Json(json!({ "ok": true, "token": "session" })))
 }
@@ -201,14 +264,17 @@ fn parse_provider(raw: &str) -> Result<Provider, ApiErr> {
     }
 }
 
-async fn agent_status(Path(provider): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn agent_status(
+    Path(provider): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let provider = parse_provider(&provider)?;
     let backend = state
         .backends()
         .into_iter()
         .find(|b| b.provider == provider)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "not_found", "provider missing"))?;
-    Ok(Json(serde_json::to_value(backend.status).unwrap_or(json!({}))))
+    Ok(Json(serde_json::to_value(backend).unwrap_or(json!({}))))
 }
 
 #[derive(Deserialize)]
@@ -230,7 +296,10 @@ async fn agent_models(
     Ok(Json(serde_json::to_value(models).unwrap_or(json!([]))))
 }
 
-async fn agent_agents(Path(provider): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn agent_agents(
+    Path(provider): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let provider = parse_provider(&provider)?;
     let agents = state.list_agents(provider).await.map_err(map_err)?;
     Ok(Json(serde_json::to_value(agents).unwrap_or(json!([]))))
@@ -262,22 +331,47 @@ async fn agent_install(
     Ok(Json(serde_json::to_value(dto).unwrap_or(json!({}))))
 }
 
-async fn agent_restart(Path(provider): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn agent_restart(
+    Path(provider): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let provider = parse_provider(&provider)?;
-    state.runtime(provider).map_err(map_err)?.start().await.map_err(map_err)?;
-    Ok(Json(json!({ "ok": true })))
+    state
+        .runtime(provider)
+        .map_err(map_err)?
+        .start()
+        .await
+        .map_err(map_err)?;
+    let backend = state
+        .backends()
+        .into_iter()
+        .find(|b| b.provider == provider)
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "not_found", "provider missing"))?;
+    Ok(Json(serde_json::to_value(backend).unwrap_or(json!({}))))
 }
 
 async fn list_workspaces(State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.list_workspaces().map_err(map_err)?).unwrap()))
+    Ok(Json(
+        serde_json::to_value(state.list_workspaces().map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn create_workspace(State(state): State<AppState>, Json(body): Json<CreateWorkspaceInput>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.create_workspace(body).map_err(map_err)?).unwrap()))
+async fn create_workspace(
+    State(state): State<AppState>,
+    Json(body): Json<CreateWorkspaceInput>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.create_workspace(body).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn get_workspace(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.get_workspace(&id).map_err(map_err)?).unwrap()))
+async fn get_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.get_workspace(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -285,11 +379,20 @@ struct LabelBody {
     label: String,
 }
 
-async fn patch_workspace(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<LabelBody>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.update_workspace(&id, &body.label).map_err(map_err)?).unwrap()))
+async fn patch_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<LabelBody>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.update_workspace(&id, &body.label).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn delete_workspace(Path(id): Path<String>, State(state): State<AppState>) -> Result<StatusCode, ApiErr> {
+async fn delete_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiErr> {
     state.delete_workspace(&id).map_err(map_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -300,12 +403,28 @@ struct FavoriteBody {
     is_favorite: Option<bool>,
 }
 
-async fn favorite_workspace(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<FavoriteBody>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.set_favorite(&id, body.is_favorite.unwrap_or(true)).map_err(map_err)?).unwrap()))
+async fn favorite_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<FavoriteBody>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .set_favorite(&id, body.is_favorite.unwrap_or(true))
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
-async fn open_workspace(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.open_workspace(&id).map_err(map_err)?).unwrap()))
+async fn open_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.open_workspace(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -313,7 +432,11 @@ struct PathQuery {
     path: Option<String>,
 }
 
-async fn workspace_tree(Path(id): Path<String>, Query(query): Query<PathQuery>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn workspace_tree(
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let rel = query.path.as_deref().unwrap_or(".");
     let nodes = state.workspace_tree(&id, rel).map_err(map_err)?;
     let ws = state.get_workspace(&id).map_err(map_err)?;
@@ -332,13 +455,27 @@ async fn workspace_tree(Path(id): Path<String>, Query(query): Query<PathQuery>, 
     Ok(Json(serde_json::to_value(root).unwrap()))
 }
 
-async fn workspace_preview(Path(id): Path<String>, Query(query): Query<PathQuery>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    let path = query.path.ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    Ok(Json(serde_json::to_value(state.workspace_preview(&id, &path).map_err(map_err)?).unwrap()))
+async fn workspace_preview(
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    let path = query
+        .path
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+    Ok(Json(
+        serde_json::to_value(state.workspace_preview(&id, &path).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn workspace_raw(Path(id): Path<String>, Query(query): Query<PathQuery>, State(state): State<AppState>) -> Result<Response, ApiErr> {
-    let path = query.path.ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+async fn workspace_raw(
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiErr> {
+    let path = query
+        .path
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
     let preview = state.workspace_preview(&id, &path).map_err(map_err)?;
     Ok((StatusCode::OK, preview.content).into_response())
 }
@@ -349,15 +486,31 @@ struct WriteFileBody {
     content: String,
 }
 
-async fn workspace_write(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<WriteFileBody>) -> Result<Json<Value>, ApiErr> {
-    state.workspace_write(&id, &body.path, &body.content).map_err(map_err)?;
+async fn workspace_write(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<WriteFileBody>,
+) -> Result<Json<Value>, ApiErr> {
+    state
+        .workspace_write(&id, &body.path, &body.content)
+        .map_err(map_err)?;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn workspace_delete_file(Path(id): Path<String>, Query(query): Query<PathQuery>, State(state): State<AppState>) -> Result<StatusCode, ApiErr> {
-    let path = query.path.ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+async fn workspace_delete_file(
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiErr> {
+    let path = query
+        .path
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let abs = remote_codex_runtime::files::assert_within(std::path::Path::new(&ws.abs_path), std::path::Path::new(&path)).map_err(map_err)?;
+    let abs = remote_codex_runtime::files::assert_within(
+        std::path::Path::new(&ws.abs_path),
+        std::path::Path::new(&path),
+    )
+    .map_err(map_err)?;
     if abs.is_dir() {
         std::fs::remove_dir_all(abs).map_err(|e| map_err(e.into()))?;
     } else {
@@ -372,16 +525,35 @@ struct ThreadListQuery {
     workspace_id: Option<String>,
 }
 
-async fn list_threads(Query(query): Query<ThreadListQuery>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.list_threads(query.workspace_id.as_deref()).map_err(map_err)?).unwrap()))
+async fn list_threads(
+    Query(query): Query<ThreadListQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .list_threads(query.workspace_id.as_deref())
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
-async fn start_thread(State(state): State<AppState>, Json(body): Json<CreateThreadInput>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.create_thread(body).await.map_err(map_err)?).unwrap()))
+async fn start_thread(
+    State(state): State<AppState>,
+    Json(body): Json<CreateThreadInput>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.create_thread(body).await.map_err(map_err)?).unwrap(),
+    ))
 }
 
 async fn import_thread() -> Result<Json<Value>, ApiErr> {
-    Err(err(StatusCode::BAD_REQUEST, "bad_request", "import is not available for ACP-only sessions"))
+    Err(err(
+        StatusCode::BAD_REQUEST,
+        "bad_request",
+        "import is not available for ACP-only sessions",
+    ))
 }
 
 async fn import_candidates() -> Json<Value> {
@@ -393,8 +565,20 @@ struct DetailQuery {
     limit: Option<u32>,
 }
 
-async fn get_thread(Path(id): Path<String>, Query(query): Query<DetailQuery>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.get_thread_detail(&id, query.limit).await.map_err(map_err)?).unwrap()))
+async fn get_thread(
+    Path(id): Path<String>,
+    Query(query): Query<DetailQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .get_thread_detail(&id, query.limit)
+                .await
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -402,11 +586,20 @@ struct RenameBody {
     title: String,
 }
 
-async fn rename_thread(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<RenameBody>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.rename_thread(&id, &body.title).map_err(map_err)?).unwrap()))
+async fn rename_thread(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.rename_thread(&id, &body.title).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn delete_thread(Path(id): Path<String>, State(state): State<AppState>) -> Result<StatusCode, ApiErr> {
+async fn delete_thread(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiErr> {
     state.delete_thread(&id).map_err(map_err)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -421,11 +614,33 @@ struct SettingsBody {
     sandbox_mode: Option<String>,
 }
 
-async fn thread_settings(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<SettingsBody>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.update_settings(&id, body.model, body.reasoning_effort, body.fast_mode, body.collaboration_mode, body.sandbox_mode).map_err(map_err)?).unwrap()))
+async fn thread_settings(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<SettingsBody>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .update_settings(
+                    &id,
+                    body.model,
+                    body.reasoning_effort,
+                    body.fast_mode,
+                    body.collaboration_mode,
+                    body.sandbox_mode,
+                )
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
-async fn thread_prompt(Path(id): Path<String>, State(state): State<AppState>, request: Request) -> Result<Json<Value>, ApiErr> {
+async fn thread_prompt(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Json<Value>, ApiErr> {
     let content_type = request
         .headers()
         .get("content-type")
@@ -447,7 +662,10 @@ async fn thread_prompt(Path(id): Path<String>, State(state): State<AppState>, re
         {
             let name = field.name().unwrap_or("").to_string();
             let file_name = field.file_name().map(str::to_string);
-            let mime = field.content_type().unwrap_or("application/octet-stream").to_string();
+            let mime = field
+                .content_type()
+                .unwrap_or("application/octet-stream")
+                .to_string();
             let bytes = field
                 .bytes()
                 .await
@@ -459,7 +677,11 @@ async fn thread_prompt(Path(id): Path<String>, State(state): State<AppState>, re
                     reasoning_effort = Some(String::from_utf8_lossy(&bytes).into_owned())
                 }
                 _ if file_name.is_some() => {
-                    files.push((file_name.unwrap_or_else(|| name.clone()), mime, bytes.to_vec()));
+                    files.push((
+                        file_name.unwrap_or_else(|| name.clone()),
+                        mime,
+                        bytes.to_vec(),
+                    ));
                 }
                 _ => {}
             }
@@ -497,7 +719,11 @@ async fn thread_prompt(Path(id): Path<String>, State(state): State<AppState>, re
     });
     for _ in 0..100 {
         if let Ok(thread) = state.get_thread(&id) {
-            if thread.status == "running" || thread.status == "idle" || thread.status == "interrupted" || thread.status == "failed" {
+            if thread.status == "running"
+                || thread.status == "idle"
+                || thread.status == "interrupted"
+                || thread.status == "failed"
+            {
                 if thread.status != "idle" || thread.last_turn_started_at.is_some() {
                     return Ok(Json(serde_json::to_value(thread).unwrap()));
                 }
@@ -505,25 +731,48 @@ async fn thread_prompt(Path(id): Path<String>, State(state): State<AppState>, re
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    Ok(Json(serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap()))
+    Ok(Json(
+        serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn thread_interrupt(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn thread_interrupt(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     state.interrupt(&id).await.map_err(map_err)?;
-    Ok(Json(serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap()))
+    Ok(Json(
+        serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn thread_resume(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.resume_thread(&id).await.map_err(map_err)?).unwrap()))
+async fn thread_resume(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.resume_thread(&id).await.map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn thread_disconnect(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap()))
+async fn thread_disconnect(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
-async fn thread_fork(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn thread_fork(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let thread = state.fork_thread(&id).await.map_err(map_err)?;
-    let detail = state.get_thread_detail(&thread.id, None).await.map_err(map_err)?;
+    let detail = state
+        .get_thread_detail(&thread.id, None)
+        .await
+        .map_err(map_err)?;
     Ok(Json(json!({
         "thread": detail,
         "sourceThreadId": id,
@@ -532,8 +781,13 @@ async fn thread_fork(Path(id): Path<String>, State(state): State<AppState>) -> R
     })))
 }
 
-async fn thread_compact(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(serde_json::to_value(state.compact_thread(&id).await.map_err(map_err)?).unwrap()))
+async fn thread_compact(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.compact_thread(&id).await.map_err(map_err)?).unwrap(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -559,7 +813,10 @@ async fn thread_goal(
     ))
 }
 
-async fn thread_goal_clear(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn thread_goal_clear(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     Ok(Json(
         state
             .thread_goal(&id, None, None, true)
@@ -577,7 +834,9 @@ async fn thread_mcp() -> Json<Value> {
 }
 
 async fn thread_hooks() -> Json<Value> {
-    Json(json!({ "cwd": ".", "hooks": [], "warnings": [], "errors": [], "globalHooksPath": "", "projectHooksPath": "" }))
+    Json(
+        json!({ "cwd": ".", "hooks": [], "warnings": [], "errors": [], "globalHooksPath": "", "projectHooksPath": "" }),
+    )
 }
 
 #[derive(Deserialize)]
@@ -602,7 +861,10 @@ async fn thread_respond(
     Ok(Json(json!({ "ok": true, "requestId": request_id })))
 }
 
-async fn export_turns(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn export_turns(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
     let turns: Vec<Value> = detail
         .turns
@@ -618,10 +880,15 @@ async fn export_turns(Path(id): Path<String>, State(state): State<AppState>) -> 
             })
         })
         .collect();
-    Ok(Json(json!({ "turns": turns, "totalTurnCount": detail.total_turn_count })))
+    Ok(Json(
+        json!({ "turns": turns, "totalTurnCount": detail.total_turn_count }),
+    ))
 }
 
-async fn export_pdf(Path(id): Path<String>, State(state): State<AppState>) -> Result<Response, ApiErr> {
+async fn export_pdf(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
     let bytes = crate::export::pdf_transcript(&detail).map_err(map_err)?;
     Ok((
@@ -632,7 +899,10 @@ async fn export_pdf(Path(id): Path<String>, State(state): State<AppState>) -> Re
         .into_response())
 }
 
-async fn export_html(Path(id): Path<String>, State(state): State<AppState>) -> Result<Response, ApiErr> {
+async fn export_html(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
     let html = crate::export::html_transcript(&detail).map_err(map_err)?;
     Ok((
@@ -643,7 +913,10 @@ async fn export_html(Path(id): Path<String>, State(state): State<AppState>) -> R
         .into_response())
 }
 
-async fn create_shell(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn create_shell(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let thread = state.get_thread(&id).map_err(map_err)?;
     let workspace = state.get_workspace(&thread.workspace_id).map_err(map_err)?;
     let (shell_id, shell) = crate::shells::hub()
@@ -660,8 +933,14 @@ async fn create_shell(Path(id): Path<String>, State(state): State<AppState>) -> 
     })))
 }
 
-async fn workspace_download(Path(id): Path<String>, Query(query): Query<PathQuery>, State(state): State<AppState>) -> Result<Response, ApiErr> {
-    let path = query.path.ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+async fn workspace_download(
+    Path(id): Path<String>,
+    Query(query): Query<PathQuery>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiErr> {
+    let path = query
+        .path
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
     let preview = state.workspace_preview(&id, &path).map_err(map_err)?;
     Ok((StatusCode::OK, preview.content).into_response())
 }
@@ -673,10 +952,22 @@ struct MoveBody {
     to_path: String,
 }
 
-async fn workspace_move(Path(id): Path<String>, State(state): State<AppState>, Json(body): Json<MoveBody>) -> Result<Json<Value>, ApiErr> {
+async fn workspace_move(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Value>, ApiErr> {
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let from = remote_codex_runtime::files::assert_within(std::path::Path::new(&ws.abs_path), std::path::Path::new(&body.from_path)).map_err(map_err)?;
-    let to = remote_codex_runtime::files::assert_within(std::path::Path::new(&ws.abs_path), std::path::Path::new(&body.to_path)).map_err(map_err)?;
+    let from = remote_codex_runtime::files::assert_within(
+        std::path::Path::new(&ws.abs_path),
+        std::path::Path::new(&body.from_path),
+    )
+    .map_err(map_err)?;
+    let to = remote_codex_runtime::files::assert_within(
+        std::path::Path::new(&ws.abs_path),
+        std::path::Path::new(&body.to_path),
+    )
+    .map_err(map_err)?;
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| map_err(e.into()))?;
     }
@@ -684,11 +975,17 @@ async fn workspace_move(Path(id): Path<String>, State(state): State<AppState>, J
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn thread_shell(Path(id): Path<String>, State(state): State<AppState>) -> Result<Json<Value>, ApiErr> {
+async fn thread_shell(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
     let thread = state.get_thread(&id).map_err(map_err)?;
     let workspace = state.get_workspace(&thread.workspace_id).map_err(map_err)?;
     let shells = crate::shells::hub().list_for_thread(&thread.id);
-    let active = shells.first().and_then(|s| s.get("id").and_then(Value::as_str)).map(str::to_string);
+    let active = shells
+        .first()
+        .and_then(|s| s.get("id").and_then(Value::as_str))
+        .map(str::to_string);
     Ok(Json(json!({
         "threadId": thread.id,
         "workspaceId": workspace.id,

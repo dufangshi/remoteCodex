@@ -29,7 +29,11 @@ impl AcpProcess {
         command: &str,
         cwd: &str,
         extra_env: &[(&str, String)],
-    ) -> Result<(Self, mpsc::UnboundedReceiver<Value>, mpsc::UnboundedReceiver<(i64, String, Value)>)> {
+    ) -> Result<(
+        Self,
+        mpsc::UnboundedReceiver<Value>,
+        mpsc::UnboundedReceiver<(i64, String, Value)>,
+    )> {
         let mut parts = command.split_whitespace();
         let exe = parts.next().ok_or_else(|| anyhow!("empty ACP command"))?;
         let args: Vec<&str> = parts.collect();
@@ -47,7 +51,10 @@ impl AcpProcess {
             .spawn()
             .with_context(|| format!("spawn ACP `{command}`"))?;
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("missing stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("missing stdout"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("missing stdout"))?;
         if let Some(mut stderr) = child.stderr.take() {
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 4096];

@@ -192,7 +192,11 @@ impl AgentRuntime for FakeRuntime {
         })
     }
 
-    async fn resume_session(&self, session_id: &str, cwd: Option<&str>) -> Result<StartSessionResult> {
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<StartSessionResult> {
         let mut sessions = self.sessions.lock().unwrap();
         if !sessions.contains_key(session_id) {
             sessions.insert(session_id.into(), cwd.unwrap_or(".").into());
@@ -222,7 +226,10 @@ impl AgentRuntime for FakeRuntime {
             json!({ "turnId": input.turn_id }),
         );
         let slow = input.prompt.len() > 180
-            || input.prompt.to_lowercase().contains("inspect this repository");
+            || input
+                .prompt
+                .to_lowercase()
+                .contains("inspect this repository");
         if slow {
             tokio::select! {
                 _ = cancel.cancelled() => {
@@ -238,11 +245,16 @@ impl AgentRuntime for FakeRuntime {
         } else {
             for (i, ch) in reply.chars().enumerate() {
                 if cancel.is_cancelled() {
-                    emit(&bus, &input.thread_id, "thread.turn.completed", json!({
-                        "turnId": input.turn_id,
-                        "status": "interrupted",
-                        "error": null
-                    }));
+                    emit(
+                        &bus,
+                        &input.thread_id,
+                        "thread.turn.completed",
+                        json!({
+                            "turnId": input.turn_id,
+                            "status": "interrupted",
+                            "error": null
+                        }),
+                    );
                     return Ok(vec![item(&item_id, "", Some("interrupted"))]);
                 }
                 emit(
@@ -304,7 +316,10 @@ impl AgentRuntime for FakeRuntime {
             bail!("this harness does not support session/fork");
         }
         let id = format!("{session_id}-fork-{}", Uuid::new_v4());
-        self.sessions.lock().unwrap().insert(id.clone(), "fork".into());
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(id.clone(), "fork".into());
         Ok(StartSessionResult {
             provider_session_id: id,
             model: None,

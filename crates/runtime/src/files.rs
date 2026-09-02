@@ -45,13 +45,21 @@ pub fn list_tree(root: &Path, rel: &str) -> Result<Vec<ThreadWorkspaceTreeNodeDt
             name,
             path: path.to_string_lossy().replace('\\', "/"),
             kind: kind.into(),
-            size: if meta.is_file() { Some(meta.len()) } else { None },
+            size: if meta.is_file() {
+                Some(meta.len())
+            } else {
+                None
+            },
             has_children: Some(meta.is_dir()),
             children_loaded: Some(false),
             children: None,
         });
     }
-    nodes.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    nodes.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     Ok(nodes)
 }
 

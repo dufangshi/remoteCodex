@@ -81,7 +81,10 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
 }
 
 async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
-    let method = payload.get("method").and_then(Value::as_str).unwrap_or("GET");
+    let method = payload
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("GET");
     let path = payload.get("path").and_then(Value::as_str).unwrap_or("/");
     let body = payload.get("body").and_then(Value::as_str).unwrap_or("");
     let url = format!("http://127.0.0.1:{}{path}", state.config.port);
@@ -94,7 +97,9 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
         _ => client.get(&url),
     };
     if !body.is_empty() {
-        req = req.header("content-type", "application/json").body(body.to_string());
+        req = req
+            .header("content-type", "application/json")
+            .body(body.to_string());
     }
     req = req.header("x-remote-codex-relay-forwarded", "1");
     match req.send().await {

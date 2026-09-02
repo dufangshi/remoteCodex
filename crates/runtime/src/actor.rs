@@ -84,7 +84,11 @@ pub trait AgentRuntime: Send + Sync {
         AgentProviderCapabilitiesDto::conversational()
     }
     async fn start_session(&self, input: StartSessionInput) -> Result<StartSessionResult>;
-    async fn resume_session(&self, session_id: &str, cwd: Option<&str>) -> Result<StartSessionResult>;
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<StartSessionResult>;
     async fn start_turn(
         &self,
         input: StartTurnInput,
@@ -113,7 +117,12 @@ pub trait AgentRuntime: Send + Sync {
     async fn get_goal(&self, _session_id: &str) -> Result<Option<GoalState>> {
         Ok(None)
     }
-    async fn set_goal(&self, _session_id: &str, _objective: Option<String>, _status: Option<String>) -> Result<Option<GoalState>> {
+    async fn set_goal(
+        &self,
+        _session_id: &str,
+        _objective: Option<String>,
+        _status: Option<String>,
+    ) -> Result<Option<GoalState>> {
         anyhow::bail!("goals are not supported by this harness");
     }
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {

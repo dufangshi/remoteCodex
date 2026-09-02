@@ -37,14 +37,14 @@ impl RuntimeConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8787);
         let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-        let workspace_root = PathBuf::from(
-            env::var("WORKSPACE_ROOT").unwrap_or_else(|_| default_workspace_root()),
-        );
-        let database_url = PathBuf::from(
-            env::var("DATABASE_URL").unwrap_or_else(|_| default_database_path()),
-        );
+        let workspace_root =
+            PathBuf::from(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| default_workspace_root()));
+        let database_url =
+            PathBuf::from(env::var("DATABASE_URL").unwrap_or_else(|_| default_database_path()));
         let enabled_providers = parse_providers(
-            env::var("REMOTE_CODEX_ENABLED_AGENT_PROVIDERS").ok().as_deref(),
+            env::var("REMOTE_CODEX_ENABLED_AGENT_PROVIDERS")
+                .ok()
+                .as_deref(),
         );
         let fake_runtime = env_flag("REMOTE_CODEX_E2E_FAKE_RUNTIME");
         Self {
@@ -63,7 +63,9 @@ impl RuntimeConfig {
             relay_server_url: env::var("REMOTE_CODEX_RELAY_SERVER_URL").ok(),
             relay_agent_token: env::var("REMOTE_CODEX_RELAY_AGENT_TOKEN").ok(),
             enabled_providers,
-            acp_command: env::var("ACP_COMMAND").ok().filter(|s| !s.trim().is_empty()),
+            acp_command: env::var("ACP_COMMAND")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
             acp_startup_timeout_ms: env::var("ACP_STARTUP_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -106,7 +108,10 @@ fn default_workspace_root() -> String {
 }
 
 fn default_database_path() -> String {
-    dirs_fallback().join("supervisor.sqlite").to_string_lossy().into()
+    dirs_fallback()
+        .join("supervisor.sqlite")
+        .to_string_lossy()
+        .into()
 }
 
 fn dirs_fallback() -> PathBuf {

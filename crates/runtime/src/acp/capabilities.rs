@@ -18,26 +18,62 @@ pub struct NegotiatedCaps {
 }
 
 pub fn negotiate(initialize: &Value) -> NegotiatedCaps {
-    let caps = initialize.get("agentCapabilities").cloned().unwrap_or(Value::Null);
-    let session = caps.get("sessionCapabilities").cloned().unwrap_or(Value::Null);
-    let prompt = caps.get("promptCapabilities").cloned().unwrap_or(Value::Null);
+    let caps = initialize
+        .get("agentCapabilities")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let session = caps
+        .get("sessionCapabilities")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let prompt = caps
+        .get("promptCapabilities")
+        .cloned()
+        .unwrap_or(Value::Null);
     let meta = initialize.get("_meta").cloned().unwrap_or(Value::Null);
     let steering = meta.get("steering").cloned().unwrap_or(Value::Null);
     let goal = meta.get("goal").cloned().unwrap_or(Value::Null);
     NegotiatedCaps {
-        load_session: caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false)
-            || session.get("load").and_then(Value::as_bool).unwrap_or(false),
-        resume: session.get("resume").and_then(Value::as_bool).unwrap_or(false),
-        list: session.get("list").and_then(Value::as_bool).unwrap_or(false),
-        close: session.get("close").and_then(Value::as_bool).unwrap_or(false),
-        delete: session.get("delete").and_then(Value::as_bool).unwrap_or(false),
-        fork: session.get("fork").and_then(Value::as_bool).unwrap_or(false),
-        steer: steering.get("supported").and_then(Value::as_bool).unwrap_or(false),
+        load_session: caps
+            .get("loadSession")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || session
+                .get("load")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        resume: session
+            .get("resume")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        list: session
+            .get("list")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        close: session
+            .get("close")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        delete: session
+            .get("delete")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        fork: session
+            .get("fork")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        steer: steering
+            .get("supported")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         compact: false,
         goals: goal.get("controlMethod").and_then(Value::as_str).is_some()
             || goal.get("version").is_some(),
         fast: false,
-        image: prompt.get("image").and_then(Value::as_bool).unwrap_or(false),
+        image: prompt
+            .get("image")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         goal_method: goal
             .get("controlMethod")
             .and_then(Value::as_str)

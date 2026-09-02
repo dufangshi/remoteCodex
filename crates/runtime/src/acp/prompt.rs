@@ -125,7 +125,8 @@ mod tests {
     fn expands_photo_token() {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("red.png"), b"png").unwrap();
-        let blocks = build_prompt_blocks("see [PHOTO red.png] please", dir.path(), true, &[]).unwrap();
+        let blocks =
+            build_prompt_blocks("see [PHOTO red.png] please", dir.path(), true, &[]).unwrap();
         assert_eq!(blocks[0]["type"], "text");
         assert_eq!(blocks[1]["type"], "image");
         assert_eq!(blocks[2]["type"], "text");

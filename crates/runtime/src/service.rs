@@ -6,9 +6,10 @@ use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use remote_codex_protocol::{
     now_rfc3339, truncate_title, AgentBackendDto, AgentCapabilitySnapshotDto, CreateThreadInput,
-    CreateWorkspaceInput, ModelOptionDto, Provider, SendThreadPromptInput, ThreadDetailDto, ThreadDto,
-    ThreadHistoryItemDto, ThreadPendingSteerDto, ThreadTurnDto, ThreadWorkspaceFilePreviewDto,
-    ThreadWorkspaceTreeNodeDto, WorkspaceDto, WorkspaceSettingsDto,
+    CreateWorkspaceInput, ModelOptionDto, Provider, SendThreadPromptInput, ThreadDetailDto,
+    ThreadDto, ThreadHistoryItemDto, ThreadPendingSteerDto, ThreadTurnDto,
+    ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
+    WorkspaceDto, WorkspaceSettingsDto,
 };
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
@@ -74,11 +75,46 @@ impl Supervisor {
     }
 
     pub fn workspace_settings(&self) -> WorkspaceSettingsDto {
+        let stored = self
+            .db
+            .get_kv("workspace_settings")
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<WorkspaceSettingsDto>(&raw).ok());
+        let workspace_root = self.config.workspace_root.to_string_lossy().into_owned();
         WorkspaceSettingsDto {
-            workspace_root: self.config.workspace_root.to_string_lossy().into(),
-            dev_home: std::env::var("HOME").unwrap_or_else(|_| ".".into()),
-            default_backend: self.default_provider(),
+            workspace_root: workspace_root.clone(),
+            dev_home: stored
+                .as_ref()
+                .map(|settings| settings.dev_home.clone())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(workspace_root),
+            default_backend: stored
+                .as_ref()
+                .map(|settings| settings.default_backend)
+                .unwrap_or_else(|| self.default_provider()),
         }
+    }
+
+    pub fn update_workspace_settings(
+        &self,
+        input: UpdateWorkspaceSettingsInput,
+    ) -> Result<WorkspaceSettingsDto> {
+        let mut current = self.workspace_settings();
+        if let Some(dev_home) = input.dev_home.filter(|value| !value.trim().is_empty()) {
+            let path = PathBuf::from(dev_home.trim());
+            if !path.is_dir() {
+                bail!("dev home must be an existing directory");
+            }
+            current.dev_home = path.canonicalize()?.to_string_lossy().into();
+        }
+        if let Some(backend) = input.default_backend {
+            current.default_backend = backend;
+        }
+        current.workspace_root = self.config.workspace_root.to_string_lossy().into();
+        self.db
+            .set_kv("workspace_settings", &serde_json::to_string(&current)?)?;
+        Ok(current)
     }
 
     pub fn list_workspaces(&self) -> Result<Vec<WorkspaceDto>> {
@@ -109,15 +145,15 @@ impl Supervisor {
     }
 
     pub fn create_workspace(&self, input: CreateWorkspaceInput) -> Result<WorkspaceDto> {
+        std::fs::create_dir_all(&self.config.workspace_root)?;
+        let settings = self.workspace_settings();
+        let dev_home = PathBuf::from(&settings.dev_home);
+        std::fs::create_dir_all(&dev_home)?;
         let abs_path = if let Some(git) = input.git_url.filter(|s| !s.is_empty()) {
-            let name = git
-                .trim_end_matches(".git")
-                .rsplit('/')
-                .next()
-                .unwrap_or("repo")
-                .to_string();
-            let dest = self.config.workspace_root.join(&name);
-            std::fs::create_dir_all(&self.config.workspace_root)?;
+            let dest = dev_home.join(infer_git_repo_name(&git));
+            if dest.exists() {
+                bail!("The Git clone target directory already exists.");
+            }
             let status = std::process::Command::new("git")
                 .args(["clone", "--depth", "1", &git, &dest.to_string_lossy()])
                 .status()?;
@@ -126,13 +162,40 @@ impl Supervisor {
             }
             dest
         } else {
-            PathBuf::from(input.abs_path.ok_or_else(|| anyhow!("absPath is required"))?)
+            let requested = input
+                .abs_path
+                .ok_or_else(|| anyhow!("absPath is required"))?;
+            let requested = requested.trim();
+            if requested.is_empty() {
+                bail!("absPath is required");
+            }
+            let target = if is_workspace_name(requested) {
+                dev_home.join(requested)
+            } else {
+                PathBuf::from(requested)
+            };
+            if !target.exists() {
+                let parent = target.parent().filter(|path| !path.as_os_str().is_empty());
+                if let Some(parent) = parent {
+                    if !parent.exists() {
+                        bail!("The parent directory for the workspace path does not exist.");
+                    }
+                }
+                std::fs::create_dir_all(&target)?;
+            }
+            if !target.is_dir() {
+                bail!("workspace path is not a directory");
+            }
+            target
         };
-        if !abs_path.exists() {
-            bail!("workspace path does not exist");
-        }
         let abs_path = abs_path.canonicalize()?;
-        std::fs::create_dir_all(&self.config.workspace_root)?;
+        let already = self
+            .list_workspaces()?
+            .into_iter()
+            .any(|workspace| PathBuf::from(&workspace.abs_path) == abs_path);
+        if already {
+            bail!("This workspace has already been added.");
+        }
         let id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         let label = input
@@ -157,7 +220,10 @@ impl Supervisor {
 
     pub fn update_workspace(&self, id: &str, label: &str) -> Result<WorkspaceDto> {
         self.db.with(|conn| {
-            let n = conn.execute("UPDATE workspaces SET label=?1 WHERE id=?2", params![label, id])?;
+            let n = conn.execute(
+                "UPDATE workspaces SET label=?1 WHERE id=?2",
+                params![label, id],
+            )?;
             if n == 0 {
                 bail!("workspace not found");
             }
@@ -325,7 +391,8 @@ impl Supervisor {
         } else {
             vec![]
         };
-        let goal = if let (Some(runtime), Some(session)) = (runtime.as_ref(), thread.provider_session_id.as_deref())
+        let goal = if let (Some(runtime), Some(session)) =
+            (runtime.as_ref(), thread.provider_session_id.as_deref())
         {
             runtime.get_goal(session).await.ok().flatten().map(|g| {
                 json!({
@@ -416,7 +483,11 @@ impl Supervisor {
         })
     }
 
-    pub async fn prompt(&self, thread_id: &str, input: SendThreadPromptInput) -> Result<ThreadDetailDto> {
+    pub async fn prompt(
+        &self,
+        thread_id: &str,
+        input: SendThreadPromptInput,
+    ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(thread_id)?;
         let images: Vec<PromptImage> = input
             .images
@@ -441,11 +512,21 @@ impl Supervisor {
                     return self.get_thread_detail(thread_id, None).await;
                 }
             }
-            self.enqueue_steer(thread_id, thread.active_turn_id.as_deref().unwrap_or(""), &input.prompt)?;
+            self.enqueue_steer(
+                thread_id,
+                thread.active_turn_id.as_deref().unwrap_or(""),
+                &input.prompt,
+            )?;
             return self.get_thread_detail(thread_id, None).await;
         }
-        self.run_turn(thread, input.prompt, input.model, input.reasoning_effort, images)
-            .await?;
+        self.run_turn(
+            thread,
+            input.prompt,
+            input.model,
+            input.reasoning_effort,
+            images,
+        )
+        .await?;
         self.get_thread_detail(thread_id, None).await
     }
 
@@ -559,8 +640,19 @@ impl Supervisor {
         match result {
             Ok(items) => {
                 let interrupted = cancel.is_cancelled();
-                let status = if interrupted { "interrupted" } else { "completed" };
-                self.persist_turn_result(&thread.id, &turn_id, status, None, &items, &completed_at)?;
+                let status = if interrupted {
+                    "interrupted"
+                } else {
+                    "completed"
+                };
+                self.persist_turn_result(
+                    &thread.id,
+                    &turn_id,
+                    status,
+                    None,
+                    &items,
+                    &completed_at,
+                )?;
             }
             Err(err) => {
                 self.persist_turn_result(
@@ -678,32 +770,64 @@ impl Supervisor {
 
     pub fn delete_thread(&self, id: &str) -> Result<()> {
         self.db.with(|conn| {
-            conn.execute("DELETE FROM thread_history_items WHERE thread_id=?1", params![id])?;
+            conn.execute(
+                "DELETE FROM thread_history_items WHERE thread_id=?1",
+                params![id],
+            )?;
             conn.execute("DELETE FROM thread_turns WHERE thread_id=?1", params![id])?;
-            conn.execute("DELETE FROM thread_pending_steers WHERE thread_id=?1", params![id])?;
+            conn.execute(
+                "DELETE FROM thread_pending_steers WHERE thread_id=?1",
+                params![id],
+            )?;
             conn.execute("DELETE FROM threads WHERE id=?1", params![id])?;
             Ok(())
         })
     }
 
-    pub fn update_settings(&self, id: &str, model: Option<String>, effort: Option<String>, fast: Option<bool>, collab: Option<String>, sandbox: Option<String>) -> Result<ThreadDto> {
+    pub fn update_settings(
+        &self,
+        id: &str,
+        model: Option<String>,
+        effort: Option<String>,
+        fast: Option<bool>,
+        collab: Option<String>,
+        sandbox: Option<String>,
+    ) -> Result<ThreadDto> {
         self.db.with(|conn| {
             if let Some(model) = model {
-                conn.execute("UPDATE threads SET model=?1 WHERE id=?2", params![model, id])?;
+                conn.execute(
+                    "UPDATE threads SET model=?1 WHERE id=?2",
+                    params![model, id],
+                )?;
             }
             if let Some(effort) = effort {
-                conn.execute("UPDATE threads SET reasoning_effort=?1 WHERE id=?2", params![effort, id])?;
+                conn.execute(
+                    "UPDATE threads SET reasoning_effort=?1 WHERE id=?2",
+                    params![effort, id],
+                )?;
             }
             if let Some(fast) = fast {
-                conn.execute("UPDATE threads SET fast_mode=?1 WHERE id=?2", params![fast as i64, id])?;
+                conn.execute(
+                    "UPDATE threads SET fast_mode=?1 WHERE id=?2",
+                    params![fast as i64, id],
+                )?;
             }
             if let Some(collab) = collab {
-                conn.execute("UPDATE threads SET collaboration_mode=?1 WHERE id=?2", params![collab, id])?;
+                conn.execute(
+                    "UPDATE threads SET collaboration_mode=?1 WHERE id=?2",
+                    params![collab, id],
+                )?;
             }
             if let Some(sandbox) = sandbox {
-                conn.execute("UPDATE threads SET sandbox_mode=?1 WHERE id=?2", params![sandbox, id])?;
+                conn.execute(
+                    "UPDATE threads SET sandbox_mode=?1 WHERE id=?2",
+                    params![sandbox, id],
+                )?;
             }
-            conn.execute("UPDATE threads SET updated_at=?1 WHERE id=?2", params![now_rfc3339(), id])?;
+            conn.execute(
+                "UPDATE threads SET updated_at=?1 WHERE id=?2",
+                params![now_rfc3339(), id],
+            )?;
             Ok(())
         })?;
         self.get_thread(id)
@@ -872,7 +996,9 @@ impl Supervisor {
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let runtime = self.runtime(thread.provider)?;
         let goal = if clear {
-            runtime.set_goal(&session, None, Some("clear".into())).await?
+            runtime
+                .set_goal(&session, None, Some("clear".into()))
+                .await?
         } else if objective.is_some() || status.is_some() {
             runtime.set_goal(&session, objective, status).await?
         } else {
@@ -908,7 +1034,11 @@ impl Supervisor {
             .count() as u32
     }
 
-    pub async fn list_models(&self, provider: Provider, agent_id: Option<&str>) -> Result<Vec<ModelOptionDto>> {
+    pub async fn list_models(
+        &self,
+        provider: Provider,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<ModelOptionDto>> {
         self.runtime(provider)?.list_models(agent_id).await
     }
 
@@ -916,12 +1046,47 @@ impl Supervisor {
         self.runtime(provider)?.list_agents().await
     }
 
-    pub async fn capabilities(&self, provider: Provider, agent_id: Option<&str>) -> Result<AgentCapabilitySnapshotDto> {
+    pub async fn capabilities(
+        &self,
+        provider: Provider,
+        agent_id: Option<&str>,
+    ) -> Result<AgentCapabilitySnapshotDto> {
         self.runtime(provider)?.capabilities(agent_id).await
     }
 
-    pub async fn install(&self, provider: Provider, agent_id: Option<&str>) -> Result<AgentBackendDto> {
+    pub async fn install(
+        &self,
+        provider: Provider,
+        agent_id: Option<&str>,
+    ) -> Result<AgentBackendDto> {
         self.runtime(provider)?.install(agent_id).await
+    }
+}
+
+fn is_workspace_name(value: &str) -> bool {
+    !Path::new(value).is_absolute()
+        && value != "."
+        && value != ".."
+        && value.chars().enumerate().all(|(index, ch)| {
+            if index == 0 {
+                ch.is_ascii_alphanumeric()
+            } else {
+                ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')
+            }
+        })
+        && (1..=128).contains(&value.len())
+}
+
+fn infer_git_repo_name(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let name = trimmed
+        .rsplit(['/', ':'])
+        .find(|part| !part.is_empty())
+        .unwrap_or("repo");
+    if name.is_empty() {
+        "repo".into()
+    } else {
+        name.into()
     }
 }
 
@@ -940,7 +1105,11 @@ fn sanitize_file_name(name: &str) -> String {
             }
         })
         .collect();
-    format!("{}-{}", cleaned.trim_matches('-'), &Uuid::new_v4().to_string()[..8])
+    format!(
+        "{}-{}",
+        cleaned.trim_matches('-'),
+        &Uuid::new_v4().to_string()[..8]
+    )
 }
 
 fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {

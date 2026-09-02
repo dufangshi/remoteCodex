@@ -134,6 +134,15 @@ pub struct WorkspaceSettingsDto {
     pub default_backend: Provider,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWorkspaceSettingsInput {
+    #[serde(default)]
+    pub dev_home: Option<String>,
+    #[serde(default)]
+    pub default_backend: Option<Provider>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadWorkspaceTreeNodeDto {
@@ -432,7 +441,7 @@ impl AgentProviderCapabilitiesDto {
                 goals: false,
             },
             management: ManagementCaps {
-                models: false,
+                models: true,
                 mcp_status: false,
                 skills: false,
                 hooks: false,

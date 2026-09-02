@@ -2,7 +2,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "remote-codex", version, about = "Remote Codex supervisor and relay")]
+#[command(
+    name = "remote-codex",
+    version,
+    about = "Remote Codex supervisor and relay"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

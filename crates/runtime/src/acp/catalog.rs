@@ -13,8 +13,22 @@ pub struct AcpAgentDef {
 
 pub fn builtin_agents(custom: Option<&str>) -> Vec<AcpAgentDef> {
     let mut agents = vec![
-        def("grok", "Grok Build", "native", "grok", "grok agent stdio", None),
-        def("cursor", "Cursor Agent", "native", "cursor-agent", "cursor-agent acp", None),
+        def(
+            "grok",
+            "Grok Build",
+            "native",
+            "grok",
+            "grok agent stdio",
+            None,
+        ),
+        def(
+            "cursor",
+            "Cursor Agent",
+            "native",
+            "cursor-agent",
+            "cursor-agent acp",
+            None,
+        ),
         def(
             "codex",
             "OpenAI Codex",
@@ -31,17 +45,52 @@ pub fn builtin_agents(custom: Option<&str>) -> Vec<AcpAgentDef> {
             "claude-agent-acp",
             Some("npm install -g @agentclientprotocol/claude-agent-acp@latest"),
         ),
-        def("gemini", "Gemini CLI", "native", "gemini", "gemini --acp", None),
-        def("copilot", "GitHub Copilot CLI", "native", "copilot", "copilot --acp", None),
-        def("opencode", "OpenCode", "native", "opencode", "opencode acp", None),
-        def("deepseek", "DeepSeek Harness", "native", "dsh", "dsh --profile acp", None),
+        def(
+            "gemini",
+            "Gemini CLI",
+            "native",
+            "gemini",
+            "gemini --acp",
+            None,
+        ),
+        def(
+            "copilot",
+            "GitHub Copilot CLI",
+            "native",
+            "copilot",
+            "copilot --acp",
+            None,
+        ),
+        def(
+            "opencode",
+            "OpenCode",
+            "native",
+            "opencode",
+            "opencode acp",
+            None,
+        ),
+        def(
+            "deepseek",
+            "DeepSeek Harness",
+            "native",
+            "dsh",
+            "dsh --profile acp",
+            None,
+        ),
     ];
     if let Some(custom) = custom
         .map(str::trim)
         .filter(|s| !s.is_empty() && *s != "grok agent stdio")
     {
         let exe = custom.split_whitespace().next().unwrap_or("acp");
-        agents.push(def("custom", "Custom ACP Agent", "custom", exe, custom, None));
+        agents.push(def(
+            "custom",
+            "Custom ACP Agent",
+            "custom",
+            exe,
+            custom,
+            None,
+        ));
     }
     agents
 }

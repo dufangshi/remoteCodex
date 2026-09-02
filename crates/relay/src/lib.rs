@@ -47,7 +47,9 @@ impl RelayStore {
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
               name TEXT NOT NULL,
+              token TEXT,
               token_hash TEXT NOT NULL,
+              token_preview TEXT,
               created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -83,6 +85,8 @@ impl RelayStore {
             );
             ",
         )?;
+        let _ = conn.execute("ALTER TABLE devices ADD COLUMN token TEXT", []);
+        let _ = conn.execute("ALTER TABLE devices ADD COLUMN token_preview TEXT", []);
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -91,6 +95,7 @@ impl RelayStore {
 
 struct DeviceSocket {
     tx: tokio::sync::mpsc::UnboundedSender<String>,
+    connection_id: Uuid,
 }
 
 struct AppState {
@@ -339,19 +344,36 @@ fn create_session(conn: &Connection, user_id: &str) -> Result<String, rusqlite::
     Ok(token)
 }
 
+fn preview_token(token: &str) -> String {
+    if token.len() <= 11 {
+        return token.to_string();
+    }
+    format!(
+        "{}...{}",
+        &token[..7.min(token.len())],
+        &token[token.len().saturating_sub(4)..]
+    )
+}
+
 fn device_json(
     id: &str,
     owner_user_id: &str,
     name: &str,
     created_at: &str,
     connected: bool,
+    token: Option<&str>,
+    token_preview: Option<&str>,
 ) -> Value {
     json!({
         "id": id,
         "ownerUserId": owner_user_id,
         "name": name,
-        "token": Value::Null,
-        "tokenPreview": "••••",
+        "token": token,
+        "tokenPreview": token_preview
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| token.map(preview_token))
+            .unwrap_or_else(|| "••••".into()),
         "connected": connected,
         "connectedAt": Value::Null,
         "lastHeartbeatAt": Value::Null,
@@ -516,19 +538,23 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
     let connected = state.sockets.read().await;
     let conn = state.store.conn.lock().await;
     let mut stmt = conn
-        .prepare("SELECT id, user_id, name, created_at FROM devices WHERE user_id=?1 ORDER BY created_at ASC")
+        .prepare("SELECT id, user_id, name, created_at, token, token_preview FROM devices WHERE user_id=?1 ORDER BY created_at ASC")
         .expect("stmt");
     stmt.query_map(params![user_id], |row| {
         let id: String = row.get(0)?;
         let owner: String = row.get(1)?;
         let name: String = row.get(2)?;
         let created_at: String = row.get(3)?;
+        let token: Option<String> = row.get(4)?;
+        let token_preview: Option<String> = row.get(5)?;
         Ok(device_json(
             &id,
             &owner,
             &name,
             &created_at,
             connected.contains_key(&id),
+            token.as_deref(),
+            token_preview.as_deref(),
         ))
     })
     .ok()
@@ -604,12 +630,14 @@ async fn create_device(
     let id = Uuid::new_v4().to_string();
     let token = format!("rcd_{}", Uuid::new_v4().simple());
     let created_at = now_rfc3339();
+    let token_preview = preview_token(&token);
+    let token_hash = hash_password(&token);
     {
         let conn = state.store.conn.lock().await;
         if conn
             .execute(
-                "INSERT INTO devices(id,user_id,name,token_hash,created_at) VALUES (?1,?2,?3,?4,?5)",
-                params![id, user.id, name, hash_password(&token), created_at],
+                "INSERT INTO devices(id,user_id,name,token,token_hash,token_preview,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![id, user.id, name, token.clone(), token_hash, token_preview.clone(), created_at],
             )
             .is_err()
         {
@@ -621,7 +649,7 @@ async fn create_device(
         }
     }
     Json(json!({
-        "device": device_json(&id, &user.id, name, &created_at, false),
+        "device": device_json(&id, &user.id, name, &created_at, false, Some(&token), Some(&token_preview)),
         "token": token
     }))
     .into_response()
@@ -992,12 +1020,13 @@ async fn supervisor_tunnel(
 }
 
 async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: String) {
+    let connection_id = Uuid::new_v4();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     state
         .sockets
         .write()
         .await
-        .insert(device_id.clone(), DeviceSocket { tx });
+        .insert(device_id.clone(), DeviceSocket { tx, connection_id });
     let (mut sink, mut stream) = socket.split();
     loop {
         tokio::select! {
@@ -1032,7 +1061,13 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
             }
         }
     }
-    state.sockets.write().await.remove(&device_id);
+    let mut sockets = state.sockets.write().await;
+    if sockets
+        .get(&device_id)
+        .is_some_and(|socket| socket.connection_id == connection_id)
+    {
+        sockets.remove(&device_id);
+    }
 }
 
 async fn client_ws(

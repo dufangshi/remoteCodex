@@ -41,7 +41,10 @@ fn escape(value: &str) -> String {
 }
 
 fn simple_pdf(text: &str) -> Vec<u8> {
-    let escaped = text.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('(', "\\(")
+        .replace(')', "\\)");
     let stream = format!("BT /F1 11 Tf 48 750 Td ({escaped}) Tj ET");
     let stream_bytes = stream.as_bytes();
     let mut pdf = Vec::new();
@@ -54,8 +57,16 @@ fn simple_pdf(text: &str) -> Vec<u8> {
             pdf.push(b'\n');
         }
     }
-    obj(&mut pdf, &mut offsets, b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
-    obj(&mut pdf, &mut offsets, b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+    obj(
+        &mut pdf,
+        &mut offsets,
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+    );
     obj(
         &mut pdf,
         &mut offsets,
@@ -65,12 +76,24 @@ fn simple_pdf(text: &str) -> Vec<u8> {
     content.extend_from_slice(stream_bytes);
     content.extend_from_slice(b"\nendstream endobj\n");
     obj(&mut pdf, &mut offsets, &content);
-    obj(&mut pdf, &mut offsets, b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj\n");
+    obj(
+        &mut pdf,
+        &mut offsets,
+        b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj\n",
+    );
     let xref = pdf.len();
-    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    pdf.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes(),
+    );
     for offset in offsets {
         pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
-    pdf.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", 6).as_bytes());
+    pdf.extend_from_slice(
+        format!(
+            "trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            6
+        )
+        .as_bytes(),
+    );
     pdf
 }

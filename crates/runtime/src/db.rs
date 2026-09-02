@@ -15,7 +15,8 @@ impl Database {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).with_context(|| format!("open sqlite {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("open sqlite {}", path.display()))?;
         conn.execute_batch(
             "
             PRAGMA journal_mode=WAL;
@@ -129,5 +130,25 @@ impl Database {
     pub fn with<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let conn = self.conn.lock().expect("db mutex");
         f(&conn)
+    }
+
+    pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
+        self.with(|conn| {
+            Ok(conn
+                .query_row("SELECT value FROM kv WHERE key=?1", params![key], |row| {
+                    row.get(0)
+                })
+                .optional()?)
+        })
+    }
+
+    pub fn set_kv(&self, key: &str, value: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
+        })
     }
 }

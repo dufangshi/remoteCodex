@@ -107,14 +107,20 @@ impl ShellHub {
 
     pub fn write(&self, id: &str, data: &str) -> Result<()> {
         let hub = self.inner.lock().unwrap();
-        let shell = hub.shells.get(id).ok_or_else(|| anyhow!("shell not found"))?;
+        let shell = hub
+            .shells
+            .get(id)
+            .ok_or_else(|| anyhow!("shell not found"))?;
         shell.writer.lock().unwrap().write_all(data.as_bytes())?;
         Ok(())
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
         let hub = self.inner.lock().unwrap();
-        let shell = hub.shells.get(id).ok_or_else(|| anyhow!("shell not found"))?;
+        let shell = hub
+            .shells
+            .get(id)
+            .ok_or_else(|| anyhow!("shell not found"))?;
         shell.master.lock().unwrap().resize(PtySize {
             rows,
             cols,
@@ -143,7 +149,10 @@ impl ShellHub {
     }
 
     fn shell_json_locked(&self, hub: &HubState, id: &str) -> Result<Value> {
-        let shell = hub.shells.get(id).ok_or_else(|| anyhow!("shell not found"))?;
+        let shell = hub
+            .shells
+            .get(id)
+            .ok_or_else(|| anyhow!("shell not found"))?;
         Ok(json!({
             "id": id,
             "status": "running",

@@ -14,7 +14,11 @@ pub trait HarnessAdapter: Send + Sync {
     fn initialize_client_meta(&self) -> Value {
         json!({})
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         let _ = (caps, negotiated);
     }
 }
@@ -25,7 +29,11 @@ impl HarnessAdapter for StandardAdapter {
     fn id(&self) -> &'static str {
         "standard"
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         apply_negotiated(caps, negotiated);
     }
 }
@@ -39,7 +47,11 @@ impl HarnessAdapter for CodexAdapter {
     fn compact_prompt(&self) -> Option<&'static str> {
         Some("/compact")
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         apply_negotiated(caps, negotiated);
         // Codex ACP compact is a hidden `/compact` turn, not a native method.
         caps.turns.compact = true;
@@ -61,7 +73,11 @@ impl HarnessAdapter for ClaudeAdapter {
     fn id(&self) -> &'static str {
         "claude"
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         apply_negotiated(caps, negotiated);
     }
 }
@@ -72,7 +88,11 @@ impl HarnessAdapter for GrokAdapter {
     fn id(&self) -> &'static str {
         "grok"
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         apply_negotiated(caps, negotiated);
     }
 }
@@ -83,7 +103,11 @@ impl HarnessAdapter for DeepSeekAdapter {
     fn id(&self) -> &'static str {
         "deepseek"
     }
-    fn patch_capabilities(&self, caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
         apply_negotiated(caps, negotiated);
     }
 }
@@ -99,18 +123,38 @@ pub fn adapter_for(agent_id: &str) -> Box<dyn HarnessAdapter> {
 }
 
 fn apply_negotiated(caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
-    caps.sessions.load = Some(negotiated.load_session);
-    caps.sessions.resume = negotiated.resume;
-    caps.sessions.close = Some(negotiated.close);
-    caps.sessions.delete = Some(negotiated.delete);
-    caps.sessions.list = negotiated.list;
-    caps.turns.steer = negotiated.steer;
+    // Only upgrade advertised product defaults. Empty/default negotiated caps must not
+    // mark an installed harness as unable to start or resume threads.
+    if negotiated.load_session {
+        caps.sessions.load = Some(true);
+    }
+    if negotiated.resume {
+        caps.sessions.resume = true;
+    }
+    if negotiated.close {
+        caps.sessions.close = Some(true);
+    }
+    if negotiated.delete {
+        caps.sessions.delete = Some(true);
+    }
+    if negotiated.list {
+        caps.sessions.list = true;
+    }
+    if negotiated.steer {
+        caps.turns.steer = true;
+    }
     if negotiated.compact {
         caps.turns.compact = true;
     }
-    caps.branching.fork = negotiated.fork;
-    caps.controls.goals = negotiated.goals;
-    caps.controls.performance_mode = negotiated.fast;
+    if negotiated.fork {
+        caps.branching.fork = true;
+    }
+    if negotiated.goals {
+        caps.controls.goals = true;
+    }
+    if negotiated.fast {
+        caps.controls.performance_mode = true;
+    }
     caps.controls.permission_requests = true;
     caps.usage.token_usage = true;
     caps.usage.context_window = true;
@@ -132,6 +176,9 @@ mod tests {
         caps.turns.compact = false;
         caps.branching.fork = true;
         adapter.patch_capabilities(&mut caps, &NegotiatedCaps::default());
+        assert!(caps.sessions.resume);
+        assert!(caps.turns.start);
+        assert!(caps.management.models);
         assert!(caps.turns.compact);
         assert!(!caps.branching.fork);
         assert!(!caps.management.mcp_status);
@@ -145,6 +192,16 @@ mod tests {
         assert!(!commands.contains(&"/mcp"));
         assert!(!commands.contains(&"/skills"));
         assert!(!commands.contains(&"/hooks"));
+    }
+
+    #[test]
+    fn advertised_caps_keep_resume_when_nothing_is_negotiated() {
+        let mut caps = base();
+        StandardAdapter.patch_capabilities(&mut caps, &NegotiatedCaps::default());
+        assert!(caps.sessions.resume);
+        assert!(caps.turns.start);
+        assert!(caps.management.models);
+        assert!(!caps.branching.fork);
     }
 
     #[test]

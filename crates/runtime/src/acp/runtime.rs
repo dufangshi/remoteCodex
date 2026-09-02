@@ -75,7 +75,12 @@ impl AcpRuntime {
         Self::new(provider, Some(agent_id.into()), None, timeout_ms)
     }
 
-    fn new(provider: Provider, bound_agent: Option<String>, custom: Option<String>, timeout_ms: u64) -> Self {
+    fn new(
+        provider: Provider,
+        bound_agent: Option<String>,
+        custom: Option<String>,
+        timeout_ms: u64,
+    ) -> Self {
         let (updates, _) = broadcast::channel(512);
         Self {
             provider,
@@ -395,7 +400,11 @@ impl AgentRuntime for AcpRuntime {
             .ok()
             .map(|d| command_available(&d.server_command) || command_available(&d.base_command))
             .unwrap_or(false);
-        let availability = if installed { "ready" } else { "adapter_missing" };
+        let availability = if installed {
+            "ready"
+        } else {
+            "adapter_missing"
+        };
         let effective = if installed {
             Some(self.caps_for(Some(&id)).await)
         } else {
@@ -437,7 +446,11 @@ impl AgentRuntime for AcpRuntime {
         }
         let model = input.model.clone();
         let effort = input.reasoning_effort.clone();
-        self.inner.sessions.lock().await.insert(scoped.clone(), live);
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .insert(scoped.clone(), live);
         Ok(StartSessionResult {
             provider_session_id: scoped,
             model: Some(model),
@@ -445,7 +458,11 @@ impl AgentRuntime for AcpRuntime {
         })
     }
 
-    async fn resume_session(&self, session_id: &str, cwd: Option<&str>) -> Result<StartSessionResult> {
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<StartSessionResult> {
         if self.inner.sessions.lock().await.contains_key(session_id) {
             return Ok(StartSessionResult {
                 provider_session_id: session_id.into(),
@@ -459,10 +476,18 @@ impl AgentRuntime for AcpRuntime {
         let def = self.agent_def(Some(agent_id))?;
         let cwd = cwd
             .map(str::to_string)
-            .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| ".".into());
         let (scoped, live) = self.spawn_session(&def, &cwd, true, Some(raw)).await?;
-        self.inner.sessions.lock().await.insert(scoped.clone(), live);
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .insert(scoped.clone(), live);
         Ok(StartSessionResult {
             provider_session_id: scoped,
             model: None,
@@ -567,7 +592,13 @@ impl AgentRuntime for AcpRuntime {
                 break;
             }
         }
-        if let Some(live) = self.inner.sessions.lock().await.get_mut(&input.provider_session_id) {
+        if let Some(live) = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get_mut(&input.provider_session_id)
+        {
             live.active = None;
         }
         let interrupted = cancel.is_cancelled();
@@ -605,7 +636,13 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn respond_permission(&self, request_id: &str, allow: bool) -> Result<()> {
-        if let Some(tx) = self.inner.pending_permissions.lock().await.remove(request_id) {
+        if let Some(tx) = self
+            .inner
+            .pending_permissions
+            .lock()
+            .await
+            .remove(request_id)
+        {
             let _ = tx.send(allow);
         }
         for list in self.inner.pending_dtos.lock().await.values_mut() {
@@ -624,7 +661,12 @@ impl AgentRuntime for AcpRuntime {
             .unwrap_or_default()
     }
 
-    async fn compact_session(&self, session_id: &str, thread_id: &str, bus: EventBus) -> Result<()> {
+    async fn compact_session(
+        &self,
+        session_id: &str,
+        thread_id: &str,
+        bus: EventBus,
+    ) -> Result<()> {
         let agent_id = session_id.split("::").next().unwrap_or("codex");
         let adapter = adapter_for(agent_id);
         let Some(prompt) = adapter.compact_prompt() else {
@@ -768,7 +810,11 @@ impl AgentRuntime for AcpRuntime {
             .goal_method
             .clone()
             .unwrap_or_else(|| "session/set_goal".into());
-        let action = if objective.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        let action = if objective
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
             "set"
         } else if status.as_deref() == Some("paused") {
             "pause"
@@ -797,7 +843,12 @@ impl AgentRuntime for AcpRuntime {
         } else if action == "clear" {
             live.goal = None;
         } else if let Some(goal) = live.goal.as_mut() {
-            goal.status = if action == "pause" { "paused" } else { "active" }.into();
+            goal.status = if action == "pause" {
+                "paused"
+            } else {
+                "active"
+            }
+            .into();
         }
         Ok(live.goal.clone())
     }
@@ -808,7 +859,10 @@ impl AgentRuntime for AcpRuntime {
             let mut parts = cmd.split_whitespace();
             let exe = parts.next().unwrap();
             let args: Vec<&str> = parts.collect();
-            let status = tokio::process::Command::new(exe).args(args).status().await?;
+            let status = tokio::process::Command::new(exe)
+                .args(args)
+                .status()
+                .await?;
             if !status.success() {
                 bail!("install failed for {}", def.display_name);
             }
@@ -859,7 +913,9 @@ async fn handle_agent_request(
             Some(live) => (
                 live.cwd.clone(),
                 live.yolo,
-                live.active.as_ref().map(|a| (a.thread_id.clone(), a.turn_id.clone(), a.bus.clone())),
+                live.active
+                    .as_ref()
+                    .map(|a| (a.thread_id.clone(), a.turn_id.clone(), a.bus.clone())),
             ),
             None => (PathBuf::from("."), true, None),
         }
@@ -936,7 +992,10 @@ async fn handle_agent_request(
             process.respond(req_id, json!({})).await?;
         }
         "terminal/create" => {
-            let command = params.get("command").and_then(Value::as_str).unwrap_or("sh");
+            let command = params
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("sh");
             let args = params
                 .get("args")
                 .and_then(Value::as_array)
@@ -953,13 +1012,17 @@ async fn handle_agent_request(
                 .map(PathBuf::from)
                 .unwrap_or(cwd);
             let id = inner.terminals.create(command, &args, term_cwd).await?;
-            process
-                .respond(req_id, json!({ "terminalId": id }))
-                .await?;
+            process.respond(req_id, json!({ "terminalId": id })).await?;
         }
         "terminal/output" => {
-            let id = params.get("terminalId").and_then(Value::as_str).unwrap_or("");
-            let output = inner.terminals.output(id).unwrap_or(json!({ "output": "" }));
+            let id = params
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let output = inner
+                .terminals
+                .output(id)
+                .unwrap_or(json!({ "output": "" }));
             process.respond(req_id, output).await?;
         }
         "terminal/wait_for_exit" => {
@@ -968,12 +1031,18 @@ async fn handle_agent_request(
                 .await?;
         }
         "terminal/kill" => {
-            let id = params.get("terminalId").and_then(Value::as_str).unwrap_or("");
+            let id = params
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let _ = inner.terminals.kill(id);
             process.respond(req_id, json!({})).await?;
         }
         "terminal/release" => {
-            let id = params.get("terminalId").and_then(Value::as_str).unwrap_or("");
+            let id = params
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             inner.terminals.release(id);
             process.respond(req_id, json!({})).await?;
         }
