@@ -205,11 +205,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          target_asset="$(curl -fsS https://remote.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
           legacy_asset="$(curl -fsS https://remote-codex.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
-          test -n "${target_asset}"
           test -n "${legacy_asset}"
-          echo "target_asset=${target_asset}" >> "${GITHUB_OUTPUT}"
           echo "legacy_asset=${legacy_asset}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
@@ -230,6 +227,7 @@ jobs:
           tags: remote-codex-rust-relay:${{ github.sha }}
 
       - name: Package Rust relay artifacts
+        id: package
         shell: bash
         run: |
           set -euo pipefail
@@ -245,6 +243,9 @@ jobs:
           docker cp "${container}:/opt/remote-codex/apps/supervisor-web/dist/." "${artifact_dir}/web/"
           chmod 0755 "${artifact_dir}/remote-codex"
           (cd "${artifact_dir}" && sha256sum remote-codex > SHA256SUMS)
+          asset_path="$(sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' "${artifact_dir}/web/index.html" | head -n 1)"
+          test -n "${asset_path}"
+          echo "asset_path=${asset_path}" >> "${GITHUB_OUTPUT}"
           tar -czf "${archive}" -C "${artifact_dir}" .
 
       - name: Upload Rust relay artifacts
@@ -254,6 +255,7 @@ jobs:
           username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
           password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
           port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          fingerprint: SHA256:SGclMsgdRESf26NGzeggwmGF9f3JKOsXsPjhxEMFXlM
           source: remote-codex-rust-relay-${{ github.sha }}.tgz
           target: /tmp
 
@@ -264,6 +266,7 @@ jobs:
           username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
           password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
           port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          fingerprint: SHA256:SGclMsgdRESf26NGzeggwmGF9f3JKOsXsPjhxEMFXlM
           timeout: 60m
           command_timeout: 20m
           script: |
@@ -274,6 +277,7 @@ jobs:
             base='/opt/remote-codex-rust-relay'
             service='remote-codex-rust-relay.service'
             health_url='http://127.0.0.1:18791/healthz'
+            expected_asset='${{ steps.package.outputs.asset_path }}'
             stage="${base}/releases/${sha}"
             backup="${base}/rollback-$(date -u +%Y%m%dT%H%M%SZ)"
             failed="${base}/failed-${sha}"
@@ -297,17 +301,42 @@ jobs:
 
             rollback() {
               deployment_active='false'
+              trap - EXIT
+              rollback_status=0
               sudo systemctl stop "${service}" >/dev/null 2>&1 || true
               mkdir -p "${failed}"
               if [ -e "${base}/remote-codex" ]; then
-                mv "${base}/remote-codex" "${failed}/remote-codex"
+                mv "${base}/remote-codex" "${failed}/remote-codex" || rollback_status=1
               fi
               if [ -e "${base}/web" ]; then
-                mv "${base}/web" "${failed}/web"
+                mv "${base}/web" "${failed}/web" || rollback_status=1
               fi
-              mv "${backup}/remote-codex" "${base}/remote-codex"
-              mv "${backup}/web" "${base}/web"
-              sudo systemctl start "${service}"
+              mv "${backup}/remote-codex" "${base}/remote-codex" || rollback_status=1
+              mv "${backup}/web" "${base}/web" || rollback_status=1
+              sudo systemctl start "${service}" || rollback_status=1
+
+              restored='false'
+              for _ in $(seq 1 30); do
+                if curl -fsS "${health_url}" >/dev/null; then
+                  restored='true'
+                  break
+                fi
+                sleep 2
+              done
+              if [ "${restored}" != 'true' ]; then
+                sudo journalctl -u "${service}" -n 120 --no-pager || true
+                rollback_status=1
+              fi
+              return "${rollback_status}"
+            }
+
+            handle_exit() {
+              status="$?"
+              trap - EXIT
+              if [ "${deployment_active}" = 'true' ]; then
+                rollback || status=2
+              fi
+              exit "${status}"
             }
 
             deployment_active='false'
@@ -319,14 +348,14 @@ jobs:
               exit 1
             fi
             deployment_active='true'
-            trap 'if [ "${deployment_active}" = "true" ]; then rollback; fi' EXIT
-            install -m 0755 "${stage}/remote-codex" "${base}/remote-codex"
-            mv "${stage}/web" "${base}/web"
+            trap handle_exit EXIT
+            chmod 0755 "${stage}/remote-codex"
+            mv "${stage}/remote-codex" "${base}/.remote-codex-${sha}.next"
+            mv "${base}/.remote-codex-${sha}.next" "${base}/remote-codex"
+            mv "${stage}/web" "${base}/.web-${sha}.next"
+            mv "${base}/.web-${sha}.next" "${base}/web"
 
-            if ! sudo systemctl start "${service}"; then
-              rollback
-              exit 1
-            fi
+            sudo systemctl start "${service}"
 
             healthy='false'
             for attempt in $(seq 1 45); do
@@ -338,7 +367,6 @@ jobs:
             done
             if [ "${healthy}" != 'true' ]; then
               sudo journalctl -u "${service}" -n 120 --no-pager || true
-              rollback
               exit 1
             fi
 
@@ -349,15 +377,16 @@ jobs:
             for attempt in $(seq 1 30); do
               public_html="$(curl -fsS https://remote.lnz-study.com/ || true)"
               public_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
-              if printf '%s' "${public_html}" | grep -Fq '#171713' \
-                && printf '%s' "${public_health}" | grep -Fq '"status":"ok"'; then
+              public_asset="$(printf '%s' "${public_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+              if [ "${public_asset}" = "${expected_asset}" ] \
+                && printf '%s' "${public_health}" | grep -Fq '"status":"ok"' \
+                && printf '%s' "${public_health}" | grep -Eq '"supervisorCount":[1-9][0-9]*'; then
                 public_ready='true'
                 break
               fi
               sleep 2
             done
             if [ "${public_ready}" != 'true' ]; then
-              rollback
               exit 1
             fi
 
@@ -371,26 +400,37 @@ jobs:
         run: |
           set -euo pipefail
 
+          expected_asset='${{ steps.package.outputs.asset_path }}'
           target_asset=''
           target_health=''
           for _ in $(seq 1 45); do
-            target_html="$(curl -fsS https://remote.lnz-study.com/)"
+            target_html="$(curl -fsS https://remote.lnz-study.com/ || true)"
             target_asset="$(printf '%s' "${target_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
-            target_health="$(curl -fsS https://remote.lnz-study.com/healthz)"
-            if printf '%s' "${target_html}" | grep -Fq '#171713' \
-              && printf '%s' "${target_health}" | jq -e '.status == "ok"' >/dev/null; then
+            target_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
+            if [ "${target_asset}" = "${expected_asset}" ] \
+              && printf '%s' "${target_health}" | jq -e '.status == "ok" and .supervisorCount >= 1' >/dev/null 2>&1; then
               break
             fi
             sleep 2
           done
 
-          test -n "${target_asset}"
-          test "${target_asset}" != '${{ steps.before.outputs.target_asset }}'
+          test "${target_asset}" = "${expected_asset}"
           printf '%s' "${target_health}" | jq -e '.status == "ok" and .supervisorCount >= 1' >/dev/null
 
-          legacy_asset="$(curl -fsS https://remote-codex.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
-          test "${legacy_asset}" = '${{ steps.before.outputs.legacy_asset }}'
-          curl -fsS https://remote-codex.lnz-study.com/healthz | jq -e '.status == "ok"' >/dev/null
+          legacy_ready='false'
+          legacy_asset=''
+          for _ in $(seq 1 15); do
+            legacy_html="$(curl -fsS https://remote-codex.lnz-study.com/ || true)"
+            legacy_asset="$(printf '%s' "${legacy_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+            legacy_health="$(curl -fsS https://remote-codex.lnz-study.com/healthz || true)"
+            if [ "${legacy_asset}" = '${{ steps.before.outputs.legacy_asset }}' ] \
+              && printf '%s' "${legacy_health}" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+              legacy_ready='true'
+              break
+            fi
+            sleep 2
+          done
+          test "${legacy_ready}" = 'true'
 
           printf 'Rust relay asset: %s\n' "${target_asset}"
           printf 'Legacy relay asset unchanged: %s\n' "${legacy_asset}"
