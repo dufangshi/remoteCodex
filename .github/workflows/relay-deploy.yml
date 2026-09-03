@@ -177,7 +177,7 @@ jobs:
               -e REMOTE_CODEX_GITHUB_OAUTH_ENABLED=true \
               "${image}"
 
-            for attempt in $(seq 1 45); do
+            for _ in $(seq 1 45); do
               health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null || true)"
               if [ "${health}" = "healthy" ] || [ "${health}" = "running" ]; then
                 docker ps --filter "name=^/${container}$"
@@ -297,6 +297,9 @@ jobs:
             test -d "${base}/web"
 
             node_container_before="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
+            old_binary_sha="$(sha256sum "${base}/remote-codex" | awk '{print $1}')"
+            old_asset="$(sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' "${base}/web/index.html" | head -n 1)"
+            test -n "${old_asset}"
             mkdir -p "${stage}" "${backup}"
             tar -xzf "${archive}" -C "${stage}"
             (cd "${stage}" && sha256sum --check SHA256SUMS)
@@ -308,20 +311,30 @@ jobs:
               deployment_active='false'
               trap - EXIT
               rollback_status=0
-              sudo systemctl stop "${service}" >/dev/null 2>&1 || true
+              if ! sudo systemctl stop "${service}"; then
+                sudo journalctl -u "${service}" -n 120 --no-pager || true
+                return 1
+              fi
+              if sudo systemctl is-active --quiet "${service}"; then
+                sudo journalctl -u "${service}" -n 120 --no-pager || true
+                return 1
+              fi
+
               mkdir -p "${failed}"
-              if [ "${old_binary_moved}" = 'true' ]; then
+              if [ -e "${backup}/remote-codex" ]; then
                 if [ -e "${base}/remote-codex" ]; then
                   mv "${base}/remote-codex" "${failed}/remote-codex" || rollback_status=1
                 fi
                 mv "${backup}/remote-codex" "${base}/remote-codex" || rollback_status=1
               fi
-              if [ "${old_web_moved}" = 'true' ]; then
+              if [ -e "${backup}/web" ]; then
                 if [ -e "${base}/web" ]; then
                   mv "${base}/web" "${failed}/web" || rollback_status=1
                 fi
                 mv "${backup}/web" "${base}/web" || rollback_status=1
               fi
+              test -x "${base}/remote-codex" || rollback_status=1
+              test -d "${base}/web" || rollback_status=1
               sudo systemctl start "${service}" || rollback_status=1
 
               restored='false'
@@ -336,6 +349,18 @@ jobs:
                 sudo journalctl -u "${service}" -n 120 --no-pager || true
                 rollback_status=1
               fi
+              if [ -x "${base}/remote-codex" ]; then
+                restored_binary_sha="$(sha256sum "${base}/remote-codex" | awk '{print $1}')"
+                test "${restored_binary_sha}" = "${old_binary_sha}" || rollback_status=1
+              else
+                rollback_status=1
+              fi
+              if [ -f "${base}/web/index.html" ]; then
+                restored_asset="$(sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' "${base}/web/index.html" | head -n 1)"
+                test "${restored_asset}" = "${old_asset}" || rollback_status=1
+              else
+                rollback_status=1
+              fi
               return "${rollback_status}"
             }
 
@@ -348,16 +373,12 @@ jobs:
               exit "${status}"
             }
 
-            old_binary_moved='false'
-            old_web_moved='false'
             deployment_active='false'
             trap handle_exit EXIT
             deployment_active='true'
             sudo systemctl stop "${service}"
             mv "${base}/remote-codex" "${backup}/remote-codex"
-            old_binary_moved='true'
             mv "${base}/web" "${backup}/web"
-            old_web_moved='true'
             chmod 0755 "${stage}/remote-codex"
             mv "${stage}/remote-codex" "${next_binary}"
             mv "${next_binary}" "${base}/remote-codex"
@@ -367,7 +388,7 @@ jobs:
             sudo systemctl start "${service}"
 
             healthy='false'
-            for attempt in $(seq 1 45); do
+            for _ in $(seq 1 45); do
               if curl -fsS "${health_url}" >/dev/null; then
                 healthy='true'
                 break
@@ -383,7 +404,7 @@ jobs:
             test "${node_container_after}" = "${node_container_before}"
 
             public_ready='false'
-            for attempt in $(seq 1 30); do
+            for _ in $(seq 1 30); do
               public_html="$(curl -fsS https://remote.lnz-study.com/ || true)"
               public_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
               public_asset="$(printf '%s' "${public_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
