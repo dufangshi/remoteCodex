@@ -218,6 +218,47 @@ test.afterAll(async () => {
 });
 
 test.describe('non-thread product UI regressions', () => {
+  test('terminal plugin can be disabled and restored from settings', async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'desktop-chromium',
+      'One browser project is sufficient for the persisted plugin toggle.',
+    );
+
+    await api(apiBaseUrl, '/api/plugins/remote-codex.terminal', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    try {
+      await page.goto('/workspaces');
+      await page.getByRole('button', { name: 'Open Navigation' }).click();
+      await page.getByRole('button', { name: 'Settings' }).click();
+
+      const terminalToggle = page.getByRole('checkbox', {
+        name: 'Terminal enabled',
+      });
+      await expect(terminalToggle).toBeChecked();
+      await terminalToggle.click();
+      await expect(terminalToggle).not.toBeChecked();
+
+      await page
+        .getByRole('dialog', { name: 'Settings' })
+        .getByRole('button', { name: 'Close Settings' })
+        .click();
+      await page.reload();
+      await page.getByRole('button', { name: 'Open Navigation' }).click();
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await expect(
+        page.getByRole('checkbox', { name: 'Terminal enabled' }),
+      ).not.toBeChecked();
+    } finally {
+      await api(apiBaseUrl, '/api/plugins/remote-codex.terminal', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: true }),
+      });
+    }
+  });
+
   test('core product routes reflow across the target width matrix', async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'desktop-chromium',

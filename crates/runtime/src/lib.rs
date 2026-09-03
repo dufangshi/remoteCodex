@@ -12,7 +12,7 @@ pub mod service;
 pub use actor::{EventBus, SharedRuntime};
 pub use config::RuntimeConfig;
 pub use db::Database;
-pub use service::{bootstrap_runtimes, Supervisor};
+pub use service::{bootstrap_runtimes, Supervisor, UploadedPromptAttachment};
 
 use anyhow::Result;
 use std::sync::Arc;

@@ -671,6 +671,8 @@ pub struct AgentCapabilitySnapshotDto {
     pub availability: String,
     pub negotiated: Option<Value>,
     pub effective_capabilities: Option<AgentProviderCapabilitiesDto>,
+    #[serde(default)]
+    pub toolbox_items: Vec<ToolboxItemDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

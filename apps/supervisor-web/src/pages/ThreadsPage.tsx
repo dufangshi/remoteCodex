@@ -236,8 +236,8 @@ export function ThreadsPage() {
       onDeleteThread={setDeletingThread}
     >
       <>
-        <div className="host-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border shadow-[var(--theme-shadow)]">
-          <div className="border-b border-[var(--theme-border)] px-4 py-3 sm:px-6 sm:py-4">
+        <div className="threads-workspace-overview flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--theme-bg)]">
+          <div className="border-b border-[var(--theme-border)] px-4 py-3.5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <h2
                 className="host-page-title min-w-0 truncate text-base font-semibold sm:text-lg"
@@ -247,46 +247,40 @@ export function ThreadsPage() {
               </h2>
               <Link
                 to={newThreadHref}
-                className="ui-action-primary inline-flex h-9 shrink-0 items-center rounded-lg px-3.5 text-xs font-medium uppercase tracking-[0.18em] transition"
+                className="ui-action-primary inline-flex h-10 shrink-0 items-center rounded-md px-3.5 text-sm font-medium transition"
               >
                 New Thread
               </Link>
             </div>
           </div>
 
-          <div className="px-4 py-3 sm:px-6 sm:py-4">
-            <article className="host-surface-strong inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-lg border px-3.5 py-2.5">
+          <div className="flex min-h-12 items-center gap-3 border-b border-[var(--theme-border)] px-4 py-2.5 sm:px-6">
               <span
                 aria-hidden="true"
-                className={`h-2.5 w-2.5 shrink-0 rounded-full ${supervisorDotClassName}`}
+                className={`h-2 w-2 shrink-0 rounded-full ${supervisorDotClassName}`}
               />
-              <div className="min-w-0">
-                <p className="host-muted truncate text-[11px] uppercase tracking-[0.22em]">
-                  Supervisor
-                </p>
-                <p className="host-soft truncate text-sm">
-                  {status?.lastError ?? (status?.state === 'ready' ? 'Ready' : status?.state ?? 'Checking')}
-                </p>
-              </div>
-            </article>
+              <span className="shrink-0 text-sm font-medium text-[var(--theme-fg)]">Supervisor</span>
+              <span className="host-muted min-w-0 truncate text-sm">
+                {status?.lastError ?? (status?.state === 'ready' ? 'Ready' : status?.state ?? 'Checking')}
+              </span>
           </div>
 
           {!loading && !error && visibleThreads.length > 0 && (
-            <div className="flex min-h-0 flex-1 flex-col border-t border-[var(--theme-border)] px-4 py-4 sm:px-6 sm:py-5">
+            <section className="flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-2">
-                <p className="host-muted text-xs uppercase tracking-[0.28em]">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                   Recent Threads
-                </p>
-                <span className="host-warning-pill rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.18em]">
+                </h3>
+                <span className="host-muted text-xs tabular-nums">
                   {visibleThreads.length} total
                 </span>
                 {runningThreads > 0 && (
                   <span className="host-muted text-xs">
-                    · {runningThreads} running
+                    {runningThreads} running
                   </span>
                 )}
               </div>
-              <div className="mt-3 min-h-0 flex-1">
+              <div className="threads-product-list mt-3 min-h-0 flex-1 overflow-hidden rounded-md border border-[var(--theme-border)]">
                 <ThreadCards
                   threads={visibleThreads}
                   currentWorkspaceId={selectedWorkspaceId}
@@ -303,11 +297,11 @@ export function ThreadsPage() {
                   showSessionCopyButton
                 />
               </div>
-            </div>
+            </section>
           )}
 
           {!loading && !error && visibleThreads.length === 0 && (
-            <div className="host-muted border-t border-[var(--theme-border)] px-4 py-6 text-sm sm:px-6">
+            <div className="host-muted px-4 py-6 text-sm sm:px-6">
               No threads available in this workspace.
             </div>
           )}

@@ -7,7 +7,7 @@ use remote_codex_runtime::actor::{AgentRuntime, SharedRuntime};
 use remote_codex_runtime::config::RuntimeConfig;
 use remote_codex_runtime::db::Database;
 use remote_codex_runtime::fake::FakeRuntime;
-use remote_codex_runtime::Supervisor;
+use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
 use tempfile::tempdir;
 
 fn test_config(dir: &std::path::Path) -> RuntimeConfig {
@@ -62,6 +62,25 @@ async fn workspace_and_hello_turn() {
         })
         .await
         .unwrap();
+    assert_eq!(thread.sandbox_mode.as_deref(), Some("danger-full-access"));
+    let attachment_prompt = supervisor
+        .prepare_prompt_attachments(
+            &thread.id,
+            "Describe [PHOTO image.png]",
+            vec![UploadedPromptAttachment {
+                kind: "photo".into(),
+                original_name: "image.png".into(),
+                placeholder: "[PHOTO image.png]".into(),
+                bytes: b"png".to_vec(),
+            }],
+        )
+        .unwrap();
+    assert!(attachment_prompt.starts_with(&format!(
+        "Describe [PHOTO ./.temp/threads/{}/image-",
+        thread.id
+    )));
+    assert!(attachment_prompt.ends_with(".png]"));
+    assert!(!attachment_prompt.contains("[PHOTO [PHOTO"));
     supervisor
         .prompt(
             &thread.id,

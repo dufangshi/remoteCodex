@@ -114,6 +114,39 @@ async fn wait_thread(client: &reqwest::Client, base: &str, id: &str) -> Value {
 }
 
 #[tokio::test]
+async fn terminal_plugin_toggle_updates_persisted_state() {
+    let (_dir, port, _ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let initial = json(&client, client.get(format!("{base}/api/plugins"))).await;
+    assert_eq!(initial.as_array().map(Vec::len), Some(1));
+    assert_eq!(initial[0]["id"], "remote-codex.terminal");
+    assert_eq!(initial[0]["enabled"], cfg!(unix));
+
+    let disabled = json(
+        &client,
+        client
+            .patch(format!("{base}/api/plugins/remote-codex.terminal"))
+            .json(&json!({ "enabled": false })),
+    )
+    .await;
+    assert_eq!(disabled["enabled"], false);
+
+    let after_disable = json(&client, client.get(format!("{base}/api/plugins"))).await;
+    assert_eq!(after_disable[0]["enabled"], false);
+
+    let enabled = json(
+        &client,
+        client
+            .patch(format!("{base}/api/plugins/remote-codex.terminal"))
+            .json(&json!({ "enabled": true })),
+    )
+    .await;
+    assert_eq!(enabled["enabled"], cfg!(unix));
+}
+
+#[tokio::test]
 async fn http_files_prompt_interrupt_export_and_capabilities() {
     let (_dir, port, ws_root) = spawn_supervisor(vec![
         Provider::Codex,
@@ -383,6 +416,17 @@ async fn named_workspace_and_backend_status_are_usable() {
     assert_eq!(status["capabilities"]["management"]["models"], true);
     assert!(status["managementSchema"]["toolboxItems"].is_array());
 
+    let capability_snapshot = json(
+        &client,
+        client.get(format!(
+            "{base}/api/agent-runtimes/codex/capabilities?agentId=codex"
+        )),
+    )
+    .await;
+    assert!(capability_snapshot["toolboxItems"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item["command"] == "/compact")));
+
     let created = json(
         &client,
         client.post(format!("{base}/api/workspaces")).json(&json!({
@@ -404,6 +448,88 @@ async fn named_workspace_and_backend_status_are_usable() {
     )
     .await;
     assert_eq!(deleted["id"], created["id"]);
+}
+
+#[tokio::test]
+async fn multipart_photo_uses_manifest_placeholder_and_preserves_extension() {
+    let (_dir, port, _ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let workspace = json(
+        &client,
+        client.post(format!("{base}/api/workspaces")).json(&json!({
+            "absPath": "image-upload"
+        })),
+    )
+    .await;
+    let thread = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/start"))
+            .json(&json!({
+                "workspaceId": workspace["id"],
+                "model": "gpt-5",
+                "approvalMode": "yolo"
+            })),
+    )
+    .await;
+
+    let boundary = "remote-codex-image-boundary";
+    let manifest = json!([{
+        "clientId": "photo-1",
+        "kind": "photo",
+        "originalName": "image.png",
+        "placeholder": "[PHOTO image.png]"
+    }]);
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nDescribe [PHOTO image.png]\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"attachmentManifest\"\r\n\r\n{manifest}\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"attachments\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(b"png");
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let response = client
+        .post(format!(
+            "{base}/api/threads/{}/prompt",
+            thread["id"].as_str().unwrap()
+        ))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let attachment_dir = std::path::Path::new(workspace["absPath"].as_str().unwrap())
+        .join(".temp")
+        .join("threads")
+        .join(thread["id"].as_str().unwrap());
+    let saved = std::fs::read_dir(attachment_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(saved.len(), 1);
+    assert!(saved[0].starts_with("image-"));
+    assert!(saved[0].ends_with(".png"));
 }
 
 #[tokio::test]

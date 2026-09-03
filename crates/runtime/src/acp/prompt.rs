@@ -30,7 +30,6 @@ pub fn build_prompt_blocks(
 fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> Result<Vec<Value>> {
     let mut blocks = Vec::new();
     let mut cursor = 0;
-    let bytes = prompt.as_bytes();
     while cursor < prompt.len() {
         let rest = &prompt[cursor..];
         let Some(start_rel) = rest.find('[') else {
@@ -65,8 +64,7 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             blocks.push(json!({
                 "type": "image",
                 "mimeType": mime_for(&abs),
-                "data": data,
-                "uri": format!("file://{}", abs.display())
+                "data": data
             }));
         } else {
             let name = abs
@@ -80,7 +78,6 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             }));
         }
         cursor = end;
-        let _ = bytes;
     }
     if cursor == 0 {
         if !prompt.is_empty() {
@@ -123,6 +120,14 @@ mod tests {
             build_prompt_blocks("see [PHOTO red.png] please", dir.path(), true, &[]).unwrap();
         assert_eq!(blocks[0]["type"], "text");
         assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["mimeType"], "image/png");
+        assert!(blocks[1].get("uri").is_none());
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(blocks[1]["data"].as_str().unwrap())
+                .unwrap(),
+            b"png"
+        );
         assert_eq!(blocks[2]["type"], "text");
     }
 

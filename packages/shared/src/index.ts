@@ -668,6 +668,7 @@ export interface AgentCapabilitySnapshotDto {
   availability: AcpAgentOptionMetadataDto['availability'];
   negotiated: unknown | null;
   effectiveCapabilities: AgentProviderCapabilitiesDto | null;
+  toolboxItems: AgentBackendToolboxItemSchemaDto[];
 }
 
 export interface AgentBackendInstallationDto {

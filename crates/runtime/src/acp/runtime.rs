@@ -72,6 +72,7 @@ struct Inner {
     pending_permissions: Mutex<HashMap<String, PendingPermission>>,
     pending_dtos: Mutex<HashMap<String, Vec<ThreadActionRequestDto>>>,
     caps_by_agent: Mutex<HashMap<String, AgentProviderCapabilitiesDto>>,
+    toolbox_by_agent: Mutex<HashMap<String, Vec<ToolboxItemDto>>>,
     updates: broadcast::Sender<Value>,
     terminals: AgentTerminals,
 }
@@ -112,6 +113,7 @@ impl AcpRuntime {
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_dtos: Mutex::new(HashMap::new()),
                 caps_by_agent: Mutex::new(HashMap::new()),
+                toolbox_by_agent: Mutex::new(HashMap::new()),
                 updates,
                 terminals: AgentTerminals::default(),
             }),
@@ -181,6 +183,7 @@ impl AcpRuntime {
         let mut negotiated = negotiate(&init);
         let mut caps = AgentProviderCapabilitiesDto::conversational();
         adapter.patch_capabilities(&mut caps, &negotiated);
+        let toolbox = adapter.toolbox_items(&caps, &negotiated);
         negotiated.compact = caps.turns.compact;
         negotiated.fork = caps.branching.fork;
         negotiated.goals = caps.controls.goals;
@@ -190,6 +193,11 @@ impl AcpRuntime {
             .lock()
             .await
             .insert(def.id.clone(), caps);
+        self.inner
+            .toolbox_by_agent
+            .lock()
+            .await
+            .insert(def.id.clone(), toolbox);
         spawn_mux(self.inner.clone(), process.clone(), updates_rx, requests_rx);
         let raw_session = if let Some(existing) = load_id {
             if negotiated.load_session {
@@ -684,7 +692,16 @@ impl AgentRuntime for AcpRuntime {
     }
 
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {
-        toolbox_from_capabilities(&self.negotiated_caps(agent_id))
+        let id = agent_id
+            .map(str::to_string)
+            .or_else(|| self.bound_agent.clone())
+            .unwrap_or_else(|| "acp".into());
+        self.inner
+            .toolbox_by_agent
+            .try_lock()
+            .ok()
+            .and_then(|toolboxes| toolboxes.get(&id).cloned())
+            .unwrap_or_else(|| toolbox_from_capabilities(&self.negotiated_caps(Some(&id))))
     }
 
     async fn start(&self) -> Result<()> {
@@ -784,12 +801,14 @@ impl AgentRuntime for AcpRuntime {
         } else {
             None
         };
+        let toolbox_items = self.toolbox(Some(&id));
         Ok(AgentCapabilitySnapshotDto {
             provider: self.provider,
             agent_id: id,
             availability: availability.into(),
             negotiated: None,
             effective_capabilities: effective,
+            toolbox_items,
         })
     }
 
@@ -1129,9 +1148,15 @@ impl AgentRuntime for AcpRuntime {
     ) -> Result<()> {
         let agent_id = session_id.split("::").next().unwrap_or("codex");
         let adapter = adapter_for(agent_id);
-        let Some(prompt) = adapter.compact_prompt() else {
-            bail!("this harness does not implement compact");
-        };
+        let prompt = adapter
+            .compact_prompt()
+            .or_else(|| {
+                self.negotiated_caps(Some(agent_id))
+                    .turns
+                    .compact
+                    .then_some("/compact")
+            })
+            .ok_or_else(|| anyhow!("this harness does not implement compact"))?;
         let cancel = CancellationToken::new();
         let _items = self
             .start_turn(

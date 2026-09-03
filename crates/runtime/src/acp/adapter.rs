@@ -1,4 +1,6 @@
-use remote_codex_protocol::{AgentProviderCapabilitiesDto, ModelOptionDto};
+use remote_codex_protocol::{
+    toolbox_from_capabilities, AgentProviderCapabilitiesDto, ModelOptionDto, ToolboxItemDto,
+};
 use serde_json::{json, Value};
 
 use super::capabilities::NegotiatedCaps;
@@ -55,6 +57,27 @@ pub trait HarnessAdapter: Send + Sync {
         negotiated: &NegotiatedCaps,
     ) {
         let _ = (caps, negotiated);
+    }
+    fn toolbox_items(
+        &self,
+        caps: &AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) -> Vec<ToolboxItemDto> {
+        let mut items = toolbox_from_capabilities(caps);
+        for command in &negotiated.available_commands {
+            let slash_command = format!("/{}", command.name);
+            if items.iter().any(|item| item.command == slash_command) {
+                continue;
+            }
+            items.push(ToolboxItemDto {
+                action: "prompt".into(),
+                command: slash_command,
+                label: command.name.clone(),
+                description: command.description.clone(),
+                panel: None,
+            });
+        }
+        items
     }
 }
 
@@ -287,6 +310,32 @@ mod tests {
             assert!(!caps.branching.fork);
             assert!(!caps.management.mcp_status);
         }
+    }
+
+    #[test]
+    fn adapter_adds_advertised_harness_commands_without_duplicates() {
+        let adapter = GrokAdapter;
+        let mut caps = base();
+        let negotiated = super::super::capabilities::negotiate(&json!({
+            "_meta": {
+                "availableCommands": [
+                    { "name": "compact", "description": "Compact context" },
+                    { "name": "deep-research", "description": "Research a topic" }
+                ]
+            }
+        }));
+        adapter.patch_capabilities(&mut caps, &negotiated);
+        let toolbox = adapter.toolbox_items(&caps, &negotiated);
+        assert_eq!(
+            toolbox
+                .iter()
+                .filter(|item| item.command == "/compact")
+                .count(),
+            1
+        );
+        assert!(toolbox
+            .iter()
+            .any(|item| item.command == "/deep-research" && item.action == "prompt"));
     }
 
     #[test]

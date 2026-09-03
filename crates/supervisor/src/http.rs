@@ -14,12 +14,28 @@ use remote_codex_protocol::{
     SupervisorConnectedEnvelope, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
     VersionDto, APP_NAME, APP_VERSION,
 };
-use remote_codex_runtime::Supervisor;
+use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::{Any, CorsLayer};
 
 pub type AppState = Arc<Supervisor>;
+
+const MAX_PROMPT_ATTACHMENTS: usize = 10;
+const MAX_PROMPT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptAttachmentManifestEntry {
+    kind: String,
+    original_name: String,
+    placeholder: String,
+}
+
+#[derive(Deserialize)]
+struct UpdatePluginInput {
+    enabled: bool,
+}
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -119,6 +135,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/workspaces/{id}/files/move", patch(workspace_move))
         .route("/api/plugins", get(list_plugins))
+        .route("/api/plugins/{id}", patch(update_plugin))
         .route("/ws", get(ws_upgrade))
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(
@@ -734,8 +751,11 @@ async fn thread_prompt(
             .await
             .map_err(|e| err(StatusCode::BAD_REQUEST, "bad_request", e.to_string()))?;
         let mut prompt = String::new();
+        let mut client_request_id = None;
         let mut model = None;
         let mut reasoning_effort = None;
+        let mut collaboration_mode = None;
+        let mut attachment_manifest = None;
         let mut files = Vec::new();
         while let Some(field) = multipart
             .next_field()
@@ -754,11 +774,36 @@ async fn thread_prompt(
                 .map_err(|e| err(StatusCode::BAD_REQUEST, "bad_request", e.to_string()))?;
             match name.as_str() {
                 "prompt" => prompt = String::from_utf8_lossy(&bytes).into_owned(),
+                "clientRequestId" => {
+                    client_request_id = Some(String::from_utf8_lossy(&bytes).into_owned())
+                }
                 "model" => model = Some(String::from_utf8_lossy(&bytes).into_owned()),
                 "reasoningEffort" | "reasoning_effort" => {
                     reasoning_effort = Some(String::from_utf8_lossy(&bytes).into_owned())
                 }
+                "collaborationMode" => {
+                    collaboration_mode = Some(String::from_utf8_lossy(&bytes).into_owned())
+                }
+                "attachmentManifest" => {
+                    attachment_manifest = Some(String::from_utf8_lossy(&bytes).into_owned())
+                }
                 _ if file_name.is_some() => {
+                    if files.len() >= MAX_PROMPT_ATTACHMENTS {
+                        return Err(err(
+                            StatusCode::BAD_REQUEST,
+                            "bad_request",
+                            format!(
+                                "A prompt can include at most {MAX_PROMPT_ATTACHMENTS} attachments."
+                            ),
+                        ));
+                    }
+                    if bytes.len() > MAX_PROMPT_ATTACHMENT_BYTES {
+                        return Err(err(
+                            StatusCode::BAD_REQUEST,
+                            "bad_request",
+                            "Each attachment must be 25 MB or smaller.",
+                        ));
+                    }
                     files.push((
                         file_name.unwrap_or_else(|| name.clone()),
                         mime,
@@ -768,22 +813,86 @@ async fn thread_prompt(
                 _ => {}
             }
         }
-        let (prompt, images) = state
-            .prepare_prompt_attachments(&id, &prompt, files)
+        let manifest = if files.is_empty() {
+            Vec::new()
+        } else {
+            let raw = attachment_manifest.ok_or_else(|| {
+                err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "attachmentManifest is required when files are uploaded.",
+                )
+            })?;
+            let parsed =
+                serde_json::from_str::<Vec<PromptAttachmentManifestEntry>>(&raw).map_err(|_| {
+                    err(
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        "attachmentManifest must be valid JSON.",
+                    )
+                })?;
+            if parsed.len() != files.len() {
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "attachmentManifest must describe every uploaded attachment.",
+                ));
+            }
+            parsed
+        };
+        let attachments = files
+            .into_iter()
+            .zip(manifest)
+            .map(|((file_name, mime_type, bytes), manifest)| {
+                let expected_prefix = match manifest.kind.as_str() {
+                    "photo" if mime_type.starts_with("image/") => "[PHOTO ",
+                    "file" => "[FILE ",
+                    "photo" => {
+                        return Err(err(
+                            StatusCode::BAD_REQUEST,
+                            "bad_request",
+                            "Photo attachments must use an image MIME type.",
+                        ))
+                    }
+                    _ => {
+                        return Err(err(
+                            StatusCode::BAD_REQUEST,
+                            "bad_request",
+                            "Attachment kind must be photo or file.",
+                        ))
+                    }
+                };
+                if !manifest.placeholder.starts_with(expected_prefix)
+                    || !manifest.placeholder.ends_with(']')
+                {
+                    return Err(err(
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        "Attachment placeholder does not match its kind.",
+                    ));
+                }
+                Ok(UploadedPromptAttachment {
+                    kind: manifest.kind,
+                    original_name: if manifest.original_name.trim().is_empty() {
+                        file_name
+                    } else {
+                        manifest.original_name
+                    },
+                    placeholder: manifest.placeholder,
+                    bytes,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let prompt = state
+            .prepare_prompt_attachments(&id, &prompt, attachments)
             .map_err(map_err)?;
         SendThreadPromptInput {
             prompt,
-            client_request_id: None,
+            client_request_id,
             model,
             reasoning_effort,
-            collaboration_mode: None,
-            images: images
-                .into_iter()
-                .map(|image| remote_codex_protocol::PromptImageDto {
-                    mime_type: image.mime_type,
-                    data: image.data,
-                })
-                .collect(),
+            collaboration_mode,
+            images: Vec::new(),
         }
     } else {
         let bytes = axum::body::to_bytes(request.into_body(), 32 * 1024 * 1024)
@@ -1104,31 +1213,41 @@ async fn thread_shell(
     })))
 }
 
-async fn list_plugins() -> Json<Value> {
-    Json(json!([
-        {
-            "id": "remote-codex.terminal",
-            "name": "Terminal",
-            "version": "0.12.0",
-            "description": "Per-thread PTY terminal.",
-            "remoteCodex": ">=0.12.0",
-            "capabilities": { "artifactTypes": [], "timelineRenderers": [], "threadPanels": [{ "id": "terminal", "label": "Terminal", "kind": "terminal", "artifactTypes": [] }] },
-            "enabled": cfg!(unix),
-            "source": "builtin",
-            "available": cfg!(unix)
-        },
-        {
-            "id": "remote-codex.xyz-viewer",
-            "name": "XYZ Molecule Viewer",
-            "version": "0.12.0",
-            "description": "3D molecule artifacts.",
-            "remoteCodex": ">=0.12.0",
-            "capabilities": { "artifactTypes": [{ "type": "molecule", "title": "Molecule", "fileExtensions": [".xyz", ".pdb", ".cif"] }], "timelineRenderers": ["molecule"], "threadPanels": [] },
-            "enabled": true,
-            "source": "builtin",
-            "available": true
-        }
-    ]))
+const TERMINAL_PLUGIN_ID: &str = "remote-codex.terminal";
+
+fn terminal_plugin(state: &Supervisor) -> Value {
+    let available = cfg!(unix);
+    json!({
+        "id": TERMINAL_PLUGIN_ID,
+        "name": "Terminal",
+        "version": "0.12.0",
+        "description": "Per-thread PTY terminal.",
+        "remoteCodex": ">=0.12.0",
+        "capabilities": { "artifactTypes": [], "timelineRenderers": [], "threadPanels": [{ "id": "terminal", "label": "Terminal", "kind": "terminal", "artifactTypes": [] }] },
+        "enabled": available && state.plugin_enabled(TERMINAL_PLUGIN_ID, true),
+        "source": "builtin",
+        "available": available,
+        "unavailableReasonCode": if available { Value::Null } else { json!("unsupported_platform") },
+        "unavailableReason": if available { Value::Null } else { json!("Terminal is unavailable on this platform.") }
+    })
+}
+
+async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
+    Json(json!([terminal_plugin(&state)]))
+}
+
+async fn update_plugin(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(input): Json<UpdatePluginInput>,
+) -> Result<Json<Value>, ApiErr> {
+    if id != TERMINAL_PLUGIN_ID {
+        return Err(err(StatusCode::NOT_FOUND, "not_found", "plugin not found"));
+    }
+    state
+        .set_plugin_enabled(TERMINAL_PLUGIN_ID, input.enabled)
+        .map_err(map_err)?;
+    Ok(Json(terminal_plugin(&state)))
 }
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {

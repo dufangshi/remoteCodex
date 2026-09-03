@@ -1257,6 +1257,16 @@ export function ThreadDetailPage() {
           capabilitySnapshot.effectiveCapabilities ??
             UNAVAILABLE_AGENT_CAPABILITIES,
         );
+        setBackendManagementSchema((current) => ({
+          hostConfigFiles: current?.hostConfigFiles ?? [],
+          toolboxItems:
+            capabilitySnapshot.toolboxItems ?? current?.toolboxItems ?? [],
+          hookCommandTemplates: current?.hookCommandTemplates ?? [],
+          providerConfigFormat: current?.providerConfigFormat ?? 'none',
+          mcpConfigFormat: current?.mcpConfigFormat ?? 'none',
+          configArchives: current?.configArchives ?? false,
+          buildRestart: current?.buildRestart ?? false,
+        }));
         if (!capabilitySnapshot.effectiveCapabilities) {
           setError((current) => current ??
             `The selected ACP agent is ${capabilitySnapshot.availability.replaceAll('_', ' ')}. Install or repair its adapter before continuing.`);

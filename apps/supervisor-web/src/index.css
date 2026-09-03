@@ -357,6 +357,30 @@ fieldset {
   color: var(--theme-fg);
 }
 
+.threads-product-list > div {
+  padding-right: 0;
+}
+
+.threads-product-list .space-y-1 > * {
+  margin-block: 0 !important;
+}
+
+.threads-product-list .thread-graph-room-card {
+  min-height: 3.75rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.threads-product-list .thread-graph-room-card + .thread-graph-room-card {
+  border-top: 1px solid var(--theme-border);
+}
+
+.threads-product-list .thread-graph-room-card:hover {
+  background: var(--theme-hover);
+}
+
 .host-card {
   box-shadow: none;
 }

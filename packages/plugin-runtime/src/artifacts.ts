@@ -11,7 +11,6 @@ import type {
 } from './types';
 
 const artifactFenceLanguages = new Set(['artifact', 'remote-codex-artifact']);
-const remoteCodexMoleculeMcpToolName = 'remote_codex_render_molecule';
 
 interface FencedBlock {
   language: string;
@@ -119,225 +118,6 @@ function findFencedBlocks(text: string, languages: Set<string>): FencedBlock[] {
   return blocks;
 }
 
-function readBalancedJsonFragment(text: string, startIndex: number) {
-  const opener = text[startIndex];
-  const expectedClose = opener === '{' ? '}' : opener === '[' ? ']' : null;
-  if (!expectedClose) {
-    return null;
-  }
-
-  const stack = [expectedClose];
-  let inString = false;
-  let escaping = false;
-  for (let index = startIndex + 1; index < text.length; index += 1) {
-    const char = text[index];
-
-    if (inString) {
-      if (escaping) {
-        escaping = false;
-      } else if (char === '\\') {
-        escaping = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char === '{') {
-      stack.push('}');
-      continue;
-    }
-
-    if (char === '[') {
-      stack.push(']');
-      continue;
-    }
-
-    if (char === stack.at(-1)) {
-      stack.pop();
-      if (stack.length === 0) {
-        return text.slice(startIndex, index + 1);
-      }
-    }
-  }
-
-  return null;
-}
-
-function containsArtifactFence(text: string) {
-  return (
-    text.includes('```artifact') ||
-    text.includes('```remote-codex-artifact') ||
-    text.includes('~~~artifact') ||
-    text.includes('~~~remote-codex-artifact')
-  );
-}
-
-function collectArtifactCandidateStrings(
-  value: unknown,
-  output: string[],
-  budget: { nodes: number },
-  depth = 0,
-) {
-  if (output.length >= 20 || depth > 12 || budget.nodes <= 0) {
-    return;
-  }
-  budget.nodes -= 1;
-
-  if (typeof value === 'string') {
-    if (containsArtifactFence(value)) {
-      output.push(value);
-    }
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      collectArtifactCandidateStrings(entry, output, budget, depth + 1);
-      if (output.length >= 20 || budget.nodes <= 0) {
-        break;
-      }
-    }
-    return;
-  }
-
-  if (value && typeof value === 'object') {
-    for (const entry of Object.values(value)) {
-      collectArtifactCandidateStrings(entry, output, budget, depth + 1);
-      if (output.length >= 20 || budget.nodes <= 0) {
-        break;
-      }
-    }
-  }
-}
-
-function parseJsonArtifactCandidateStrings(fragment: string, output: string[]) {
-  try {
-    collectArtifactCandidateStrings(JSON.parse(fragment), output, { nodes: 2_000 });
-  } catch {
-    // Ignore non-JSON fragments. Artifact extraction is opportunistic.
-  }
-}
-
-function findJsonFragmentAt(text: string, index: number) {
-  let startIndex = index;
-  while (startIndex < text.length && /\s/.test(text[startIndex] ?? '')) {
-    startIndex += 1;
-  }
-  const char = text[startIndex];
-  if (char !== '{' && char !== '[') {
-    return null;
-  }
-  return readBalancedJsonFragment(text, startIndex);
-}
-
-function extractToolJsonArtifactCandidateStrings(text: string) {
-  const values: string[] = [];
-  const seenFragments = new Set<string>();
-
-  const addFragment = (fragment: string | null) => {
-    if (!fragment || seenFragments.has(fragment)) {
-      return;
-    }
-    seenFragments.add(fragment);
-    parseJsonArtifactCandidateStrings(fragment, values);
-  };
-
-  addFragment(findJsonFragmentAt(text, 0));
-
-  const labelPattern = /(?:^|\n)(?:Arguments|Result)\n/g;
-  for (const match of text.matchAll(labelPattern)) {
-    addFragment(findJsonFragmentAt(text, match.index + match[0].length));
-    if (seenFragments.size >= 4 || values.length >= 20) {
-      break;
-    }
-  }
-
-  return values;
-}
-
-function extractArtifactCandidateTexts(item: ThreadHistoryItemDto, text: string) {
-  const values = [text];
-  if (
-    item.kind !== 'toolCall' ||
-    ![item.text, item.previewText, text].some(
-      (value) =>
-        typeof value === 'string' &&
-        value.includes(remoteCodexMoleculeMcpToolName),
-    )
-  ) {
-    return values;
-  }
-
-  const seen = new Set(values);
-  for (const value of extractToolJsonArtifactCandidateStrings(text)) {
-    if (seen.has(value)) {
-      continue;
-    }
-    seen.add(value);
-    values.push(value);
-  }
-
-  return values;
-}
-
-function isFiniteNumberToken(value: string | undefined) {
-  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value));
-}
-
-export function looksLikeXyzMolecule(content: string) {
-  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const atomCount = Number(lines[0]);
-  if (!Number.isInteger(atomCount) || atomCount <= 0 || atomCount > 100_000) {
-    return false;
-  }
-
-  const atomLines = lines.slice(2);
-  if (atomLines.length < atomCount) {
-    return false;
-  }
-
-  return atomLines.slice(0, atomCount).every((line) => {
-    const parts = line.split(/\s+/);
-    return (
-      parts.length >= 4 &&
-      /^([A-Za-z][A-Za-z]?|\d+)$/.test(parts[0] ?? '') &&
-      isFiniteNumberToken(parts[1]) &&
-      isFiniteNumberToken(parts[2]) &&
-      isFiniteNumberToken(parts[3])
-    );
-  });
-}
-
-export function looksLikePdbMolecule(content: string) {
-  return content
-    .split(/\r?\n/)
-    .some((line) => /^(ATOM|HETATM)\s+/i.test(line));
-}
-
-export function looksLikeCifMolecule(content: string) {
-  return /\bdata_[^\s]*/i.test(content) && /_atom_site\./i.test(content);
-}
-
-export function looksLikeMoleculeStructure(content: string, format: string) {
-  switch (format) {
-    case 'xyz':
-    case 'extxyz':
-      return looksLikeXyzMolecule(content);
-    case 'pdb':
-      return looksLikePdbMolecule(content);
-    case 'cif':
-      return looksLikeCifMolecule(content);
-    default:
-      return false;
-  }
-}
-
 export class ManifestArtifactExtractor implements ArtifactExtractor {
   constructor(private readonly manifests: PluginManifestDto[]) {}
 
@@ -381,15 +161,13 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
     text: string,
   ): ThreadArtifactDto[] {
     const artifacts: ThreadArtifactDto[] = [];
-    const extractableTexts = extractArtifactCandidateTexts(item, text);
     const seenBlocks = new Set<string>();
-    for (const extractableText of extractableTexts) {
-      for (const block of findFencedBlocks(extractableText, artifactFenceLanguages)) {
-        const blockKey = `${block.language}\n${block.content}`;
-        if (seenBlocks.has(blockKey)) {
-          continue;
-        }
-        seenBlocks.add(blockKey);
+    for (const block of findFencedBlocks(text, artifactFenceLanguages)) {
+      const blockKey = `${block.language}\n${block.content}`;
+      if (seenBlocks.has(blockKey)) {
+        continue;
+      }
+      seenBlocks.add(blockKey);
       if (!block.content) {
         continue;
       }
@@ -423,7 +201,6 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
         sourceItemId: item.id,
         createdAt: context.now,
       });
-    }
     }
     return artifacts;
   }

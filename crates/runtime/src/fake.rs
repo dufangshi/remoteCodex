@@ -192,6 +192,7 @@ impl AgentRuntime for FakeRuntime {
             availability: "ready".into(),
             negotiated: None,
             effective_capabilities: Some(self.caps()),
+            toolbox_items: self.toolbox(agent_id),
         })
     }
 

@@ -72,11 +72,6 @@ export default defineConfig(({ mode }) => {
   const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8787';
   const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET ?? 'ws://127.0.0.1:8787';
   const threadUiRoot = path.resolve(__dirname, '../../remote-codex-thread-ui');
-  const xyzViewerRoot = path.join(threadUiRoot, 'packages/plugin-xyz-viewer');
-  const xyzViewerEntry = path.join(xyzViewerRoot, 'src/index.ts');
-  const xyzViewerFrontendEntry = path.join(xyzViewerRoot, 'src/frontend.ts');
-  const xyzViewerManifestEntry = path.join(xyzViewerRoot, 'src/manifest.ts');
-  const xyzViewerStyles = path.join(xyzViewerRoot, 'src/styles.css');
   const lucideReactEntry = require.resolve('lucide-react', { paths: [__dirname] });
   const threeDmolEntry = require.resolve('3dmol', { paths: [__dirname] });
   const threeDmolSource = require.resolve('3dmol/build/3Dmol-min.js', {
@@ -103,10 +98,6 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: {
-        '@remote-codex/plugin-xyz-viewer/styles.css': xyzViewerStyles,
-        '@remote-codex/plugin-xyz-viewer/frontend': xyzViewerFrontendEntry,
-        '@remote-codex/plugin-xyz-viewer/manifest': xyzViewerManifestEntry,
-        '@remote-codex/plugin-xyz-viewer': xyzViewerEntry,
         '3dmol': threeDmolEntry,
         'lucide-react': lucideReactEntry,
       },
@@ -150,7 +141,6 @@ export default defineConfig(({ mode }) => {
             '@remote-codex/thread-ui',
             '@remote-codex/plugin-runtime',
             '@remote-codex/plugin-terminal',
-            '@remote-codex/plugin-xyz-viewer',
           ],
         },
       },

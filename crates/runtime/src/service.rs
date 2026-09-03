@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
-use base64::Engine;
 use remote_codex_protocol::{
     now_rfc3339, truncate_title, AgentBackendDto, AgentCapabilitySnapshotDto, CreateThreadInput,
     CreateWorkspaceInput, ImportThreadCandidateDto, ImportThreadInput, ModelOptionDto, Provider,
@@ -32,6 +31,13 @@ use crate::local_sessions::{find_local_session, list_local_sessions, LocalSessio
 
 struct LiveTurn {
     cancel: CancellationToken,
+}
+
+pub struct UploadedPromptAttachment {
+    pub kind: String,
+    pub original_name: String,
+    pub placeholder: String,
+    pub bytes: Vec<u8>,
 }
 
 pub struct Supervisor {
@@ -190,6 +196,20 @@ impl Supervisor {
         self.db
             .set_kv("workspace_settings", &serde_json::to_string(&current)?)?;
         Ok(current)
+    }
+
+    pub fn plugin_enabled(&self, plugin_id: &str, default_enabled: bool) -> bool {
+        self.db
+            .get_kv(&format!("plugin:{plugin_id}:enabled"))
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse::<bool>().ok())
+            .unwrap_or(default_enabled)
+    }
+
+    pub fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<()> {
+        self.db
+            .set_kv(&format!("plugin:{plugin_id}:enabled"), &enabled.to_string())
     }
 
     pub fn list_workspaces(&self) -> Result<Vec<WorkspaceDto>> {
@@ -410,6 +430,7 @@ impl Supervisor {
     }
 
     pub async fn create_thread(&self, input: CreateThreadInput) -> Result<ThreadDto> {
+        const DEFAULT_SANDBOX_MODE: &str = "danger-full-access";
         let workspace = self.get_workspace(&input.workspace_id)?;
         let provider = input.provider.unwrap_or_else(|| self.default_provider());
         let runtime = self.runtime(provider)?;
@@ -420,7 +441,7 @@ impl Supervisor {
                 model: input.model.clone(),
                 reasoning_effort: input.reasoning_effort.clone(),
                 approval_mode: input.approval_mode.clone(),
-                sandbox_mode: None,
+                sandbox_mode: Some(DEFAULT_SANDBOX_MODE.into()),
             })
             .await?;
         let id = Uuid::new_v4().to_string();
@@ -432,8 +453,8 @@ impl Supervisor {
         self.db.with(|conn| {
             conn.execute(
                 "INSERT INTO threads(id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
-                    reasoning_effort, collaboration_mode, approval_mode, status, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,'idle',?10,?10)",
+                    reasoning_effort, collaboration_mode, approval_mode, sandbox_mode, status, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,?10,'idle',?11,?11)",
                 params![
                     id,
                     input.workspace_id,
@@ -444,7 +465,8 @@ impl Supervisor {
                     started.model.clone().unwrap_or(input.model.clone()),
                     started.reasoning_effort.clone(),
                     input.approval_mode,
-                    now
+                    DEFAULT_SANDBOX_MODE,
+                    now,
                 ],
             )?;
             Ok(())
@@ -1502,10 +1524,10 @@ impl Supervisor {
         &self,
         thread_id: &str,
         prompt: &str,
-        files: Vec<(String, String, Vec<u8>)>,
-    ) -> Result<(String, Vec<PromptImage>)> {
-        if files.is_empty() {
-            return Ok((prompt.to_string(), Vec::new()));
+        attachments: Vec<UploadedPromptAttachment>,
+    ) -> Result<String> {
+        if attachments.is_empty() {
+            return Ok(prompt.to_string());
         }
         let thread = self.get_thread(thread_id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
@@ -1515,34 +1537,24 @@ impl Supervisor {
             .join(thread_id);
         std::fs::create_dir_all(&dir)?;
         let mut rewritten = prompt.to_string();
-        let mut images = Vec::new();
-        for (name, mime, bytes) in files {
-            let safe = sanitize_file_name(&name);
-            std::fs::write(dir.join(&safe), &bytes)?;
+        for attachment in attachments {
+            if !rewritten.contains(&attachment.placeholder) {
+                bail!(
+                    "Prompt is missing attachment placeholder {}.",
+                    attachment.placeholder
+                );
+            }
+            let safe = sanitize_file_name(&attachment.original_name);
+            std::fs::write(dir.join(&safe), &attachment.bytes)?;
             let rel = format!("./.temp/threads/{thread_id}/{safe}");
-            let photo = mime.starts_with("image/");
-            let token = if photo {
+            let token = if attachment.kind == "photo" {
                 format!("[PHOTO {rel}]")
             } else {
                 format!("[FILE {rel}]")
             };
-            if rewritten.contains(&name) {
-                rewritten = rewritten.replace(&name, &token);
-            } else if !rewritten.contains(&token) {
-                if rewritten.is_empty() {
-                    rewritten = token;
-                } else {
-                    rewritten = format!("{rewritten}\n{token}");
-                }
-            }
-            if photo {
-                images.push(PromptImage {
-                    mime_type: mime,
-                    data: base64::engine::general_purpose::STANDARD.encode(bytes),
-                });
-            }
+            rewritten = rewritten.replace(&attachment.placeholder, &token);
         }
-        Ok((rewritten, images))
+        Ok(rewritten)
     }
 
     pub async fn thread_goal(
@@ -1665,7 +1677,22 @@ fn sanitize_file_name(name: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "attachment".into());
-    let cleaned: String = basename
+    let extension = Path::new(&basename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| {
+            value
+                .chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .take(15)
+                .collect::<String>()
+        })
+        .filter(|value| !value.is_empty());
+    let stem = Path::new(&basename)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let cleaned: String = stem
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
@@ -1675,11 +1702,13 @@ fn sanitize_file_name(name: &str) -> String {
             }
         })
         .collect();
-    format!(
-        "{}-{}",
-        cleaned.trim_matches('-'),
-        &Uuid::new_v4().to_string()[..8]
-    )
+    let stem = cleaned.trim_matches('-');
+    let stem = if stem.is_empty() { "attachment" } else { stem };
+    let suffix = &Uuid::new_v4().to_string()[..8];
+    match extension {
+        Some(extension) => format!("{stem}-{suffix}.{extension}"),
+        None => format!("{stem}-{suffix}"),
+    }
 }
 
 fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {

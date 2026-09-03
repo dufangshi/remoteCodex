@@ -14,7 +14,6 @@
     "3dmol": "^2.5.2",
     "@remote-codex/plugin-runtime": "workspace:*",
     "@remote-codex/plugin-terminal": "workspace:*",
-    "@remote-codex/plugin-xyz-viewer": "file:../../remote-codex-thread-ui/packages/plugin-xyz-viewer",
     "@remote-codex/shared": "workspace:*",
     "@remote-codex/thread-ui": "file:../../remote-codex-thread-ui/packages/thread-ui",
     "@streamdown/code": "^1.1.1",
