@@ -278,9 +278,12 @@ jobs:
             service='remote-codex-rust-relay.service'
             health_url='http://127.0.0.1:18791/healthz'
             expected_asset='${{ steps.package.outputs.asset_path }}'
-            stage="${base}/releases/${sha}"
-            backup="${base}/rollback-$(date -u +%Y%m%dT%H%M%SZ)"
-            failed="${base}/failed-${sha}"
+            release_id="${sha}-${{ github.run_id }}-${{ github.run_attempt }}"
+            stage="${base}/releases/${release_id}"
+            backup="${base}/rollback-${release_id}"
+            failed="${base}/failed-${release_id}"
+            next_binary="${base}/.remote-codex-${release_id}.next"
+            next_web="${base}/.web-${release_id}.next"
 
             unit="$(sudo systemctl cat "${service}")"
             printf '%s' "${unit}" | grep -Fq 'remote.lnz-study.com'
@@ -290,6 +293,8 @@ jobs:
             grep -Fxq 'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-rust-relay' "${base}/relay.env"
             grep -Fxq 'REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex-rust-relay/web' "${base}/relay.env"
             test -f "${archive}"
+            test -x "${base}/remote-codex"
+            test -d "${base}/web"
 
             node_container_before="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
             mkdir -p "${stage}" "${backup}"
@@ -305,14 +310,18 @@ jobs:
               rollback_status=0
               sudo systemctl stop "${service}" >/dev/null 2>&1 || true
               mkdir -p "${failed}"
-              if [ -e "${base}/remote-codex" ]; then
-                mv "${base}/remote-codex" "${failed}/remote-codex" || rollback_status=1
+              if [ "${old_binary_moved}" = 'true' ]; then
+                if [ -e "${base}/remote-codex" ]; then
+                  mv "${base}/remote-codex" "${failed}/remote-codex" || rollback_status=1
+                fi
+                mv "${backup}/remote-codex" "${base}/remote-codex" || rollback_status=1
               fi
-              if [ -e "${base}/web" ]; then
-                mv "${base}/web" "${failed}/web" || rollback_status=1
+              if [ "${old_web_moved}" = 'true' ]; then
+                if [ -e "${base}/web" ]; then
+                  mv "${base}/web" "${failed}/web" || rollback_status=1
+                fi
+                mv "${backup}/web" "${base}/web" || rollback_status=1
               fi
-              mv "${backup}/remote-codex" "${base}/remote-codex" || rollback_status=1
-              mv "${backup}/web" "${base}/web" || rollback_status=1
               sudo systemctl start "${service}" || rollback_status=1
 
               restored='false'
@@ -339,21 +348,21 @@ jobs:
               exit "${status}"
             }
 
+            old_binary_moved='false'
+            old_web_moved='false'
             deployment_active='false'
+            trap handle_exit EXIT
+            deployment_active='true'
             sudo systemctl stop "${service}"
             mv "${base}/remote-codex" "${backup}/remote-codex"
-            if ! mv "${base}/web" "${backup}/web"; then
-              mv "${backup}/remote-codex" "${base}/remote-codex"
-              sudo systemctl start "${service}"
-              exit 1
-            fi
-            deployment_active='true'
-            trap handle_exit EXIT
+            old_binary_moved='true'
+            mv "${base}/web" "${backup}/web"
+            old_web_moved='true'
             chmod 0755 "${stage}/remote-codex"
-            mv "${stage}/remote-codex" "${base}/.remote-codex-${sha}.next"
-            mv "${base}/.remote-codex-${sha}.next" "${base}/remote-codex"
-            mv "${stage}/web" "${base}/.web-${sha}.next"
-            mv "${base}/.web-${sha}.next" "${base}/web"
+            mv "${stage}/remote-codex" "${next_binary}"
+            mv "${next_binary}" "${base}/remote-codex"
+            mv "${stage}/web" "${next_web}"
+            mv "${next_web}" "${base}/web"
 
             sudo systemctl start "${service}"
 
