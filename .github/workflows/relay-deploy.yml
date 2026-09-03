@@ -21,6 +21,7 @@ env:
 
 jobs:
   build-and-push:
+    if: github.ref == 'refs/heads/main'
     name: Build and push relay image
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -68,6 +69,7 @@ jobs:
             ${{ steps.image.outputs.image_sha }}
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     name: Deploy relay over SSH
     runs-on: ubuntu-latest
     needs: build-and-push
@@ -187,3 +189,208 @@ jobs:
 
             docker logs --tail 200 "${container}" || true
             exit 1
+
+  deploy-rust-rewrite:
+    if: github.ref == 'refs/heads/rust/acp-rewrite'
+    name: Deploy Rust relay to remote.lnz-study.com
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Capture deployment boundaries
+        id: before
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_asset="$(curl -fsS https://remote.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+          legacy_asset="$(curl -fsS https://remote-codex.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+          test -n "${target_asset}"
+          test -n "${legacy_asset}"
+          echo "target_asset=${target_asset}" >> "${GITHUB_OUTPUT}"
+          echo "legacy_asset=${legacy_asset}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Rust relay release image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.relay
+          platforms: linux/amd64
+          load: true
+          push: false
+          build-args: |
+            REMOTE_CODEX_THREAD_UI_CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=rust-relay
+          cache-to: type=gha,mode=max,scope=rust-relay
+          tags: remote-codex-rust-relay:${{ github.sha }}
+
+      - name: Package Rust relay artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="remote-codex-rust-relay:${GITHUB_SHA}"
+          container="remote-codex-rust-relay-extract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_dir="rust-relay-artifact"
+          archive="remote-codex-rust-relay-${GITHUB_SHA}.tgz"
+
+          mkdir -p "${artifact_dir}/web"
+          docker create --name "${container}" "${image}" >/dev/null
+          trap 'docker rm -f "${container}" >/dev/null 2>&1 || true' EXIT
+          docker cp "${container}:/usr/local/bin/remote-codex" "${artifact_dir}/remote-codex"
+          docker cp "${container}:/opt/remote-codex/apps/supervisor-web/dist/." "${artifact_dir}/web/"
+          chmod 0755 "${artifact_dir}/remote-codex"
+          (cd "${artifact_dir}" && sha256sum remote-codex > SHA256SUMS)
+          tar -czf "${archive}" -C "${artifact_dir}" .
+
+      - name: Upload Rust relay artifacts
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          source: remote-codex-rust-relay-${{ github.sha }}.tgz
+          target: /tmp
+
+      - name: Replace only the Rust relay service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          timeout: 60m
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+
+            sha='${{ github.sha }}'
+            archive="/tmp/remote-codex-rust-relay-${sha}.tgz"
+            base='/opt/remote-codex-rust-relay'
+            service='remote-codex-rust-relay.service'
+            health_url='http://127.0.0.1:18791/healthz'
+            stage="${base}/releases/${sha}"
+            backup="${base}/rollback-$(date -u +%Y%m%dT%H%M%SZ)"
+            failed="${base}/failed-${sha}"
+
+            unit="$(sudo systemctl cat "${service}")"
+            printf '%s' "${unit}" | grep -Fq 'remote.lnz-study.com'
+            printf '%s' "${unit}" | grep -Fq 'ExecStart=/opt/remote-codex-rust-relay/remote-codex relay'
+            grep -Fxq 'HOST=127.0.0.1' "${base}/relay.env"
+            grep -Fxq 'PORT=18791' "${base}/relay.env"
+            grep -Fxq 'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-rust-relay' "${base}/relay.env"
+            grep -Fxq 'REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex-rust-relay/web' "${base}/relay.env"
+            test -f "${archive}"
+
+            node_container_before="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
+            mkdir -p "${stage}" "${backup}"
+            tar -xzf "${archive}" -C "${stage}"
+            (cd "${stage}" && sha256sum --check SHA256SUMS)
+            file "${stage}/remote-codex" | grep -Eq 'x86-64|x86_64'
+            test -f "${stage}/web/index.html"
+            grep -Fq '#171713' "${stage}/web/index.html"
+
+            rollback() {
+              deployment_active='false'
+              sudo systemctl stop "${service}" >/dev/null 2>&1 || true
+              mkdir -p "${failed}"
+              if [ -e "${base}/remote-codex" ]; then
+                mv "${base}/remote-codex" "${failed}/remote-codex"
+              fi
+              if [ -e "${base}/web" ]; then
+                mv "${base}/web" "${failed}/web"
+              fi
+              mv "${backup}/remote-codex" "${base}/remote-codex"
+              mv "${backup}/web" "${base}/web"
+              sudo systemctl start "${service}"
+            }
+
+            deployment_active='false'
+            sudo systemctl stop "${service}"
+            mv "${base}/remote-codex" "${backup}/remote-codex"
+            if ! mv "${base}/web" "${backup}/web"; then
+              mv "${backup}/remote-codex" "${base}/remote-codex"
+              sudo systemctl start "${service}"
+              exit 1
+            fi
+            deployment_active='true'
+            trap 'if [ "${deployment_active}" = "true" ]; then rollback; fi' EXIT
+            install -m 0755 "${stage}/remote-codex" "${base}/remote-codex"
+            mv "${stage}/web" "${base}/web"
+
+            if ! sudo systemctl start "${service}"; then
+              rollback
+              exit 1
+            fi
+
+            healthy='false'
+            for attempt in $(seq 1 45); do
+              if curl -fsS "${health_url}" >/dev/null; then
+                healthy='true'
+                break
+              fi
+              sleep 2
+            done
+            if [ "${healthy}" != 'true' ]; then
+              sudo journalctl -u "${service}" -n 120 --no-pager || true
+              rollback
+              exit 1
+            fi
+
+            node_container_after="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
+            test "${node_container_after}" = "${node_container_before}"
+
+            public_ready='false'
+            for attempt in $(seq 1 30); do
+              public_html="$(curl -fsS https://remote.lnz-study.com/ || true)"
+              public_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
+              if printf '%s' "${public_html}" | grep -Fq '#171713' \
+                && printf '%s' "${public_health}" | grep -Fq '"status":"ok"'; then
+                public_ready='true'
+                break
+              fi
+              sleep 2
+            done
+            if [ "${public_ready}" != 'true' ]; then
+              rollback
+              exit 1
+            fi
+
+            sudo systemctl --no-pager --full status "${service}"
+            curl -fsS "${health_url}"
+            deployment_active='false'
+            trap - EXIT
+
+      - name: Verify the public Rust relay and legacy isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_asset=''
+          target_health=''
+          for _ in $(seq 1 45); do
+            target_html="$(curl -fsS https://remote.lnz-study.com/)"
+            target_asset="$(printf '%s' "${target_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+            target_health="$(curl -fsS https://remote.lnz-study.com/healthz)"
+            if printf '%s' "${target_html}" | grep -Fq '#171713' \
+              && printf '%s' "${target_health}" | jq -e '.status == "ok"' >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          test -n "${target_asset}"
+          test "${target_asset}" != '${{ steps.before.outputs.target_asset }}'
+          printf '%s' "${target_health}" | jq -e '.status == "ok" and .supervisorCount >= 1' >/dev/null
+
+          legacy_asset="$(curl -fsS https://remote-codex.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+          test "${legacy_asset}" = '${{ steps.before.outputs.legacy_asset }}'
+          curl -fsS https://remote-codex.lnz-study.com/healthz | jq -e '.status == "ok"' >/dev/null
+
+          printf 'Rust relay asset: %s\n' "${target_asset}"
+          printf 'Legacy relay asset unchanged: %s\n' "${legacy_asset}"

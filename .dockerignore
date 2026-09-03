@@ -2,6 +2,7 @@
 .local
 .pnpm-store
 node_modules
+remote-codex-thread-ui
 apps/*/dist
 packages/*/dist
 output
