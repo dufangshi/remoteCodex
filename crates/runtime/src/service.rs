@@ -673,15 +673,16 @@ impl Supervisor {
     ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
-        let mut turns = self.load_turns(id)?;
+        let mut turns = if summary_only {
+            self.load_turn_summaries(id)?
+        } else {
+            self.load_turns(id)?
+        };
         let total = turns.len() as u32;
         if let Some(limit) = limit {
             if turns.len() > limit as usize {
                 turns = turns.split_off(turns.len() - limit as usize);
             }
-        }
-        if summary_only {
-            turns = turns.into_iter().map(summarize_completed_turn).collect();
         }
         let pending_steers = self.load_steers(id)?;
         let present = Path::new(&workspace.abs_path).exists();
@@ -691,7 +692,9 @@ impl Supervisor {
         } else {
             vec![]
         };
-        let goal = if let (Some(runtime), Some(session)) =
+        let goal = if summary_only && thread.status != "running" {
+            None
+        } else if let (Some(runtime), Some(session)) =
             (runtime.as_ref(), thread.provider_session_id.as_deref())
         {
             runtime.get_goal(session).await.ok().flatten().map(|g| {
@@ -764,29 +767,140 @@ impl Supervisor {
         })
     }
 
+    fn load_items_for_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<Vec<ThreadHistoryItemDto>> {
+        self.db.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT item_json FROM thread_history_items
+                 WHERE thread_id=?1 AND turn_id=?2
+                 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let items = stmt
+                .query_map(params![thread_id, turn_id], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .filter_map(|raw| serde_json::from_str::<ThreadHistoryItemDto>(&raw).ok())
+                .collect();
+            Ok(items)
+        })
+    }
+
+    fn load_turn_summaries(&self, thread_id: &str) -> Result<Vec<ThreadTurnDto>> {
+        let mut turns = self.load_turns_meta(thread_id)?;
+        let counts = self.db.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT turn_id, COUNT(*) FROM thread_history_items WHERE thread_id=?1 GROUP BY turn_id",
+            )?;
+            let rows: Vec<(String, i64)> = stmt
+                .query_map(params![thread_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })?;
+        let count_by_turn: std::collections::HashMap<String, i64> = counts.into_iter().collect();
+        let conversation = self.db.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT turn_id, item_json FROM thread_history_items
+                 WHERE thread_id=?1
+                   AND json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage')
+                 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map(params![thread_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })?;
+        let mut conversation_by_turn: std::collections::HashMap<String, Vec<ThreadHistoryItemDto>> =
+            std::collections::HashMap::new();
+        for (turn_id, raw) in conversation {
+            if let Ok(item) = serde_json::from_str::<ThreadHistoryItemDto>(&raw) {
+                conversation_by_turn.entry(turn_id).or_default().push(item);
+            }
+        }
+        for turn in &mut turns {
+            if turn.status == "inProgress" {
+                turn.items = self.load_items_for_turn(thread_id, &turn.id)?;
+                continue;
+            }
+            let items = conversation_by_turn.remove(&turn.id).unwrap_or_default();
+            let summarized = summarize_completed_turn(ThreadTurnDto {
+                items,
+                ..turn.clone()
+            });
+            let total = count_by_turn.get(&turn.id).copied().unwrap_or(0) as usize;
+            let deferred = total.saturating_sub(summarized.items.len());
+            turn.items = summarized.items;
+            if deferred > 0 {
+                turn.has_deferred_items = Some(true);
+                turn.deferred_item_count = Some(deferred as u32);
+            }
+        }
+        Ok(turns)
+    }
+
+    fn load_turns_meta(&self, thread_id: &str) -> Result<Vec<ThreadTurnDto>> {
+        self.db.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, status, error, model, reasoning_effort, started_at FROM thread_turns
+                 WHERE thread_id=?1 ORDER BY ordinal ASC",
+            )?;
+            let turns = stmt
+                .query_map(params![thread_id], |row| {
+                    Ok(ThreadTurnDto {
+                        id: row.get(0)?,
+                        started_at: row.get(5)?,
+                        status: row.get(1)?,
+                        error: row.get(2)?,
+                        model: row.get(3)?,
+                        reasoning_effort: row.get(4)?,
+                        token_usage: None,
+                        has_deferred_items: None,
+                        deferred_item_count: None,
+                        items: Vec::new(),
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(turns)
+        })
+    }
+
     pub fn get_thread_turn_detail(&self, id: &str, turn_id: &str) -> Result<ThreadTurnDto> {
-        let mut turn = self
-            .load_turns(id)?
-            .into_iter()
+        let mut turns = self.load_turns_meta(id)?;
+        let mut turn = turns
+            .iter_mut()
             .find(|turn| turn.id == turn_id)
-            .ok_or_else(|| anyhow!("turn not found"))?;
+            .ok_or_else(|| anyhow!("turn not found"))?
+            .clone();
+        turn.items = self.load_items_for_turn(id, turn_id)?;
         turn.has_deferred_items = Some(false);
         turn.deferred_item_count = Some(0);
         Ok(turn)
     }
 
     pub fn get_history_item_detail(&self, id: &str, item_id: &str) -> Result<serde_json::Value> {
-        for turn in self.load_turns(id)? {
-            if let Some(item) = turn.items.into_iter().find(|item| item.id == item_id) {
-                return Ok(json!({
-                    "id": item.id,
-                    "kind": item.kind,
-                    "title": item.preview_text.unwrap_or_else(|| item.text.clone()),
-                    "text": item.text,
-                }));
-            }
-        }
-        bail!("history item not found");
+        let raw: Option<String> = self.db.with(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT item_json FROM thread_history_items WHERE thread_id=?1 AND item_id=?2 LIMIT 1",
+                    params![id, item_id],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })?;
+        let Some(raw) = raw else {
+            bail!("history item not found");
+        };
+        let item: ThreadHistoryItemDto = serde_json::from_str(&raw)?;
+        Ok(json!({
+            "id": item.id,
+            "kind": item.kind,
+            "title": item.preview_text.unwrap_or_else(|| item.text.clone()),
+            "text": item.text,
+        }))
     }
 
     pub fn thread_image(&self, id: &str, rel: &str) -> Result<(Vec<u8>, &'static str)> {
