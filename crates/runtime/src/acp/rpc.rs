@@ -90,21 +90,43 @@ impl AcpProcess {
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.request_with_timeout(method, params, timeout_for_method(method))
+            .await
+    }
+
+    pub async fn request_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        wait: Option<Duration>,
+    ) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, Pending { tx });
         {
             let mut stdin = self.stdin.lock().await;
-            write_message(
+            if let Err(err) = write_message(
                 &mut stdin,
                 &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
             )
-            .await?;
-        }
-        timeout(Duration::from_secs(180), rx)
             .await
-            .context("ACP request timeout")?
-            .map_err(|_| anyhow!("ACP request dropped"))?
+            {
+                self.pending.lock().await.remove(&id);
+                return Err(err);
+            }
+        }
+        let result = if let Some(wait) = wait {
+            match timeout(wait, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    self.pending.lock().await.remove(&id);
+                    return Err(anyhow!("ACP request timeout ({method})"));
+                }
+            }
+        } else {
+            rx.await
+        };
+        result.map_err(|_| anyhow!("ACP request dropped"))?
     }
 
     pub async fn respond(&self, id: i64, result: Value) -> Result<()> {
@@ -232,5 +254,56 @@ impl Drop for AcpProcess {
         if let Ok(mut child) = self.child.try_lock() {
             let _ = child.start_kill();
         }
+    }
+}
+
+/// Control RPCs (initialize, session/new, set_mode, …) stay bounded.
+/// `session/prompt` is the live agent turn and can run for many minutes, matching
+/// the TypeScript ACP adapter which does not time out `session/prompt`.
+pub(crate) fn timeout_for_method(method: &str) -> Option<Duration> {
+    match method {
+        "session/prompt" => None,
+        _ => Some(Duration::from_secs(180)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_has_no_rpc_timeout() {
+        assert_eq!(timeout_for_method("session/prompt"), None);
+        assert_eq!(
+            timeout_for_method("initialize"),
+            Some(Duration::from_secs(180))
+        );
+        assert_eq!(
+            timeout_for_method("session/new"),
+            Some(Duration::from_secs(180))
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_request_times_out_and_clears_pending() {
+        let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hang.py");
+        std::fs::write(&script, "import time\ntime.sleep(30)\n").unwrap();
+        let (process, _updates, _requests) = AcpProcess::spawn(
+            &format!("python3 {}", script.display()),
+            dir.to_str().unwrap(),
+            &[],
+        )
+        .await
+        .expect("spawn hanging process");
+        let started = std::time::Instant::now();
+        let err = process
+            .request_with_timeout("initialize", json!({}), Some(Duration::from_millis(80)))
+            .await
+            .expect_err("initialize should time out");
+        assert!(err.to_string().contains("timeout"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(process.pending.lock().await.is_empty());
     }
 }

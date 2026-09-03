@@ -26,7 +26,7 @@ use crate::import_id::session_ids_match;
 use super::adapter::{adapter_for, SessionSettingOp};
 use super::capabilities::{negotiate, NegotiatedCaps};
 use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
-use super::mapper::TurnMapper;
+use super::mapper::{MappedUpdate, TurnMapper};
 use super::modes::{
     parse_available_modes, parse_permission_choices, permission_questions, permission_title,
     resolve_mode, resolve_mode_config_value, select_permission_option, PermissionChoice,
@@ -100,7 +100,7 @@ impl AcpRuntime {
         custom: Option<String>,
         timeout_ms: u64,
     ) -> Self {
-        let (updates, _) = broadcast::channel(512);
+        let (updates, _) = broadcast::channel(2048);
         Self {
             provider,
             bound_agent,
@@ -973,56 +973,70 @@ impl AgentRuntime for AcpRuntime {
         let mut prompt_done = false;
         loop {
             tokio::select! {
+                biased;
                 _ = cancel.cancelled() => {
                     let _ = process.notify("session/cancel", json!({ "sessionId": session_id })).await;
                     break;
                 }
                 result = &mut prompt_rpc, if !prompt_done => {
                     prompt_done = true;
-                    if result.is_err() && mapper_empty(&mapper) {
+                    if let Err(err) = result {
+                        tracing::warn!(
+                            error = %err,
+                            session_id = %session_id,
+                            "ACP session/prompt failed"
+                        );
+                        let _ = process
+                            .notify("session/cancel", json!({ "sessionId": session_id }))
+                            .await;
+                        if !cancel.is_cancelled() {
+                            cancel.cancel();
+                        }
                         break;
                     }
                 }
-                Ok(update) = updates.recv() => {
-                    if let Some(sid) = update.get("sessionId").and_then(Value::as_str) {
-                        if sid != session_id {
-                            continue;
-                        }
-                    }
-                    let mapped = mapper.apply(&update);
-                    if let Some(goal) = mapped.goal {
-                        if let Some(live) = self.inner.sessions.lock().await.get_mut(&input.provider_session_id) {
-                            live.goal = goal;
-                        }
-                    }
-                    if !input.hidden {
-                        for (item_id, delta) in mapped.deltas {
-                            bus.emit(ThreadEventEnvelope {
-                                event_type: "thread.output.delta".into(),
-                                thread_id: input.thread_id.clone(),
-                                timestamp: now_rfc3339(),
-                                payload: json!({
-                                    "turnId": input.turn_id,
-                                    "itemId": item_id,
-                                    "delta": delta
-                                }),
-                            });
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_millis(80)) => {
-                    if prompt_done {
-                        tokio::select! {
-                            Ok(update) = updates.recv() => {
-                                let _ = mapper.apply(&update);
+                recv = updates.recv() => {
+                    match recv {
+                        Ok(update) => {
+                            if let Some(sid) = update.get("sessionId").and_then(Value::as_str) {
+                                if sid != session_id {
+                                    continue;
+                                }
                             }
-                            _ = tokio::time::sleep(Duration::from_millis(400)) => { break; }
+                            let mapped = mapper.apply(&update);
+                            if let Some(goal) = mapped.goal.clone() {
+                                if let Some(live) = self
+                                    .inner
+                                    .sessions
+                                    .lock()
+                                    .await
+                                    .get_mut(&input.provider_session_id)
+                                {
+                                    live.goal = goal;
+                                }
+                            }
+                            emit_mapped(
+                                &bus,
+                                &input.thread_id,
+                                &input.turn_id,
+                                mapped,
+                                input.hidden,
+                            );
                         }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(skipped, "ACP session/update receiver lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
-            }
-            if process.exited().await.unwrap_or(false) {
-                break;
+                _ = tokio::time::sleep(Duration::from_millis(250)), if prompt_done => {
+                    break;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
+                    if process.exited().await.unwrap_or(false) {
+                        break;
+                    }
+                }
             }
         }
         if let Some(live) = self
@@ -1831,7 +1845,52 @@ fn apply_config_option_caps(caps: &mut AgentProviderCapabilitiesDto, options: &V
     }
 }
 
-fn mapper_empty(mapper: &TurnMapper) -> bool {
-    let _ = mapper;
-    false
+fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpdate, hidden: bool) {
+    if hidden {
+        return;
+    }
+    for (item_id, delta, sequence) in mapped.deltas {
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.output.delta".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({
+                "turnId": turn_id,
+                "itemId": item_id,
+                "sequence": sequence,
+                "delta": delta
+            }),
+        });
+    }
+    for item in mapped.items {
+        let completed = matches!(
+            item.status.as_deref(),
+            Some("completed" | "failed" | "interrupted")
+        );
+        bus.emit(ThreadEventEnvelope {
+            event_type: if completed {
+                "thread.item.completed".into()
+            } else {
+                "thread.item.started".into()
+            },
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({ "turnId": turn_id, "item": item }),
+        });
+    }
+    if let Some(plan) = mapped.plan {
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.plan.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({
+                "turnId": turn_id,
+                "explanation": Value::Null,
+                "plan": plan
+                    .into_iter()
+                    .map(|(step, status)| json!({ "step": step, "status": status }))
+                    .collect::<Vec<_>>()
+            }),
+        });
+    }
 }
