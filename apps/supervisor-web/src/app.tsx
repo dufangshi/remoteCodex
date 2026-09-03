@@ -420,7 +420,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (state.status === 'checking') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-muted)]">
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-fg-muted)]">
         Checking supervisor access...
       </main>
     );
@@ -468,6 +468,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function RelayGate({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const [state, setState] = useState<
     | { status: 'checking' }
     | { status: 'authenticated'; session: RelaySessionDto }
@@ -499,14 +500,20 @@ function RelayGate({ children }: { children: React.ReactNode }) {
 
   if (state.status === 'checking') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-muted)]">
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-fg-muted)]">
         Checking relay access...
       </main>
     );
   }
 
   if (state.status === 'loginRequired') {
-    return <Navigate to="/relay-portal" replace />;
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    return (
+      <Navigate
+        to={`/relay-portal?returnTo=${encodeURIComponent(returnTo)}`}
+        replace
+      />
+    );
   }
 
   return children;
@@ -555,6 +562,15 @@ function SupervisorRoutes({
         <Route path="/devices/:relayDeviceId/threads/import" element={<ThreadImportPage />} />
         <Route path="/devices/:relayDeviceId/threads/new" element={<ThreadNewPage />} />
         <Route path="/devices/:relayDeviceId/threads/:id" element={<ThreadDetailPage />} />
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to={relayModeActive() ? '/relay-devices' : '/workspaces'}
+              replace
+            />
+          }
+        />
       </Route>
     </Routes>
   );
@@ -605,6 +621,9 @@ export function App() {
     root.dataset.themeMode = themeMode;
     root.dataset.themeEffective = effectiveTheme;
     root.style.colorScheme = effectiveTheme;
+    document
+      .querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+      ?.setAttribute('content', effectiveTheme === 'dark' ? '#171713' : '#f3f6f7');
   }, [effectiveTheme, themeMode]);
 
   return (

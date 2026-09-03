@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import type {
@@ -8,7 +9,7 @@ import type {
   ImportThreadCandidateDto,
   ModelOptionDto,
 } from '@remote-codex/shared';
-import { agentBackendMetadata, defaultAgentBackendId } from '@remote-codex/shared';
+import { defaultAgentBackendId } from '@remote-codex/shared';
 import {
   ApiError,
   fetchAgentBackends,
@@ -17,7 +18,11 @@ import {
   importThread,
 } from '../lib/api';
 import { parseSessionRef, providerForImportedAgent } from '../lib/importSessionId';
-import { currentThreadHref } from '../lib/relayRoutes';
+import { currentThreadHref, currentWorkspacesHref } from '../lib/relayRoutes';
+
+function canImportFromBackend(backend: AgentBackendDto) {
+  return backend.enabled && backend.capabilities.sessions.importLocal;
+}
 
 export function ThreadImportPage() {
   const navigate = useNavigate();
@@ -25,18 +30,22 @@ export function ThreadImportPage() {
   const [provider, setProvider] = useState<AgentBackendIdDto>(defaultAgentBackendId);
   const [backends, setBackends] = useState<AgentBackendDto[]>([]);
   const [backendsLoading, setBackendsLoading] = useState(true);
+  const [backendsError, setBackendsError] = useState<string | null>(null);
+  const [backendLoadAttempt, setBackendLoadAttempt] = useState(0);
   const [agents, setAgents] = useState<ModelOptionDto[]>([]);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [candidates, setCandidates] = useState<ImportThreadCandidateDto[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(true);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  const [candidateQuery, setCandidateQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setBackendsLoading(true);
+    setBackendsError(null);
     fetchAgentBackends()
       .then((loaded) => {
         if (cancelled) {
@@ -44,14 +53,18 @@ export function ThreadImportPage() {
         }
         setBackends(loaded);
         const preferred =
-          loaded.find((backend) => backend.isDefault && backend.enabled)?.provider ??
-          loaded.find((backend) => backend.enabled)?.provider ??
+          loaded.find((backend) => backend.isDefault && canImportFromBackend(backend))?.provider ??
+          loaded.find(canImportFromBackend)?.provider ??
+          loaded[0]?.provider ??
           defaultAgentBackendId;
         setProvider(preferred);
       })
-      .catch(() => {
+      .catch((caught) => {
         if (!cancelled) {
           setBackends([]);
+          setBackendsError(
+            caught instanceof Error ? caught.message : 'Unable to load backends.',
+          );
         }
       })
       .finally(() => {
@@ -62,7 +75,7 @@ export function ThreadImportPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [backendLoadAttempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,24 +148,33 @@ export function ThreadImportPage() {
     };
   }, [agentId, agentsLoading, provider]);
 
-  const backendOptions = useMemo(() => {
-    if (backends.length > 0) {
-      return backends;
-    }
-    return [
-      {
-        provider: defaultAgentBackendId,
-        displayName: agentBackendMetadata[defaultAgentBackendId].displayName,
-        enabled: true,
-      } as AgentBackendDto,
-    ];
-  }, [backends]);
+  const backendOptions = backends;
+  const selectedBackend = backendOptions.find((backend) => backend.provider === provider) ?? null;
+  const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
+  const canImportSelection = Boolean(
+    selectedBackend &&
+      canImportFromBackend(selectedBackend) &&
+      (provider !== 'acp' || selectedAgent?.acpAgent?.availability === 'ready'),
+  );
+  const normalizedCandidateQuery = candidateQuery.trim().toLocaleLowerCase();
+  const filteredCandidates = useMemo(
+    () =>
+      normalizedCandidateQuery
+        ? candidates.filter((candidate) =>
+            `${candidate.title} ${candidate.sessionId} ${candidate.cwd ?? ''} ${candidate.preview ?? ''}`
+              .toLocaleLowerCase()
+              .includes(normalizedCandidateQuery),
+          )
+        : candidates,
+    [candidates, normalizedCandidateQuery],
+  );
   const parsedSession = parseSessionRef(sessionId);
   const selectedCandidate = candidates.find(
     (candidate) => candidate.sessionId === parsedSession.rawId,
   ) ?? null;
 
   function applyPastedSession(value: string) {
+    setError(null);
     const parsed = parseSessionRef(value);
     const looksComplete =
       Boolean(parsed.rawId) &&
@@ -182,6 +204,14 @@ export function ThreadImportPage() {
       setError('Session ID is required.');
       return;
     }
+    if (!canImportSelection) {
+      setError(
+        provider === 'acp'
+          ? 'Choose a ready ACP agent before importing this session.'
+          : 'Choose a backend that supports local session import.',
+      );
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -204,28 +234,51 @@ export function ThreadImportPage() {
     }
   }
 
+  function cancelImport() {
+    navigate(currentWorkspacesHref());
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">Import Session</p>
-        <h2 className="host-page-title mt-2 text-3xl font-semibold">Bring in a local backend session</h2>
-        <p className="host-page-description mt-3 max-w-3xl text-sm leading-6">
-          Select the backend and paste a session ID from this machine. Copied harness links such as
-          {' '}
-          <code>codex://threads/&lt;id&gt;</code>
-          {' '}
-          or Grok/Claude prefixes are accepted — Supervisor extracts the id automatically. It will
-          recover the workspace path, reuse an existing workspace when possible, or create one with
-          the last folder name as the default label.
-        </p>
-        <p className="host-muted mt-2 max-w-3xl text-sm leading-6">
-          Imported history appears immediately, but sending a new prompt still requires a manual
-          Resume / Connect.
-        </p>
+    <div className="product-page !max-w-3xl pt-[calc(env(safe-area-inset-top)+0.5rem)] sm:pt-4">
+      <div className="product-topbar">
+        <button
+          aria-label="Back to workspaces"
+          className="product-icon-button"
+          onClick={cancelImport}
+          type="button"
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-semibold text-[var(--theme-fg)]">Import session</span>
       </div>
 
-      <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-lg border p-5 sm:p-6">
+      <header className="product-page-header">
         <div>
+          <p className="product-eyebrow">Session library</p>
+          <h1 className="product-title mt-1.5">Import a backend session</h1>
+          <p className="product-description mt-2">
+            Resume a session discovered on this supervisor, or paste its session ID.
+          </p>
+        </div>
+      </header>
+
+      <form className="divide-y divide-[var(--theme-border)]" onSubmit={handleSubmit}>
+        <section className="product-divider-section space-y-5">
+          {backendsError ? (
+            <div className="host-error flex flex-col gap-3 rounded-md border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between" role="alert">
+              <span>Backends could not be loaded. {backendsError}</span>
+              <button
+                className="host-secondary-button inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-xs font-semibold"
+                onClick={() => setBackendLoadAttempt((attempt) => attempt + 1)}
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          <div>
           <label htmlFor="backend-provider" className="host-form-label text-sm font-medium">
             Backend
           </label>
@@ -235,20 +288,23 @@ export function ThreadImportPage() {
             onChange={(event) => {
               setProvider(event.target.value as AgentBackendIdDto);
               setSessionId('');
+              setError(null);
             }}
-            disabled={busy || backendsLoading}
-            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+            disabled={busy || backendsLoading || backendOptions.length === 0}
+            className="host-form-control mt-2 w-full rounded-md border px-3 outline-none transition"
           >
+            {backendsLoading ? <option value="">Loading backends...</option> : null}
+            {!backendsLoading && backendOptions.length === 0 ? <option value="">No backends available</option> : null}
             {backendOptions.map((backend) => (
-              <option key={backend.provider} value={backend.provider}>
-                {backend.displayName || agentBackendMetadata[backend.provider].displayName}
-                {backend.enabled ? '' : ' (not ready)'}
+              <option disabled={!canImportFromBackend(backend)} key={backend.provider} value={backend.provider}>
+                {backend.displayName}
+                {canImportFromBackend(backend) ? '' : ' (import unavailable)'}
               </option>
             ))}
           </select>
-        </div>
-        {provider === 'acp' && (
-          <div>
+          </div>
+          {provider === 'acp' && (
+            <div>
             <label htmlFor="acp-agent" className="host-form-label text-sm font-medium">
               ACP agent
             </label>
@@ -258,9 +314,10 @@ export function ThreadImportPage() {
               onChange={(event) => {
                 setAgentId(event.target.value || null);
                 setSessionId('');
+                setError(null);
               }}
               disabled={busy || agentsLoading || agents.length === 0}
-              className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+              className="host-form-control mt-2 w-full rounded-md border px-3 outline-none transition"
             >
               <option value="">
                 {agentsLoading ? 'Loading agents...' : 'No ready ACP agent'}
@@ -278,34 +335,66 @@ export function ThreadImportPage() {
                 </option>
               ))}
             </select>
+            </div>
+          )}
+        </section>
+
+        <section className="product-divider-section space-y-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--theme-fg)]">Recent sessions</h2>
+              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                {candidatesLoading ? 'Scanning this supervisor...' : `${filteredCandidates.length} of ${candidates.length} sessions`}
+              </p>
+            </div>
           </div>
-        )}
-        <div>
-          <label htmlFor="available-session" className="host-form-label text-sm font-medium">
-            Available sessions
-          </label>
+          {candidates.length > 8 ? (
+            <label className="relative block">
+              <span className="sr-only">Search sessions</span>
+              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--theme-fg-muted)]" />
+              <input
+                className="host-form-control w-full rounded-md border pl-9 pr-3 text-sm outline-none transition"
+                disabled={busy}
+                onChange={(event) => {
+                  setCandidateQuery(event.target.value);
+                  setError(null);
+                }}
+                placeholder="Search title, ID, or workspace"
+                type="search"
+                value={candidateQuery}
+              />
+            </label>
+          ) : null}
+          <label className="block" htmlFor="available-session">
+            <span className="host-form-label text-sm font-medium">Available session</span>
           <select
             id="available-session"
             value={selectedCandidate?.sessionId ?? ''}
-            onChange={(event) => setSessionId(event.target.value)}
-            disabled={busy || candidatesLoading || candidates.length === 0}
-            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+            onChange={(event) => {
+              setSessionId(event.target.value);
+              setError(null);
+            }}
+            disabled={busy || candidatesLoading || filteredCandidates.length === 0}
+            className="host-form-control mt-2 w-full rounded-md border px-3 outline-none transition"
           >
             <option value="">
               {candidatesLoading
                 ? 'Loading sessions...'
-                : candidates.length === 0
-                  ? 'No unmanaged sessions found'
+                : filteredCandidates.length === 0
+                  ? candidateQuery
+                    ? 'No matching sessions'
+                    : 'No unmanaged sessions found'
                   : 'Select a session'}
             </option>
-            {candidates.map((candidate) => (
+            {filteredCandidates.map((candidate) => (
               <option key={candidate.sessionId} value={candidate.sessionId}>
                 {candidate.title} · {candidate.sessionId}
               </option>
             ))}
           </select>
+          </label>
           {selectedCandidate && (
-            <div className="host-muted mt-2 space-y-1 text-xs">
+            <div className="host-muted space-y-1 text-xs">
               <p className="break-all">{selectedCandidate.cwd}</p>
               {selectedCandidate.preview && (
                 <p className="line-clamp-2">{selectedCandidate.preview}</p>
@@ -313,39 +402,54 @@ export function ThreadImportPage() {
             </div>
           )}
           {candidatesError && (
-            <p className="host-muted mt-2 text-xs">
+            <p className="text-xs text-[var(--status-warning-fg)]" role="status">
               Session discovery unavailable. Manual import is still available.
             </p>
           )}
-        </div>
-        <div>
+        </section>
+
+        <section className="product-divider-section">
           <label htmlFor="session-id" className="host-form-label text-sm font-medium">
             Session ID
           </label>
           <input
             id="session-id"
+            aria-describedby={error ? 'import-session-error' : undefined}
+            aria-invalid={error ? true : undefined}
+            disabled={busy}
             value={sessionId}
             onChange={(event) => applyPastedSession(event.target.value)}
             placeholder="codex://threads/01a0634a-23df-7191-acd2-1fca43a10418"
-            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+            className="host-form-control mt-2 w-full rounded-md border px-3 outline-none transition"
           />
-        </div>
+          <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+            Full Codex links and supported backend prefixes are accepted.
+          </p>
 
-        {error && (
-          <div className="host-error rounded-lg border px-4 py-3 text-sm">
-            {error}
+          {error ? (
+            <div className="host-error mt-4 rounded-md border px-4 py-3 text-sm" id="import-session-error" role="alert">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row">
+            <button
+              className="host-secondary-button min-h-11 rounded-md border px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busy}
+              onClick={cancelImport}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="ui-action-primary min-h-11 rounded-md px-5 text-sm font-semibold transition disabled:cursor-not-allowed"
+              disabled={busy || !parseSessionRef(sessionId).rawId || !canImportSelection}
+              type="submit"
+            >
+              {busy ? 'Importing...' : 'Import session'}
+            </button>
           </div>
-        )}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            disabled={busy}
-              className="ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed"
-          >
-            {busy ? 'Importing...' : 'Import Session'}
-          </button>
-        </div>
+        </section>
       </form>
     </div>
   );

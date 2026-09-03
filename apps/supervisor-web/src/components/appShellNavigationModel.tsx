@@ -11,35 +11,11 @@ import {
 import { ApiError } from '../lib/api';
 import type { AgentBackendId, ThemeMode } from './AppShellNavContext';
 
-function MenuIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4 w-4 fill-current"
-    >
-      <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4 w-4 fill-current"
-    >
-      <path d="M3.22 2.47 8 7.25l4.78-4.78 1.06 1.06L9.06 8.31l4.78 4.78-1.06 1.06L8 9.37l-4.78 4.78-1.06-1.06 4.78-4.78-4.78-4.78 1.06-1.06Z" />
-    </svg>
-  );
-}
-
-function menuItemClassName(disabled = false) {
-  return `flex w-full items-center rounded-[0.95rem] px-3 py-2 text-left text-sm transition ${
-    disabled
-      ? 'cursor-not-allowed bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
-      : 'text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
+function menuItemClassName(active = false) {
+  return `flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition ${
+    active
+      ? 'bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'
+      : 'text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
   }`;
 }
 
@@ -253,8 +229,6 @@ function defaultProviderHostFileState(name: string) {
 }
 
 export {
-  CloseIcon,
-  MenuIcon,
   apiErrorMessage,
   defaultProviderHostFileState,
   emptyManagementSchema,

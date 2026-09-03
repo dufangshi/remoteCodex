@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 import { ApiError } from '../lib/api';
 
@@ -15,6 +16,7 @@ export function LoginPage({
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,9 +42,15 @@ export function LoginPage({
     <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 py-8 text-[var(--app-fg)]">
       <section className="w-full max-w-sm rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
         <div className="mb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-            {eyebrow}
-          </p>
+          <div className="mb-5 flex items-center gap-3 border-b border-[var(--theme-border)] pb-4">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-[var(--theme-accent-soft)] text-xs font-bold text-[var(--theme-accent-strong)]">
+              RC
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[var(--theme-fg)]">Remote Codex</p>
+              <p className="text-xs text-[var(--theme-fg-muted)]">{eyebrow}</p>
+            </div>
+          </div>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
             Sign in
           </h1>
@@ -59,10 +67,13 @@ export function LoginPage({
             <input
               autoComplete="username"
               autoFocus
-              className="mt-2 h-11 w-full rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
+              className="host-form-control mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition"
               disabled={submitting}
               name="username"
-              onChange={(event) => setUsername(event.target.value)}
+              onChange={(event) => {
+                setUsername(event.target.value);
+                setError(null);
+              }}
               value={username}
             />
           </label>
@@ -71,25 +82,39 @@ export function LoginPage({
             <span className="text-sm font-medium text-[var(--theme-fg-soft)]">
               Password
             </span>
-            <input
-              autoComplete="current-password"
-              className="mt-2 h-11 w-full rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-solid)] focus:ring-2 focus:ring-[var(--theme-accent-border)]"
-              disabled={submitting}
-              name="password"
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              value={password}
-            />
+            <span className="relative mt-2 block">
+              <input
+                autoComplete="current-password"
+                className="host-form-control h-11 w-full rounded-md border px-3 pr-12 text-sm outline-none transition"
+                disabled={submitting}
+                name="password"
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setError(null);
+                }}
+                type={passwordVisible ? 'text' : 'password'}
+                value={password}
+              />
+              <button
+                aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)]"
+                disabled={submitting}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                type="button"
+              >
+                {passwordVisible ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
+              </button>
+            </span>
           </label>
 
           {error && (
-            <p className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+            <p className="rounded-md border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]" role="alert">
               {error}
             </p>
           )}
 
           <button
-            className="h-11 w-full rounded-lg bg-[var(--theme-accent-solid)] px-4 text-sm font-semibold text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-border)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="ui-action-primary h-11 w-full rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed"
             disabled={submitting || !username.trim() || !password}
             type="submit"
           >

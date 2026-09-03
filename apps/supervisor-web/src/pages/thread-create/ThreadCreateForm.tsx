@@ -1,5 +1,6 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useId, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import {
   AgentBackendDto,
@@ -16,10 +17,12 @@ import {
   createThread,
   fetchAgentBackendAgents,
   fetchAgentBackends,
+  fetchAgentBackendModels,
   fetchAgentBackendModelsFor,
   fetchWorkspaces,
   installOrUpdateAgentBackend,
 } from '../../lib/api';
+import { currentRelayScopedPath } from '../../lib/relayRoutes';
 
 function canStart(backend: AgentBackendDto) {
   return backend.enabled && backend.capabilities.sessions.resume && backend.capabilities.turns.start;
@@ -104,7 +107,7 @@ export function ThreadCreateForm({
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
   const [title, setTitle] = useState(() => initialTitle ?? '');
-  const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
+  const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('guarded');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
@@ -142,9 +145,11 @@ export function ThreadCreateForm({
         setWorkspaces(workspaceRecords);
         const requested = initialWorkspaceId ?? null;
         setWorkspaceId(
-          workspaceRecords.some((workspace) => workspace.id === requested)
-            ? requested!
-            : (workspaceRecords[0]?.id ?? ''),
+          requested === null
+            ? (workspaceRecords[0]?.id ?? '')
+            : workspaceRecords.some((workspace) => workspace.id === requested)
+              ? requested
+              : '',
         );
       })
       .catch((caught) => {
@@ -193,9 +198,10 @@ export function ThreadCreateForm({
     }
     setAgentOptions([]);
     setAgentId('');
-    fetchAgentBackendModelsFor(provider, {
-      cwd: selectedWorkspace?.absPath,
-    })
+    fetchAgentBackendModelsFor(
+      provider,
+      selectedWorkspace ? { cwd: selectedWorkspace.absPath } : {},
+    )
       .then((records) => {
         if (!cancelled) {
           applyModels(records);
@@ -220,6 +226,7 @@ export function ThreadCreateForm({
     setModels([]);
     setModel('');
     setReasoningEffort(null);
+    setError(null);
     fetchAgentBackendModelsFor('acp', { agentId, cwd: selectedWorkspace.absPath })
       .then((records) => {
         if (!cancelled) {
@@ -294,6 +301,10 @@ export function ThreadCreateForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedBackend || !canStart(selectedBackend)) {
+      setError('Choose an available backend before creating a thread.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -325,6 +336,18 @@ export function ThreadCreateForm({
   }
 
   const backendUnavailable = selectedBackend && !canStart(selectedBackend);
+  const selectedBackendAction = selectedBackend?.installation.installed ? 'Update' : 'Install';
+  const selectedBackendActionAvailable = selectedBackend
+    ? selectedBackend.installation.installed
+      ? Boolean(selectedBackend.installation.updateCommand)
+      : Boolean(selectedBackend.installation.installCommand)
+    : false;
+  const selectedBackendBusy = selectedBackend
+    ? runtimeBusyProvider === selectedBackend.provider || selectedBackend.installation.busy
+    : false;
+  const selectedBackendBusyLabel = selectedBackend?.installation.installed
+    ? 'Updating...'
+    : 'Installing...';
 
   return (
     <form
@@ -340,25 +363,73 @@ export function ThreadCreateForm({
         </div>
       ) : null}
 
-      <Field id={`${formId}-thread-backend`} label="Backend">
-        <select
-          id={`${formId}-thread-backend`}
-          value={provider}
-          onChange={(event) => setProvider(event.target.value as AgentBackendIdDto)}
-          className={controlClass}
-        >
-          {backends.map((backend) => (
-            <option key={backend.provider} value={backend.provider} disabled={!canStart(backend)}>
-              {backend.displayName}
-              {canStart(backend) ? '' : ' (not available)'}
-            </option>
-          ))}
-          {!acpAdvertised ? (
-            <option value="acp" disabled>
-              ACP Agent (enable on device)
-            </option>
-          ) : null}
-        </select>
+      <fieldset>
+        <legend className="host-form-label text-xs font-medium">Backend</legend>
+        {compact ? (
+          <select
+            id={`${formId}-thread-backend`}
+            disabled={busy || runtimeBusyProvider !== null}
+            value={provider}
+            onChange={(event) => setProvider(event.target.value as AgentBackendIdDto)}
+            className={controlClass}
+          >
+            {backends.map((backend) => (
+              <option key={backend.provider} value={backend.provider} disabled={!canStart(backend)}>
+                {backend.displayName}
+                {canStart(backend) ? '' : ' (not available)'}
+              </option>
+            ))}
+            {!acpAdvertised ? (
+              <option value="acp" disabled>
+                ACP Agent (enable on device)
+              </option>
+            ) : null}
+          </select>
+        ) : (
+          <div aria-label="Backend" className="product-segmented mt-2 !grid w-full grid-cols-2 sm:!flex" role="radiogroup">
+            {backends.map((backend) => {
+              const selected = backend.provider === provider;
+              return (
+                <label
+                  className="product-segment min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-45"
+                  key={backend.provider}
+                >
+                  <input
+                    checked={selected}
+                    className="sr-only"
+                    disabled={!canStart(backend) || busy || runtimeBusyProvider !== null}
+                    name={`${formId}-backend`}
+                    onChange={() => setProvider(backend.provider)}
+                    type="radio"
+                    value={backend.provider}
+                  />
+                  {backend.displayName}
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedBackend ? (
+          <div className="mt-3 flex flex-col gap-2 border-b border-[var(--theme-border)] pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 text-xs leading-5 text-[var(--theme-fg-muted)]">
+              {selectedBackend.installation.installed
+                ? `Installed${selectedBackend.installation.installedVersion ? `, version ${selectedBackend.installation.installedVersion}` : ''}`
+                : selectedBackend.installation.lastError ?? selectedBackend.status.lastError ?? 'Runtime is not installed.'}
+            </p>
+            {selectedBackendActionAvailable ? (
+              <button
+                aria-label={`${selectedBackendAction} ${selectedBackend.displayName}`}
+                className="host-secondary-button min-h-10 shrink-0 rounded-md border px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy || selectedBackendBusy || runtimeBusyProvider !== null}
+                onClick={() => void handleRuntimeAction(selectedBackend)}
+                type="button"
+              >
+                {selectedBackendBusy ? selectedBackendBusyLabel : `${selectedBackendAction} runtime`}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {!acpAdvertised ? (
           <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
             ACP is not enabled on this supervisor. Add
@@ -366,79 +437,40 @@ export function ThreadCreateForm({
             to <code className="font-mono">REMOTE_CODEX_ENABLED_AGENT_PROVIDERS</code>.
           </p>
         ) : null}
-        {!compact ? (
-          <div className="mt-3 space-y-2">
-            {backends.map((backend) => {
-              const selected = backend.provider === provider;
-              const installAvailable = backend.installation.installed
-                ? Boolean(backend.installation.updateCommand)
-                : Boolean(backend.installation.installCommand);
-              const action = backend.installation.installed ? 'Update' : 'Install';
-              const rowBusy = runtimeBusyProvider === backend.provider || backend.installation.busy;
-              return (
-                <div
-                  key={backend.provider}
-                  className={`rounded-lg border px-4 py-3 transition ${
-                    selected ? 'host-surface-strong' : 'host-surface'
-                  } ${canStart(backend) ? '' : 'opacity-75'}`}
-                >
-                  <div className="flex flex-wrap items-start gap-3">
-                    <button
-                      type="button"
-                      onClick={() => canStart(backend) && setProvider(backend.provider)}
-                      disabled={!canStart(backend) || busy || rowBusy}
-                      className="min-w-0 flex-1 text-left disabled:cursor-not-allowed"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{backend.displayName}</span>
-                        {selected ? <span className="host-pill rounded-full px-2 py-0.5 text-xs">Selected</span> : null}
-                        {!canStart(backend) ? (
-                          <span className="host-pill rounded-full px-2 py-0.5 text-xs">Not available</span>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 text-sm opacity-75">
-                        {backend.installation.installed
-                          ? `Installed${backend.installation.installedVersion ? `: ${backend.installation.installedVersion}` : ''}`
-                          : backend.installation.lastError ?? backend.status.lastError ?? 'Runtime is not installed.'}
-                      </p>
-                    </button>
-                    {installAvailable ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleRuntimeAction(backend)}
-                        disabled={busy || rowBusy || runtimeBusyProvider !== null}
-                        className="host-secondary-button rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
-                        aria-label={`${action} ${backend.displayName}`}
-                      >
-                        {rowBusy ? `${action}ing...` : action}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
         {backendUnavailable ? (
           <p className={`mt-2 ${compact ? 'text-xs text-[var(--theme-fg-muted)]' : 'text-sm opacity-75'}`}>
             Select an available backend before creating a thread.
           </p>
         ) : null}
-      </Field>
+      </fieldset>
 
       <Field id={`${formId}-thread-workspace`} label="Workspace">
         <select
           id={`${formId}-thread-workspace`}
+          disabled={busy}
           value={workspaceId}
           onChange={(event) => setWorkspaceId(event.target.value)}
           className={controlClass}
         >
+          {!workspaceId ? <option value="">Choose a workspace</option> : null}
           {workspaces.map((workspace) => (
             <option key={workspace.id} value={workspace.id}>
               {workspace.label} · {workspace.absPath}
             </option>
           ))}
         </select>
+        {workspaces.length === 0 ? (
+          <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+            Add a workspace before creating a thread.{' '}
+            <Link className="font-semibold text-[var(--theme-accent-strong)] hover:underline" to={currentRelayScopedPath('/workspaces/new')}>
+              Add workspace
+            </Link>
+          </p>
+        ) : initialWorkspaceId && !workspaces.some((workspace) => workspace.id === initialWorkspaceId) ? (
+          <p className="mt-2 text-xs leading-5 text-[var(--status-warning-fg)]" role="status">
+            The requested workspace is unavailable. Choose another workspace to continue.
+          </p>
+        ) : null}
       </Field>
 
       {isAcpAgentSelection ? (
@@ -465,18 +497,9 @@ export function ThreadCreateForm({
                       : 'Ready';
               return (
                 <div key={entry.id} className="flex min-w-0 items-stretch gap-2 px-2 py-2">
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-disabled={!ready || busy || installingAgentId !== null}
+                  <label
                     title={meta?.statusMessage}
-                    onClick={() => {
-                      if (ready && !busy && installingAgentId === null) {
-                        setAgentId(entry.model);
-                      }
-                    }}
-                    className={`min-w-0 flex-1 rounded-md px-2.5 py-2 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-solid)] ${
+                    className={`product-radio-option min-w-0 flex-1 rounded-md px-2.5 py-2 text-left outline-none transition ${
                       selected
                         ? 'bg-[var(--theme-surface-strong)] text-[var(--theme-fg)]'
                         : ready
@@ -484,6 +507,15 @@ export function ThreadCreateForm({
                           : 'cursor-not-allowed text-[var(--theme-fg-muted)] opacity-70'
                     }`}
                   >
+                    <input
+                      checked={selected}
+                      className="sr-only"
+                      disabled={!ready || busy || installingAgentId !== null}
+                      name={`${formId}-agent`}
+                      onChange={() => setAgentId(entry.model)}
+                      type="radio"
+                      value={entry.model}
+                    />
                     <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="truncate font-medium">{entry.displayName}</span>
                       <span className="host-pill rounded-full px-2 py-0.5 text-[0.68rem]">{statusLabel}</span>
@@ -491,13 +523,13 @@ export function ThreadCreateForm({
                     <span className="mt-1 block truncate font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
                       {meta?.serverCommand ?? 'Unavailable'}
                     </span>
-                  </button>
+                  </label>
                   {adapterMissing && meta?.installCommand ? (
                     <button
                       type="button"
                       onClick={() => void handleAcpAgentInstall(entry)}
                       disabled={busy || installing || installingAgentId !== null}
-                      className="host-secondary-button my-auto shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+                      className="host-secondary-button my-auto min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {installing ? 'Installing...' : 'Install adapter'}
                     </button>
@@ -509,53 +541,57 @@ export function ThreadCreateForm({
         </fieldset>
       ) : null}
 
-      <Field id={`${formId}-thread-model`} label="Model">
-        <select
-          id={`${formId}-thread-model`}
-          value={model}
-          disabled={models.length === 0}
-          onChange={(event) => {
-            const next = models.find((entry) => entry.model === event.target.value) ?? null;
-            setModel(event.target.value);
-            setReasoningEffort((current) =>
-              current && next?.supportedReasoningEfforts.some((entry) => entry.reasoningEffort === current)
-                ? current
-                : (next?.defaultReasoningEffort ?? null),
-            );
-          }}
-          className={controlClass}
-        >
-          {models.length === 0 ? <option value="">No models available</option> : null}
-          {models.map((entry) => (
-            <option key={entry.id} value={entry.model}>
-              {entry.displayName}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {selectedModel && selectedModel.supportedReasoningEfforts.length > 0 ? (
-        <Field id={`${formId}-thread-effort`} label="Reasoning effort">
+      <div className={selectedModel?.supportedReasoningEfforts.length ? 'grid gap-5 sm:grid-cols-2' : ''}>
+        <Field id={`${formId}-thread-model`} label="Model">
           <select
-            id={`${formId}-thread-effort`}
-            value={reasoningEffort ?? ''}
-            onChange={(event) =>
-              setReasoningEffort((event.target.value || null) as ReasoningEffortDto | null)
-            }
+            id={`${formId}-thread-model`}
+            value={model}
+            disabled={busy || models.length === 0}
+            onChange={(event) => {
+              const next = models.find((entry) => entry.model === event.target.value) ?? null;
+              setModel(event.target.value);
+              setReasoningEffort((current) =>
+                current && next?.supportedReasoningEfforts.some((entry) => entry.reasoningEffort === current)
+                  ? current
+                  : (next?.defaultReasoningEffort ?? null),
+              );
+            }}
             className={controlClass}
           >
-            {selectedModel.supportedReasoningEfforts.map((entry) => (
-              <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
-                {entry.reasoningEffort}
+            {models.length === 0 ? <option value="">No models available</option> : null}
+            {models.map((entry) => (
+              <option key={entry.id} value={entry.model}>
+                {entry.displayName}
               </option>
             ))}
           </select>
         </Field>
-      ) : null}
+
+        {selectedModel && selectedModel.supportedReasoningEfforts.length > 0 ? (
+          <Field id={`${formId}-thread-effort`} label="Reasoning effort">
+            <select
+              id={`${formId}-thread-effort`}
+              disabled={busy}
+              value={reasoningEffort ?? ''}
+              onChange={(event) =>
+                setReasoningEffort((event.target.value || null) as ReasoningEffortDto | null)
+              }
+              className={controlClass}
+            >
+              {selectedModel.supportedReasoningEfforts.map((entry) => (
+                <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
+                  {entry.reasoningEffort}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
+      </div>
 
       <Field id={`${formId}-thread-title`} label="Title">
         <input
           id={`${formId}-thread-title`}
+          disabled={busy}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="Optional. Falls back to first prompt."
@@ -563,25 +599,50 @@ export function ThreadCreateForm({
         />
       </Field>
 
-      <Field id={`${formId}-thread-approval-mode`} label="Approval mode">
-        <select
-          id={`${formId}-thread-approval-mode`}
-          value={approvalMode}
-          onChange={(event) => setApprovalMode(event.target.value as 'yolo' | 'guarded')}
-          className={controlClass}
-        >
-          <option value="yolo">yolo</option>
-          <option value="guarded">guarded</option>
-        </select>
-      </Field>
+      <fieldset>
+        <legend className="host-form-label text-xs font-medium">Approval mode</legend>
+        <div aria-label="Approval mode" className="product-segmented mt-2 w-full" role="radiogroup">
+          <label className="product-segment flex-1">
+            <input
+              checked={approvalMode === 'guarded'}
+              className="sr-only"
+              disabled={busy}
+              name={`${formId}-approval`}
+              onChange={() => setApprovalMode('guarded')}
+              type="radio"
+              value="guarded"
+            />
+            Guarded
+          </label>
+          <label className="product-segment flex-1">
+            <input
+              checked={approvalMode === 'yolo'}
+              className="sr-only"
+              disabled={busy}
+              name={`${formId}-approval`}
+              onChange={() => setApprovalMode('yolo')}
+              type="radio"
+              value="yolo"
+            />
+            Full access
+          </label>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+          {approvalMode === 'guarded'
+            ? 'Pauses when an action needs your approval.'
+            : 'Runs tool actions without approval prompts. Use only in a trusted workspace.'}
+        </p>
+      </fieldset>
 
-      {error ? <div className="host-error rounded-lg border px-4 py-3 text-sm">{error}</div> : null}
+      {error ? <div className="host-error rounded-md border px-4 py-3 text-sm" role="alert">{error}</div> : null}
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <button
           type="submit"
           disabled={
             busy ||
+            !selectedBackend ||
+            !canStart(selectedBackend) ||
             !workspaceId ||
             !model ||
             !selectedModel ||
@@ -589,8 +650,8 @@ export function ThreadCreateForm({
           }
           className={
             compact
-              ? 'ui-action-primary rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed'
-              : 'ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed'
+              ? 'ui-action-primary min-h-11 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed'
+              : 'ui-action-primary min-h-11 rounded-md px-5 font-semibold transition disabled:cursor-not-allowed'
           }
         >
           {busy ? 'Creating...' : 'Create Thread'}
@@ -602,8 +663,8 @@ export function ThreadCreateForm({
             disabled={busy}
             className={
               compact
-                ? 'host-secondary-button rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
-                : 'host-secondary-button rounded-lg border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
+                ? 'host-secondary-button min-h-11 rounded-md border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
+                : 'host-secondary-button min-h-11 rounded-md border px-5 font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
             }
           >
             Cancel

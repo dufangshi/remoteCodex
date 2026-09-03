@@ -1,12 +1,18 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import {
+  FormEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   Check,
-  Clock3,
-  Database,
   KeyRound,
   LogOut,
   RefreshCw,
@@ -19,9 +25,7 @@ import {
   Camera,
   ShieldCheck,
   Settings,
-  Share2,
   Trash2,
-  Users,
   X,
 } from 'lucide-react';
 
@@ -37,6 +41,7 @@ import type {
   RelayUserDto,
 } from '@remote-codex/shared';
 import { LoginPage } from './LoginPage';
+import { useDialogLifecycle } from '../components/useDialogLifecycle';
 import {
   ApiError,
   approveRelayRegistration,
@@ -73,6 +78,14 @@ type AdminTab =
   | 'hosted'
   | 'shares'
   | 'settings';
+const adminTabs: AdminTab[] = [
+  'overview',
+  'users',
+  'devices',
+  'hosted',
+  'shares',
+  'settings',
+];
 type SortDirection = 'asc' | 'desc';
 type UserSortKey =
   | 'username'
@@ -98,13 +111,36 @@ function errorMessage(caught: unknown) {
       : 'Unable to update relay admin state.';
 }
 
+function adminTabFromSearch(search: string): AdminTab {
+  const requested = new URLSearchParams(search).get('tab');
+  return adminTabs.includes(requested as AdminTab)
+    ? (requested as AdminTab)
+    : 'overview';
+}
+
+function unsupportedAdminStatus(caught: unknown) {
+  if (
+    caught instanceof ApiError &&
+    (caught.statusCode === 404 || caught.statusCode === 501)
+  ) {
+    return caught.statusCode;
+  }
+  return null;
+}
+
 export function RelayAdminPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<RelayAdminSummaryDto | null>(null);
+  const [adminSession, setAdminSession] = useState<RelaySessionDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unsupportedStatus, setUnsupportedStatus] = useState<number | null>(null);
   const [loginRequired, setLoginRequired] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [tab, setTab] = useState<AdminTab>('overview');
+  const [tab, setTab] = useState<AdminTab>(() =>
+    adminTabFromSearch(location.search),
+  );
   const [days, setDays] = useState(7);
   const [settingsDraft, setSettingsDraft] =
     useState<RelayRegistrationSettingsDto | null>(null);
@@ -127,6 +163,7 @@ export function RelayAdminPage() {
       setLoading(true);
     }
     setError(null);
+    setUnsupportedStatus(null);
     try {
       enableRelayMode();
       const result = await fetchRelayAdmin(nextDays);
@@ -140,10 +177,18 @@ export function RelayAdminPage() {
         (caught.statusCode === 401 || caught.statusCode === 403)
       ) {
         setSummary(null);
+        setAdminSession(null);
         setLoginRequired(true);
         setError(null);
       } else {
-        setError(errorMessage(caught));
+        const status = unsupportedAdminStatus(caught);
+        if (status) {
+          setSummary(null);
+          setUnsupportedStatus(status);
+          setError(null);
+        } else {
+          setError(errorMessage(caught));
+        }
       }
     } finally {
       setLoading(false);
@@ -151,8 +196,70 @@ export function RelayAdminPage() {
   }
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+
+    async function initialize() {
+      setLoading(true);
+      setError(null);
+      setUnsupportedStatus(null);
+      try {
+        enableRelayMode();
+        const session = await fetchRelayAdminSession();
+        if (cancelled) {
+          return;
+        }
+        if (!session.authenticated || session.user?.role !== 'admin') {
+          setAdminSession(null);
+          setSummary(null);
+          setLoginRequired(true);
+          setLoading(false);
+          return;
+        }
+        setAdminSession(session);
+        setLoginRequired(false);
+        await load(days, { showLoading: false });
+      } catch (caught) {
+        if (cancelled) {
+          return;
+        }
+        if (
+          caught instanceof ApiError &&
+          (caught.statusCode === 401 || caught.statusCode === 403)
+        ) {
+          setAdminSession(null);
+          setSummary(null);
+          setLoginRequired(true);
+          setError(null);
+        } else {
+          setError(
+            caught instanceof Error
+              ? `Unable to verify the relay admin session: ${caught.message}`
+              : 'Unable to verify the relay admin session.',
+          );
+        }
+        setLoading(false);
+      }
+    }
+
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    const nextTab = adminTabFromSearch(location.search);
+    setTab(nextTab);
+
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.get('tab') !== nextTab) {
+      searchParams.set('tab', nextTab);
+      navigate(
+        `${location.pathname}?${searchParams.toString()}`,
+        { replace: true },
+      );
+    }
+  }, [location.pathname, location.search, navigate]);
 
   async function loadHosted(options: { showLoading?: boolean } = {}) {
     if (options.showLoading !== false) {
@@ -189,13 +296,13 @@ export function RelayAdminPage() {
   }
 
   useEffect(() => {
-    if (tab === 'hosted') {
+    if (tab === 'hosted' && summary) {
       void loadHosted();
     }
-  }, [tab]);
+  }, [summary, tab]);
 
   useEffect(() => {
-    if (tab !== 'hosted') return;
+    if (tab !== 'hosted' || !summary) return;
     const hasPendingSandbox = hostedSandboxes.some((sandbox) =>
       ['requested', 'creating', 'starting', 'provisioning', 'stopping', 'deleting'].includes(
         sandbox.status,
@@ -206,7 +313,7 @@ export function RelayAdminPage() {
       hasPendingSandbox ? 2_000 : 15_000,
     );
     return () => window.clearInterval(intervalId);
-  }, [tab, hostedSandboxes]);
+  }, [summary, tab, hostedSandboxes]);
 
   async function hostedAction(
     busyKeyValue: string,
@@ -262,6 +369,7 @@ export function RelayAdminPage() {
       await load(days, { showLoading: false });
     } catch (caught) {
       setError(errorMessage(caught));
+      throw caught;
     } finally {
       setBusyKey(null);
     }
@@ -275,6 +383,7 @@ export function RelayAdminPage() {
       setSummary((current) => replaceAdminUser(current, updated));
     } catch (caught) {
       setError(errorMessage(caught));
+      throw caught;
     } finally {
       setBusyKey(null);
     }
@@ -330,8 +439,48 @@ export function RelayAdminPage() {
     username: string;
     password: string;
   }) {
-    await relayAdminLogin(input);
+    const result = await relayAdminLogin(input);
+    if (!result.session.authenticated || result.session.user?.role !== 'admin') {
+      throw new Error('This account does not have relay admin access.');
+    }
+    setAdminSession(result.session);
+    setLoginRequired(false);
     await load(days);
+  }
+
+  function selectTab(nextTab: AdminTab) {
+    setTab(nextTab);
+    const searchParams = new URLSearchParams(location.search);
+    searchParams.set('tab', nextTab);
+    navigate(`${location.pathname}?${searchParams.toString()}`, { replace: true });
+  }
+
+  function handleTabKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentTab: AdminTab,
+  ) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    const currentIndex = adminTabs.indexOf(currentTab);
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? adminTabs.length - 1
+          : event.key === 'ArrowRight'
+            ? (currentIndex + 1) % adminTabs.length
+            : (currentIndex - 1 + adminTabs.length) % adminTabs.length;
+    const nextTab = adminTabs[nextIndex];
+    if (!nextTab) {
+      return;
+    }
+    selectTab(nextTab);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`relay-admin-tab-${nextTab}`)?.focus();
+    });
   }
 
   if (loginRequired) {
@@ -345,32 +494,25 @@ export function RelayAdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-fg)] sm:px-6">
-      <RelayAdminUserMenu
-        onLogout={() => {
-          setSummary(null);
-          setLoginRequired(true);
-        }}
-      />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <header className="flex flex-col gap-4 border-b border-[var(--theme-border)] pb-5 lg:flex-row lg:items-end lg:justify-between">
+    <main className="min-h-screen bg-[var(--app-bg)] px-4 pt-[env(safe-area-inset-top)] text-[var(--app-fg)] sm:px-6">
+      <div className="product-page product-page-wide flex flex-col gap-5">
+        <header className="product-page-header !items-start max-lg:flex-col">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
+            <p className="product-eyebrow">
               Relay Admin
             </p>
-            <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-              Operations panel
+            <h1 className="product-title mt-1">
+              Administration
             </h1>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--theme-fg-muted)]">
-              Accounts, devices, usage, registration policy, and shared thread
-              access.
+            <p className="product-description mt-1">
+              Manage relay access, connected devices, and registration policy.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-end gap-2 lg:w-auto lg:justify-end">
             <label className="flex items-center gap-2 text-sm text-[var(--theme-fg-muted)]">
               Usage window
               <select
-                className="relay-input h-10 w-24"
+                className="relay-input h-11 w-24"
                 onChange={(event) => void load(Number(event.target.value))}
                 value={days}
               >
@@ -384,119 +526,175 @@ export function RelayAdminPage() {
               Relay home
             </Link>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2"
+              aria-label="Refresh admin data"
+              className="product-icon-button"
               onClick={() => void load(days)}
+              title="Refresh admin data"
               type="button"
             >
               <RefreshCw className="h-4 w-4" />
-              Refresh
             </button>
+            <RelayAdminUserMenu
+              session={adminSession}
+              onLogout={() => {
+                setAdminSession(null);
+                setSummary(null);
+                setLoginRequired(true);
+              }}
+            />
           </div>
         </header>
 
-        {error ? (
-          <section className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-4 text-sm text-[var(--status-danger-fg)]">
-            {error}
-          </section>
+        {error && summary ? (
+          <div
+            className="host-error flex min-h-11 items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
+            role="alert"
+          >
+            <span>{error}</span>
+            <button
+              className="shrink-0 rounded-md px-2 py-1 font-medium hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+              onClick={() => setError(null)}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
         ) : null}
 
         {loading ? (
-          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 text-sm text-[var(--theme-fg-muted)]">
-            Loading relay admin...
+          <section className="product-panel" aria-busy="true" aria-label="Loading relay administration">
+            <div className="product-row min-h-24">
+              <div className="min-w-0 flex-1 space-y-3">
+                <div className="product-skeleton h-4 w-40" />
+                <div className="product-skeleton h-3 w-72 max-w-full" />
+              </div>
+            </div>
+          </section>
+        ) : unsupportedStatus ? (
+          <AdminCompatibilityState
+            statusCode={unsupportedStatus}
+            onRetry={() => void load(days)}
+          />
+        ) : error && !summary ? (
+          <section className="product-panel" role="alert">
+            <div className="p-5 sm:p-6">
+              <p className="text-base font-semibold text-[var(--theme-fg)]">
+                Admin data is unavailable
+              </p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--status-danger-fg)]">
+                {error}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  className="relay-button-primary"
+                  onClick={() => void load(days)}
+                  type="button"
+                >
+                  Retry
+                </button>
+                <Link className="relay-button-secondary" to="/">
+                  Relay home
+                </Link>
+              </div>
+            </div>
           </section>
         ) : summary ? (
           <>
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                icon={<Users className="h-5 w-5" />}
-                label="Users"
-                value={totals.users}
-                detail={`${totals.enabledUsers} enabled`}
-              />
-              <MetricCard
-                icon={<Database className="h-5 w-5" />}
-                label="Devices"
-                value={totals.devices}
-                detail={`${totals.onlineDevices} online`}
-              />
-              <MetricCard
-                icon={<Clock3 className="h-5 w-5" />}
-                label={`Conversations, ${summary.conversationWindowDays}d`}
-                value={totals.conversations}
-                detail="Relay prompt/start events"
-              />
-              <MetricCard
-                icon={<Share2 className="h-5 w-5" />}
-                label="Active shares"
-                value={totals.shares}
-                detail={`${summary.pendingRegistrations.length} pending registrations`}
-              />
+            <section className="product-panel" aria-label="Relay summary">
+              <dl className="grid grid-cols-2 sm:grid-cols-4">
+                <MetricStat
+                  label="Users"
+                  value={totals.users}
+                  detail={`${totals.enabledUsers} enabled`}
+                />
+                <MetricStat
+                  label="Devices"
+                  value={totals.devices}
+                  detail={`${totals.onlineDevices} online`}
+                />
+                <MetricStat
+                  label={`Conversations, ${summary.conversationWindowDays}d`}
+                  value={totals.conversations}
+                  detail="Prompt and start events"
+                />
+                <MetricStat
+                  label="Active shares"
+                  value={totals.shares}
+                  detail={`${summary.pendingRegistrations.length} registrations pending`}
+                />
+              </dl>
             </section>
 
-            <nav className="flex gap-2 overflow-x-auto border-b border-[var(--theme-border)] pb-2">
-              {(
-                [
-                  'overview',
-                  'users',
-                  'devices',
-                  'hosted',
-                  'shares',
-                  'settings',
-                ] as AdminTab[]
-              ).map((item) => (
+            <div
+              aria-label="Relay administration sections"
+              aria-orientation="horizontal"
+              className="product-segmented w-full"
+              role="tablist"
+            >
+              {adminTabs.map((item) => (
                 <button
-                  className={`rounded-md px-3 py-2 text-sm font-medium ${
-                    tab === item
-                      ? 'bg-[var(--theme-accent-soft)] text-[var(--theme-fg)]'
-                      : 'text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
-                  }`}
+                  aria-controls={`relay-admin-panel-${item}`}
+                  aria-selected={tab === item}
+                  className="product-segment min-h-11 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+                  id={`relay-admin-tab-${item}`}
                   key={item}
-                  onClick={() => setTab(item)}
+                  onClick={() => selectTab(item)}
+                  onKeyDown={(event) => handleTabKeyDown(event, item)}
+                  role="tab"
+                  tabIndex={tab === item ? 0 : -1}
                   type="button"
                 >
                   {tabLabel(item)}
                 </button>
               ))}
-            </nav>
+            </div>
 
-            {tab === 'overview' ? <Overview summary={summary} /> : null}
-            {tab === 'users' ? (
-              <UsersTable
-                busyKey={busyKey}
-                onDeleteUser={deleteUser}
-                onResetPassword={resetUserPassword}
-                onUpdateUser={updateUser}
-                users={summary.users}
-              />
-            ) : null}
-            {tab === 'devices' ? (
-              <DevicesPanel devices={summary.devices} users={summary.users} />
-            ) : null}
-            {tab === 'hosted' ? (
-              <HostedSandboxesPanel
-                busyKey={hostedBusyKey}
-                capability={hostedCapability}
-                error={hostedError}
-                loading={hostedLoading}
-                onAction={hostedAction}
-                onRefresh={loadHosted}
-                sandboxes={hostedSandboxes}
-                reconciliation={hostedReconciliation}
-                users={summary.users}
-              />
-            ) : null}
-            {tab === 'shares' ? <SharesTable shares={summary.shares} /> : null}
-            {tab === 'settings' && settingsDraft ? (
-              <SettingsPanel
-                busy={busyKey === 'settings'}
-                draft={settingsDraft}
-                onChange={setSettingsDraft}
-                onReviewRegistration={reviewRegistration}
-                onSave={saveSettings}
-                pending={summary.pendingRegistrations}
-                reviewBusyKey={busyKey}
-              />
-            ) : null}
+            <div
+              aria-labelledby={`relay-admin-tab-${tab}`}
+              className="min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+              id={`relay-admin-panel-${tab}`}
+              role="tabpanel"
+              tabIndex={0}
+            >
+              {tab === 'overview' ? <Overview summary={summary} /> : null}
+              {tab === 'users' ? (
+                <UsersTable
+                  busyKey={busyKey}
+                  onDeleteUser={deleteUser}
+                  onResetPassword={resetUserPassword}
+                  onUpdateUser={updateUser}
+                  users={summary.users}
+                />
+              ) : null}
+              {tab === 'devices' ? (
+                <DevicesPanel devices={summary.devices} users={summary.users} />
+              ) : null}
+              {tab === 'hosted' ? (
+                <HostedSandboxesPanel
+                  busyKey={hostedBusyKey}
+                  capability={hostedCapability}
+                  error={hostedError}
+                  loading={hostedLoading}
+                  onAction={hostedAction}
+                  onRefresh={loadHosted}
+                  sandboxes={hostedSandboxes}
+                  reconciliation={hostedReconciliation}
+                  users={summary.users}
+                />
+              ) : null}
+              {tab === 'shares' ? <SharesTable shares={summary.shares} /> : null}
+              {tab === 'settings' && settingsDraft ? (
+                <SettingsPanel
+                  busy={busyKey === 'settings'}
+                  draft={settingsDraft}
+                  onChange={setSettingsDraft}
+                  onReviewRegistration={reviewRegistration}
+                  onSave={saveSettings}
+                  pending={summary.pendingRegistrations}
+                  reviewBusyKey={busyKey}
+                />
+              ) : null}
+            </div>
           </>
         ) : null}
       </div>
@@ -853,7 +1051,7 @@ function HostedReconciliationPanel({
           </p>
         </div>
         <button
-          className="relay-button-secondary inline-flex min-h-10 items-center justify-center gap-2"
+          className="relay-button-secondary inline-flex min-h-11 items-center justify-center gap-2 sm:min-h-10"
           disabled={busyKey === 'hosted:reconcile'}
           onClick={() =>
             void onAction('hosted:reconcile', runHostedSandboxReconciliation)
@@ -893,7 +1091,7 @@ function HostedReconciliationPanel({
             {instance.snapshots.length} snapshots
           </span>
           <button
-            className="relay-button-danger min-h-9"
+            className="relay-button-danger min-h-11 sm:min-h-9"
             disabled={busyKey === `hosted:orphan-instance:${instance.id}`}
             onClick={() =>
               void onAction(`hosted:orphan-instance:${instance.id}`, () =>
@@ -915,7 +1113,7 @@ function HostedReconciliationPanel({
             Orphan credential {credential.credentialRef}
           </span>
           <button
-            className="relay-button-danger min-h-9"
+            className="relay-button-danger min-h-11 sm:min-h-9"
             disabled={
               busyKey === `hosted:orphan-credential:${credential.credentialRef}`
             }
@@ -951,6 +1149,10 @@ function HostedSandboxRow({
   const [inviteQuery, setInviteQuery] = useState('');
   const [manageOpen, setManageOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const manageTriggerRef = useRef<HTMLButtonElement>(null);
+  const manageDialogRef = useRef<HTMLElement>(null);
+  const manageCloseRef = useRef<HTMLButtonElement>(null);
+  const manageTitleId = useId();
   const busy = busyKey?.endsWith(sandbox.id) ?? false;
   const tone = hostedStatusTone(sandbox.status);
   const memberIds = sandbox.assignedUsers.map((user) => user.userId);
@@ -970,14 +1172,13 @@ function HostedSandboxRow({
     return () => window.clearInterval(timer);
   }, [sandbox.runningSince]);
 
-  useEffect(() => {
-    if (!manageOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setManageOpen(false);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [manageOpen]);
+  useDialogLifecycle({
+    busy,
+    containerRef: manageDialogRef,
+    initialFocusRef: manageCloseRef,
+    onClose: () => setManageOpen(false),
+    open: manageOpen,
+  });
   return (
     <article className="px-4 py-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1089,6 +1290,7 @@ function HostedSandboxRow({
             className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
             disabled={busy}
             onClick={() => setManageOpen(true)}
+            ref={manageTriggerRef}
             type="button"
           >
             <Settings className="h-4 w-4" />
@@ -1097,7 +1299,7 @@ function HostedSandboxRow({
           {confirmDelete ? (
             <span className="inline-flex items-center gap-2 rounded-md bg-[var(--status-danger-bg)] p-1">
               <button
-                className="min-h-9 rounded-md px-3 text-sm font-medium text-[var(--status-danger-fg)] hover:bg-[var(--theme-hover)]"
+                className="min-h-11 rounded-md px-3 text-sm font-medium text-[var(--status-danger-fg)] hover:bg-[var(--theme-hover)] sm:min-h-9"
                 disabled={busy}
                 onClick={() =>
                   void onAction(`delete:${sandbox.id}`, () =>
@@ -1109,7 +1311,7 @@ function HostedSandboxRow({
                 Confirm delete
               </button>
               <button
-                className="min-h-9 rounded-md px-2 text-sm text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)]"
+                className="min-h-11 rounded-md px-2 text-sm text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)] sm:min-h-9"
                 onClick={() => setConfirmDelete(false)}
                 type="button"
               >
@@ -1133,18 +1335,22 @@ function HostedSandboxRow({
           <button
             aria-label="Close VM management"
             className="absolute inset-0 bg-[var(--overlay-scrim)]"
+            disabled={busy}
             onClick={() => setManageOpen(false)}
+            tabIndex={-1}
             type="button"
           />
           <section
-            aria-label={`Manage ${sandbox.deviceName}`}
+            aria-labelledby={manageTitleId}
             aria-modal="true"
-            className="relative flex h-full w-full max-w-2xl flex-col border-l border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-[var(--theme-shadow)]"
+            className="product-dialog relative flex h-full w-full max-w-2xl flex-col border-l border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-[var(--theme-shadow)]"
+            ref={manageDialogRef}
             role="dialog"
+            tabIndex={-1}
           >
             <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[var(--theme-border)] px-5">
               <div className="min-w-0">
-                <h3 className="truncate text-base font-semibold text-[var(--theme-fg)]">
+                <h3 className="truncate text-base font-semibold text-[var(--theme-fg)]" id={manageTitleId}>
                   Manage {sandbox.deviceName}
                 </h3>
                 <p className="mt-0.5 text-xs text-[var(--theme-fg-muted)]">
@@ -1153,8 +1359,10 @@ function HostedSandboxRow({
               </div>
               <button
                 aria-label="Close VM management"
-                className="relay-button-secondary inline-flex h-10 w-10 items-center justify-center p-0"
+                className="relay-button-secondary inline-flex h-11 w-11 items-center justify-center p-0"
+                disabled={busy}
                 onClick={() => setManageOpen(false)}
+                ref={manageCloseRef}
                 type="button"
               >
                 <X className="h-4 w-4" />
@@ -1205,7 +1413,7 @@ function HostedSandboxRow({
             <button
               aria-expanded={inviteOpen}
               aria-label="Add authorized user"
-              className="relay-button-secondary inline-flex h-9 w-9 items-center justify-center p-0"
+              className="relay-button-secondary inline-flex h-11 w-11 items-center justify-center p-0 sm:h-9 sm:w-9"
               disabled={busy}
               onClick={() => {
                 setInviteOpen((current) => !current);
@@ -1290,7 +1498,7 @@ function HostedSandboxRow({
                 </span>
                 <button
                   aria-label={`Remove ${user.username} access`}
-                  className="min-h-9 rounded-md px-3 text-xs font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]"
+                  className="min-h-11 rounded-md px-3 text-xs font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] sm:min-h-9"
                   disabled={busy || memberIds.length === 1}
                   onClick={() =>
                     void onAction(`members:${sandbox.id}`, () =>
@@ -1479,7 +1687,7 @@ function BackendFileField({
         >
           {filename}
         </label>
-        <label className="relay-button-secondary inline-flex min-h-9 cursor-pointer items-center px-3 text-xs">
+        <label className="relay-button-secondary inline-flex min-h-11 cursor-pointer items-center px-3 text-xs sm:min-h-9">
           Upload {language}
           <input
             accept={
@@ -1557,58 +1765,114 @@ function formatMemory(memoryMiB: number) {
     : `${(memoryMiB / 1024).toFixed(1)} GiB`;
 }
 
-function MetricCard({
-  icon,
+function AdminCompatibilityState({
+  onRetry,
+  statusCode,
+}: {
+  onRetry: () => void;
+  statusCode: number;
+}) {
+  return (
+    <section className="product-panel" role="status">
+      <div className="p-5 sm:p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            Admin API is not available
+          </h2>
+          <span className="rounded-full border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-warning-fg)]">
+            HTTP {statusCode}
+          </span>
+        </div>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-fg-muted)]">
+          This relay server does not expose the administration endpoints required
+          by this web app. The relay home and normal device controls remain
+          available.
+        </p>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-fg-muted)]">
+          Update and restart the relay server with a compatible Remote Codex
+          release, then retry this check.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button className="relay-button-primary" onClick={onRetry} type="button">
+            Retry
+          </button>
+          <Link className="relay-button-secondary" to="/">
+            Relay home
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MetricStat({
   label,
   value,
   detail,
 }: {
-  icon: React.ReactNode;
   label: string;
   value: number;
   detail: string;
 }) {
   return (
-    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-      <div className="flex items-start gap-3">
-        <span className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-2 text-[var(--theme-accent-strong)]">
-          {icon}
+    <div className="min-w-0 px-4 py-3.5 sm:border-l sm:border-[var(--theme-border)] sm:first:border-l-0">
+      <dt className="truncate text-xs font-medium text-[var(--theme-fg-muted)]">
+        {label}
+      </dt>
+      <dd className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-xl font-semibold tabular-nums text-[var(--theme-fg)]">
+          {value.toLocaleString()}
         </span>
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
-            {label}
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-[var(--theme-fg)]">
-            {value.toLocaleString()}
-          </p>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">{detail}</p>
-        </div>
-      </div>
-    </article>
+        <span className="text-xs text-[var(--theme-fg-muted)]">{detail}</span>
+      </dd>
+    </div>
   );
 }
 
-function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
-  const [session, setSession] = useState<RelaySessionDto | null>(null);
+function RelayAdminUserMenu({
+  onLogout,
+  session,
+}: {
+  onLogout: () => void;
+  session: RelaySessionDto | null;
+}) {
   const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchRelayAdminSession()
-      .then((nextSession) => {
-        if (!cancelled) {
-          setSession(nextSession.authenticated ? nextSession : null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSession(null);
-        }
-      });
+    if (!open) {
+      return;
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    }, 0);
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && !wrapperRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
-      cancelled = true;
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [open]);
 
   const user = session?.user ?? null;
   if (!user) {
@@ -1616,20 +1880,48 @@ function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
   }
 
   async function logout() {
-    await relayAdminLogout();
-    setSession(null);
-    setOpen(false);
-    onLogout();
+    try {
+      await relayAdminLogout();
+    } catch {
+      // The local admin token is cleared before the session refresh request.
+    } finally {
+      setOpen(false);
+      onLogout();
+    }
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }
 
   return (
-    <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.55rem)] z-50">
+    <div
+      className="relative z-40 shrink-0"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+      ref={wrapperRef}
+    >
       <button
+        aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`Relay admin menu for ${user.username}`}
-        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] text-sm font-semibold text-[var(--theme-fg)] shadow-lg transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
         onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        ref={triggerRef}
         type="button"
       >
         {initials(user.username)}
@@ -1637,6 +1929,9 @@ function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
       {open ? (
         <div
           className="absolute right-0 mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)]"
+          id={menuId}
+          onKeyDown={handleMenuKeyDown}
+          ref={menuRef}
           role="menu"
         >
           <div className="border-b border-[var(--theme-border)] px-3 py-2">
@@ -1651,7 +1946,7 @@ function RelayAdminUserMenu({ onLogout }: { onLogout: () => void }) {
             </p>
           </div>
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)]"
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus-visible:bg-[var(--status-danger-bg)]"
             onClick={() => void logout()}
             role="menuitem"
             type="button"
@@ -1671,7 +1966,7 @@ function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
     .slice(0, 6);
   const activeDevices = summary.devices.filter((device) => device.connected);
   return (
-    <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.7fr)]">
+    <section className="product-panel grid min-w-0 divide-y divide-[var(--theme-border)] xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.7fr)] xl:divide-x xl:divide-y-0">
       <Panel title="Recent users" detail="Last authenticated relay activity.">
         <div className="divide-y divide-[var(--theme-border)]">
           {recentUsers.map((user) => (
@@ -1783,6 +2078,44 @@ function UsersTable({
             {users.length.toLocaleString()} users
           </p>
         </div>
+        <div className="mb-4 grid grid-cols-2 gap-3 md:hidden">
+          <label className="text-xs font-medium text-[var(--theme-fg-muted)]">
+            Sort by
+            <select
+              className="relay-input mt-1.5 w-full"
+              onChange={(event) =>
+                setSort((current) => ({
+                  ...current,
+                  key: event.target.value as UserSortKey,
+                }))
+              }
+              value={sort.key}
+            >
+              <option value="username">User</option>
+              <option value="enabled">Status</option>
+              <option value="lastSeenAt">Last used</option>
+              <option value="conversationCount">Conversations</option>
+              <option value="deviceCount">Devices</option>
+              <option value="createdAt">Created</option>
+            </select>
+          </label>
+          <label className="text-xs font-medium text-[var(--theme-fg-muted)]">
+            Direction
+            <select
+              className="relay-input mt-1.5 w-full"
+              onChange={(event) =>
+                setSort((current) => ({
+                  ...current,
+                  direction: event.target.value as SortDirection,
+                }))
+              }
+              value={sort.direction}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </label>
+        </div>
         <ResponsiveTable minWidth="68rem">
           <thead>
             <tr>
@@ -1828,22 +2161,22 @@ function UsersTable({
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.id}>
-                <Td strong>
+                <Td label="User" strong>
                   {user.username}
                   <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
                     {user.email}
                   </div>
                 </Td>
-                <Td>
+                <Td label="Status">
                   <StatusPill active={user.enabled}>
                     {user.enabled ? 'Enabled' : 'Disabled'}
                   </StatusPill>
                 </Td>
-                <Td>{formatTimestamp(user.lastSeenAt)}</Td>
-                <Td>{user.conversationCount.toLocaleString()}</Td>
-                <Td>{user.deviceCount.toLocaleString()}</Td>
-                <Td>{user.role}</Td>
-                <Td>
+                <Td label="Last used">{formatTimestamp(user.lastSeenAt)}</Td>
+                <Td label="Conversations">{user.conversationCount.toLocaleString()}</Td>
+                <Td label="Devices">{user.deviceCount.toLocaleString()}</Td>
+                <Td label="Role">{user.role}</Td>
+                <Td label="Actions">
                   <div className="flex flex-wrap gap-2">
                     <button
                       className="relay-button-secondary"
@@ -2044,13 +2377,13 @@ function DevicesPanel({
         <tbody>
           {filteredDevices.map((device) => (
             <tr key={device.id}>
-              <Td strong>
+              <Td label="Device" strong>
                 {device.name}
                 <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
                   {device.tokenPreview}
                 </div>
               </Td>
-              <Td>
+              <Td label="Owner">
                 <span className="font-medium text-[var(--theme-fg-soft)]">
                   {device.ownerUsername}
                 </span>
@@ -2058,18 +2391,18 @@ function DevicesPanel({
                   {device.ownerEmail}
                 </div>
               </Td>
-              <Td>
+              <Td label="Status">
                 <StatusPill active={device.connected}>
                   {device.connected ? 'Online' : 'Offline'}
                 </StatusPill>
               </Td>
-              <Td>
+              <Td label="Last activity">
                 {formatTimestamp(deviceLastActivity(device))}
                 <div className="text-xs text-[var(--theme-fg-muted)]">
                   created {formatTimestamp(device.createdAt)}
                 </div>
               </Td>
-              <Td>
+              <Td label="Inventory">
                 <span>
                   {device.workspaces.length.toLocaleString()} workspaces
                 </span>
@@ -2082,7 +2415,7 @@ function DevicesPanel({
                   {device.threads[0]?.title ?? 'No thread metadata'}
                 </div>
               </Td>
-              <Td>
+              <Td label="Network">
                 {device.ipAddress ?? 'IP unavailable'}
                 <div className="text-xs text-[var(--theme-fg-muted)]">
                   heartbeat {formatTimestamp(device.lastHeartbeatAt)}
@@ -2120,9 +2453,9 @@ function SharesTable({ shares }: { shares: RelaySessionShareDto[] }) {
         <tbody>
           {shares.map((share) => (
             <tr key={share.id}>
-              <Td strong>{share.ownerUsername}</Td>
-              <Td>{share.targetUsername}</Td>
-              <Td>
+              <Td label="Owner" strong>{share.ownerUsername}</Td>
+              <Td label="Target">{share.targetUsername}</Td>
+              <Td label="Thread">
                 <span className="font-medium text-[var(--theme-fg)]">
                   {share.threadTitle ?? share.label ?? 'Thread unavailable'}
                 </span>
@@ -2130,13 +2463,13 @@ function SharesTable({ shares }: { shares: RelaySessionShareDto[] }) {
                   {share.workspaceLabel ?? 'Workspace unavailable'}
                 </div>
               </Td>
-              <Td>{share.deviceName}</Td>
-              <Td>
+              <Td label="Device">{share.deviceName}</Td>
+              <Td label="Permissions">
                 {share.threadAccess} /{' '}
                 {workspaceAccessLabel(share.workspaceAccess)}
               </Td>
-              <Td>{formatTimestamp(share.lastAccessedAt)}</Td>
-              <Td>
+              <Td label="Last access">{formatTimestamp(share.lastAccessedAt)}</Td>
+              <Td label="Status">
                 {share.revokedAt
                   ? 'Revoked'
                   : share.expiresAt &&
@@ -2172,8 +2505,9 @@ function SettingsPanel({
   pending: RelayAdminSummaryDto['pendingRegistrations'];
   reviewBusyKey: string | null;
 }) {
+  const settingsLocked = busy || reviewBusyKey !== null;
   return (
-    <section className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+    <section className="product-panel grid min-w-0 divide-y divide-[var(--theme-border)] xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] xl:divide-x xl:divide-y-0">
       <Panel
         title="Registration settings"
         detail="Stored in the relay database. Environment password seeds this once if empty."
@@ -2181,6 +2515,7 @@ function SettingsPanel({
         <form className="space-y-4" onSubmit={onSave}>
           <Checkbox
             checked={draft.enabled}
+            disabled={settingsLocked}
             label="Open registration"
             onChange={(enabled) => onChange({ ...draft, enabled })}
           />
@@ -2188,6 +2523,7 @@ function SettingsPanel({
             Registration password
             <input
               className="relay-input mt-2 w-full"
+              disabled={settingsLocked}
               onChange={(event) =>
                 onChange({ ...draft, registrationPassword: event.target.value })
               }
@@ -2197,24 +2533,25 @@ function SettingsPanel({
           </label>
           <Checkbox
             checked={draft.approvalRequired}
+            disabled={settingsLocked}
             label="Require admin approval"
             onChange={(approvalRequired) =>
               onChange({ ...draft, approvalRequired })
             }
           />
           <div className="space-y-3 border-t border-[var(--theme-border)] pt-4">
-            <Checkbox checked={draft.googleAuthEnabled} disabled={!draft.googleAuthAvailable} label="Enable Google authentication" onChange={(googleAuthEnabled) => onChange({ ...draft, googleAuthEnabled })} />
-            <Checkbox checked={draft.githubAuthEnabled} disabled={!draft.githubAuthAvailable} label="Enable GitHub authentication" onChange={(githubAuthEnabled) => onChange({ ...draft, githubAuthEnabled })} />
-            <Checkbox checked={draft.emailVerificationEnabled} disabled={!draft.emailVerificationAvailable} label="Enable email verification" onChange={(emailVerificationEnabled) => onChange({ ...draft, emailVerificationEnabled })} />
+            <Checkbox checked={draft.googleAuthEnabled} disabled={settingsLocked || !draft.googleAuthAvailable} label="Enable Google authentication" onChange={(googleAuthEnabled) => onChange({ ...draft, googleAuthEnabled })} />
+            <Checkbox checked={draft.githubAuthEnabled} disabled={settingsLocked || !draft.githubAuthAvailable} label="Enable GitHub authentication" onChange={(githubAuthEnabled) => onChange({ ...draft, githubAuthEnabled })} />
+            <Checkbox checked={draft.emailVerificationEnabled} disabled={settingsLocked || !draft.emailVerificationAvailable} label="Enable email verification" onChange={(emailVerificationEnabled) => onChange({ ...draft, emailVerificationEnabled })} />
             {!draft.emailVerificationAvailable ? <p className="text-xs text-[var(--theme-fg-muted)]">Configure the email provider and verification secret to enable this option.</p> : null}
           </div>
           <button
             className="relay-button-primary inline-flex items-center gap-2"
-            disabled={busy}
+            disabled={settingsLocked}
             type="submit"
           >
             <Settings className="h-4 w-4" />
-            Save settings
+            {busy ? 'Saving...' : 'Save settings'}
           </button>
         </form>
       </Panel>
@@ -2241,7 +2578,7 @@ function SettingsPanel({
                 <div className="flex gap-2">
                   <button
                     className="relay-button-primary inline-flex items-center gap-2"
-                    disabled={reviewBusyKey === `approve:${request.id}`}
+                    disabled={reviewBusyKey !== null}
                     onClick={() => onReviewRegistration(request.id, 'approve')}
                     type="button"
                   >
@@ -2250,7 +2587,7 @@ function SettingsPanel({
                   </button>
                   <button
                     className="relay-button-secondary"
-                    disabled={reviewBusyKey === `reject:${request.id}`}
+                    disabled={reviewBusyKey !== null}
                     onClick={() => onReviewRegistration(request.id, 'reject')}
                     type="button"
                   >
@@ -2309,7 +2646,7 @@ function Panel({
   title: string;
 }) {
   return (
-    <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+    <section className="min-w-0 px-4 py-5 sm:px-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">
@@ -2332,7 +2669,12 @@ function ResponsiveTable({
   minWidth: string;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div
+      aria-label="Scrollable data table"
+      className="admin-responsive-table max-w-full overflow-x-auto overscroll-x-contain rounded-lg border border-[var(--theme-border)]"
+      role="region"
+      tabIndex={0}
+    >
       <table
         className="w-full border-collapse text-left text-sm"
         style={{ minWidth }}
@@ -2345,7 +2687,7 @@ function ResponsiveTable({
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+    <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--theme-fg-muted)] first:pl-3">
       {children}
     </th>
   );
@@ -2368,7 +2710,10 @@ function SortableTh({
       ? ArrowUp
       : ArrowDown;
   return (
-    <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
+    <th
+      aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className="border-b border-[var(--theme-border)] py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[var(--theme-fg-muted)] first:pl-3"
+    >
       <button
         className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)] ${
           active ? 'text-[var(--theme-fg)]' : ''
@@ -2385,15 +2730,19 @@ function SortableTh({
 
 function Td({
   children,
+  label,
   strong = false,
 }: {
   children: React.ReactNode;
+  label: string;
   strong?: boolean;
 }) {
   return (
     <td
-      className={`border-b border-[var(--theme-border)] py-3 pr-3 ${strong ? 'font-medium text-[var(--theme-fg)]' : 'text-[var(--theme-fg-muted)]'}`}
+      data-label={label}
+      className={`border-b border-[var(--theme-border)] py-3 pr-3 first:pl-3 ${strong ? 'font-medium text-[var(--theme-fg)]' : 'text-[var(--theme-fg-muted)]'}`}
     >
+      <span className="sr-only md:hidden">{label}: </span>
       {children}
     </td>
   );
@@ -2446,7 +2795,7 @@ function StatusPill({
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
+    <p className="product-empty !min-h-24 !p-4 text-sm">
       {children}
     </p>
   );
@@ -2465,6 +2814,18 @@ function PasswordResetDialog({
 }) {
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
+  const errorId = useId();
+
+  useDialogLifecycle({
+    busy,
+    containerRef: dialogRef,
+    initialFocusRef: inputRef,
+    onClose,
+    open: true,
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2473,37 +2834,79 @@ function PasswordResetDialog({
       setLocalError('Password must be at least 8 characters.');
       return;
     }
-    await onSubmit(password);
+    try {
+      await onSubmit(password);
+    } catch (caught) {
+      setLocalError(errorMessage(caught));
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
-      <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
-        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">
-          Reset password
-        </h2>
-        <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-          Set a new relay password for {user.username}.
-        </p>
-        <form className="mt-5 space-y-4" onSubmit={submit}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+      <button
+        aria-label="Close reset password dialog"
+        className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
+        disabled={busy}
+        onClick={onClose}
+        tabIndex={-1}
+        type="button"
+      />
+      <form
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="host-dialog relative z-10 w-full max-w-md space-y-5 rounded-lg border p-5 shadow-[var(--theme-shadow)]"
+        onSubmit={submit}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--theme-fg)]" id={titleId}>
+              Reset password
+            </h2>
+            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+              Set a new relay password for {user.username}.
+            </p>
+          </div>
+          <button
+            aria-label="Close reset password dialog"
+            className="product-icon-button"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden="true" className="h-4 w-4" />
+          </button>
+        </header>
+        <div>
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             New password
             <input
-              autoFocus
+              aria-describedby={localError ? errorId : undefined}
+              aria-invalid={localError ? true : undefined}
+              autoComplete="new-password"
               className="relay-input mt-2 w-full"
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setLocalError(null);
+              }}
+              ref={inputRef}
+              required
               type="password"
               value={password}
             />
           </label>
           {localError ? (
-            <p className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+            <p className="mt-3 rounded-md bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]" id={errorId} role="alert">
               {localError}
             </p>
           ) : null}
-          <div className="flex justify-end gap-2">
+        </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               className="relay-button-secondary"
+              disabled={busy}
               onClick={onClose}
               type="button"
             >
@@ -2511,15 +2914,14 @@ function PasswordResetDialog({
             </button>
             <button
               className="relay-button-primary inline-flex items-center gap-2"
-              disabled={busy}
+              disabled={busy || password.length < 8}
               type="submit"
             >
-              <KeyRound className="h-4 w-4" />
-              Save password
+              <KeyRound aria-hidden="true" className="h-4 w-4" />
+              {busy ? 'Saving...' : 'Save password'}
             </button>
           </div>
-        </form>
-      </section>
+      </form>
     </div>
   );
 }
@@ -2539,34 +2941,91 @@ function DangerConfirmDialog({
   onConfirm: () => Promise<void>;
   title: string;
 }) {
+  const [localError, setLocalError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useDialogLifecycle({
+    busy,
+    containerRef: dialogRef,
+    initialFocusRef: cancelRef,
+    onClose,
+    open: true,
+  });
+
+  async function confirm() {
+    setLocalError(null);
+    try {
+      await onConfirm();
+    } catch (caught) {
+      setLocalError(errorMessage(caught));
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-8">
-      <section className="w-full max-w-md rounded-lg border border-[var(--status-danger-border)] bg-[var(--theme-panel)] p-5 shadow-2xl shadow-[color-mix(in_oklch,var(--app-fg)_18%,transparent)]">
-        <h2 className="text-lg font-semibold text-[var(--theme-fg)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+      <button
+        aria-label="Close confirmation dialog"
+        className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
+        disabled={busy}
+        onClick={onClose}
+        tabIndex={-1}
+        type="button"
+      />
+      <div
+        aria-describedby={descriptionId}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="host-dialog relative z-10 w-full max-w-md rounded-lg border p-5 shadow-[var(--theme-shadow)]"
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="text-lg font-semibold text-[var(--theme-fg)]" id={titleId}>
           {title}
-        </h2>
-        <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
+          </h2>
+          <button
+            aria-label="Close confirmation dialog"
+            className="product-icon-button"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden="true" className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]" id={descriptionId}>
           {description}
         </p>
-        <div className="mt-5 flex justify-end gap-2">
+        {localError ? (
+          <p className="mt-3 rounded-md bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]" role="alert">
+            {localError}
+          </p>
+        ) : null}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             className="relay-button-secondary"
+            disabled={busy}
             onClick={onClose}
+            ref={cancelRef}
             type="button"
           >
             Cancel
           </button>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-[var(--action-danger-bg)] px-4 text-sm font-semibold text-[var(--action-danger-fg)] transition hover:bg-[var(--action-danger-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="ui-action-danger inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed"
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => void confirm()}
             type="button"
           >
-            <Trash2 className="h-4 w-4" />
-            {confirmLabel}
+            <Trash2 aria-hidden="true" className="h-4 w-4" />
+            {busy ? 'Deleting...' : confirmLabel}
           </button>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

@@ -1,20 +1,13 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FolderOpen, FolderPlus, GitBranch } from 'lucide-react';
 
-function inferWorkspaceLabel(absPath: string) {
-  const trimmed = absPath.trim();
-  const normalized = trimmed.replace(/[\\/]+$/, '');
-  if (!normalized) {
-    return '';
-  }
+export type WorkspaceFormMode = 'folder' | 'path' | 'git';
 
-  if (isGitInput(trimmed)) {
-    const withoutQuery = normalized.split(/[?#]/)[0] ?? normalized;
-    const rawName = withoutQuery.split(/[/:]/).filter(Boolean).at(-1) ?? '';
-    return rawName.endsWith('.git') ? rawName.slice(0, -4) : rawName;
-  }
+export type WorkspaceFormInput =
+  | { mode: 'folder' | 'path'; absPath: string; label?: string }
+  | { mode: 'git'; gitUrl: string; label?: string };
 
-  return normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
-}
+const folderNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function isGitInput(value: string) {
   const trimmed = value.trim();
@@ -25,33 +18,112 @@ function isGitInput(value: string) {
   );
 }
 
+function isAbsolutePath(value: string) {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(trimmed) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(trimmed)
+  );
+}
+
+function inferInitialMode(value: string): WorkspaceFormMode {
+  if (isGitInput(value)) {
+    return 'git';
+  }
+  return isAbsolutePath(value) ? 'path' : 'folder';
+}
+
+function inferWorkspaceLabel(value: string) {
+  const trimmed = value.trim();
+  const normalized = trimmed.replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+
+  const withoutQuery = normalized.split(/[?#]/)[0] ?? normalized;
+  const rawName = withoutQuery.split(/[\\/:]/).filter(Boolean).at(-1) ?? '';
+  return rawName.endsWith('.git') ? rawName.slice(0, -4) : rawName;
+}
+
+const modeOptions = [
+  { value: 'folder' as const, label: 'New folder', Icon: FolderPlus },
+  { value: 'path' as const, label: 'Existing path', Icon: FolderOpen },
+  { value: 'git' as const, label: 'Git repository', Icon: GitBranch },
+];
+
+const modeFields: Record<
+  WorkspaceFormMode,
+  { label: string; placeholder: string; hint: string; submitLabel: string; busyLabel: string }
+> = {
+  folder: {
+    label: 'Folder name',
+    placeholder: 'my-project',
+    hint: 'Creates a new directory under the configured development folder.',
+    submitLabel: 'Create folder',
+    busyLabel: 'Creating...',
+  },
+  path: {
+    label: 'Absolute path',
+    placeholder: '/Users/name/project',
+    hint: 'Registers a directory that is already available on this device.',
+    submitLabel: 'Add workspace',
+    busyLabel: 'Adding...',
+  },
+  git: {
+    label: 'Repository URL',
+    placeholder: 'https://github.com/owner/repo.git',
+    hint: 'Clones the repository into the configured development folder.',
+    submitLabel: 'Clone repository',
+    busyLabel: 'Cloning...',
+  },
+};
+
 interface WorkspaceFormProps {
   initialPath?: string;
   initialLabel?: string;
+  initialMode?: WorkspaceFormMode;
+  newFolderRoot?: string | null;
   submitLabel?: string;
   error?: string | null;
   busy?: boolean;
   surface?: boolean;
-  onSubmit: (input: { absPath: string; label?: string } | { gitUrl: string; label?: string }) => Promise<void> | void;
+  onCancel?: () => void;
+  onInputChange?: () => void;
+  onSubmit: (input: WorkspaceFormInput) => Promise<void> | void;
 }
 
 export function WorkspaceForm({
   initialPath = '',
   initialLabel = '',
-  submitLabel = 'Save Workspace',
+  initialMode,
+  newFolderRoot,
+  submitLabel,
   error,
   busy = false,
   surface = true,
-  onSubmit
+  onCancel,
+  onInputChange,
+  onSubmit,
 }: WorkspaceFormProps) {
+  const resolvedInitialMode = initialMode ?? inferInitialMode(initialPath);
   const initialAutoLabel = inferWorkspaceLabel(initialPath);
-  const [absPath, setAbsPath] = useState(initialPath);
+  const [mode, setMode] = useState<WorkspaceFormMode>(resolvedInitialMode);
+  const [targets, setTargets] = useState<Record<WorkspaceFormMode, string>>({
+    folder: resolvedInitialMode === 'folder' ? initialPath : '',
+    path: resolvedInitialMode === 'path' ? initialPath : '',
+    git: resolvedInitialMode === 'git' ? initialPath : '',
+  });
   const [label, setLabel] = useState(initialLabel || initialAutoLabel);
   const [localError, setLocalError] = useState<string | null>(null);
   const previousAutoLabelRef = useRef(initialAutoLabel);
+  const targetInputRef = useRef<HTMLInputElement | null>(null);
+  const activeTarget = targets[mode];
+  const field = modeFields[mode];
+  const fieldError = localError ?? error ?? null;
 
   useEffect(() => {
-    const nextAutoLabel = inferWorkspaceLabel(absPath);
+    const nextAutoLabel = inferWorkspaceLabel(activeTarget);
     setLabel((current) => {
       if (!current.trim() || current === previousAutoLabelRef.current) {
         return nextAutoLabel;
@@ -60,76 +132,167 @@ export function WorkspaceForm({
       return current;
     });
     previousAutoLabelRef.current = nextAutoLabel;
-  }, [absPath]);
+  }, [activeTarget]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    const focusFrame = window.requestAnimationFrame(() => targetInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [error]);
+
+  function clearErrors() {
+    setLocalError(null);
+    onInputChange?.();
+  }
+
+  function changeMode(nextMode: WorkspaceFormMode) {
+    setMode(nextMode);
+    clearErrors();
+  }
+
+  function validateTarget(rawTarget: string) {
+    if (!rawTarget) {
+      return `${field.label} is required.`;
+    }
+    if (mode === 'folder' && !folderNamePattern.test(rawTarget)) {
+      return 'Use 1-128 letters, numbers, periods, underscores, or hyphens.';
+    }
+    if (mode === 'path' && !isAbsolutePath(rawTarget)) {
+      return 'Enter an absolute path, such as /Users/name/project.';
+    }
+    if (mode === 'git' && !isGitInput(rawTarget)) {
+      return 'Enter an HTTPS or SSH Git repository URL.';
+    }
+    return null;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const rawTarget = absPath.trim();
-    if (!rawTarget) {
-      setLocalError('Workspace path or Git URL is required.');
+    const rawTarget = activeTarget.trim();
+    const validationError = validateTarget(rawTarget);
+    if (validationError) {
+      setLocalError(validationError);
+      targetInputRef.current?.focus();
       return;
     }
 
     setLocalError(null);
     const normalizedLabel = label.trim();
-    const payload = isGitInput(rawTarget)
-      ? { gitUrl: rawTarget, ...(normalizedLabel ? { label: normalizedLabel } : {}) }
-      : { absPath: rawTarget, ...(normalizedLabel ? { label: normalizedLabel } : {}) };
+    const optionalLabel = normalizedLabel ? { label: normalizedLabel } : {};
+    const payload: WorkspaceFormInput =
+      mode === 'git'
+        ? { mode, gitUrl: rawTarget, ...optionalLabel }
+        : { mode, absPath: rawTarget, ...optionalLabel };
     await onSubmit(payload);
   }
 
   const formClassName = surface
-    ? 'host-panel space-y-5 rounded-lg border p-5 sm:p-6'
-    : 'space-y-5';
+    ? 'product-panel space-y-6 p-5 sm:p-6'
+    : 'space-y-6';
+  const hintText =
+    mode === 'folder' && newFolderRoot
+      ? `Creates a new directory under ${newFolderRoot}.`
+      : field.hint;
 
   return (
-    <form onSubmit={handleSubmit} className={formClassName}>
+    <form onSubmit={handleSubmit} className={formClassName} noValidate>
+      <fieldset disabled={busy}>
+        <legend className="host-form-label text-sm font-medium">Workspace source</legend>
+        <div className="product-segmented mt-2 !grid w-full grid-cols-3 !overflow-visible" aria-label="Workspace source">
+          {modeOptions.map(({ value, label: optionLabel, Icon }) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              onClick={() => changeMode(value)}
+              className="product-segment flex !min-h-14 min-w-0 items-center justify-center gap-1.5 !whitespace-normal px-1.5 text-center leading-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] sm:!min-h-11 sm:px-3"
+            >
+              <Icon aria-hidden="true" className="hidden h-4 w-4 shrink-0 sm:block" />
+              <span>{optionLabel}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
       <div>
-        <label htmlFor="workspace-path" className="host-form-label text-sm font-medium">
-          Path or Git URL
+        <label htmlFor="workspace-target" className="host-form-label text-sm font-medium">
+          {field.label}
         </label>
         <input
-          id="workspace-path"
-          name="absPath"
-          value={absPath}
-          onChange={(event) => setAbsPath(event.target.value)}
-          placeholder="test, /Users/name/project, or https://github.com/owner/repo.git"
-          className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+          ref={targetInputRef}
+          id="workspace-target"
+          name={mode === 'git' ? 'gitUrl' : mode === 'folder' ? 'folderName' : 'absPath'}
+          value={activeTarget}
+          onChange={(event) => {
+            setTargets((current) => ({ ...current, [mode]: event.target.value }));
+            clearErrors();
+          }}
+          placeholder={field.placeholder}
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={busy}
+          aria-invalid={fieldError ? true : undefined}
+          aria-describedby={`workspace-target-hint${fieldError ? ' workspace-target-error' : ''}`}
+          aria-errormessage={fieldError ? 'workspace-target-error' : undefined}
+          className="host-form-control mt-2 min-h-11 w-full rounded-lg border px-4 py-2.5 outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <p className="host-muted mt-2 text-xs">
-          A name such as “test” creates a folder under the configured workspace directory. Absolute
-          paths register existing directories; Git URLs clone a repository.
+        <p id="workspace-target-hint" className="host-muted mt-2 break-words text-xs leading-5">
+          {hintText}
         </p>
+        {fieldError ? (
+          <p
+            id="workspace-target-error"
+            role="alert"
+            className="mt-2 text-sm leading-5 text-[var(--status-danger-fg)]"
+          >
+            {fieldError}
+          </p>
+        ) : null}
       </div>
+
       <div>
         <label htmlFor="workspace-label" className="host-form-label text-sm font-medium">
-          Display label
+          Display label <span className="host-muted font-normal">(optional)</span>
         </label>
         <input
           id="workspace-label"
           name="label"
           value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          placeholder="Optional override"
-          className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+          onChange={(event) => {
+            setLabel(event.target.value);
+            clearErrors();
+          }}
+          placeholder="Uses the folder or repository name"
+          disabled={busy}
+          className="host-form-control mt-2 min-h-11 w-full rounded-lg border px-4 py-2.5 outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <p className="host-muted mt-2 text-xs">
-          Defaults to the last folder name. You can override it.
-        </p>
       </div>
-      {(localError || error) && (
-        <div className="host-error rounded-lg border px-4 py-3 text-sm">
-          {localError ?? error}
-        </div>
-      )}
-      <button
-        type="submit"
-        disabled={busy}
-        className="ui-action-primary rounded-lg px-5 py-3 font-medium transition disabled:cursor-not-allowed"
-      >
-        {busy ? 'Saving...' : submitLabel}
-      </button>
+
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--theme-border)] pt-5">
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="host-secondary-button inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+        ) : null}
+        <button
+          type="submit"
+          disabled={busy || !activeTarget.trim()}
+          className="ui-action-primary inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-medium transition disabled:cursor-not-allowed"
+        >
+          {busy ? field.busyLabel : submitLabel ?? field.submitLabel}
+        </button>
+      </div>
     </form>
   );
 }

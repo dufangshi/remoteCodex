@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   Copy,
+  Ellipsis,
   MonitorSmartphone,
   Plug,
   Plus,
@@ -8,7 +9,15 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import type {
@@ -40,6 +49,11 @@ import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
 type SupervisorPlatform = 'unix' | 'windows';
+type SharedView =
+  | 'incoming-threads'
+  | 'incoming-devices'
+  | 'outgoing-devices'
+  | 'outgoing-threads';
 const RELAY_SUPERVISOR_PORT_BY_PLATFORM: Record<SupervisorPlatform, number> = {
   unix: 45679,
   windows: 45680,
@@ -168,9 +182,17 @@ export function RelayDevicesPage() {
   const [createdDevice, setCreatedDevice] =
     useState<RelayCreateDeviceResultDto | null>(null);
   const [copiedDeviceId, setCopiedDeviceId] = useState<string | null>(null);
+  const [deviceCopyError, setDeviceCopyError] = useState<{
+    deviceId: string;
+    message: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [activeSharedView, setActiveSharedView] =
+    useState<SharedView>('incoming-threads');
   const [expandedShareId, setExpandedShareId] = useState<string | null>(null);
   const [expandedGrantId, setExpandedGrantId] = useState<string | null>(null);
   const [editingShare, setEditingShare] = useState<RelaySessionShareDto | null>(
@@ -184,6 +206,8 @@ export function RelayDevicesPage() {
     | { kind: 'share'; share: RelaySessionShareDto }
     | null
   >(null);
+  const [deletingDevice, setDeletingDevice] =
+    useState<RelayDeviceDto | null>(null);
   const [sharingDevice, setSharingDevice] = useState<RelayDeviceDto | null>(
     null,
   );
@@ -191,6 +215,7 @@ export function RelayDevicesPage() {
   const hasLoadedPortalRef = useRef(false);
   const handledShareDeviceRequestRef = useRef<string | null>(null);
   const copiedResetTimeoutRef = useRef<number | null>(null);
+  const addDeviceButtonRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(
     async (options?: { showLoading?: boolean; clearError?: boolean }) => {
@@ -206,12 +231,22 @@ export function RelayDevicesPage() {
       try {
         enableRelayMode();
         const nextPortal = await fetchRelayPortal();
+        const recoveredInitialLoad = !hasLoadedPortalRef.current;
         hasLoadedPortalRef.current = true;
         setPortal((current) => mergeRelayPortalSummary(current, nextPortal));
-      } catch (caught) {
-        if (showLoading || !hasLoadedPortalRef.current) {
-          setError(errorMessage(caught, 'Unable to load devices.'));
+        if (recoveredInitialLoad) {
+          setError(null);
         }
+        setRefreshError(null);
+        return true;
+      } catch (caught) {
+        const message = errorMessage(caught, 'Unable to load devices.');
+        if (showLoading || !hasLoadedPortalRef.current) {
+          setError(message);
+        } else {
+          setRefreshError(message);
+        }
+        return false;
       } finally {
         if (showLoading) {
           setLoading(false);
@@ -222,13 +257,68 @@ export function RelayDevicesPage() {
   );
 
   useEffect(() => {
-    void load();
-    const intervalId = window.setInterval(() => {
-      void load({ showLoading: false, clearError: false });
-    }, RELAY_PORTAL_REFRESH_INTERVAL_MS);
+    let cancelled = false;
+    let refreshing = false;
+    let retryCount = 0;
+    let timeoutId: number | null = null;
+
+    function scheduleNextRefresh() {
+      if (cancelled || document.visibilityState === 'hidden') {
+        return;
+      }
+      const delay = Math.min(
+        RELAY_PORTAL_REFRESH_INTERVAL_MS * 2 ** retryCount,
+        48_000,
+      );
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        void refresh(false);
+      }, delay);
+    }
+
+    async function refresh(initial: boolean) {
+      if (refreshing) {
+        return;
+      }
+      refreshing = true;
+      try {
+        const succeeded = await load(
+          initial
+            ? undefined
+            : { showLoading: false, clearError: false },
+        );
+        if (cancelled) {
+          return;
+        }
+        retryCount = succeeded ? 0 : Math.min(retryCount + 1, 4);
+        scheduleNextRefresh();
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (document.visibilityState !== 'hidden') {
+        void refresh(false);
+      }
+    }
+
+    void refresh(true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.clearInterval(intervalId);
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange,
+      );
     };
   }, [load]);
 
@@ -256,6 +346,7 @@ export function RelayDevicesPage() {
     }
 
     handledShareDeviceRequestRef.current = requestedDeviceId;
+    setDialogError(null);
     setSharingDevice(device);
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('shareDevice');
@@ -279,8 +370,9 @@ export function RelayDevicesPage() {
     }
   }
 
-  async function removeDevice(device: RelayDeviceDto) {
-    if (!window.confirm(`Delete relay device "${device.name}"?`)) {
+  async function removeDevice() {
+    const device = deletingDevice;
+    if (!device) {
       return;
     }
     setBusy(device.id);
@@ -290,7 +382,25 @@ export function RelayDevicesPage() {
       if (createdDevice?.device.id === device.id) {
         setCreatedDevice(null);
       }
-      await load({ showLoading: false });
+      const reloaded = await load({ showLoading: false });
+      if (!reloaded) {
+        setPortal((current) =>
+          current
+            ? {
+                ...current,
+                devices: current.devices.filter((entry) => entry.id !== device.id),
+              }
+            : current,
+        );
+      }
+      setDeletingDevice(null);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (document.activeElement === document.body) {
+            document.getElementById('devices-heading')?.focus();
+          }
+        });
+      });
     } catch (caught) {
       setError(errorMessage(caught, 'Unable to delete device.'));
     } finally {
@@ -331,7 +441,7 @@ export function RelayDevicesPage() {
     },
   ) {
     setBusy(`grant:create:${device.id}`);
-    setError(null);
+    setDialogError(null);
     try {
       await createRelayGrant({
         ...input,
@@ -341,9 +451,10 @@ export function RelayDevicesPage() {
         workspaceIds: [],
       });
       setSharingDevice(null);
+      setDialogError(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to share device.'));
+      setDialogError(errorMessage(caught, 'Unable to share device.'));
     } finally {
       setBusy(null);
     }
@@ -360,7 +471,7 @@ export function RelayDevicesPage() {
     },
   ) {
     setBusy(`grant:${grant.id}`);
-    setError(null);
+    setDialogError(null);
     try {
       await updateRelayGrant(grant.id, {
         ...input,
@@ -369,9 +480,12 @@ export function RelayDevicesPage() {
         workspaceIds: grant.workspaceIds,
       });
       setEditingGrant(null);
+      setDialogError(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to update shared access.'));
+      setDialogError(
+        errorMessage(caught, 'Unable to update shared access.'),
+      );
     } finally {
       setBusy(null);
     }
@@ -402,16 +516,19 @@ export function RelayDevicesPage() {
     },
   ) {
     setBusy(`share:${share.id}`);
-    setError(null);
+    setDialogError(null);
     try {
       await updateRelayShare(share.id, {
         ...input,
         workspaceId: share.workspaceId,
       });
       setEditingShare(null);
+      setDialogError(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to update shared thread.'));
+      setDialogError(
+        errorMessage(caught, 'Unable to update shared thread.'),
+      );
     } finally {
       setBusy(null);
     }
@@ -438,16 +555,28 @@ export function RelayDevicesPage() {
   ) {
     const token = device.token;
     if (!token) {
-      setError(
-        'This device token is not available. Create a new device token for devices created before token storage was enabled.',
-      );
+      setDeviceCopyError({
+        deviceId: device.id,
+        message:
+          'This token is unavailable. Create a new device to generate a setup command.',
+      });
+      return;
+    }
+
+    const clipboard = navigator.clipboard;
+    if (!clipboard || typeof clipboard.writeText !== 'function') {
+      setCopiedDeviceId(null);
+      setDeviceCopyError({
+        deviceId: device.id,
+        message:
+          'Clipboard access is unavailable. Check browser permissions and try again.',
+      });
       return;
     }
 
     try {
-      await navigator.clipboard?.writeText(
-        relaySupervisorCommand(token, platform),
-      );
+      await clipboard.writeText(relaySupervisorCommand(token, platform));
+      setDeviceCopyError(null);
       setCopiedDeviceId(device.id);
       if (copiedResetTimeoutRef.current !== null) {
         window.clearTimeout(copiedResetTimeoutRef.current);
@@ -459,96 +588,252 @@ export function RelayDevicesPage() {
         copiedResetTimeoutRef.current = null;
       }, 1600);
     } catch {
-      // Clipboard access can be unavailable in non-secure contexts.
+      setCopiedDeviceId(null);
+      setDeviceCopyError({
+        deviceId: device.id,
+        message:
+          'Unable to copy the setup command. Check browser clipboard permissions and try again.',
+      });
     }
   }
 
   const sharedDevicesWithMe = portal?.sharedDevicesWithMe ?? [];
   const outgoingGrants = portal?.grantsByMe ?? [];
+  const sharedViewTabs: Array<{
+    count: number;
+    id: SharedView;
+    label: string;
+  }> = [
+    {
+      id: 'incoming-threads',
+      label: 'Threads with me',
+      count: portal?.sharedWithMe.length ?? 0,
+    },
+    {
+      id: 'incoming-devices',
+      label: 'Devices with me',
+      count: groupGrantsByDevice(sharedDevicesWithMe).length,
+    },
+    {
+      id: 'outgoing-devices',
+      label: 'Devices by me',
+      count: groupGrantsByDevice(outgoingGrants).length,
+    },
+    {
+      id: 'outgoing-threads',
+      label: 'Threads by me',
+      count: portal?.sharedByMe.length ?? 0,
+    },
+  ];
+
+  function handleSharedTabKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (index + 1) % sharedViewTabs.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex =
+        (index - 1 + sharedViewTabs.length) % sharedViewTabs.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = sharedViewTabs.length - 1;
+    }
+    if (nextIndex === null) {
+      return;
+    }
+    event.preventDefault();
+    const nextView = sharedViewTabs[nextIndex]?.id;
+    if (!nextView) {
+      return;
+    }
+    setActiveSharedView(nextView);
+    document.getElementById(`shared-tab-${nextView}`)?.focus();
+  }
 
   return (
-    <main className="min-h-screen bg-[var(--app-bg)] px-4 pb-6 text-[var(--app-fg)] sm:px-6">
-      <div className="mx-auto w-full max-w-[1600px] space-y-5">
-        <header className="host-topbar sticky top-[env(safe-area-inset-top)] z-30 -mx-4 border-b px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-4">
+    <div>
+      <div className="product-page space-y-6">
+        <header className="product-topbar -mx-4 px-2.5 sm:mx-0 sm:px-4">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            <RelayUserMenu />
+            <RelayUserMenu className="[&>button]:h-11 [&>button]:w-11 [&_[role=menuitem]]:min-h-11 sm:[&>button]:h-9 sm:[&>button]:w-9" />
             <Link
-              className="host-info-pill inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] transition sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+              className="relay-button-secondary inline-flex h-11 shrink-0 items-center px-3 text-xs font-medium sm:h-9"
               to="/"
             >
               Relay home
             </Link>
             <div className="min-w-0 flex-1 text-right">
-              <p className="host-page-eyebrow truncate text-[11px] uppercase tracking-[0.24em]">
-                Relay portal
-              </p>
+              <p className="truncate text-xs font-medium text-[var(--theme-fg-muted)]">Devices</p>
             </div>
           </div>
         </header>
 
-        <section className="border-b border-[var(--theme-border)] pb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-            Relay portal
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-[var(--theme-fg)]">
-            Devices and shared sessions
-          </h1>
+        <section className="product-page-header">
+          <div>
+            <h1 className="product-title">
+              Devices and shared sessions
+            </h1>
+          </div>
         </section>
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
-        {createdDevice ? <DeviceTokenPanel result={createdDevice} /> : null}
-
-        <section className="grid gap-4 xl:grid-cols-[minmax(42rem,0.9fr)_minmax(0,1.1fr)]">
-          <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-                  Devices
-                </h2>
-                <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                  Connect to an online device before opening workspaces.
-                </p>
-              </div>
-              <button
-                className="relay-button-secondary inline-flex h-9 shrink-0 items-center gap-2 px-3"
-                onClick={() => setAddDeviceOpen(true)}
-                type="button"
+        {refreshError ? (
+          <Notice tone="danger">
+            Latest device status could not be refreshed: {refreshError}
+            {' Retrying automatically.'}
+          </Notice>
+        ) : null}
+        <section aria-labelledby="devices-heading">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2
+                className="text-lg font-semibold text-[var(--theme-fg)]"
+                id="devices-heading"
+                tabIndex={-1}
               >
+                Devices
+              </h2>
+              <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+                Your relay supervisors and their current availability.
+              </p>
+            </div>
+            <button
+              aria-controls="add-device-form"
+              aria-expanded={addDeviceOpen}
+              className="relay-button-secondary inline-flex min-h-11 shrink-0 items-center gap-2 px-3 sm:min-h-10"
+              onClick={() => {
+                setError(null);
+                setAddDeviceOpen((current) => !current);
+              }}
+              ref={addDeviceButtonRef}
+              type="button"
+            >
+              {addDeviceOpen ? (
+                <X className="h-4 w-4" />
+              ) : (
                 <Plus className="h-4 w-4" />
-                Add
-              </button>
+              )}
+              {addDeviceOpen ? 'Close' : 'Add device'}
+            </button>
+          </div>
+
+          {addDeviceOpen ? (
+            <AddDeviceForm
+              busy={busy === 'create'}
+              deviceName={deviceName}
+              onChangeDeviceName={setDeviceName}
+              onClose={() => {
+                setAddDeviceOpen(false);
+                window.requestAnimationFrame(() =>
+                  addDeviceButtonRef.current?.focus(),
+                );
+              }}
+              onSubmit={addDevice}
+            />
+          ) : null}
+
+          {createdDevice ? <DeviceTokenPanel result={createdDevice} /> : null}
+
+          <div className="mt-4 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)]">
+            <div className="hidden grid-cols-[minmax(14rem,1fr)_minmax(14rem,0.8fr)_auto] gap-5 border-b border-[var(--theme-border)] px-3 py-2 text-xs font-medium text-[var(--theme-fg-muted)] md:grid">
+              <span>Device</span>
+              <span>Activity</span>
+              <span className="text-right">Action</span>
             </div>
             {loading ? (
-              <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
-                Loading devices...
-              </p>
+              <LoadingRows label="Loading devices..." />
             ) : portal?.devices.length ? (
-              <div className="space-y-3">
+              <div className="divide-y divide-[var(--theme-border)]">
                 {portal.devices.map((device) => (
                   <DeviceRow
                     busy={busy === device.id}
                     copiedSetup={copiedDeviceId === device.id}
+                    copyError={
+                      deviceCopyError?.deviceId === device.id
+                        ? deviceCopyError.message
+                        : null
+                    }
                     device={device}
                     key={device.id}
                     onConnect={() => connectDevice(device)}
                     onCopySetup={(platform) =>
                       void copySupervisorSetup(device, platform)
                     }
-                    onDelete={() => void removeDevice(device)}
-                    onShare={() => setSharingDevice(device)}
+                    onDelete={() => {
+                      setError(null);
+                      setDeletingDevice(device);
+                    }}
+                    onShare={() => {
+                      setDialogError(null);
+                      setSharingDevice(device);
+                    }}
                     setupTokenAvailable={Boolean(device.token)}
                   />
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
-                No devices yet. Create a token, then start `remote-codex
-                relay-supervisor` on your private machine.
+              <div className="product-empty">
+                No devices yet. Add a device to create its one-time supervisor
+                token.
               </div>
             )}
-          </section>
+          </div>
+        </section>
 
-          <div className="space-y-4">
+        <section aria-labelledby="shared-access-heading" className="pt-2">
+          <div>
+            <h2
+              className="text-lg font-semibold text-[var(--theme-fg)]"
+              id="shared-access-heading"
+            >
+              Shared access
+            </h2>
+            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+              Access you received and access you granted.
+            </p>
+          </div>
+          <div
+            aria-label="Shared access views"
+            className="product-segmented mt-4"
+            role="tablist"
+          >
+            {sharedViewTabs.map((tab, index) => {
+              const selected = tab.id === activeSharedView;
+              return (
+                <button
+                  aria-controls={`shared-panel-${tab.id}`}
+                  aria-selected={selected}
+                  className="product-segment inline-flex min-h-11 shrink-0 items-center gap-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]"
+                  id={`shared-tab-${tab.id}`}
+                  key={tab.id}
+                  onClick={() => setActiveSharedView(tab.id)}
+                  onKeyDown={(event) =>
+                    handleSharedTabKeyDown(event, index)
+                  }
+                  role="tab"
+                  style={{ minHeight: '2.75rem' }}
+                  tabIndex={selected ? 0 : -1}
+                  type="button"
+                >
+                  {tab.label}
+                  <span className="rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            aria-labelledby={`shared-tab-${activeSharedView}`}
+            id={`shared-panel-${activeSharedView}`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {activeSharedView === 'incoming-threads' ? (
             <ShareSection
               count={portal?.sharedWithMe.length ?? 0}
               emptyText="No sessions have been shared with this account yet."
@@ -566,7 +851,8 @@ export function RelayDevicesPage() {
                 />
               )}
             />
-
+            ) : null}
+            {activeSharedView === 'incoming-devices' ? (
             <GrantSection
               emptyText="No devices have been shared with this account yet."
               grants={sharedDevicesWithMe}
@@ -583,7 +869,8 @@ export function RelayDevicesPage() {
                 />
               )}
             />
-
+            ) : null}
+            {activeSharedView === 'outgoing-devices' ? (
             <GrantSection
               emptyText="No devices have been shared by this account yet."
               grants={outgoingGrants}
@@ -601,10 +888,14 @@ export function RelayDevicesPage() {
                   grants={group.grants}
                   mode="outgoing"
                   onOpen={openSharedGrant}
-                  onEdit={setEditingGrant}
-                  onRevoke={(grant) =>
-                    setRevokeTarget({ kind: 'grant', grant })
-                  }
+                  onEdit={(grant) => {
+                    setDialogError(null);
+                    setEditingGrant(grant);
+                  }}
+                  onRevoke={(grant) => {
+                    setError(null);
+                    setRevokeTarget({ kind: 'grant', grant });
+                  }}
                   onToggleAccess={(grant) => {
                     setExpandedGrantId((current) =>
                       current === grant.id ? null : grant.id,
@@ -613,7 +904,8 @@ export function RelayDevicesPage() {
                 />
               )}
             />
-
+            ) : null}
+            {activeSharedView === 'outgoing-threads' ? (
             <ShareSection
               count={portal?.sharedByMe.length ?? 0}
               emptyText="No threads have been shared by this account yet."
@@ -630,8 +922,14 @@ export function RelayDevicesPage() {
                   mode="outgoing"
                   share={share}
                   onOpen={() => openSharedSession(share)}
-                  onEdit={() => setEditingShare(share)}
-                  onRevoke={() => setRevokeTarget({ kind: 'share', share })}
+                  onEdit={() => {
+                    setDialogError(null);
+                    setEditingShare(share);
+                  }}
+                  onRevoke={() => {
+                    setError(null);
+                    setRevokeTarget({ kind: 'share', share });
+                  }}
                   onToggleAccess={() => {
                     setExpandedShareId((current) =>
                       current === share.id ? null : share.id,
@@ -640,31 +938,31 @@ export function RelayDevicesPage() {
                 />
               )}
             />
+            ) : null}
           </div>
         </section>
       </div>
-      {addDeviceOpen ? (
-        <AddDeviceDialog
-          busy={busy === 'create'}
-          deviceName={deviceName}
-          onChangeDeviceName={setDeviceName}
-          onClose={() => setAddDeviceOpen(false)}
-          onSubmit={addDevice}
-        />
-      ) : null}
       {editingShare ? (
         <SharePermissionsDialog
           busy={busy === `share:${editingShare.id}`}
+          error={dialogError}
           share={editingShare}
-          onClose={() => setEditingShare(null)}
+          onClose={() => {
+            setEditingShare(null);
+            setDialogError(null);
+          }}
           onSave={(input) => void updateSharedSession(editingShare, input)}
         />
       ) : null}
       {editingGrant ? (
         <GrantPermissionsDialog
           busy={busy === `grant:${editingGrant.id}`}
+          error={dialogError}
           grant={editingGrant}
-          onClose={() => setEditingGrant(null)}
+          onClose={() => {
+            setEditingGrant(null);
+            setDialogError(null);
+          }}
           onSave={(input) => void updateAccessGrant(editingGrant, input)}
         />
       ) : null}
@@ -672,10 +970,34 @@ export function RelayDevicesPage() {
         <ShareDeviceDialog
           busy={busy === `grant:create:${sharingDevice.id}`}
           device={sharingDevice}
-          onClose={() => setSharingDevice(null)}
+          error={dialogError}
+          onClose={() => {
+            setSharingDevice(null);
+            setDialogError(null);
+          }}
           onShare={(input) => void createDeviceGrant(sharingDevice, input)}
         />
       ) : null}
+      <ConfirmDialog
+        open={deletingDevice !== null}
+        title="Delete relay device"
+        description={
+          deletingDevice
+            ? `Delete ${deletingDevice.name}? Its device token will stop working immediately. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete device"
+        busyLabel="Deleting..."
+        busy={Boolean(deletingDevice && busy === deletingDevice.id)}
+        error={deletingDevice ? error : null}
+        onCancel={() => {
+          if (!deletingDevice || busy !== deletingDevice.id) {
+            setDeletingDevice(null);
+            setError(null);
+          }
+        }}
+        onConfirm={removeDevice}
+      />
       <ConfirmDialog
         open={revokeTarget !== null}
         title={
@@ -687,9 +1009,11 @@ export function RelayDevicesPage() {
         confirmLabel="Revoke access"
         busyLabel="Revoking..."
         busy={revokeTargetBusy(revokeTarget, busy)}
+        error={revokeTarget ? error : null}
         onCancel={() => {
           if (!revokeTargetBusy(revokeTarget, busy)) {
             setRevokeTarget(null);
+            setError(null);
           }
         }}
         onConfirm={() => {
@@ -701,11 +1025,11 @@ export function RelayDevicesPage() {
             : revokeSharedSession(revokeTarget.share);
         }}
       />
-    </main>
+    </div>
   );
 }
 
-function AddDeviceDialog({
+function AddDeviceForm({
   busy,
   deviceName,
   onChangeDeviceName,
@@ -719,45 +1043,37 @@ function AddDeviceDialog({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
-      <form
-        className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
-        onSubmit={onSubmit}
+    <form
+      aria-labelledby="add-device-heading"
+      className="mt-4 border-y border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-4 sm:px-4"
+      id="add-device-form"
+      onSubmit={onSubmit}
+    >
+      <h3
+        className="text-sm font-semibold text-[var(--theme-fg)]"
+        id="add-device-heading"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-              Relay device
-            </p>
-            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">
-              Add device
-            </h2>
-            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-              Create a token for one private supervisor.
-            </p>
-          </div>
-          <button
-            aria-label="Close add device dialog"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)] transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <label className="mt-5 block text-sm text-[var(--theme-fg-soft)]">
+        Create a device token
+      </h3>
+      <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
+        Name the private supervisor that will use this token.
+      </p>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <label className="block min-w-0 flex-1 text-sm text-[var(--theme-fg-soft)]">
           Device name
           <input
             autoFocus
-            className="relay-input mt-2 w-full"
+            className="relay-input mt-2 min-h-11 w-full"
+            disabled={busy}
             onChange={(event) => onChangeDeviceName(event.target.value)}
             placeholder="MacBook Pro"
+            required
             value={deviceName}
           />
         </label>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="flex shrink-0 gap-2">
           <button
-            className="relay-button-secondary"
+            className="relay-button-secondary min-h-11"
             disabled={busy}
             onClick={onClose}
             type="button"
@@ -765,15 +1081,32 @@ function AddDeviceDialog({
             Cancel
           </button>
           <button
-            className="relay-button-primary inline-flex items-center gap-2"
+            className="relay-button-primary inline-flex min-h-11 items-center gap-2"
             disabled={busy || !deviceName.trim()}
             type="submit"
           >
             <MonitorSmartphone className="h-4 w-4" />
-            Create device token
+            {busy ? 'Creating...' : 'Create token'}
           </button>
         </div>
-      </form>
+      </div>
+    </form>
+  );
+}
+
+function LoadingRows({ label }: { label: string }) {
+  return (
+    <div aria-busy="true" aria-live="polite" className="divide-y divide-[var(--theme-border)]" role="status">
+      <span className="sr-only">{label}</span>
+      {[0, 1].map((row) => (
+        <div className="flex min-h-20 items-center gap-4 px-3 py-4" key={row}>
+          <div className="min-w-0 flex-1 space-y-2">
+            <span className="product-skeleton block h-3.5 w-36 max-w-[55%]" />
+            <span className="product-skeleton block h-3 w-56 max-w-[80%]" />
+          </div>
+          <span className="product-skeleton block h-9 w-20" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -798,8 +1131,8 @@ function ShareSection({
   title: string;
 }) {
   return (
-    <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="pt-5">
+      <div className="mb-3 flex items-start justify-between gap-3 px-1">
         <div>
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">
             {title}
@@ -808,20 +1141,20 @@ function ShareSection({
             {subtitle}
           </p>
         </div>
-        <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+        <span className="rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
           {count}
         </span>
       </div>
       {loading ? (
-        <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
-          {loadingText}
-        </p>
+        <div className="product-list">
+          <LoadingRows label={loadingText} />
+        </div>
       ) : shares.length ? (
-        <div className="grid gap-3">
+        <div className="product-list divide-y divide-[var(--theme-border)]">
           {shares.map((share) => renderShare(share))}
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
+        <div className="product-empty product-list">
           {emptyText}
         </div>
       )}
@@ -881,8 +1214,8 @@ function GrantSection({
 }) {
   const deviceGroups = groupGrantsByDevice(grants);
   return (
-    <section className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="pt-5">
+      <div className="mb-3 flex items-start justify-between gap-3 px-1">
         <div>
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">
             {title}
@@ -891,20 +1224,20 @@ function GrantSection({
             {subtitle}
           </p>
         </div>
-        <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
+        <span className="rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-xs text-[var(--theme-fg-muted)]">
           {deviceGroups.length}
         </span>
       </div>
       {loading ? (
-        <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm text-[var(--theme-fg-muted)]">
-          {loadingText}
-        </p>
+        <div className="product-list">
+          <LoadingRows label={loadingText} />
+        </div>
       ) : deviceGroups.length ? (
-        <div className="grid gap-3">
+        <div className="product-list divide-y divide-[var(--theme-border)]">
           {deviceGroups.map((group) => renderDevice(group))}
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 text-sm text-[var(--theme-fg-muted)]">
+        <div className="product-empty product-list">
           {emptyText}
         </div>
       )}
@@ -931,6 +1264,7 @@ function SharedSessionRow({
   share: RelaySessionShareDto;
   onOpen?: () => void;
 }) {
+  const accessHistoryId = `share-access-history-${useId()}`;
   const shareTitle = shareTitleText(share);
   const threadLabel = shareTitle;
   const shareLabel = share.label?.trim() || null;
@@ -941,7 +1275,7 @@ function SharedSessionRow({
     : 'Not accessed yet';
 
   return (
-    <article className="relative rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+    <article className="px-3 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
@@ -989,7 +1323,7 @@ function SharedSessionRow({
         </div>
         {mode === 'incoming' ? (
           <button
-            className="relay-button-primary inline-flex items-center gap-2"
+            className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
             onClick={onOpen}
             type="button"
           >
@@ -998,14 +1332,14 @@ function SharedSessionRow({
         ) : (
           <div className="flex flex-wrap gap-2">
             <button
-              className="relay-button-primary inline-flex items-center gap-2"
+              className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               onClick={onOpen}
               type="button"
             >
               Open
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2"
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               disabled={busy}
               onClick={onEdit}
               type="button"
@@ -1013,17 +1347,19 @@ function SharedSessionRow({
               Permissions
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2"
+              aria-controls={accessHistoryId}
+              aria-expanded={expanded}
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               onClick={onToggleAccess}
               type="button"
             >
-              Access
+              Access history
               <ChevronDown
                 className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
               />
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 text-[var(--status-danger-fg)] sm:min-h-10"
               disabled={busy}
               onClick={onRevoke}
               type="button"
@@ -1034,12 +1370,18 @@ function SharedSessionRow({
         )}
       </div>
       {mode === 'outgoing' && expanded ? (
-        <div className="absolute right-3 top-[calc(100%-0.5rem)] z-20 w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3 shadow-xl">
+        <div
+          className="mt-4 border-t border-[var(--theme-border)] pt-3"
+          id={accessHistoryId}
+        >
+          <p className="mb-2 text-xs font-medium text-[var(--theme-fg-soft)]">
+            Recent access
+          </p>
           {share.accessEvents.length ? (
-            <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
+            <ul className="divide-y divide-[var(--theme-border)] text-xs text-[var(--theme-fg-muted)]">
               {share.accessEvents.map((event) => (
                 <li
-                  className="flex items-center justify-between gap-3"
+                  className="flex min-h-11 items-center justify-between gap-3 py-2"
                   key={event.id}
                 >
                   <span className="min-w-0">
@@ -1089,16 +1431,16 @@ function GrantDeviceCard({
   const deviceName = grantTitleText(firstGrant);
 
   return (
-    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]">
-      <header className="flex items-center justify-between gap-3 px-3 py-3">
+    <article className="px-3 py-4">
+      <header className="flex items-center justify-between gap-3">
         <p className="min-w-0 truncate text-sm font-semibold text-[var(--theme-fg)]">
           {deviceName}
         </p>
-        <span className="shrink-0 rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] text-[var(--theme-fg-muted)]">
+        <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[11px] text-[var(--theme-fg-muted)]">
           {grants.length} {grants.length === 1 ? 'share' : 'shares'}
         </span>
       </header>
-      <div className="divide-y divide-[var(--theme-border)] border-t border-[var(--theme-border)] px-3">
+      <div className="mt-3 divide-y divide-[var(--theme-border)] border-t border-[var(--theme-border)]">
         {grants.map((grant) => (
           <GrantScopeRow
             busy={busyGrantId === grant.id}
@@ -1138,6 +1480,7 @@ function GrantScopeRow({
   onRevoke?: () => void;
   onToggleAccess?: () => void;
 }) {
+  const accessHistoryId = `grant-access-history-${useId()}`;
   const scopeLabel = grantScopeLabel(grant);
   const workspaceLabel =
     grant.workspaceLabel?.trim() || 'Workspace unavailable';
@@ -1222,7 +1565,7 @@ function GrantScopeRow({
         </div>
         {mode === 'incoming' ? (
           <button
-            className="relay-button-primary inline-flex items-center gap-2"
+            className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
             onClick={onOpen}
             type="button"
           >
@@ -1231,14 +1574,14 @@ function GrantScopeRow({
         ) : (
           <div className="flex flex-wrap gap-2">
             <button
-              className="relay-button-primary inline-flex items-center gap-2"
+              className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               onClick={onOpen}
               type="button"
             >
               Open
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2"
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               disabled={busy}
               onClick={onEdit}
               type="button"
@@ -1246,17 +1589,19 @@ function GrantScopeRow({
               Permissions
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2"
+              aria-controls={accessHistoryId}
+              aria-expanded={expanded}
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
               onClick={onToggleAccess}
               type="button"
             >
-              Access
+              Access history
               <ChevronDown
                 className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
               />
             </button>
             <button
-              className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
+              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 text-[var(--status-danger-fg)] sm:min-h-10"
               disabled={busy}
               onClick={onRevoke}
               type="button"
@@ -1267,12 +1612,18 @@ function GrantScopeRow({
         )}
       </div>
       {mode === 'outgoing' && expanded ? (
-        <div className="absolute right-3 top-[calc(100%-0.5rem)] z-20 w-[min(24rem,calc(100vw-3rem))] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3 shadow-xl">
+        <div
+          className="mt-3 border-t border-[var(--theme-border)] pt-3"
+          id={accessHistoryId}
+        >
+          <p className="mb-2 text-xs font-medium text-[var(--theme-fg-soft)]">
+            Recent access
+          </p>
           {grant.accessEvents.length ? (
-            <ul className="space-y-2 text-xs text-[var(--theme-fg-muted)]">
+            <ul className="divide-y divide-[var(--theme-border)] text-xs text-[var(--theme-fg-muted)]">
               {grant.accessEvents.map((event) => (
                 <li
-                  className="flex items-center justify-between gap-3"
+                  className="flex min-h-11 items-center justify-between gap-3 py-2"
                   key={event.id}
                 >
                   <span className="min-w-0">
@@ -1296,13 +1647,180 @@ function GrantScopeRow({
   );
 }
 
+const DIALOG_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'a[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function useAccessibleDialog({
+  busy,
+  onClose,
+}: {
+  busy: boolean;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const busyRef = useRef(busy);
+  const closeRef = useRef(onClose);
+  busyRef.current = busy;
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    if (dialog && !dialog.contains(document.activeElement)) {
+      const initialTarget = dialog.querySelector<HTMLElement>(
+        '[data-dialog-initial-focus]',
+      );
+      const firstTarget = dialog.querySelector<HTMLElement>(
+        DIALOG_FOCUSABLE_SELECTOR,
+      );
+      (initialTarget ?? firstTarget ?? dialog).focus();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!dialog) {
+        return;
+      }
+      if (event.key === 'Escape' && !busyRef.current) {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR),
+      );
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (
+        event.shiftKey &&
+        (document.activeElement === first ||
+          !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last?.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last ||
+          !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, []);
+
+  return dialogRef;
+}
+
+function RelayDialog({
+  busy,
+  children,
+  description,
+  error,
+  onClose,
+  title,
+}: {
+  busy: boolean;
+  children: React.ReactNode;
+  description: string;
+  error: string | null;
+  onClose: () => void;
+  title: string;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useAccessibleDialog({ busy, onClose });
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] p-3 sm:p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        aria-describedby={descriptionId}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="product-dialog max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 shadow-2xl sm:max-h-[min(42rem,calc(100dvh-3rem))] sm:p-5"
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2
+              className="text-base font-semibold text-[var(--theme-fg)]"
+              id={titleId}
+            >
+              {title}
+            </h2>
+            <p
+              className="mt-1 text-sm text-[var(--theme-fg-muted)]"
+              id={descriptionId}
+            >
+              {description}
+            </p>
+          </div>
+          <button
+            aria-label={`Close ${title}`}
+            className="product-icon-button"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {error ? (
+          <div className="mt-4">
+            <Notice tone="danger">{error}</Notice>
+          </div>
+        ) : null}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function SharePermissionsDialog({
   busy,
+  error,
   onClose,
   onSave,
   share,
 }: {
   busy: boolean;
+  error: string | null;
   onClose: () => void;
   onSave: (input: {
     label: string | null;
@@ -1334,24 +1852,24 @@ function SharePermissionsDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+    <RelayDialog
+      busy={busy}
+      description={`${share.targetUsername} can access ${shareTitleText(share)}.`}
+      error={error}
+      onClose={onClose}
+      title="Shared thread permissions"
+    >
       <form
-        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        className="mt-5"
         onSubmit={submit}
       >
-        <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-            Shared thread permissions
-          </h2>
-          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-            {share.targetUsername} can access {shareTitleText(share)}.
-          </p>
-        </div>
-        <div className="mt-5 space-y-4">
+        <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
+        <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Label
             <input
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
+              data-dialog-initial-focus
               onChange={(event) => setLabel(event.target.value)}
               placeholder="Optional shared thread label"
               value={label}
@@ -1360,7 +1878,7 @@ function SharePermissionsDialog({
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Thread access
             <select
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) =>
                 setThreadAccess(event.target.value as RelayThreadAccessDto)
               }
@@ -1373,7 +1891,7 @@ function SharePermissionsDialog({
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Workspace access
             <select
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
               disabled={workspaceAccessLocked}
               onChange={(event) =>
                 setWorkspaceAccess(
@@ -1397,7 +1915,7 @@ function SharePermissionsDialog({
             Expiration
             <input
               aria-label="Expiration"
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setExpiresAt(event.target.value)}
               type="datetime-local"
               value={expiresAt}
@@ -1407,9 +1925,9 @@ function SharePermissionsDialog({
             </span>
           </label>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
-            className="relay-button-secondary"
+            className="relay-button-secondary min-h-11 w-full sm:w-auto"
             disabled={busy}
             onClick={onClose}
             type="button"
@@ -1417,26 +1935,29 @@ function SharePermissionsDialog({
             Cancel
           </button>
           <button
-            className="relay-button-primary"
+            className="relay-button-primary min-h-11 w-full sm:w-auto"
             disabled={busy}
             type="submit"
           >
-            Save permissions
+            {busy ? 'Saving...' : 'Save permissions'}
           </button>
         </div>
+        </fieldset>
       </form>
-    </div>
+    </RelayDialog>
   );
 }
 
 function ShareDeviceDialog({
   busy,
   device,
+  error,
   onClose,
   onShare,
 }: {
   busy: boolean;
   device: RelayDeviceDto;
+  error: string | null;
   onClose: () => void;
   onShare: (input: {
     targetIdentifier: string;
@@ -1466,39 +1987,24 @@ function ShareDeviceDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+    <RelayDialog
+      busy={busy}
+      description="Give another relay account access to this device and its workspaces."
+      error={error}
+      onClose={onClose}
+      title={`Share ${device.name}`}
+    >
       <form
-        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        className="mt-5"
         onSubmit={submit}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-              Relay device
-            </p>
-            <h2 className="mt-1 text-lg font-semibold text-[var(--theme-fg)]">
-              Share {device.name}
-            </h2>
-            <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-              Give another relay account access to this device and its
-              workspaces.
-            </p>
-          </div>
-          <button
-            aria-label="Close share device dialog"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg-muted)] transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="mt-5 space-y-4">
+        <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
+        <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Relay account
             <input
-              autoFocus
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
+              data-dialog-initial-focus
               onChange={(event) => setTargetIdentifier(event.target.value)}
               placeholder="username or email"
               value={targetIdentifier}
@@ -1507,7 +2013,7 @@ function ShareDeviceDialog({
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Label
             <input
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setLabel(event.target.value)}
               placeholder="Optional note shown in Shared devices by me"
               value={label}
@@ -1517,7 +2023,7 @@ function ShareDeviceDialog({
             <label className="block text-sm text-[var(--theme-fg-soft)]">
               Thread access
               <select
-                className="relay-input mt-2 w-full"
+                className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setThreadAccess(event.target.value as RelayThreadAccessDto)
                 }
@@ -1530,7 +2036,7 @@ function ShareDeviceDialog({
             <label className="block text-sm text-[var(--theme-fg-soft)]">
               Workspace access
               <select
-                className="relay-input mt-2 w-full"
+                className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setWorkspaceAccess(
                     event.target.value as RelayWorkspaceAccessDto,
@@ -1544,7 +2050,7 @@ function ShareDeviceDialog({
               </select>
             </label>
           </div>
-          <label className="flex items-center justify-between gap-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-soft)]">
+          <label className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--theme-fg-soft)]">
             Can create new threads
             <input
               checked={canCreateThreads}
@@ -1554,9 +2060,9 @@ function ShareDeviceDialog({
             />
           </label>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
-            className="relay-button-secondary"
+            className="relay-button-secondary min-h-11 w-full sm:w-auto"
             disabled={busy}
             onClick={onClose}
             type="button"
@@ -1564,26 +2070,29 @@ function ShareDeviceDialog({
             Cancel
           </button>
           <button
-            className="relay-button-primary inline-flex items-center gap-2"
+            className="relay-button-primary inline-flex min-h-11 w-full items-center justify-center gap-2 sm:w-auto"
             disabled={busy || !targetIdentifier.trim()}
             type="submit"
           >
             <Share2 className="h-4 w-4" />
-            Share device
+            {busy ? 'Sharing...' : 'Share device'}
           </button>
         </div>
+        </fieldset>
       </form>
-    </div>
+    </RelayDialog>
   );
 }
 
 function GrantPermissionsDialog({
   busy,
+  error,
   grant,
   onClose,
   onSave,
 }: {
   busy: boolean;
+  error: string | null;
   grant: RelayAccessGrantDto;
   onClose: () => void;
   onSave: (input: {
@@ -1621,24 +2130,24 @@ function GrantPermissionsDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_oklch,var(--app-bg)_82%,transparent)] px-4 py-6">
+    <RelayDialog
+      busy={busy}
+      description={`${grant.targetUsername} can access ${grantTitleText(grant)}.`}
+      error={error}
+      onClose={onClose}
+      title="Shared access permissions"
+    >
       <form
-        className="max-h-[min(42rem,calc(100vh-3rem))] w-full max-w-lg overflow-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-2xl"
+        className="mt-5"
         onSubmit={submit}
       >
-        <div>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-            Shared access permissions
-          </h2>
-          <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-            {grant.targetUsername} can access {grantTitleText(grant)}.
-          </p>
-        </div>
-        <div className="mt-5 space-y-4">
+        <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
+        <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
             Label
             <input
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
+              data-dialog-initial-focus
               onChange={(event) => setLabel(event.target.value)}
               placeholder="Optional shared access label"
               value={label}
@@ -1648,7 +2157,7 @@ function GrantPermissionsDialog({
             <label className="block text-sm text-[var(--theme-fg-soft)]">
               Thread access
               <select
-                className="relay-input mt-2 w-full"
+                className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setThreadAccess(event.target.value as RelayThreadAccessDto)
                 }
@@ -1661,7 +2170,7 @@ function GrantPermissionsDialog({
             <label className="block text-sm text-[var(--theme-fg-soft)]">
               Workspace access
               <select
-                className="relay-input mt-2 w-full"
+                className="relay-input mt-2 min-h-11 w-full"
                 disabled={workspaceAccessLocked}
                 onChange={(event) =>
                   setWorkspaceAccess(
@@ -1677,7 +2186,7 @@ function GrantPermissionsDialog({
             </label>
           </div>
           {canCreateThreadsAvailable ? (
-            <label className="flex items-center justify-between gap-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-soft)]">
+            <label className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--theme-fg-soft)]">
               Can create new threads
               <input
                 checked={canCreateThreads}
@@ -1691,7 +2200,7 @@ function GrantPermissionsDialog({
             Expiration
             <input
               aria-label="Expiration"
-              className="relay-input mt-2 w-full"
+              className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setExpiresAt(event.target.value)}
               type="datetime-local"
               value={expiresAt}
@@ -1701,9 +2210,9 @@ function GrantPermissionsDialog({
             </span>
           </label>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
-            className="relay-button-secondary"
+            className="relay-button-secondary min-h-11 w-full sm:w-auto"
             disabled={busy}
             onClick={onClose}
             type="button"
@@ -1711,15 +2220,16 @@ function GrantPermissionsDialog({
             Cancel
           </button>
           <button
-            className="relay-button-primary"
+            className="relay-button-primary min-h-11 w-full sm:w-auto"
             disabled={busy}
             type="submit"
           >
-            Save permissions
+            {busy ? 'Saving...' : 'Save permissions'}
           </button>
         </div>
+        </fieldset>
       </form>
-    </div>
+    </RelayDialog>
   );
 }
 
@@ -1727,6 +2237,7 @@ function DeviceRow({
   device,
   busy,
   copiedSetup,
+  copyError,
   onConnect,
   onCopySetup,
   onDelete,
@@ -1736,163 +2247,269 @@ function DeviceRow({
   device: RelayDeviceDto;
   busy: boolean;
   copiedSetup: boolean;
+  copyError: string | null;
   onConnect: () => void;
   onCopySetup: (platform: SupervisorPlatform) => void;
   onDelete: () => void;
   onShare: () => void;
   setupTokenAvailable: boolean;
 }) {
-  const [setupMenuOpen, setSetupMenuOpen] = useState(false);
-  const setupMenuRef = useRef<HTMLDivElement>(null);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuFocusDirectionRef = useRef<'first' | 'last'>('first');
+  const menuId = `device-actions-${useId()}`;
   const hostedStatus = device.hostedStatus ?? null;
   const canConnect = device.connected || hostedStatus === 'stopped';
+  const canCopySetup = setupTokenAvailable && !hostedStatus;
   const statusText = hostedStatus
     ? hostedStatusLabel(hostedStatus)
     : device.connected
       ? 'Online'
       : 'Offline';
+  const activityText =
+    hostedStatus === 'stopped'
+      ? 'Stopped. Connect to wake this VM.'
+      : hostedStatus && hostedStatus !== 'online'
+        ? `${statusText}. The hosted supervisor is not ready yet.`
+        : device.connected
+          ? device.connectedAt
+            ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
+            : 'Online. Connected time unavailable.'
+          : device.lastHeartbeatAt
+            ? `Last heartbeat ${formatRelayTimestamp(device.lastHeartbeatAt)}`
+            : 'No heartbeat recorded.';
 
   useEffect(() => {
-    if (!setupMenuOpen) return;
+    if (!actionsMenuOpen) return;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      const items = Array.from(
+        actionsMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+          '[role="menuitem"]:not(:disabled)',
+        ) ?? [],
+      );
+      const target =
+        menuFocusDirectionRef.current === 'last'
+          ? items[items.length - 1]
+          : items[0];
+      target?.focus();
+    });
 
     function closeOnOutsideClick(event: MouseEvent) {
-      if (!setupMenuRef.current?.contains(event.target as Node)) {
-        setSetupMenuOpen(false);
+      if (!actionsMenuRef.current?.contains(event.target as Node)) {
+        setActionsMenuOpen(false);
       }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setSetupMenuOpen(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setActionsMenuOpen(false);
+        actionsTriggerRef.current?.focus();
+      }
     }
 
     document.addEventListener('mousedown', closeOnOutsideClick);
     document.addEventListener('keydown', closeOnEscape);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('mousedown', closeOnOutsideClick);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [setupMenuOpen]);
+  }, [actionsMenuOpen]);
+
+  function openActionsMenu(direction: 'first' | 'last' = 'first') {
+    menuFocusDirectionRef.current = direction;
+    setActionsMenuOpen(true);
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      if (event.key === 'Tab') {
+        setActionsMenuOpen(false);
+      }
+      return;
+    }
+    const items = Array.from(
+      actionsMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ) ?? [],
+    );
+    if (!items.length) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = items.findIndex(
+      (item) => item === document.activeElement,
+    );
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowUp'
+            ? (currentIndex - 1 + items.length) % items.length
+            : (currentIndex + 1) % items.length;
+    items[nextIndex]?.focus();
+  }
 
   function copySetup(platform: SupervisorPlatform) {
-    setSetupMenuOpen(false);
+    actionsTriggerRef.current?.focus();
+    setActionsMenuOpen(false);
     onCopySetup(platform);
   }
 
   return (
-    <article className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${
-                device.connected
-                  ? 'bg-[var(--status-success-fg)]'
-                  : 'bg-[var(--theme-fg-muted)]'
-              }`}
-            />
-            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-              {device.name}
-            </p>
-            {hostedStatus ? (
-              <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
-                Hosted · {statusText}
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1 font-mono text-xs text-[var(--theme-fg-muted)]">
-            {device.tokenPreview}
+    <article className="grid min-w-0 gap-3 px-3 py-4 transition hover:bg-[var(--theme-hover)] md:grid-cols-[minmax(14rem,1fr)_minmax(14rem,0.8fr)_auto] md:items-center md:gap-5">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden="true"
+            className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+              device.connected
+                ? 'bg-[var(--status-success-fg)]'
+                : 'bg-[var(--theme-fg-muted)]'
+            }`}
+          />
+          <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--theme-fg)]">
+            {device.name}
           </p>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {hostedStatus === 'stopped'
-              ? 'Stopped. Connect to wake this VM.'
-              : hostedStatus && hostedStatus !== 'online'
-                ? `${statusText}. The hosted supervisor is not ready yet.`
-                : device.connected
-                  ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
-                  : `Offline. Last heartbeat: ${formatRelayTimestamp(device.lastHeartbeatAt)}`}
-          </p>
+          {hostedStatus ? (
+            <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
+              Hosted: {statusText}
+            </span>
+          ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
-          <div className="relative" ref={setupMenuRef}>
-            <button
-              aria-expanded={setupMenuOpen}
-              aria-haspopup="menu"
-              className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
-              onClick={() => setSetupMenuOpen((current) => !current)}
-              title={
-                setupTokenAvailable
-                  ? 'Choose a platform and copy the relay supervisor setup command'
-                  : 'Device token is not available. Create a new device token for devices created before token storage was enabled.'
+        <p className="mt-1 truncate font-mono text-xs text-[var(--theme-fg-muted)]">
+          {device.tokenPreview}
+        </p>
+      </div>
+      <div className="min-w-0 text-xs text-[var(--theme-fg-muted)]">
+        <p>{activityText}</p>
+        {!setupTokenAvailable && !hostedStatus ? (
+          <p className="mt-1 text-[var(--theme-fg-soft)]">
+            Setup token unavailable. Recreate this device to copy a command.
+          </p>
+        ) : null}
+        {copiedSetup ? (
+          <p
+            className="mt-1 text-[var(--status-success-fg)]"
+            role="status"
+          >
+            Setup command copied.
+          </p>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 items-center gap-2 md:justify-end">
+        <button
+          className="relay-button-primary inline-flex min-h-11 grow items-center justify-center gap-2 whitespace-nowrap md:grow-0 sm:min-h-10"
+          disabled={!canConnect}
+          onClick={onConnect}
+          type="button"
+        >
+          <Plug className="h-4 w-4" />
+          {hostedStatus === 'stopped' ? 'Start & connect' : 'Connect'}
+        </button>
+        <div className="relative" ref={actionsMenuRef}>
+          <button
+            aria-controls={menuId}
+            aria-expanded={actionsMenuOpen}
+            aria-haspopup="menu"
+            aria-label={`More actions for ${device.name}`}
+            className="product-icon-button"
+            onClick={() => {
+              if (actionsMenuOpen) {
+                setActionsMenuOpen(false);
+              } else {
+                openActionsMenu();
               }
-              disabled={!setupTokenAvailable || Boolean(hostedStatus)}
-              type="button"
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                openActionsMenu(
+                  event.key === 'ArrowUp' ? 'last' : 'first',
+                );
+              }
+            }}
+            ref={actionsTriggerRef}
+            type="button"
+          >
+            <Ellipsis className="h-5 w-5" />
+          </button>
+          {actionsMenuOpen ? (
+            <div
+              aria-label={`Actions for ${device.name}`}
+              className="absolute right-0 top-full z-40 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)]"
+              id={menuId}
+              onKeyDown={handleMenuKeyDown}
+              role="menu"
             >
-              <Copy className="h-4 w-4" />
-              {copiedSetup ? 'Copied' : 'Copy setup'}
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {setupMenuOpen ? (
-              <div
-                aria-label={`Setup platform for ${device.name}`}
-                className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)] sm:left-auto sm:right-0"
-                role="menu"
+              <button
+                className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canCopySetup}
+                onClick={() => copySetup('unix')}
+                role="menuitem"
+                type="button"
               >
+                <Copy className="h-4 w-4" />
+                Copy setup for macOS/Linux
+              </button>
+              <button
+                className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canCopySetup}
+                onClick={() => copySetup('windows')}
+                role="menuitem"
+                type="button"
+              >
+                <Copy className="h-4 w-4" />
+                Copy setup for Windows
+              </button>
+              <button
+                className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+                onClick={() => {
+                  actionsTriggerRef.current?.focus();
+                  setActionsMenuOpen(false);
+                  onShare();
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Share2 className="h-4 w-4" />
+                Share device
+              </button>
+              <div className="mt-1 border-t border-[var(--theme-border)] pt-1">
                 <button
-                  className="flex min-h-10 w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
-                  onClick={() => copySetup('unix')}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={busy || Boolean(hostedStatus)}
+                  onClick={() => {
+                    actionsTriggerRef.current?.focus();
+                    setActionsMenuOpen(false);
+                    onDelete();
+                  }}
                   role="menuitem"
+                  title={
+                    hostedStatus
+                      ? 'Hosted VMs are managed by a relay admin.'
+                      : `Delete ${device.name}`
+                  }
                   type="button"
                 >
-                  macOS &amp; Linux
-                </button>
-                <button
-                  className="flex min-h-10 w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
-                  onClick={() => copySetup('windows')}
-                  role="menuitem"
-                  type="button"
-                >
-                  Windows (PowerShell)
+                  <Trash2 className="h-4 w-4" />
+                  Delete device
                 </button>
               </div>
-            ) : null}
-          </div>
-          <button
-            className="relay-button-primary inline-flex h-10 items-center gap-2 whitespace-nowrap"
-            disabled={!canConnect}
-            onClick={onConnect}
-            type="button"
-          >
-            <Plug className="h-4 w-4" />
-            {hostedStatus === 'stopped' ? 'Start & connect' : 'Connect'}
-          </button>
-          <button
-            className="relay-button-secondary inline-flex h-10 items-center gap-2 whitespace-nowrap"
-            onClick={onShare}
-            type="button"
-          >
-            <Share2 className="h-4 w-4" />
-            Share
-          </button>
-          <button
-            aria-label={`Delete ${device.name}`}
-            className="relay-button-secondary inline-flex h-10 w-10 items-center justify-center px-0"
-            disabled={busy || Boolean(hostedStatus)}
-            onClick={onDelete}
-            title={
-              hostedStatus
-                ? 'Hosted VMs are managed by a relay admin.'
-                : `Delete ${device.name}`
-            }
-            type="button"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+            </div>
+          ) : null}
         </div>
       </div>
-      {!setupTokenAvailable ? (
-        <p className="mt-3 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
-          Token not available for this device. Create a new device token to copy
-          a ready-to-run setup command.
+      {copyError ? (
+        <p
+          className="text-sm text-[var(--status-danger-fg)] md:col-span-3"
+          role="alert"
+        >
+          {copyError}
         </p>
       ) : null}
     </article>
@@ -1903,7 +2520,10 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
   const [platform, setPlatform] = useState<SupervisorPlatform>('unix');
   const command = relaySupervisorCommand(result.token, platform);
   return (
-    <section className="rounded-lg border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] p-4">
+    <section
+      aria-live="polite"
+      className="mt-4 rounded-lg border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] p-4"
+    >
       <h2 className="text-base font-semibold text-[var(--theme-fg)]">
         Token created for {result.device.name}
       </h2>
@@ -1958,7 +2578,7 @@ function PlatformButton({
   return (
     <button
       aria-pressed={active}
-      className={`min-h-8 rounded-md px-2.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)] ${
+      className={`min-h-11 rounded-md px-2.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)] sm:min-h-9 ${
         active
           ? 'bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] shadow-sm'
           : 'text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
@@ -1982,11 +2602,29 @@ function CodeBlock({
   nested?: boolean;
   value: string;
 }) {
+  const [copyState, setCopyState] = useState<
+    'idle' | 'copied' | 'error'
+  >('idle');
+
+  useEffect(() => {
+    if (copyState !== 'copied') {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setCopyState('idle'), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [copyState]);
+
   async function copy() {
+    const clipboard = navigator.clipboard;
+    if (!clipboard || typeof clipboard.writeText !== 'function') {
+      setCopyState('error');
+      return;
+    }
     try {
-      await navigator.clipboard?.writeText(value);
+      await clipboard.writeText(value);
+      setCopyState('copied');
     } catch {
-      // Clipboard access can be unavailable in non-secure contexts.
+      setCopyState('error');
     }
   }
 
@@ -1998,17 +2636,33 @@ function CodeBlock({
         </p>
         <button
           aria-label={copyLabel}
-          className="relay-button-secondary inline-flex items-center gap-1 px-2 py-1 text-xs"
+          className="relay-button-secondary inline-flex min-h-11 items-center gap-1 px-2 text-xs sm:min-h-9"
           onClick={() => void copy()}
           type="button"
         >
           <Copy className="h-3.5 w-3.5" />
-          Copy
+          {copyState === 'copied' ? 'Copied' : 'Copy'}
         </button>
       </div>
       <code className="block break-all rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 font-mono text-xs text-[var(--theme-fg)]">
         {value}
       </code>
+      {copyState === 'copied' ? (
+        <p
+          className="mt-1 text-xs text-[var(--status-success-fg)]"
+          role="status"
+        >
+          Copied to clipboard.
+        </p>
+      ) : null}
+      {copyState === 'error' ? (
+        <p
+          className="mt-1 text-xs text-[var(--status-danger-fg)]"
+          role="alert"
+        >
+          Clipboard access failed. Select the text and copy it manually.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -2018,7 +2672,10 @@ function Notice({ children }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]">
+    <div
+      className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]"
+      role="alert"
+    >
       {children}
     </div>
   );
@@ -2071,7 +2728,7 @@ function relayWebsocketBaseUrl() {
 }
 
 function formatRelayTimestamp(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : 'never';
+  return value ? new Date(value).toLocaleString() : 'Unavailable';
 }
 
 function hostedStatusLabel(

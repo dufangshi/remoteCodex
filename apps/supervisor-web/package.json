@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "cross-env NODE_ENV=test vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "3dmol": "^2.5.2",
@@ -34,11 +34,16 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.4",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4.1.4",
     "typescript": "^5.8.3",
-    "vite": "^6.3.2"
+    "vite": "^6.3.2",
+    "vitest": "^3.1.1"
   }
 }

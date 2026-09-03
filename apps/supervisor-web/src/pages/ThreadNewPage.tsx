@@ -15,11 +15,6 @@ export function ThreadNewPage() {
   const requestedTitle = searchParams.get('title');
 
   function handleCancel() {
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-
     if (requestedWorkspaceId) {
       navigate(currentThreadsHref(requestedWorkspaceId));
       return;
@@ -30,10 +25,12 @@ export function ThreadNewPage() {
 
   return (
     <FloatingRoutePanel
+      backLabel={requestedWorkspaceId ? 'Back to threads' : 'Back to workspaces'}
       eyebrow="New Thread"
       title="Start a backend session"
-      description="Choose the workspace, agent or model, and approval mode for the new thread."
-      maxWidthClassName="max-w-3xl"
+      description="Choose a workspace, backend, model, and approval mode."
+      maxWidthClassName="!max-w-3xl"
+      onBack={handleCancel}
     >
       <ThreadCreateForm
         initialWorkspaceId={requestedWorkspaceId}

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 
 import type {
   AgentBackendDto,
@@ -24,8 +25,8 @@ import {
 } from '../lib/api';
 import { usePlugins } from '@remote-codex/thread-ui';
 import { useAppShellNav } from './AppShellNavContext';
+import { useDialogLifecycle } from './useDialogLifecycle';
 import {
-  CloseIcon,
   apiErrorMessage,
   defaultProviderHostFileState,
   fallbackBackends,
@@ -129,6 +130,7 @@ export function AppShellSettingsDialog({
     creating: boolean;
     applyingId: string | null;
     renamingId: string | null;
+    renamingBusyId: string | null;
     renameDraft: string;
     message: string | null;
     error: string | null;
@@ -137,12 +139,75 @@ export function AppShellSettingsDialog({
     creating: false,
     applyingId: null,
     renamingId: null,
+    renamingBusyId: null,
     renameDraft: '',
     message: null,
     error: null,
   });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
   const settingsVisible = embedded || Boolean(shellNav?.settingsOpen);
+  const settingsDialogRef = useRef<HTMLElement>(null);
+  const settingsCloseRef = useRef<HTMLButtonElement>(null);
+  const pluginsDialogRef = useRef<HTMLElement>(null);
+  const pluginsCloseRef = useRef<HTMLButtonElement>(null);
+  const fileDialogRef = useRef<HTMLDivElement>(null);
+  const fileCloseRef = useRef<HTMLButtonElement>(null);
+  const settingsTitleId = useId();
+  const pluginsTitleId = useId();
+  const fileTitleId = useId();
+  const shellNavRef = useRef(shellNav);
+  shellNavRef.current = shellNav;
+
+  const closeSettings = useCallback(() => {
+    shellNavRef.current?.closeSettings();
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[aria-controls="app-shell-navigation-menu"]')
+        ?.focus();
+    });
+  }, []);
+  const closePluginsPanel = useCallback(() => {
+    setPluginsPanelOpen(false);
+  }, []);
+  const closeFileEditor = useCallback(() => {
+    setSelectedFileName(null);
+  }, []);
+
+  useDialogLifecycle({
+    busy: true,
+    containerRef: settingsDialogRef,
+    initialFocusRef: settingsCloseRef,
+    onClose: closeSettings,
+    open: settingsVisible && !embedded,
+  });
+  useDialogLifecycle({
+    containerRef: pluginsDialogRef,
+    initialFocusRef: pluginsCloseRef,
+    onClose: closePluginsPanel,
+    open: embedded && pluginsPanelOpen,
+  });
+  useDialogLifecycle({
+    containerRef: fileDialogRef,
+    initialFocusRef: fileCloseRef,
+    onClose: closeFileEditor,
+    open: !embedded && settingsVisible && Boolean(selectedFileName && selectedFile),
+  });
+
+  useEffect(() => {
+    if (!settingsVisible || embedded || selectedFileName) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSettings();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [closeSettings, embedded, selectedFileName, settingsVisible]);
 
   async function handleImportPlugin() {
     const manifestJson = pluginImportDraft.trim();
@@ -195,35 +260,6 @@ export function AppShellSettingsDialog({
     activeBackend.managementSchema ??
     fallbackManagementSchema(activeBackend.provider);
   const editableFiles = activeManagementSchema.hostConfigFiles;
-
-  useEffect(() => {
-    if (
-      !settingsVisible ||
-      embedded ||
-      !shellNav ||
-      !activeManagementSchema.configArchives
-    ) {
-      return;
-    }
-
-    const activeNav = shellNav;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        activeNav.closeSettings();
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [
-    activeManagementSchema.configArchives,
-    embedded,
-    settingsVisible,
-    shellNav,
-  ]);
 
   useEffect(() => {
     if (!settingsVisible) {
@@ -688,7 +724,11 @@ export function AppShellSettingsDialog({
   }
 
   async function handleCreateArchive() {
-    if (archivesState.creating) {
+    if (
+      archivesState.creating ||
+      archivesState.applyingId !== null ||
+      archivesState.renamingBusyId !== null
+    ) {
       return;
     }
 
@@ -722,7 +762,11 @@ export function AppShellSettingsDialog({
   }
 
   async function handleApplyArchive(archive: ProviderHostConfigArchiveDto) {
-    if (archivesState.applyingId) {
+    if (
+      archivesState.applyingId ||
+      archivesState.creating ||
+      archivesState.renamingBusyId !== null
+    ) {
       return;
     }
 
@@ -760,12 +804,19 @@ export function AppShellSettingsDialog({
 
   async function handleRenameArchive(archive: ProviderHostConfigArchiveDto) {
     const label = archivesState.renameDraft.trim();
-    if (!label || archivesState.renamingId !== archive.id) {
+    if (
+      !label ||
+      archivesState.renamingId !== archive.id ||
+      archivesState.renamingBusyId !== null ||
+      archivesState.creating ||
+      archivesState.applyingId !== null
+    ) {
       return;
     }
 
     setArchivesState((current) => ({
       ...current,
+      renamingBusyId: archive.id,
       message: null,
       error: null,
     }));
@@ -782,12 +833,14 @@ export function AppShellSettingsDialog({
       setArchivesState((current) => ({
         ...current,
         renamingId: null,
+        renamingBusyId: null,
         renameDraft: '',
         message: 'Backup renamed.',
       }));
     } catch (error) {
       setArchivesState((current) => ({
         ...current,
+        renamingBusyId: null,
         error:
           error instanceof ApiError
             ? error.message
@@ -802,11 +855,11 @@ export function AppShellSettingsDialog({
 
   const pluginsManagementNode = (
     <>
-      <div className="mt-3 grid gap-2">
+      <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
         {plugins.plugins.map((plugin) => (
           <label
             key={plugin.id}
-            className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
+            className="flex min-h-11 cursor-pointer items-start justify-between gap-4 py-3"
           >
             <span className="min-w-0">
               <span className="block text-sm font-medium text-[var(--theme-fg)]">
@@ -815,7 +868,7 @@ export function AppShellSettingsDialog({
               <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
                 {plugin.description}
               </span>
-              <span className="mt-2 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+              <span className="mt-2 block text-[11px] leading-5 text-[var(--theme-fg-muted)]">
                 {[
                   ...plugin.capabilities.artifactTypes.map((type) => type.type),
                   ...plugin.capabilities.threadPanels.map(
@@ -823,19 +876,19 @@ export function AppShellSettingsDialog({
                   ),
                 ].join(', ') || 'utility'}
               </span>
-              <span className="mt-1 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+              <span className="mt-0.5 block text-[11px] leading-5 text-[var(--theme-fg-muted)]">
                 {plugin.source === 'imported'
                   ? 'Imported manifest'
                   : 'Built-in module'}
               </span>
               {unavailablePluginReason(plugin) ? (
-                <span className="mt-1 block text-xs leading-5 text-amber-300">
+                <span className="mt-1 block text-xs leading-5 text-[var(--status-warning-fg)]">
                   {unavailablePluginReason(plugin)}
                 </span>
               ) : null}
             </span>
             <input
-              type="checkbox"
+              className="mt-1 h-5 w-5 shrink-0 accent-[var(--theme-accent-solid)] disabled:cursor-not-allowed disabled:opacity-50"
               checked={plugin.enabled}
               disabled={unavailablePluginReason(plugin) !== null}
               aria-label={`${plugin.name} enabled`}
@@ -845,12 +898,12 @@ export function AppShellSettingsDialog({
                   event.currentTarget.checked,
                 )
               }
-              className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)] disabled:cursor-not-allowed disabled:opacity-50"
+              type="checkbox"
             />
           </label>
         ))}
         {plugins.plugins.length === 0 && (
-          <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+          <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
             No plugins are registered.
           </p>
         )}
@@ -860,6 +913,7 @@ export function AppShellSettingsDialog({
           Import manifest JSON
         </label>
         <textarea
+          disabled={pluginImportState.busy}
           value={pluginImportDraft}
           onChange={(event) => {
             setPluginImportDraft(event.currentTarget.value);
@@ -873,7 +927,7 @@ export function AppShellSettingsDialog({
           }}
           placeholder='{"id":"example.viewer","name":"Example Viewer","version":"0.1.0",...}'
           rows={4}
-          className="mt-2 min-h-28 w-full resize-y rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus:border-[var(--theme-accent-border)]"
+          className="mt-2 min-h-28 w-full resize-y rounded-md border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus-visible:border-[var(--theme-accent-border)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-wait disabled:opacity-60"
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
@@ -884,24 +938,24 @@ export function AppShellSettingsDialog({
             type="button"
             onClick={() => void handleImportPlugin()}
             disabled={!pluginImportDraft.trim() || pluginImportState.busy}
-            className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+            className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pluginImportState.busy ? 'Importing...' : 'Import'}
           </button>
         </div>
         {pluginImportState.error && (
-          <p className="mt-2 text-xs text-rose-300">
+          <p className="host-error mt-2 rounded-md border px-3 py-2 text-xs" role="alert">
             {pluginImportState.error}
           </p>
         )}
         {pluginImportState.message && (
-          <p className="mt-2 text-xs text-emerald-300">
+          <p className="mt-2 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
             {pluginImportState.message}
           </p>
         )}
       </div>
       {plugins.error && (
-        <p className="mt-2 text-xs text-rose-300">{plugins.error}</p>
+        <p className="host-error mt-2 rounded-md border px-3 py-2 text-xs" role="alert">{plugins.error}</p>
       )}
     </>
   );
@@ -909,138 +963,120 @@ export function AppShellSettingsDialog({
   const settingsContentNode = (
     <>
       {!embedded ? (
-        <div className="shrink-0 p-5 pb-0">
+        <div className="shrink-0 border-b border-[var(--theme-border)] p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:p-5">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-[var(--theme-fg-muted)]">
-                Settings
-              </p>
-              <h2 className="mt-2 text-xl font-semibold text-[var(--theme-fg)]">
+            <div className="min-w-0">
+              <h2 id={settingsTitleId} className="text-xl font-semibold text-[var(--theme-fg)]">
                 Settings
               </h2>
-              <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-soft)]">
-                Choose the default backend and manage host-side runtime files.
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--theme-fg-soft)]">
+                Configure appearance, workspaces, plugins, and host runtimes.
               </p>
             </div>
             <button
-              type="button"
               aria-label="Close Settings"
-              onClick={shellNav?.closeSettings}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:border-[var(--theme-border-contrast)] hover:bg-[var(--theme-hover)]"
+              className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
+              onClick={closeSettings}
+              ref={settingsCloseRef}
+              type="button"
             >
-              <CloseIcon />
+              <X aria-hidden="true" className="h-4 w-4" />
             </button>
           </div>
         </div>
       ) : null}
       <div
-        className={`min-h-0 flex-1 overflow-y-auto ${embedded ? 'p-0' : 'p-5 pt-5'}`}
+        className={`min-h-0 flex-1 overflow-y-auto ${embedded ? 'p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
       >
-        <div className="space-y-2">
+        <div className="divide-y divide-[var(--theme-border)]">
           {!embedded ? (
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">
-                    Appearance
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Choose light, dark, or follow the system setting. Active:{' '}
-                    {effectiveTheme}.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <fieldset className="py-5">
+              <legend className="text-sm font-semibold text-[var(--theme-fg)]">Appearance</legend>
+              <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                Choose a theme for this browser. The active display is {effectiveTheme}.
+              </p>
+              <div className="product-segmented mt-3 grid w-full grid-cols-3 sm:w-auto">
                 {themeOptions.map((option) => {
-                  const active = selectedThemeMode === option.value;
                   return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => shellNav?.setThemeMode(option.value)}
-                      className={`block rounded-[1rem] border px-3 py-2.5 text-left transition ${
-                        active
-                          ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)]'
-                          : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] hover:bg-[var(--theme-hover)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium text-[var(--theme-fg)]">
-                          {option.label}
-                        </span>
-                        {active ? (
-                          <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
-                            Active
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                        {option.description}
-                      </p>
-                    </button>
+                    <label className="product-segment min-h-11 flex-1 cursor-pointer" key={option.value}>
+                      <input
+                        checked={selectedThemeMode === option.value}
+                        className="sr-only"
+                        name="settings-theme"
+                        onChange={() => shellNav?.setThemeMode(option.value)}
+                        type="radio"
+                        value={option.value}
+                      />
+                      <span>{option.label}</span>
+                    </label>
                   );
                 })}
               </div>
-            </div>
+              <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                {themeOptions.find((option) => option.value === selectedThemeMode)?.description}
+              </p>
+            </fieldset>
           ) : null}
 
           {shellNav?.setAutoCollapseCompletedTurns ? (
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+            <section className="py-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                     Thread timeline
-                  </p>
+                  </h3>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Collapse completed turns into prompt, elapsed work, and final reply.
                   </p>
                 </div>
-                <label className="inline-flex min-h-10 shrink-0 items-center gap-2 text-xs font-medium text-[var(--theme-fg-soft)]">
+                <label className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-[var(--theme-fg-soft)]">
                   <input
-                    type="checkbox"
                     checked={autoCollapseCompletedTurns}
+                    className="h-5 w-5 accent-[var(--theme-accent-solid)]"
                     onChange={(event) =>
                       shellNav.setAutoCollapseCompletedTurns?.(
                         event.currentTarget.checked,
                       )
                     }
-                    className="h-4 w-4 accent-[var(--theme-accent-solid)]"
+                    type="checkbox"
                   />
                   <span>Auto collapse</span>
                 </label>
               </div>
-            </div>
+            </section>
           ) : null}
 
-          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+          <section className="py-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                   Plugins
-                </p>
+                </h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                   Enable renderers and thread extensions loaded by this
                   supervisor.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void plugins.refresh()}
-                disabled={plugins.loading}
-                className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
-              >
-                {plugins.loading ? 'Loading...' : 'Refresh'}
-              </button>
+              {!embedded ? (
+                <button
+                  className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={plugins.loading}
+                  onClick={() => void plugins.refresh()}
+                  type="button"
+                >
+                  {plugins.loading ? 'Loading...' : 'Refresh'}
+                </button>
+              ) : null}
             </div>
             {embedded ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2">
+              <div className="mt-3 flex min-h-11 flex-wrap items-center justify-between gap-2 border-y border-[var(--theme-border)] py-2">
                 <span className="text-xs text-[var(--theme-fg-muted)]">
                   {pluginCountLabel}
                 </span>
                 <button
                   type="button"
                   onClick={() => setPluginsPanelOpen(true)}
-                  className="rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition"
                 >
                   Manage
                 </button>
@@ -1048,30 +1084,30 @@ export function AppShellSettingsDialog({
             ) : (
               pluginsManagementNode
             )}
-          </div>
+          </section>
 
-          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+          <section className="py-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                   Workspace defaults
-                </p>
+                </h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                   Git projects clone into dev home. New workspace directories
                   can create one missing child under this path.
                 </p>
               </div>
             </div>
-            <div className="mt-3 grid gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+            <div className="mt-3 grid gap-4">
+              <div className="border-y border-[var(--theme-border)] py-3">
+                <p className="text-xs font-medium text-[var(--theme-fg-muted)]">
                   Workspace root
                 </p>
                 <p
                   title={
                     workspaceSettings?.workspaceRoot ?? 'Loading workspace root'
                   }
-                  className="mt-1 truncate rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs text-[var(--theme-fg-soft)]"
+                  className="mt-1 truncate font-mono text-xs leading-5 text-[var(--theme-fg-soft)]"
                 >
                   {workspaceSettingsState.loading && !workspaceSettings
                     ? 'Loading...'
@@ -1081,12 +1117,13 @@ export function AppShellSettingsDialog({
               <div>
                 <label
                   htmlFor="settings-dev-home"
-                  className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]"
+                  className="text-xs font-medium text-[var(--theme-fg-soft)]"
                 >
                   Dev home
                 </label>
                 <div className="mt-1 flex flex-col gap-2 sm:flex-row">
                   <input
+                    disabled={workspaceSettingsState.loading || workspaceSettingsState.saving}
                     id="settings-dev-home"
                     value={workspaceSettingsState.devHomeDraft}
                     onChange={(event) =>
@@ -1098,7 +1135,7 @@ export function AppShellSettingsDialog({
                       }))
                     }
                     placeholder="/Users/name/dev"
-                    className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
+                    className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
                   />
                   <button
                     type="button"
@@ -1109,7 +1146,7 @@ export function AppShellSettingsDialog({
                       workspaceSettingsState.saving ||
                       !workspaceSettingsState.devHomeDraft.trim()
                     }
-                    className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                    className="relay-button-primary min-h-11 shrink-0 rounded-md px-4"
                   >
                     {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
                   </button>
@@ -1117,33 +1154,33 @@ export function AppShellSettingsDialog({
               </div>
             </div>
             {workspaceSettingsState.error ? (
-              <p className="mt-2 text-xs text-rose-300">
+              <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">
                 {workspaceSettingsState.error}
               </p>
             ) : workspaceSettingsState.message ? (
-              <p className="mt-2 text-xs text-emerald-300">
+              <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
                 {workspaceSettingsState.message}
               </p>
             ) : null}
-          </div>
+          </section>
 
-          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-            <div className="flex items-start justify-between gap-3">
+          <section className="py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                   Runtime controls
-                </p>
+                </h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                   Inspect installed backend versions, install optional runtimes,
                   or restart the selected backend.
                 </p>
               </div>
-              <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
                 <button
                   type="button"
                   onClick={() => void handleRestartAppServer()}
                   disabled={restartState.busy || backendState.saving}
-                  className="rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {restartState.busy ? 'Restarting...' : 'Restart'}
                 </button>
@@ -1151,13 +1188,13 @@ export function AppShellSettingsDialog({
                   type="button"
                   onClick={() => void handleBuildAndRestartService()}
                   disabled={restartState.busy || backendState.saving}
-                  className="rounded-full border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 py-1.5 text-xs font-medium text-[var(--status-warning-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  className="min-h-11 rounded-md border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 text-xs font-medium text-[var(--status-warning-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {restartState.busy ? 'Working...' : 'Build and restart'}
                 </button>
               </div>
             </div>
-            <div className="mt-3 grid gap-2">
+            <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
               {backends.map((backend) => {
                 const installation = backend.installation;
                 const canInstall =
@@ -1170,20 +1207,17 @@ export function AppShellSettingsDialog({
                   backendState.operatingProvider === backend.provider;
                 const operationLabel = canInstall ? 'Install' : 'Update';
                 return (
-                  <div
-                    key={backend.provider}
-                    className="flex flex-col gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                  >
+                  <div key={backend.provider} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-medium text-[var(--theme-fg)]">
                           {backend.displayName}
                         </span>
                         <span
-                          className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${
+                          className={`text-[11px] font-medium ${
                             backend.enabled
-                              ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-400'
-                              : 'border-[var(--theme-border)] bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
+                              ? 'text-[var(--status-success-fg)]'
+                              : 'text-[var(--theme-fg-muted)]'
                           }`}
                         >
                           {backend.enabled
@@ -1206,7 +1240,7 @@ export function AppShellSettingsDialog({
                           : ''}
                       </p>
                       {installation.lastError ? (
-                        <p className="mt-1 line-clamp-2 text-xs text-rose-300">
+                        <p className="mt-1 line-clamp-2 text-xs text-[var(--status-danger-fg)]">
                           {installation.lastError}
                         </p>
                       ) : null}
@@ -1226,7 +1260,7 @@ export function AppShellSettingsDialog({
                           backendState.saving ||
                           (!canInstall && !canUpdate)
                         }
-                        className="shrink-0 rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                        className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {operationInProgress
                           ? backendState.operatingAction === 'install'
@@ -1239,42 +1273,46 @@ export function AppShellSettingsDialog({
                 );
               })}
             </div>
+            {backendState.loading ? (
+              <p className="mt-3 text-xs text-[var(--theme-fg-muted)]" role="status">Refreshing backend status...</p>
+            ) : null}
             {restartState.error ? (
-              <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
+              <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">{restartState.error}</p>
             ) : restartState.message ? (
-              <p className="mt-2 text-xs text-emerald-300">
+              <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
                 {restartState.message}
               </p>
             ) : backendState.message ? (
               <p
-                className={`mt-2 whitespace-pre-line text-xs ${
+                className={`mt-3 whitespace-pre-line rounded-md px-3 py-2 text-xs ${
                   backendState.message.includes('requires attention')
-                    ? 'text-[var(--status-warning-fg)]'
-                    : 'text-emerald-300'
+                    ? 'bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]'
+                    : 'bg-[var(--status-success-bg)] text-[var(--status-success-fg)]'
                 }`}
+                role="status"
               >
                 {backendState.message}
               </p>
             ) : backendState.error ? (
-              <p className="mt-2 whitespace-pre-line text-xs text-rose-300">
+              <p className="host-error mt-3 whitespace-pre-line rounded-md border px-3 py-2 text-xs" role="alert">
                 {backendState.error}
               </p>
             ) : null}
-          </div>
+          </section>
 
-          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+          <section className="py-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                   Provider host files
-                </p>
+                </h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                   {activeBackend.displayName} exposes these editable files
                   through its backend schema.
                 </p>
               </div>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
               {editableFiles.map((file) => {
                 const state = files[file.name] ?? {
                   path: file.name,
@@ -1293,7 +1331,7 @@ export function AppShellSettingsDialog({
                     key={file.name}
                     type="button"
                     onClick={() => setSelectedFileName(file.name)}
-                    className="block rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-left transition hover:bg-[var(--theme-hover)]"
+                    className="block min-h-11 w-full px-2 py-3 text-left transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1303,22 +1341,25 @@ export function AppShellSettingsDialog({
                         <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                           {file.description}
                         </p>
+                        {state.error ? (
+                          <p className="mt-1 text-xs text-[var(--status-danger-fg)]" role="alert">{state.error}</p>
+                        ) : null}
                       </div>
                       <div className="shrink-0">
                         {state.loading ? (
-                          <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
+                          <span className="text-[11px] font-medium text-[var(--theme-fg-muted)]">
                             Loading
                           </span>
                         ) : dirty ? (
-                          <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
+                          <span className="text-[11px] font-medium text-[var(--theme-accent-strong)]">
                             Unsaved
                           </span>
                         ) : state.exists ? (
-                          <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-100">
+                          <span className="text-[11px] font-medium text-[var(--status-success-fg)]">
                             Ready
                           </span>
                         ) : (
-                          <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-sky-100">
+                          <span className="text-[11px] font-medium text-[var(--status-info-fg)]">
                             New
                           </span>
                         )}
@@ -1328,20 +1369,20 @@ export function AppShellSettingsDialog({
                 );
               })}
               {editableFiles.length === 0 ? (
-                <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
                   This backend does not expose editable host files.
                 </p>
               ) : null}
             </div>
-          </div>
+          </section>
 
           {activeManagementSchema.configArchives ? (
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
+            <section className="py-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
                     Config archives
-                  </p>
+                  </h3>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Backup the selected backend host files, then apply a saved
                     archive with a backend restart.
@@ -1350,28 +1391,32 @@ export function AppShellSettingsDialog({
                 <button
                   type="button"
                   onClick={() => void handleCreateArchive()}
-                  disabled={archivesState.creating}
-                  className="shrink-0 rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  disabled={
+                    archivesState.creating ||
+                    archivesState.applyingId !== null ||
+                    archivesState.renamingBusyId !== null
+                  }
+                  className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {archivesState.creating ? 'Creating...' : 'Create backup'}
                 </button>
               </div>
               {archivesState.error ? (
-                <p className="mt-2 text-xs text-rose-300">
+                <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">
                   {archivesState.error}
                 </p>
               ) : archivesState.message ? (
-                <p className="mt-2 text-xs text-emerald-300">
+                <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
                   {archivesState.message}
                 </p>
               ) : null}
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
                 {archivesState.loading ? (
-                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                  <p className="py-4 text-xs text-[var(--theme-fg-muted)]" role="status">
                     Loading backups...
                   </p>
                 ) : archives.length === 0 ? (
-                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                  <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
                     No config backups yet.
                   </p>
                 ) : (
@@ -1380,14 +1425,15 @@ export function AppShellSettingsDialog({
                     return (
                       <div
                         key={archive.id}
-                        className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3"
+                        className="py-3"
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0">
                             {renaming ? (
-                              <div className="flex max-w-xl gap-2">
+                              <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
                                 <input
                                   aria-label={`Rename ${archive.label}`}
+                                  disabled={archivesState.renamingBusyId === archive.id}
                                   value={archivesState.renameDraft}
                                   onChange={(event) =>
                                     setArchivesState((current) => ({
@@ -1397,7 +1443,7 @@ export function AppShellSettingsDialog({
                                       message: null,
                                     }))
                                   }
-                                  className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
+                                  className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
                                 />
                                 <button
                                   type="button"
@@ -1405,9 +1451,13 @@ export function AppShellSettingsDialog({
                                   onClick={() =>
                                     void handleRenameArchive(archive)
                                   }
-                                  className="rounded-full bg-[var(--theme-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
+                                  disabled={
+                                    archivesState.renamingBusyId === archive.id ||
+                                    !archivesState.renameDraft.trim()
+                                  }
+                                  className="relay-button-primary min-h-11 rounded-md px-3"
                                 >
-                                  Save
+                                  {archivesState.renamingBusyId === archive.id ? 'Saving...' : 'Save'}
                                 </button>
                                 <button
                                   type="button"
@@ -1418,7 +1468,8 @@ export function AppShellSettingsDialog({
                                       renameDraft: '',
                                     }))
                                   }
-                                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                                  disabled={archivesState.renamingBusyId === archive.id}
+                                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   Cancel
                                 </button>
@@ -1435,7 +1486,7 @@ export function AppShellSettingsDialog({
                               {editableFiles.map((file) => (
                                 <span
                                   key={file.name}
-                                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 font-mono"
+                                  className="font-mono"
                                 >
                                   {file.name}:{' '}
                                   {archive.files[
@@ -1459,16 +1510,25 @@ export function AppShellSettingsDialog({
                                   error: null,
                                 }))
                               }
-                              disabled={renaming}
-                              className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                              disabled={
+                                renaming ||
+                                archivesState.creating ||
+                                archivesState.renamingBusyId !== null ||
+                                archivesState.applyingId !== null
+                              }
+                              className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               Rename
                             </button>
                             <button
                               type="button"
                               onClick={() => void handleApplyArchive(archive)}
-                              disabled={archivesState.applyingId !== null}
-                              className="rounded-full border border-emerald-400/35 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)] dark:text-emerald-100"
+                              disabled={
+                                archivesState.applyingId !== null ||
+                                archivesState.creating ||
+                                archivesState.renamingBusyId !== null
+                              }
+                              className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {archivesState.applyingId === archive.id
                                 ? 'Applying...'
@@ -1481,7 +1541,7 @@ export function AppShellSettingsDialog({
                   })
                 )}
               </div>
-            </div>
+            </section>
           ) : null}
         </div>
       </div>
@@ -1493,19 +1553,27 @@ export function AppShellSettingsDialog({
       <div className="flex min-h-0 flex-col overflow-hidden">
         {settingsContentNode}
         {pluginsPanelOpen ? (
-          <div className="fixed inset-0 z-[90] flex items-start justify-center p-4 pt-[max(env(safe-area-inset-top),4rem)] sm:items-center sm:pt-4">
+          <div className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4">
             <button
-              type="button"
               aria-label="Close plugins panel"
-              onClick={() => setPluginsPanelOpen(false)}
               className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
+              onClick={closePluginsPanel}
+              tabIndex={-1}
+              type="button"
             />
-            <section className="relative z-10 flex max-h-[min(82vh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
-              <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3">
+            <section
+              aria-labelledby={pluginsTitleId}
+              aria-modal="true"
+              className="product-dialog relative z-10 flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-t-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:max-h-[min(82vh,42rem)] sm:rounded-lg"
+              ref={pluginsDialogRef}
+              role="dialog"
+              tabIndex={-1}
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  <h2 className="text-sm font-semibold text-[var(--theme-fg)]" id={pluginsTitleId}>
                     Plugins
-                  </p>
+                  </h2>
                   <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
                     {pluginCountLabel}
                   </p>
@@ -1515,21 +1583,22 @@ export function AppShellSettingsDialog({
                     type="button"
                     onClick={() => void plugins.refresh()}
                     disabled={plugins.loading}
-                    className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                    className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {plugins.loading ? 'Loading...' : 'Refresh'}
                   </button>
                   <button
-                    type="button"
                     aria-label="Close plugins panel"
-                    onClick={() => setPluginsPanelOpen(false)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                    className="host-icon-button inline-flex h-11 w-11 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
+                    onClick={closePluginsPanel}
+                    ref={pluginsCloseRef}
+                    type="button"
                   >
-                    <CloseIcon />
+                    <X aria-hidden="true" className="h-4 w-4" />
                   </button>
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 {pluginsManagementNode}
               </div>
             </section>
@@ -1540,70 +1609,89 @@ export function AppShellSettingsDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center p-4 pt-[max(env(safe-area-inset-top),1rem)] sm:items-center">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center sm:p-4">
       <button
-        type="button"
         aria-label="Close Settings"
-        onClick={shellNav?.closeSettings}
         className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm"
+        onClick={closeSettings}
+        tabIndex={-1}
+        type="button"
       />
       <section
-        role="dialog"
+        aria-labelledby={settingsTitleId}
         aria-modal="true"
-        aria-label="Settings"
-        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]"
+        className="product-dialog relative z-10 flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:rounded-lg sm:border sm:border-[var(--theme-border)]"
+        ref={settingsDialogRef}
+        role="dialog"
+        tabIndex={-1}
       >
         {settingsContentNode}
       </section>
 
       {selectedFileName && selectedFile ? (
-        <div className="pointer-events-none fixed inset-0 z-[71] flex items-center justify-center p-4">
-          <div className="pointer-events-auto relative z-10 flex max-h-[min(88vh,56rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
-            <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 sm:px-5">
+        <div className="fixed inset-0 z-[71] flex items-center justify-center sm:p-4">
+          <button
+            aria-label="Close file editor"
+            className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
+            onClick={closeFileEditor}
+            tabIndex={-1}
+            type="button"
+          />
+          <div
+            aria-labelledby={fileTitleId}
+            aria-modal="true"
+            className="product-dialog relative z-10 flex h-[100dvh] max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:h-auto sm:max-h-[min(88vh,56rem)] sm:rounded-lg sm:border sm:border-[var(--theme-border)]"
+            ref={fileDialogRef}
+            role="dialog"
+            tabIndex={-1}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                <h2 className="text-sm font-semibold text-[var(--theme-fg)]" id={fileTitleId}>
                   {selectedFileName}
-                </p>
+                </h2>
                 <p className="mt-1 break-all font-mono text-xs text-[var(--theme-fg-muted)]">
                   {selectedFile.path}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {selectedFile.error ? (
-                  <span className="text-xs text-rose-300">
-                    {selectedFile.error}
-                  </span>
-                ) : selectedFile.saveMessage ? (
-                  <span className="text-xs text-emerald-300">
-                    {selectedFile.saveMessage}
-                  </span>
-                ) : null}
                 <button
-                  type="button"
                   aria-label={`Save ${selectedFileName}`}
-                  onClick={() => void handleSave(selectedFileName)}
+                  className="relay-button-primary min-h-11 rounded-md px-4"
                   disabled={
                     selectedFile.loading ||
                     selectedFile.saving ||
                     selectedFile.draftContent === selectedFile.originalContent
                   }
-                  className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-sm font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  onClick={() => void handleSave(selectedFileName)}
+                  type="button"
                 >
                   {selectedFile.saving ? 'Saving...' : 'Save'}
                 </button>
                 <button
-                  type="button"
                   aria-label="Close File Editor"
-                  onClick={() => setSelectedFileName(null)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:border-[var(--theme-border-contrast)] hover:bg-[var(--theme-hover)]"
+                  className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
+                  onClick={closeFileEditor}
+                  ref={fileCloseRef}
+                  type="button"
                 >
-                  <CloseIcon />
+                  <X aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+            {selectedFile.error ? (
+              <p className="host-error mx-4 mt-3 rounded-md border px-3 py-2 text-xs sm:mx-5" role="alert">
+                {selectedFile.error}
+              </p>
+            ) : selectedFile.saveMessage ? (
+              <p className="mx-4 mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)] sm:mx-5" role="status">
+                {selectedFile.saveMessage}
+              </p>
+            ) : null}
+            <div className="flex min-h-0 flex-1 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5">
               <textarea
                 aria-label={`Edit ${selectedFileName}`}
+                disabled={selectedFile.loading || selectedFile.saving}
                 value={selectedFile.draftContent}
                 onChange={(event) =>
                   setFiles((current) => ({
@@ -1618,7 +1706,7 @@ export function AppShellSettingsDialog({
                   }))
                 }
                 spellCheck={false}
-                className="min-h-[28rem] w-full rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-border)]"
+                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--theme-fg)] outline-none transition focus-visible:border-[var(--theme-accent-border)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-wait disabled:opacity-60 sm:min-h-[28rem]"
                 placeholder={
                   selectedFile.loading
                     ? 'Loading...'

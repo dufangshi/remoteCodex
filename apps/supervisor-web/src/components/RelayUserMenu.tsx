@@ -1,15 +1,21 @@
-import { LogOut, MonitorSmartphone, Settings, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { LogOut, MonitorSmartphone, Settings } from 'lucide-react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import type { RelaySessionDto } from '@remote-codex/shared';
 import {
+  ApiError,
   fetchRelaySession,
   relayLogout,
   relayModeActive,
 } from '../lib/api';
-import { RelayAccountSettingsPanel } from '../pages/RelayAccountPage';
 
 function initials(username: string | null | undefined) {
   const normalized = username?.trim() ?? '';
@@ -17,6 +23,14 @@ function initials(username: string | null | undefined) {
     return '??';
   }
   return Array.from(normalized).slice(0, 2).join('').toUpperCase();
+}
+
+function menuErrorMessage(caught: unknown) {
+  return caught instanceof ApiError
+    ? caught.payload.message
+    : caught instanceof Error
+      ? caught.message
+      : 'Unable to log out. Try again.';
 }
 
 export function RelayUserMenu({
@@ -28,9 +42,15 @@ export function RelayUserMenu({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const menuId = useId();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<'first' | 'last'>('first');
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [open, setOpen] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!relayModeActive()) {
@@ -55,114 +75,189 @@ export function RelayUserMenu({
 
   useEffect(() => {
     setOpen(false);
-    setAccountOpen(false);
+    setLogoutError(null);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const items = menuItems(menuRef.current);
+      const target = initialFocusRef.current === 'last' ? items.at(-1) : items[0];
+      target?.focus();
+      initialFocusRef.current = 'first';
+    });
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && !wrapperRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
 
   const user = session?.user ?? null;
   const label = useMemo(() => initials(user?.username), [user?.username]);
-  const accountDialog =
-    accountOpen && typeof document !== 'undefined'
-      ? createPortal(
-          <div
-            aria-modal="true"
-            className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 backdrop-blur-sm sm:py-10"
-            role="dialog"
-          >
-            <section className="w-full max-w-3xl rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]">
-              <header className="flex items-start justify-between gap-4 border-b border-[var(--theme-border)] px-5 py-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-                    Relay Account
-                  </p>
-                  <h2 className="mt-1 text-xl font-semibold text-[var(--theme-fg)]">
-                    Account settings
-                  </h2>
-                </div>
-                <button
-                  aria-label="Close account settings"
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
-                  onClick={() => setAccountOpen(false)}
-                  type="button"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
-              <div className="max-h-[min(78vh,48rem)] overflow-y-auto p-5">
-                <RelayAccountSettingsPanel />
-              </div>
-            </section>
-          </div>,
-          document.body,
-        )
-      : null;
 
   if (!relayModeActive() || !user) {
     return null;
   }
 
   async function logout() {
-    await relayLogout();
-    setSession(null);
-    navigate('/relay-portal');
+    if (loggingOut) {
+      return;
+    }
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      await relayLogout();
+      setSession(null);
+      navigate('/relay-portal');
+    } catch (caught) {
+      setLogoutError(menuErrorMessage(caught));
+      setLoggingOut(false);
+    }
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const items = menuItems(menuRef.current);
+    if (items.length === 0) {
+      return;
+    }
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+    if (event.key === 'Home') {
+      items[0]?.focus();
+      return;
+    }
+    if (event.key === 'End') {
+      items.at(-1)?.focus();
+      return;
+    }
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = currentIndex < 0
+      ? direction > 0 ? 0 : items.length - 1
+      : (currentIndex + direction + items.length) % items.length;
+    items[nextIndex]?.focus();
   }
 
   return (
-    <div className={`relative z-50 inline-flex shrink-0 ${className}`.trim()}>
+    <div
+      className={`relative z-50 inline-flex shrink-0 ${className}`.trim()}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+      ref={wrapperRef}
+    >
       <button
+        aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`Relay account menu for ${user.username}`}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-ring)]"
-        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+        onClick={() => {
+          initialFocusRef.current = 'first';
+          setLogoutError(null);
+          setOpen((current) => !current);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+            return;
+          }
+          event.preventDefault();
+          initialFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first';
+          setOpen(true);
+        }}
+        ref={triggerRef}
         type="button"
       >
         {label}
       </button>
       {open ? (
         <div
-          className={`absolute mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)] ${
+          className={`absolute top-full mt-2 w-64 overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)] ${
             menuAlign === 'right' ? 'right-0' : 'left-0'
           }`}
+          id={menuId}
+          onKeyDown={handleMenuKeyDown}
+          ref={menuRef}
           role="menu"
         >
-          <div className="border-b border-[var(--theme-border)] px-3 py-2">
+          <div className="border-b border-[var(--theme-border)] px-3 py-2" role="presentation">
             <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
               {user.username}
             </p>
             <p className="truncate text-xs text-[var(--theme-fg-muted)]">{user.email}</p>
           </div>
-          <button
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
-            onClick={() => {
-              setOpen(false);
-              setAccountOpen(true);
-            }}
-            role="menuitem"
-            type="button"
-          >
-            <Settings className="h-4 w-4" />
-            Account settings
-          </button>
           <Link
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+            className="flex h-11 items-center gap-2 rounded-md px-3 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+            onClick={() => setOpen(false)}
+            role="menuitem"
+            to="/relay-account"
+          >
+            <Settings aria-hidden="true" className="h-4 w-4" />
+            Account settings
+          </Link>
+          <Link
+            className="flex h-11 items-center gap-2 rounded-md px-3 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
+            onClick={() => setOpen(false)}
             role="menuitem"
             to="/relay-devices"
           >
-            <MonitorSmartphone className="h-4 w-4" />
+            <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />
             Device management
           </Link>
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)]"
+            aria-busy={loggingOut}
+            aria-disabled={loggingOut}
+            className="flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:bg-[var(--status-danger-bg)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] aria-disabled:cursor-wait aria-disabled:opacity-60"
             onClick={() => void logout()}
             role="menuitem"
             type="button"
           >
-            <LogOut className="h-4 w-4" />
-            Logout
+            <LogOut aria-hidden="true" className="h-4 w-4" />
+            {loggingOut ? 'Logging out...' : 'Log out'}
           </button>
+          {logoutError ? (
+            <p
+              aria-live="assertive"
+              className="mx-2 mb-2 rounded-md bg-[var(--status-danger-bg)] px-2 py-1.5 text-xs leading-5 text-[var(--status-danger-fg)]"
+              role="alert"
+            >
+              {logoutError}
+            </p>
+          ) : null}
         </div>
       ) : null}
-      {accountDialog}
     </div>
+  );
+}
+
+function menuItems(menu: HTMLDivElement | null) {
+  return Array.from(
+    menu?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [],
   );
 }

@@ -1,12 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { FolderKanban, Import, Menu, Settings, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
-import {
-  CloseIcon,
-  MenuIcon,
-  menuItemClassName,
-} from './appShellNavigationModel';
+import { menuItemClassName } from './appShellNavigationModel';
 import {
   currentRelayScopedPath,
   currentWorkspacesHref,
@@ -27,9 +24,9 @@ export function AppShellMenuButton({ className = '' }: { className?: string }) {
       aria-expanded={shellNav.navOpen}
       aria-controls="app-shell-navigation-menu"
       onClick={shellNav.toggleNav}
-      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center text-[var(--theme-fg)] transition hover:text-[var(--theme-fg-soft)] ${className}`.trim()}
+      className={`product-icon-button text-[var(--theme-fg)] ${className}`.trim()}
     >
-      {shellNav.navOpen ? <CloseIcon /> : <MenuIcon />}
+      {shellNav.navOpen ? <X aria-hidden="true" className="h-4 w-4" /> : <Menu aria-hidden="true" className="h-4 w-4" />}
     </button>
   );
 }
@@ -79,9 +76,25 @@ export function AppShellNavigationMenu({
       activeNav.closeNav();
     }
 
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        activeNav.closeNav();
+        document
+          .querySelector<HTMLElement>('[aria-controls="app-shell-navigation-menu"]')
+          ?.focus();
+      }
+    }
+
     document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    const focusTimer = window.setTimeout(() => {
+      menuRef.current?.querySelector<HTMLElement>('button, a[href]')?.focus();
+    }, 0);
     return () => {
+      window.clearTimeout(focusTimer);
       document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [shellNav]);
 
@@ -102,22 +115,23 @@ export function AppShellNavigationMenu({
       onTouchStart={(event) => {
         event.stopPropagation();
       }}
-      className={`rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 shadow-[var(--theme-shadow)] backdrop-blur ${className}`.trim()}
+      className={`w-64 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-2 shadow-[var(--theme-shadow)] ${className}`.trim()}
     >
-      <div>
-        <p className="text-base font-semibold tracking-wide text-[var(--theme-accent-strong)]">
+      <div className="border-b border-[var(--theme-border)] px-3 pb-2.5 pt-1.5">
+        <p className="text-sm font-semibold text-[var(--theme-fg)]">
           Remote Codex
         </p>
-        <p className="mt-1 text-xs uppercase tracking-[0.24em] text-[var(--theme-fg-muted)]">
-          Navigation
+        <p className="mt-0.5 text-xs text-[var(--theme-fg-muted)]">
+          Supervisor controls
         </p>
       </div>
-      <nav className="mt-4 flex flex-col gap-1.5 text-sm">
+      <nav aria-label="Supervisor navigation" className="mt-1 flex flex-col gap-0.5 text-sm">
         <button
           type="button"
-          disabled={isWorkspacesRoute}
+          aria-current={isWorkspacesRoute ? 'page' : undefined}
           onClick={() => {
             if (isWorkspacesRoute) {
+              shellNav.closeNav();
               return;
             }
 
@@ -126,13 +140,15 @@ export function AppShellNavigationMenu({
           }}
           className={menuItemClassName(isWorkspacesRoute)}
         >
+          <FolderKanban aria-hidden="true" className="h-4 w-4" />
           Workspaces
         </button>
         <button
           type="button"
-          disabled={isImportRoute}
+          aria-current={isImportRoute ? 'page' : undefined}
           onClick={() => {
             if (isImportRoute) {
+              shellNav.closeNav();
               return;
             }
 
@@ -141,6 +157,7 @@ export function AppShellNavigationMenu({
           }}
           className={menuItemClassName(isImportRoute)}
         >
+          <Import aria-hidden="true" className="h-4 w-4" />
           Import Session
         </button>
         <button
@@ -150,6 +167,7 @@ export function AppShellNavigationMenu({
           }}
           className={menuItemClassName()}
         >
+          <Settings aria-hidden="true" className="h-4 w-4" />
           Settings
         </button>
       </nav>

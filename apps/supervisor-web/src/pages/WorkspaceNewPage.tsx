@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { WorkspaceForm } from '../components/WorkspaceForm';
+import {
+  WorkspaceForm,
+  type WorkspaceFormInput,
+} from '../components/WorkspaceForm';
 import { FloatingRoutePanel } from '../components/FloatingRoutePanel';
 import { ApiError, createWorkspace, fetchWorkspaceSettings } from '../lib/api';
-import { currentThreadsHref } from '../lib/relayRoutes';
+import { currentThreadsHref, currentWorkspacesHref } from '../lib/relayRoutes';
 
 export function WorkspaceNewPage() {
   const navigate = useNavigate();
@@ -18,17 +21,23 @@ export function WorkspaceNewPage() {
       .catch(() => setDevHome(null));
   }, []);
 
-  async function handleSubmit(input: { absPath: string; label?: string } | { gitUrl: string; label?: string }) {
+  async function handleSubmit(input: WorkspaceFormInput) {
     setBusy(true);
     setError(null);
 
     try {
-      const normalizedInput =
-        'absPath' in input &&
-        devHome &&
-        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.absPath)
-          ? { ...input, absPath: `${devHome.replace(/\/$/, '')}/${input.absPath}` }
-          : input;
+      const normalizedInput = input.mode === 'git'
+        ? {
+            gitUrl: input.gitUrl,
+            ...(input.label ? { label: input.label } : {}),
+          }
+        : {
+            absPath:
+              input.mode === 'folder' && devHome
+                ? `${devHome.replace(/[\\/]+$/, '')}/${input.absPath}`
+                : input.absPath,
+            ...(input.label ? { label: input.label } : {}),
+          };
       const workspace = await createWorkspace(normalizedInput);
       navigate(currentThreadsHref(workspace.id));
     } catch (caught) {
@@ -42,17 +51,25 @@ export function WorkspaceNewPage() {
     }
   }
 
+  function handleCancel() {
+    navigate(currentWorkspacesHref());
+  }
+
   return (
     <FloatingRoutePanel
-      eyebrow="Add Workspace"
-      title="Create a workspace"
-      description="Enter a folder name to create it under the workspace directory, register an absolute path, or clone a Git repository."
+      backLabel="Back to workspaces"
+      eyebrow="Workspaces"
+      title="Add a workspace"
+      description="Choose a folder, existing path, or Git repository."
+      onBack={handleCancel}
     >
       <WorkspaceForm
         busy={busy}
         error={error}
-        submitLabel="Create Workspace"
+        newFolderRoot={devHome}
         surface={false}
+        onCancel={handleCancel}
+        onInputChange={() => setError(null)}
         onSubmit={handleSubmit}
       />
     </FloatingRoutePanel>

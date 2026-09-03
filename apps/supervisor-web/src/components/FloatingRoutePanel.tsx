@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react';
 
 interface FloatingRoutePanelProps {
   eyebrow: string;
@@ -6,6 +7,8 @@ interface FloatingRoutePanelProps {
   description?: string;
   children: ReactNode;
   maxWidthClassName?: string;
+  backLabel?: string;
+  onBack?: () => void;
 }
 
 export function FloatingRoutePanel({
@@ -13,25 +16,37 @@ export function FloatingRoutePanel({
   title,
   description,
   children,
-  maxWidthClassName = 'max-w-2xl',
+  maxWidthClassName = '!max-w-2xl',
+  backLabel = 'Back',
+  onBack,
 }: FloatingRoutePanelProps) {
   return (
-    <div className="flex min-h-[calc(100vh-2rem)] items-start justify-center py-[calc(env(safe-area-inset-top)+3.75rem)] sm:items-center sm:py-[calc(env(safe-area-inset-top)+2rem)]">
-      <section
-        className={`host-panel w-full ${maxWidthClassName} overflow-hidden rounded-lg border shadow-[var(--theme-shadow)]`}
-      >
-        <header className="border-b border-[var(--theme-border)] px-5 py-4 sm:px-6">
-          <p className="host-page-eyebrow text-xs uppercase tracking-[0.22em]">{eyebrow}</p>
-          <h1 className="host-page-title mt-2 text-xl font-semibold tracking-normal sm:text-2xl">
+    <div className={`product-page ${maxWidthClassName} pt-[calc(env(safe-area-inset-top)+1rem)] sm:pt-8`}>
+      <section>
+        {onBack ? (
+          <div className="product-topbar">
+            <button
+              className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm font-medium text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+              onClick={onBack}
+              type="button"
+            >
+              <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+              {backLabel}
+            </button>
+          </div>
+        ) : null}
+        <header className={`border-b border-[var(--theme-border)] pb-5 ${onBack ? 'pt-6' : ''}`}>
+          <p className="product-eyebrow">{eyebrow}</p>
+          <h1 className="product-title mt-1.5">
             {title}
           </h1>
           {description ? (
-            <p className="host-page-description mt-2 max-w-2xl text-sm leading-6">
+            <p className="product-description mt-2">
               {description}
             </p>
           ) : null}
         </header>
-        <div className="px-5 py-5 sm:px-6">{children}</div>
+        <div className="py-6">{children}</div>
       </section>
     </div>
   );

@@ -46,9 +46,10 @@ test.describe('Composer caret behavior', () => {
     const workspacePath = await ensureWorkspaceDir(workspaceName);
 
     await page.goto('/workspaces/new');
-    await page.getByLabel('Path or Git URL').fill(workspacePath);
+    await page.getByRole('button', { name: 'Existing path' }).click();
+    await page.getByLabel('Absolute path').fill(workspacePath);
     await page.getByLabel('Display label').fill(workspaceName);
-    await page.getByRole('button', { name: 'Create Workspace' }).click();
+    await page.getByRole('button', { name: 'Add workspace' }).click();
 
     await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
 

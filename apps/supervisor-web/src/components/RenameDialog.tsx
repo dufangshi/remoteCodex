@@ -1,5 +1,8 @@
-import { FormEvent, useEffect } from 'react';
+import { FormEvent, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
+
+import { useDialogLifecycle } from './useDialogLifecycle';
 
 interface RenameDialogProps {
   open: boolean;
@@ -7,6 +10,7 @@ interface RenameDialogProps {
   label: string;
   value: string;
   busy?: boolean;
+  error?: string | null;
   onChange: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void | Promise<void>;
@@ -18,26 +22,23 @@ export function RenameDialog({
   label,
   value,
   busy = false,
+  error,
   onChange,
   onCancel,
   onSubmit,
 }: RenameDialogProps) {
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
+  const inputErrorId = useId();
 
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busy) {
-        onCancel();
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [busy, onCancel, open]);
+  useDialogLifecycle({
+    busy,
+    containerRef: dialogRef,
+    initialFocusRef: inputRef,
+    onClose: onCancel,
+    open,
+  });
 
   if (!open) {
     return null;
@@ -58,15 +59,17 @@ export function RenameDialog({
         className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm disabled:cursor-not-allowed"
       />
       <form
-        role="dialog"
+        aria-labelledby={titleId}
         aria-modal="true"
-        aria-label={title}
-        onSubmit={handleSubmit}
         className="host-dialog relative z-[1] w-full max-w-md rounded-lg border p-5 shadow-[var(--theme-shadow)] sm:p-6"
+        onSubmit={handleSubmit}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="host-page-title text-sm font-medium">{title}</p>
+            <h2 className="host-page-title text-base font-semibold" id={titleId}>{title}</h2>
             <p className="host-muted mt-1 text-sm">
               Changes are saved only after confirmation.
             </p>
@@ -76,11 +79,9 @@ export function RenameDialog({
             aria-label="Close dialog"
             onClick={onCancel}
             disabled={busy}
-            className="host-icon-button inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60"
+            className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-9 sm:w-9"
           >
-            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4 fill-current">
-              <path d="M3.22 2.47 8 7.25l4.78-4.78 1.06 1.06L9.06 8.31l4.78 4.78-1.06 1.06L8 9.37l-4.78 4.78-1.06-1.06 4.78-4.78-4.78-4.78 1.06-1.06Z" />
-            </svg>
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
 
@@ -91,26 +92,35 @@ export function RenameDialog({
           <input
             id="rename-dialog-input"
             aria-label={label}
-            autoFocus
+            aria-describedby={error ? inputErrorId : undefined}
+            aria-invalid={error ? true : undefined}
+            disabled={busy}
+            ref={inputRef}
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            className="host-form-control mt-2 w-full rounded-lg border px-4 py-3 outline-none transition"
+            className="host-form-control mt-2 w-full rounded-md border px-4 py-3 outline-none transition disabled:cursor-wait disabled:opacity-60"
           />
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-2">
+        {error ? (
+          <p className="host-error mt-3 rounded-md border px-3 py-2 text-sm" id={inputErrorId} role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="host-secondary-button rounded-lg border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+            className="host-secondary-button min-h-11 rounded-md border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy || !value.trim()}
-            className="ui-action-success rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
+            className="ui-action-primary min-h-11 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed"
           >
             Save
           </button>
