@@ -209,6 +209,22 @@ jobs:
           test -n "${legacy_asset}"
           echo "legacy_asset=${legacy_asset}" >> "${GITHUB_OUTPUT}"
 
+      - name: Verify Rust relay deployment host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
+          password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
+          port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
+          fingerprint: SHA256:XCQeaNxZRFdwDbMHDnIviKL6oST7O9st0OhBj734WLw
+          timeout: 60s
+          command_timeout: 60s
+          script: |
+            set -euo pipefail
+            test "$(hostname)" = 'vps-0e6cee34'
+            sudo systemctl cat remote-codex-rust-relay.service | grep -Fq 'remote.lnz-study.com'
+            sudo systemctl cat remote-codex-rust-relay.service | grep -Fq 'ExecStart=/opt/remote-codex-rust-relay/remote-codex relay'
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -255,7 +271,7 @@ jobs:
           username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
           password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
           port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
-          fingerprint: SHA256:SGclMsgdRESf26NGzeggwmGF9f3JKOsXsPjhxEMFXlM
+          fingerprint: SHA256:XCQeaNxZRFdwDbMHDnIviKL6oST7O9st0OhBj734WLw
           source: remote-codex-rust-relay-${{ github.sha }}.tgz
           target: /tmp
 
@@ -266,7 +282,7 @@ jobs:
           username: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_USER }}
           password: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PASSWORD }}
           port: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_PORT }}
-          fingerprint: SHA256:SGclMsgdRESf26NGzeggwmGF9f3JKOsXsPjhxEMFXlM
+          fingerprint: SHA256:XCQeaNxZRFdwDbMHDnIviKL6oST7O9st0OhBj734WLw
           timeout: 60m
           command_timeout: 20m
           script: |
