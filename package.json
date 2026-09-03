@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.11.63",
+  "version": "0.11.64",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
