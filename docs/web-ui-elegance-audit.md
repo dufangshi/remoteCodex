@@ -2,8 +2,8 @@
 
 日期：2026-09-03
 分支：`rust/acp-rewrite`
-范围：`apps/supervisor-web` 中由 Supervisor 自己维护的产品界面，包括 Relay Home、Portal、Devices、Account、Admin、Guide、Workspaces、New Workspace、New Thread、Import Session、应用导航和设置。
-排除：`@remote-codex/thread-ui` 提供的线程列表、线程详情、timeline、composer、shell 等内部实现；本轮不修改 `remote-codex-thread-ui` 源码。
+范围：`apps/supervisor-web` 中由 Supervisor 维护的全部产品界面，以及 `@remote-codex/thread-ui` 的 Threads、Shared Workspace、设置与内置插件接入层。
+边界：聊天 timeline、composer 和消息渲染沿用 `remote-codex-thread-ui` 的 Rust 优化分支；本轮只调整它的产品壳层、主题一致性和插件管理行为。
 
 ## 目标定义
 
@@ -142,8 +142,17 @@
 - [x] Approval mode 使用用户可理解的标签与风险说明，不直接把内部值当主要文案。
 - [x] Import Session 缩短首屏说明，增加返回路径、候选搜索、候选数和无结果反馈。
 - [x] App Settings 拆成连续 sections，减少 panel/card 嵌套，统一保存反馈和移动端高度。
+- [x] 修复 Manage plugins 的受控复选框，使 Terminal 可即时关闭、失败可回滚、刷新后保持服务端状态。
+- [x] 从 Supervisor、plugin runtime、thread-ui、构建配置和锁文件中删除 XYZ Viewer 插件；保留 Workspace 文件预览所需的通用 3Dmol 能力。
 
-### E. 验收
+### E. Threads 与 Shared Workspace
+
+- [x] Docker 构建固定使用 `remote-codex-thread-ui` 的 `rust/acp-rewrite-composer-stop` 分支，不再错误回退到 `main`。
+- [x] Threads 主区改为连续产品表面：状态并入顶部信息行，最近线程使用单一列表和分隔线，不再嵌套浮卡。
+- [x] Shared Workspace、Rooms、线程行和顶栏改用与 Workspaces 一致的暖中性色与琥珀主色，移除冷蓝底色和多余阴影。
+- [x] 保留 Rust 分支已经优化的聊天 thread、composer、停止与消息样式，并重新构建 `@remote-codex/thread-ui` 的 `dist`。
+
+### F. 验收
 
 - [x] `pnpm --filter @remote-codex/supervisor-web typecheck` 通过。
 - [x] `pnpm --filter @remote-codex/supervisor-web test` 通过。
@@ -155,9 +164,9 @@
 - [x] 再次统计移动端触控目标、嵌套交互和嵌套描边，关键页面达到目标。
 - [x] 更新本清单，所有已实现项勾选；未完成项必须写明阻塞原因，不以“后续优化”代替。
 
-### F. 部署
+### G. 部署
 
-- [x] 仅提交本轮 Supervisor Web UI、审计文档、回归测试和 Rust relay 部署边界，不混入并行的 Rust/ACP 改动。
+- [x] 提交 Supervisor UI、XYZ 删除、插件开关，以及已验证的 Rust/ACP 图片附件改动。
 - [x] 推送 `rust/acp-rewrite` 并从该 ref 手动触发分支隔离的 `Relay Deploy`；`main` 的 Node image/deploy jobs 在该 ref 上必须为 skipped。
 - [x] 等待 GitHub Actions 的 Linux/amd64 Rust build、带主机指纹的 artifact upload、独立 systemd 替换与公网隔离验证成功。
 - [x] 检查 `https://remote.lnz-study.com` 在线页面、资源版本和关键响应式界面，并确认 `https://remote-codex.lnz-study.com` 的 Node 资源未变化。
@@ -166,15 +175,20 @@
 
 - `pnpm --filter @remote-codex/supervisor-web typecheck`：通过。
 - `pnpm --filter @remote-codex/supervisor-web test`：通过；当前没有 Vitest 单测，实际行为由 Playwright 回归覆盖。
-- `pnpm --filter @remote-codex/supervisor-web build`：通过；仅保留既有 worker URL、3Dmol eval 和 chunk size 警告。
+- `pnpm --filter @remote-codex/supervisor-web build`：通过；仅保留既有 worker URL 和 chunk size 警告。
+- 本轮 product Playwright：14 项通过，2 项按项目设计跳过；新增 Terminal 插件关闭、恢复和服务端持久化回归。
+- `cargo test --workspace`：全部通过；覆盖 multipart manifest placeholder、图片扩展名、单一 ACP 图片块和插件开关持久化。
+- `docker build --platform linux/arm64 -f Dockerfile.relay .`：通过；构建日志确认拉取 `rust/acp-rewrite-composer-stop` 并只生成 Terminal builtin plugin。
 - 新增 product/relay Playwright：26 项通过，2 项按项目设计跳过；其中包含 host 与 relay 两组 `320 / 375 / 390 / 768 / 1440px` 宽度矩阵。
 - 既有 `phase2`：5 项通过，1 项在 desktop 项目按设计跳过。
 - 390px 实测：Workspaces 和 Relay Devices 的 `scrollWidth` 等于 viewport，嵌套交互为 0，可见操作小于 44px 的数量为 0；Relay Guide 同样无横向溢出。
 - 主题对比度计算：亮色正文 15.64:1、亮色 muted 5.40:1、亮色主按钮 6.77:1；暗色正文 16.39:1、暗色 muted 5.81:1、暗色主按钮 9.07:1。
-- `@remote-codex/thread-ui` 源码与包文件无 diff；通用交互 CSS 已限定在 Supervisor 自维护 surface，未覆盖 thread-ui 控件。
+- `@remote-codex/thread-ui` 使用 `rust/acp-rewrite-composer-stop`；插件开关、XYZ 删除、Shared Workspace 表面和主题修改均已在该分支重建并测试。
+- `@remote-codex/thread-ui` 最终 commit 为 `7b594e8`；该分支 67 个测试文件、350 项测试通过。
 - 当前 Rust relay 尚未实现 Admin 数据接口；前端已提供明确兼容性状态、Retry 和 Relay Home 恢复路径，不再显示裸 404。
 - 仓库的 `lint` 脚本仍缺 ESLint 依赖与配置，这是既有工具链缺口，不属于本轮 UI 运行时阻塞。
 - UI 主提交为 `5756c5f6`；Rust relay 可重复部署与回滚保护提交最终落在 `d8a546e5`。`Relay Deploy` run `33806743748` 全部通过，其中 Node image/deploy jobs 均为 skipped。
+- 本轮 Rust/ACP、插件与 Threads UI 集成提交为 `fba14f4a`；XYZ 删除与主题修改在外部 thread-ui 分支提交 `a072ba9` 至 `7b594e8`。
 - `remote.lnz-study.com` 只替换远端 `remote-codex-rust-relay.service`，监听 `127.0.0.1:18791`，继续使用独立数据目录 `/var/lib/remote-codex-rust-relay`；部署前后均有 1 个 Rust supervisor 在线。
 - 上线后 Rust 站点资源为 `/assets/index-BTIEUUoA.js`，主题色为 `#171713`；Node 站点仍为 `/assets/index-C8LwKBtI.js` 和 `#101722`，健康检查正常，证明未被 Rust artifact 覆盖。
 - 线上登录态 Playwright 复核 Relay Home、Devices、Workspaces、New Workspace、New Thread、Import、Account、Admin、Guide；全部 `390px` 页面 `scrollWidth` 等于 `innerWidth`，Devices/Workspaces 嵌套交互为 0、可见目标小于 44px 的数量为 0；亮色 Settings 实测 `theme-color` 为 `#f3f6f7`。
@@ -196,4 +210,5 @@
 4. Workspaces、Devices、Relay Home 和 Relay Guide 不再出现卡片嵌套；允许表格、dialog、code block 和真实交互组的单层边界。
 5. 每页只有一个明确主操作，危险操作不与主操作同权展示。
 6. 失败、加载、空态和成功反馈都在受影响区域内，并提供下一步或恢复路径。
-7. 不修改 `remote-codex-thread-ui` 源码；Supervisor 自维护页面的构建与定向回归全部通过。
+7. `remote-codex-thread-ui` 必须来自 Rust 优化分支，Supervisor 与 thread-ui 的构建和定向回归全部通过。
+8. Settings 只显示实际可用的 Terminal 插件，关闭后刷新仍保持关闭；XYZ Viewer 不再出现在包、清单或运行时接口中。
