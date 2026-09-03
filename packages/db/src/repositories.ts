@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, inArray, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
@@ -459,6 +459,55 @@ export function listThreadHistoryItemRecordsByThreadId(
     .where(eq(threadHistoryItems.threadId, threadId))
     .orderBy(threadHistoryItems.createdAt)
     .all();
+}
+
+export function listThreadHistoryItemRecordsByThreadAndTurnId(
+  db: DatabaseClient,
+  threadId: string,
+  turnId: string,
+) {
+  return db
+    .select()
+    .from(threadHistoryItems)
+    .where(
+      and(
+        eq(threadHistoryItems.threadId, threadId),
+        eq(threadHistoryItems.turnId, turnId),
+      ),
+    )
+    .orderBy(threadHistoryItems.createdAt)
+    .all();
+}
+
+export function listThreadHistorySummaryRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  const conversationRecords = db
+    .select({
+      turnId: threadHistoryItems.turnId,
+      itemJson: threadHistoryItems.itemJson,
+      createdAt: threadHistoryItems.createdAt,
+    })
+    .from(threadHistoryItems)
+    .where(
+      and(
+        eq(threadHistoryItems.threadId, threadId),
+        sql`json_extract(${threadHistoryItems.itemJson}, '$.kind') IN ('userMessage', 'agentMessage')`,
+      ),
+    )
+    .orderBy(threadHistoryItems.createdAt)
+    .all();
+  const counts = db
+    .select({
+      turnId: threadHistoryItems.turnId,
+      itemCount: sql<number>`count(*)`,
+    })
+    .from(threadHistoryItems)
+    .where(eq(threadHistoryItems.threadId, threadId))
+    .groupBy(threadHistoryItems.turnId)
+    .all();
+  return { conversationRecords, counts };
 }
 
 export function upsertThreadHistoryItemRecord(

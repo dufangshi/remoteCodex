@@ -81,6 +81,10 @@ describe('ACP supervisor history fixture', () => {
         findLocalSession: async () => null,
         listPersistedHistoryItemsByTurnId: (threadId) =>
           persistence.listPersistedHistoryItemsByTurnId(threadId),
+        listPersistedHistoryItemsForTurn: (threadId, turnId) =>
+          persistence.listPersistedHistoryItemsForTurn(threadId, turnId),
+        listPersistedTurnSummariesByTurnId: (threadId) =>
+          persistence.listPersistedTurnSummariesByTurnId(threadId),
         materializeHiddenRuntimeTurns: () => undefined,
         readRemoteSession: async () => remoteSession,
         resumeRemoteSession: async () => remoteSession,

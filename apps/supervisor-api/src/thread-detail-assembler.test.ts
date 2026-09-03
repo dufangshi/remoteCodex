@@ -65,6 +65,11 @@ function createAssembler(remoteSession: AgentSessionDetail | null) {
     buildThreadPatch: vi.fn(() => ({})),
     findLocalSession,
     listPersistedHistoryItemsByTurnId: vi.fn(() => new Map()),
+    listPersistedHistoryItemsForTurn: vi.fn((): ThreadHistoryItemDto[] => []),
+    listPersistedTurnSummariesByTurnId: vi.fn(
+      (): Map<string, { items: ThreadHistoryItemDto[]; totalItemCount: number }> =>
+        new Map(),
+    ),
     materializeHiddenRuntimeTurns: vi.fn(),
     readRemoteSession,
     resumeRemoteSession: vi.fn(async () => {
@@ -161,6 +166,39 @@ describe('ThreadDetailAssembler', () => {
         ],
       ]),
     );
+    callbacks.listPersistedTurnSummariesByTurnId.mockReturnValue(
+      new Map([
+        [
+          'persisted-1',
+          {
+            items: persistedTurn('persisted-1', '2026-08-31T12:00:00.000Z'),
+            totalItemCount: 4,
+          },
+        ],
+        [
+          'persisted-2',
+          {
+            items: persistedTurn('persisted-2', '2026-08-31T12:01:00.000Z'),
+            totalItemCount: 5,
+          },
+        ],
+        [
+          'acp-hydrated:persisted-2',
+          {
+            items: persistedTurn('persisted-2', '2026-08-31T12:01:00.000Z').map(
+              (item) => ({
+                ...item,
+                id: `acp-hydrated:${item.id}`,
+                ...(item.kind === 'agentMessage'
+                  ? { sourceTurnId: 'acp-hydrated:persisted-2' }
+                  : {}),
+              }),
+            ),
+            totalItemCount: 5,
+          },
+        ],
+      ]),
+    );
 
     const entry = await assembler.buildCacheEntry({
       localThreadId: record.id,
@@ -179,7 +217,50 @@ describe('ThreadDetailAssembler', () => {
           { kind: 'userMessage', text: 'Prompt persisted-2' },
           { kind: 'agentMessage', text: 'Reply persisted-2' },
         ],
+        hasDeferredItems: true,
+        deferredItemCount: 3,
       },
+    ]);
+  });
+
+  it('builds one turn detail from its persisted items without loading a session', () => {
+    const { assembler, callbacks } = createAssembler(session([turn('remote-turn')]));
+    callbacks.listPersistedHistoryItemsForTurn.mockReturnValue([
+      {
+        id: 'turn-1:user',
+        kind: 'userMessage',
+        text: 'Inspect this turn.',
+        createdAt: '2026-08-31T12:00:00.000Z',
+      },
+      {
+        id: 'turn-1:reasoning',
+        kind: 'reasoning',
+        text: 'Checking.',
+        createdAt: '2026-08-31T12:00:01.000Z',
+      },
+      {
+        id: 'turn-1:agent',
+        kind: 'agentMessage',
+        text: 'Done.',
+        sourceTurnId: 'turn-1',
+        createdAt: '2026-08-31T12:00:02.000Z',
+      },
+    ]);
+
+    const detail = assembler.buildPersistedTurnDetail({
+      localThreadId: record.id,
+      turnId: 'turn-1',
+    });
+
+    expect(callbacks.listPersistedHistoryItemsForTurn).toHaveBeenCalledWith(
+      record.id,
+      'turn-1',
+    );
+    expect(callbacks.readRemoteSession).not.toHaveBeenCalled();
+    expect(detail?.turn.items.map((item) => item.id)).toEqual([
+      'turn-1:user',
+      'turn-1:reasoning',
+      'turn-1:agent',
     ]);
   });
 

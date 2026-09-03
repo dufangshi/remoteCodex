@@ -307,6 +307,10 @@ export class ThreadService {
           getThreadRecordById(this.db, localThreadId)!,
         listPersistedHistoryItemsByTurnId: (localThreadId) =>
           this.historyPersistence.listPersistedHistoryItemsByTurnId(localThreadId),
+        listPersistedHistoryItemsForTurn: (localThreadId, turnId) =>
+          this.historyPersistence.listPersistedHistoryItemsForTurn(localThreadId, turnId),
+        listPersistedTurnSummariesByTurnId: (localThreadId) =>
+          this.historyPersistence.listPersistedTurnSummariesByTurnId(localThreadId),
         materializeHiddenRuntimeTurns: (localThreadId, turns) =>
           this.materializeHiddenRuntimeTurns(localThreadId, turns),
         readRemoteSession: async (record, options) => {
@@ -776,7 +780,7 @@ export class ThreadService {
           ? { beforeTurnId: options.beforeTurnId }
           : {}),
         ...(options.summaryOnly && record.provider === 'acp' &&
-        !loadedIds.has(providerSessionId)
+        record.status !== 'running'
           ? { preferPersistedHistory: true }
           : {}),
       },
@@ -816,7 +820,9 @@ export class ThreadService {
     );
     const goalHistory = this.goalCoordinator.listThreadGoalHistory(updated.id);
     const remoteGoal =
-      updated.isConnected === false || !this.optionalRuntimeForProvider(updated.provider)
+      updated.isConnected === false ||
+      !loadedIds.has(providerSessionId) ||
+      !this.optionalRuntimeForProvider(updated.provider)
         ? null
         : await this.goalCoordinator.getThreadGoalForRecord(updated).catch(() => null);
     const goal =
@@ -938,10 +944,32 @@ export class ThreadService {
     const workspace = this.requireWorkspaceForThread(record);
     this.requireProviderSessionId(record);
 
+    const turnMetadataById = listThreadTurnMetadataMap(this.db, localThreadId);
+    const persistedDetail = this.detailAssembler.buildPersistedTurnDetail({
+      localThreadId,
+      turnId,
+      ...(turnMetadataById.get(turnId)
+        ? { metadata: turnMetadataById.get(turnId)! }
+        : {}),
+    });
+    if (persistedDetail) {
+      const [turn] = this.pluginService?.enrichTurnsWithArtifacts({
+        threadId: record.id,
+        workspacePath: workspace.absPath,
+        turns: [persistedDetail.turn],
+        deferredDetails: persistedDetail.deferredDetails,
+      }) ?? [persistedDetail.turn];
+      return {
+        ...turn!,
+        hasDeferredItems: false,
+        deferredItemCount: 0,
+      };
+    }
+
     const cachedDetail = await this.detailAssembler.buildCacheEntry({
       localThreadId,
       record,
-      turnMetadataById: listThreadTurnMetadataMap(this.db, localThreadId),
+      turnMetadataById,
     });
     const enrichedTurns = this.pluginService?.enrichTurnsWithArtifacts({
       threadId: record.id,

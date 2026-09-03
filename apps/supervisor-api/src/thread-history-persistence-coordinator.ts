@@ -3,6 +3,8 @@ import {
   deleteThreadTurnMetadataByThreadAndTurnId,
   getThreadTurnMetadataByThreadAndTurnId,
   listThreadHistoryItemRecordsByThreadId,
+  listThreadHistoryItemRecordsByThreadAndTurnId,
+  listThreadHistorySummaryRecordsByThreadId,
   upsertThreadHistoryItemRecord,
   upsertThreadTurnMetadata,
   type DatabaseClient,
@@ -16,6 +18,7 @@ import {
   parseStoredHistoryItem,
   shouldPersistLiveHistoryItem,
   shouldPersistRuntimeFinalHistoryItem,
+  sortHistoryItemsBySequence,
 } from './thread-history-items';
 
 export class ThreadHistoryPersistenceCoordinator {
@@ -51,6 +54,54 @@ export class ThreadHistoryPersistenceCoordinator {
     }
 
     return itemsByTurnId;
+  }
+
+  listPersistedHistoryItemsForTurn(localThreadId: string, turnId: string) {
+    return listThreadHistoryItemRecordsByThreadAndTurnId(
+      this.db,
+      localThreadId,
+      turnId,
+    ).flatMap((record) => {
+      const item = parseStoredHistoryItem(record.itemJson);
+      if (!item || (item.kind === 'agentMessage' && !item.sourceTurnId)) {
+        return [];
+      }
+      return [item];
+    });
+  }
+
+  listPersistedTurnSummariesByTurnId(localThreadId: string) {
+    const { conversationRecords, counts } =
+      listThreadHistorySummaryRecordsByThreadId(this.db, localThreadId);
+    const conversationItems = new Map<string, ThreadHistoryItemDto[]>();
+    for (const record of conversationRecords) {
+      const item = parseStoredHistoryItem(record.itemJson);
+      if (!item || (item.kind === 'agentMessage' && !item.sourceTurnId)) {
+        continue;
+      }
+      const current = conversationItems.get(record.turnId) ?? [];
+      current.push(item);
+      conversationItems.set(record.turnId, current);
+    }
+    const totalByTurnId = new Map(counts.map((entry) => [entry.turnId, entry.itemCount]));
+    return new Map(
+      [...conversationItems].map(([turnId, items]) => {
+        const ordered = sortHistoryItemsBySequence(items);
+        const finalAgent = ordered.findLast(
+          (item) => item.kind === 'agentMessage' && item.text.trim().length > 0,
+        );
+        const summaryItems = ordered.filter(
+          (item) => item.kind === 'userMessage' || item === finalAgent,
+        );
+        return [
+          turnId,
+          {
+            items: summaryItems,
+            totalItemCount: totalByTurnId.get(turnId) ?? summaryItems.length,
+          },
+        ];
+      }),
+    );
   }
 
   persistLiveHistoryItem(

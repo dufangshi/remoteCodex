@@ -65,6 +65,11 @@ interface LocalSessionLike {
   turns: ThreadTurnDto[];
 }
 
+interface PersistedTurnSummary {
+  items: ThreadHistoryItemDto[];
+  totalItemCount: number;
+}
+
 interface ThreadDetailAssemblerOptions {
   limit?: number;
   beforeTurnId?: string;
@@ -81,6 +86,13 @@ interface ThreadDetailAssemblerCallbacks {
   listPersistedHistoryItemsByTurnId(
     localThreadId: string,
   ): Map<string, ThreadHistoryItemDto[]>;
+  listPersistedHistoryItemsForTurn(
+    localThreadId: string,
+    turnId: string,
+  ): ThreadHistoryItemDto[];
+  listPersistedTurnSummariesByTurnId(
+    localThreadId: string,
+  ): Map<string, PersistedTurnSummary>;
   materializeHiddenRuntimeTurns(localThreadId: string, turns: AgentTurn[]): void;
   readRemoteSession(
     record: ThreadDetailRecord,
@@ -164,6 +176,38 @@ export class ThreadDetailAssembler {
 
   invalidate(localThreadId: string) {
     this.threadDetailCache.delete(localThreadId);
+  }
+
+  buildPersistedTurnDetail(input: {
+    localThreadId: string;
+    turnId: string;
+    metadata?: ThreadTurnMetadataRecord;
+  }) {
+    const items = this.input.callbacks.listPersistedHistoryItemsForTurn(
+      input.localThreadId,
+      input.turnId,
+    );
+    if (items.length === 0) {
+      return null;
+    }
+    const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
+    const status = persistedAcpTurnStatus(items);
+    const baseTurn: ThreadTurnDto = {
+      id: input.turnId,
+      startedAt: input.metadata?.createdAt ?? earliestItemCreatedAt(items),
+      status,
+      error: status === 'failed' ? persistedTurnError(items) : null,
+      items: [],
+    };
+    const merged = mergePersistedHistoryItemsIntoTurns(
+      [baseTurn],
+      new Map([[input.turnId, items]]),
+      deferredDetails,
+    )[0]!;
+    return {
+      turn: buildTurnDto(merged, input.metadata),
+      deferredDetails,
+    };
   }
 
   cachedTurns(localThreadId: string) {
@@ -373,9 +417,17 @@ export class ThreadDetailAssembler {
     options: ThreadDetailAssemblerOptions;
   }): Promise<ThreadDetailCacheEntry> {
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
-    const persistedItemsByTurnId = this.input.callbacks.listPersistedHistoryItemsByTurnId(
-      input.localThreadId,
-    );
+    const persistedSummariesByTurnId = input.options.preferPersistedHistory
+      ? this.input.callbacks.listPersistedTurnSummariesByTurnId(input.localThreadId)
+      : null;
+    const persistedItemsByTurnId = persistedSummariesByTurnId
+      ? new Map(
+          [...persistedSummariesByTurnId].map(([turnId, summary]) => [
+            turnId,
+            summary.items,
+          ]),
+        )
+      : this.input.callbacks.listPersistedHistoryItemsByTurnId(input.localThreadId);
     const localSession =
       input.options.preferPersistedHistory && persistedItemsByTurnId.size > 0
         ? null
@@ -403,12 +455,23 @@ export class ThreadDetailAssembler {
       ),
       selectedPersistedItems,
       deferredDetails,
-    ).map((turn) =>
-      buildTurnDto(
+    ).map((turn) => {
+      const built = buildTurnDto(
         deferLargeHistoryItemDetails(turn, deferredDetails),
         input.turnMetadataById.get(turn.id) ?? fallbackMetadata,
-      ),
-    );
+      );
+      const summary = persistedSummariesByTurnId?.get(turn.id);
+      const deferredItemCount = summary
+        ? Math.max(0, summary.totalItemCount - built.items.length)
+        : 0;
+      return deferredItemCount > 0
+        ? {
+            ...built,
+            hasDeferredItems: true,
+            deferredItemCount,
+          }
+        : built;
+    });
     const entry = {
       cachedAt: Date.now(),
       turns,
