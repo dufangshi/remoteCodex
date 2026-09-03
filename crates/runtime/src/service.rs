@@ -12,7 +12,7 @@ use remote_codex_protocol::{
     UpdateWorkspaceSettingsInput, WorkspaceDto, WorkspaceSettingsDto,
 };
 use rusqlite::{params, OptionalExtension};
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -62,6 +62,66 @@ impl Supervisor {
     pub fn with_local_session_homes(mut self, homes: LocalSessionHomes) -> Self {
         self.local_session_homes = homes;
         self
+    }
+
+    pub fn spawn_live_item_persister(self: &Arc<Self>) {
+        let this = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut events = this.bus.subscribe();
+            loop {
+                match events.recv().await {
+                    Ok(event)
+                        if event.event_type == "thread.item.started"
+                            || event.event_type == "thread.item.completed" =>
+                    {
+                        let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str)
+                        else {
+                            continue;
+                        };
+                        let Some(item) = event.payload.get("item").cloned() else {
+                            continue;
+                        };
+                        let Ok(item) = serde_json::from_value::<ThreadHistoryItemDto>(item) else {
+                            continue;
+                        };
+                        if let Err(err) = this.upsert_history_item(&event.thread_id, turn_id, &item)
+                        {
+                            tracing::warn!(error = %err, "failed to persist live history item");
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    fn upsert_history_item(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        item: &ThreadHistoryItemDto,
+    ) -> Result<()> {
+        let now = item.created_at.clone().unwrap_or_else(now_rfc3339);
+        self.db.with(|conn| {
+            conn.execute(
+                "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?6)
+                 ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
+                    item_json=excluded.item_json,
+                    updated_at=excluded.updated_at",
+                params![
+                    Uuid::new_v4().to_string(),
+                    thread_id,
+                    turn_id,
+                    item.id,
+                    serde_json::to_string(item)?,
+                    now
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn runtime(&self, provider: Provider) -> Result<&SharedRuntime> {
@@ -609,8 +669,11 @@ impl Supervisor {
                 )?;
                 for item in &turn.items {
                     conn.execute(
-                        "INSERT OR REPLACE INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
-                         VALUES (?1,?2,?3,?4,?5,?6,?6)",
+                        "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+                         VALUES (?1,?2,?3,?4,?5,?6,?6)
+                         ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
+                            item_json=excluded.item_json,
+                            updated_at=excluded.updated_at",
                         params![
                             Uuid::new_v4().to_string(),
                             thread_id,
@@ -1006,6 +1069,25 @@ impl Supervisor {
             .provider_session_id
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        if !runtime.session_loaded(&session_id) {
+            let cwd = self
+                .get_workspace(&thread.workspace_id)
+                .ok()
+                .map(|ws| ws.abs_path);
+            runtime.resume_session(&session_id, cwd.as_deref()).await?;
+            let _ = runtime
+                .apply_session_settings(
+                    session_id.as_str(),
+                    SessionSettings {
+                        model: thread.model.clone(),
+                        effort: thread.reasoning_effort.clone(),
+                        sandbox_mode: thread.sandbox_mode.clone(),
+                        collaboration_mode: Some(thread.collaboration_mode.clone()),
+                        approval_mode: Some(thread.approval_mode.clone()),
+                    },
+                )
+                .await;
+        }
         let turn_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         let title = if thread.title == "New thread" {
@@ -1137,8 +1219,11 @@ impl Supervisor {
             )?;
             for item in items {
                 conn.execute(
-                    "INSERT OR REPLACE INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
-                     VALUES (?1,?2,?3,?4,?5,?6,?6)",
+                    "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?6)
+                     ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
+                        item_json=excluded.item_json,
+                        updated_at=excluded.updated_at",
                     params![
                         Uuid::new_v4().to_string(),
                         thread_id,
