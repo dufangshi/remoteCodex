@@ -25,7 +25,9 @@ use crate::import_id::session_ids_match;
 
 use super::adapter::{adapter_for, SessionSettingOp};
 use super::capabilities::{negotiate, NegotiatedCaps};
-use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
+use super::catalog::{
+    builtin_agents, classify_availability, command_program, parse_command_models, AcpAgentDef,
+};
 use super::mapper::{MappedUpdate, TurnMapper};
 use super::modes::{
     parse_available_modes, parse_permission_choices, permission_description, permission_questions,
@@ -1562,10 +1564,10 @@ impl AgentRuntime for AcpRuntime {
         let def = self.agent_def(agent_id)?;
         if let Some(cmd) = def.install_command.clone() {
             let parsed = parse_spawn_command(&cmd)?;
-            let status = tokio::process::Command::new(&parsed.program)
-                .args(&parsed.args)
-                .status()
-                .await?;
+            let mut command = tokio::process::Command::new(&parsed.program);
+            command.args(&parsed.args);
+            crate::child_process::hide_tokio(&mut command);
+            let status = command.status().await?;
             if !status.success() {
                 bail!("install failed for {}", def.display_name);
             }
@@ -1899,10 +1901,8 @@ fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
         }
     }
     if def.id == "codex" {
-        let codex_path = shell_words::split(&def.base_command)
-            .ok()
-            .and_then(|parts| parts.into_iter().next())
-            .unwrap_or_else(|| def.base_command.clone());
+        let codex_path =
+            command_program(&def.base_command).unwrap_or_else(|| def.base_command.clone());
         env.push(("CODEX_PATH", codex_path));
     }
     env
@@ -1922,6 +1922,33 @@ fn agent_server_command(def: &AcpAgentDef, auto_approve: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_path_preserves_an_absolute_command_path_with_spaces() {
+        let directory = std::env::temp_dir().join(format!("codex path {}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+        std::fs::write(&executable, "test").unwrap();
+        let definition = AcpAgentDef {
+            id: "codex".into(),
+            display_name: "OpenAI Codex".into(),
+            description: String::new(),
+            transport: "adapter".into(),
+            base_command: executable.to_string_lossy().into(),
+            server_command: "codex-acp".into(),
+            install_command: None,
+            model_list_command: None,
+        };
+        let environment = extra_env_for(&definition);
+        assert_eq!(
+            environment
+                .iter()
+                .find(|(key, _)| *key == "CODEX_PATH")
+                .map(|(_, value)| value.as_str()),
+            executable.to_str()
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn grok_process_flags_follow_the_product_permission_policy() {
@@ -1982,10 +2009,10 @@ fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
     let Ok(parsed) = parse_spawn_command(command) else {
         return Vec::new();
     };
-    let output = std::process::Command::new(&parsed.program)
-        .args(&parsed.args)
-        .output()
-        .ok();
+    let mut command = std::process::Command::new(&parsed.program);
+    command.args(&parsed.args);
+    crate::child_process::hide_std(&mut command);
+    let output = command.output().ok();
     let Some(output) = output.filter(|output| output.status.success()) else {
         return Vec::new();
     };

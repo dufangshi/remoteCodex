@@ -39,6 +39,7 @@ const packages = [
     key: 'win32-x64-msvc',
     dir: 'win32-x64-msvc',
     executable: 'remote-codex.exe',
+    releaseAsset: 'remote-codex-win32-x64-msvc-cli.exe',
   },
 ];
 
@@ -118,9 +119,11 @@ if (requireAll) {
 
 const nativeAssets = {};
 for (const entry of packages) {
-  const executable = entry.executable.endsWith('.exe')
-    ? `remote-codex-${entry.key}.exe`
-    : `remote-codex-${entry.key}`;
+  const executable =
+    entry.releaseAsset ??
+    (entry.executable.endsWith('.exe')
+      ? `remote-codex-${entry.key}.exe`
+      : `remote-codex-${entry.key}`);
   const staged = path.join(npmRoot, entry.dir, 'bin', entry.executable);
   if (!fs.existsSync(staged)) continue;
   const contents = fs.readFileSync(staged);

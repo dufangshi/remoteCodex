@@ -40,6 +40,7 @@ impl AgentTerminals {
         };
         let id = Uuid::new_v4().to_string();
         let mut cmd = Command::new(&executable);
+        crate::child_process::hide_tokio(&mut cmd);
         cmd.args(&parsed_args)
             .current_dir(&cwd)
             .envs(env.iter().cloned())
@@ -236,9 +237,10 @@ fn terminate_process(child_id: u32) -> Result<()> {
 
 #[cfg(windows)]
 fn terminate_process(child_id: u32) -> Result<()> {
-    let status = std::process::Command::new("taskkill")
-        .args(["/PID", &child_id.to_string(), "/T", "/F"])
-        .status()?;
+    let mut command = std::process::Command::new("taskkill");
+    command.args(["/PID", &child_id.to_string(), "/T", "/F"]);
+    crate::child_process::hide_std(&mut command);
+    let status = command.status()?;
     if status.success() {
         Ok(())
     } else {

@@ -120,6 +120,7 @@ impl AcpProcess {
     )> {
         let parsed = parse_spawn_command(command)?;
         let mut cmd = Command::new(&parsed.program);
+        crate::child_process::hide_tokio(&mut cmd);
         cmd.args(&parsed.args)
             .current_dir(cwd)
             .stdin(Stdio::piped())

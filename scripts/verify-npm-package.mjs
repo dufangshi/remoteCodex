@@ -21,6 +21,7 @@ const packageVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
 ).version;
 let launcher = null;
+const npm = npmInvocation();
 
 try {
   fs.mkdirSync(installRoot, { recursive: true });
@@ -58,7 +59,7 @@ try {
       2,
     )}\n`,
   );
-  await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], {
+  await run(npm.command, [...npm.args, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], {
     cwd: installRoot,
   });
 
@@ -134,13 +135,24 @@ try {
 
 async function npmPack(directory, destination) {
   const result = await run(
-    'npm',
-    ['pack', '--json', '--pack-destination', destination, '--ignore-scripts'],
+    npm.command,
+    [...npm.args, 'pack', '--json', '--pack-destination', destination, '--ignore-scripts'],
     { cwd: directory, capture: true },
   );
   const output = JSON.parse(result.stdout);
   const metadata = output[0];
   return { metadata, path: path.join(destination, metadata.filename) };
+}
+
+function npmInvocation() {
+  if (process.platform !== 'win32') return { command: 'npm', args: [] };
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(path.dirname(process.execPath), '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  const npmCli = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!npmCli) throw new Error('npm-cli.js was not found beside the active Node.js runtime.');
+  return { command: process.execPath, args: [npmCli] };
 }
 
 function assertPackageContents(metadata) {

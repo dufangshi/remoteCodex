@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import { publishRelease } from './publish-npm-release.mjs';
@@ -70,7 +71,7 @@ test('publishes and tags the launcher', () => {
   assert.deepEqual(npm.commands('publish'), [
     [
       'publish',
-      '/release/remote-codex-0.12.0.tgz',
+      path.join('/release', 'remote-codex-0.12.0.tgz'),
       '--tag',
       'latest',
       '--access',
@@ -146,7 +147,7 @@ function mockNpm(initialRegistry, options = {}) {
         };
       }
       if (args[0] === 'publish') {
-        const filename = args[1].split('/').at(-1);
+        const filename = path.basename(args[1]);
         const entry = manifest.packages.find(
           (candidate) => candidate.filename === filename,
         );

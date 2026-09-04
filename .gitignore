@@ -26,6 +26,7 @@ test-results/
 apps/supervisor-web/test-results/
 apps/supervisor-api/.tmp/
 artifacts/phase-zero-six-evidence/
+artifacts/windows-device-manager/
 aws-staging-preflight.json
 staging-phase-one-smoke.json
 phase-zero-six-verification.json

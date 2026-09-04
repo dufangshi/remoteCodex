@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod actor;
+mod child_process;
 pub mod config;
 pub mod db;
 pub mod fake;

@@ -202,19 +202,41 @@ pub fn augment_path() {
 }
 
 pub fn resolve_executable(command: &str) -> Option<PathBuf> {
-    let parsed = shell_words::split(command).ok()?;
-    let exe = parsed.first().map(String::as_str).unwrap_or(command);
-    if exe.contains('/') {
-        let path = PathBuf::from(exe);
-        return path.exists().then_some(path);
+    let exe = command_program(command)?;
+    let path = PathBuf::from(&exe);
+    if path.is_file() {
+        return Some(path);
     }
-    if let Ok(path) = which(exe) {
+    if path.is_absolute() {
+        return None;
+    }
+    if let Ok(path) = which(&exe) {
         return Some(path);
     }
     extra_bin_dirs().into_iter().find_map(|dir| {
-        let candidate = dir.join(exe);
+        let candidate = dir.join(&exe);
         candidate.is_file().then_some(candidate)
     })
+}
+
+pub(crate) fn command_program(command: &str) -> Option<String> {
+    let literal = command.trim();
+    let literal = literal
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            literal
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(literal);
+    let literal_path = PathBuf::from(literal);
+    if literal_path.is_file() {
+        return Some(literal.to_string());
+    }
+
+    let parsed = shell_words::split(command).ok()?;
+    parsed.first().cloned()
 }
 
 pub fn command_available(command: &str) -> bool {
@@ -342,5 +364,22 @@ mod tests {
             opencode.model_list_command.as_deref(),
             Some("'/opt/Open Code/opencode' models --profile team")
         );
+    }
+
+    #[test]
+    fn resolves_an_absolute_executable_path_with_spaces_before_shell_parsing() {
+        let directory = std::env::temp_dir().join(format!("remote codex {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join(if cfg!(windows) { "agent.cmd" } else { "agent" });
+        std::fs::write(&executable, "test").unwrap();
+        assert_eq!(
+            resolve_executable(&executable.to_string_lossy()),
+            Some(executable.clone())
+        );
+        assert_eq!(
+            resolve_executable(&format!("\"{}\"", executable.display())),
+            Some(executable.clone())
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
