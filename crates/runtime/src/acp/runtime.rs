@@ -1447,9 +1447,14 @@ fn spawn_mux(
                     let _ = inner.updates.send(update);
                 }
                 Some((req_id, method, params)) = requests.recv() => {
-                    if let Err(err) = handle_agent_request(&inner, &process, req_id, &method, params).await {
-                        tracing::warn!(error = %err, "ACP client request failed");
-                    }
+                    let inner = inner.clone();
+                    let process = process.clone();
+                    tokio::spawn(async move {
+                        if let Err(err) = handle_agent_request(&inner, &process, req_id, &method, params).await {
+                            tracing::warn!(error = %err, method, req_id, "ACP client request failed");
+                            let _ = process.respond_error(req_id, &err.to_string()).await;
+                        }
+                    });
                 }
                 else => break,
             }
@@ -1604,12 +1609,34 @@ async fn handle_agent_request(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let env = params
+                .get("env")
+                .and_then(Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| {
+                            Some((
+                                entry.get("name")?.as_str()?.to_string(),
+                                entry.get("value")?.as_str()?.to_string(),
+                            ))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let output_byte_limit = params
+                .get("outputByteLimit")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
             let term_cwd = params
                 .get("cwd")
                 .and_then(Value::as_str)
                 .map(PathBuf::from)
                 .unwrap_or(cwd);
-            let id = inner.terminals.create(command, &args, term_cwd).await?;
+            let id = inner
+                .terminals
+                .create(command, &args, term_cwd, &env, output_byte_limit)
+                .await?;
             process.respond(req_id, json!({ "terminalId": id })).await?;
         }
         "terminal/output" => {
@@ -1624,9 +1651,12 @@ async fn handle_agent_request(
             process.respond(req_id, output).await?;
         }
         "terminal/wait_for_exit" => {
-            process
-                .respond(req_id, json!({ "exitCode": 0, "signal": null }))
-                .await?;
+            let id = params
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let status = inner.terminals.wait_for_exit(id).await?;
+            process.respond(req_id, status).await?;
         }
         "terminal/kill" => {
             let id = params
