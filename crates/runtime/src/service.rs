@@ -985,7 +985,7 @@ impl Supervisor {
             "id": item.id,
             "kind": item.kind,
             "title": item.preview_text.unwrap_or_else(|| item.text.clone()),
-            "text": item.text,
+            "text": item.detail_text.unwrap_or(item.text),
         }))
     }
 
@@ -1136,6 +1136,7 @@ impl Supervisor {
                 kind: "userMessage".into(),
                 text: prompt.clone(),
                 preview_text: None,
+                detail_text: None,
                 status: None,
                 sequence: None,
                 source_turn_id: Some(turn_id.clone()),

@@ -42,6 +42,7 @@ mod tests {
             kind: kind.into(),
             text: text.into(),
             preview_text: None,
+            detail_text: None,
             status: None,
             sequence: None,
             source_turn_id: None,

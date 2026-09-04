@@ -414,6 +414,7 @@ fn item(id: &str, text: &str, status: Option<&str>) -> ThreadHistoryItemDto {
         kind: "agentMessage".into(),
         text: text.into(),
         preview_text: None,
+        detail_text: None,
         status: status.map(str::to_string),
         sequence: None,
         source_turn_id: None,

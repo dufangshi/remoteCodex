@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use remote_codex_protocol::{now_rfc3339, ThreadHistoryItemDto};
 use serde_json::Value;
 
@@ -19,6 +21,7 @@ pub struct TurnMapper {
     agent_text: String,
     thought_text: String,
     tools: Vec<ThreadHistoryItemDto>,
+    tool_payloads: HashMap<String, Value>,
     plans: Vec<ThreadHistoryItemDto>,
     compactions: Vec<ThreadHistoryItemDto>,
     seq: i64,
@@ -31,6 +34,7 @@ impl TurnMapper {
             agent_text: String::new(),
             thought_text: String::new(),
             tools: Vec::new(),
+            tool_payloads: HashMap::new(),
             plans: Vec::new(),
             compactions: Vec::new(),
             seq: 0,
@@ -66,7 +70,11 @@ impl TurnMapper {
                 }
             }
             "tool_call" | "tool_call_update" => {
-                if let Some(item) = tool_item(&self.turn_id, body) {
+                if let Some(tool_id) = body.get("toolCallId").and_then(Value::as_str) {
+                    let payload = merge_tool_payload(self.tool_payloads.get(tool_id), body);
+                    self.tool_payloads
+                        .insert(tool_id.to_string(), payload.clone());
+                    let item = tool_item(&self.turn_id, &payload);
                     if let Some(existing) = self
                         .tools
                         .iter_mut()
@@ -157,63 +165,240 @@ fn content_text(body: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn tool_item(turn_id: &str, body: &Value) -> Option<ThreadHistoryItemDto> {
+fn merge_tool_payload(previous: Option<&Value>, patch: &Value) -> Value {
+    let mut merged = previous
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(fields) = patch.as_object() {
+        for (key, value) in fields {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
+fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
     let id = body
         .get("toolCallId")
         .and_then(Value::as_str)
         .unwrap_or("tool")
         .to_string();
     let raw_kind = body.get("kind").and_then(Value::as_str).unwrap_or("");
-    let name = body
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let tool_name = body.get("name").and_then(Value::as_str).or_else(|| {
+        body.pointer("/_meta/x.ai~1tool/name")
+            .and_then(Value::as_str)
+    });
+    let normalized_name = format!(
+        "{} {}",
+        tool_name.unwrap_or(""),
+        body.get("title").and_then(Value::as_str).unwrap_or("")
+    )
+    .to_ascii_lowercase();
     let kind = match raw_kind {
         "edit" | "delete" | "move" => "fileChange",
         "read" => "fileRead",
         "fetch" => "webSearch",
         "think" => "reasoning",
         "execute" => "commandExecution",
-        _ if name.contains("web") || name.contains("http") => "webSearch",
-        _ if name.contains("read") => "fileRead",
-        _ => "commandExecution",
+        _ if normalized_name.contains("web") || normalized_name.contains("http") => "webSearch",
+        _ if normalized_name.contains("read") => "fileRead",
+        _ if normalized_name.contains("edit")
+            || normalized_name.contains("write")
+            || normalized_name.contains("patch") =>
+        {
+            "fileChange"
+        }
+        _ => "toolCall",
     };
-    let title = body
-        .get("title")
-        .and_then(Value::as_str)
-        .or_else(|| body.get("name").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            body.pointer("/rawInput/command")
-                .and_then(Value::as_str)
-                .map(str::to_string)
+    let location_text = tool_locations(body)
+        .into_iter()
+        .map(|(path, line)| match line {
+            Some(line) => format!("{path}:{line}"),
+            None => path,
         })
-        .or_else(|| {
-            body.pointer("/rawInput/path")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            body.get("locations")
-                .and_then(Value::as_array)
-                .and_then(|locations| {
-                    locations
-                        .iter()
-                        .filter_map(|location| location.get("path").and_then(Value::as_str))
-                        .next()
-                        .map(str::to_string)
-                })
-        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let command = record_value(body.get("rawInput"), &["command", "cmd", "argv"]);
+    let input_path = record_value(
+        body.get("rawInput"),
+        &["path", "target_file", "file", "uri"],
+    );
+    let title = command
+        .clone()
+        .or_else(|| (!location_text.is_empty()).then_some(location_text.clone()))
+        .or(input_path)
+        .or_else(|| nonempty_string(body.get("title")))
+        .or_else(|| tool_name.map(str::to_string))
         .unwrap_or_else(|| "Tool call".into());
     let status = match body.get("status").and_then(Value::as_str).unwrap_or("") {
         "completed" | "failed" => body.get("status").and_then(Value::as_str),
         "in_progress" => Some("running"),
         _ => Some("running"),
     };
-    Some(item(id, kind, title, status.unwrap_or("running"), turn_id))
+    let detail = tool_detail(body, tool_name, raw_kind, &location_text);
+    let mut mapped = item(
+        id,
+        kind,
+        title.clone(),
+        status.unwrap_or("running"),
+        turn_id,
+    );
+    mapped.preview_text = Some(title);
+    mapped.detail_text = (!detail.is_empty()).then_some(detail);
+    mapped
+}
+
+fn nonempty_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn record_value(value: Option<&Value>, keys: &[&str]) -> Option<String> {
+    let record = value?.as_object()?;
+    keys.iter().find_map(|key| match record.get(*key) {
+        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        Some(Value::Array(values)) if values.iter().all(Value::is_string) => Some(
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    })
+}
+
+fn tool_locations(body: &Value) -> Vec<(String, Option<u64>)> {
+    body.get("locations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| {
+            Some((
+                location.get("path")?.as_str()?.to_string(),
+                location.get("line").and_then(Value::as_u64),
+            ))
+        })
+        .collect()
+}
+
+fn tool_detail(body: &Value, tool_name: Option<&str>, raw_kind: &str, locations: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(name) = tool_name.or_else(|| body.get("title").and_then(Value::as_str)) {
+        parts.push(format!("Tool: {name}"));
+    }
+    if !raw_kind.is_empty() {
+        parts.push(format!("Kind: {raw_kind}"));
+    }
+    if let Some(status) = body.get("status").and_then(Value::as_str) {
+        parts.push(format!("Status: {status}"));
+    }
+    if !locations.is_empty() {
+        parts.push(format!("Locations:\n{locations}"));
+    }
+    if let Some(input) = body.get("rawInput") {
+        parts.push(format!("Input:\n{}", pretty_json(input)));
+    }
+    let content = tool_content_text(body);
+    if !content.is_empty() {
+        parts.push(format!("Result:\n{content}"));
+    } else if let Some(output) = body.get("rawOutput") {
+        parts.push(format!("Output:\n{}", readable_output(output)));
+    }
+    parts.join("\n\n")
+}
+
+fn tool_content_text(body: &Value) -> String {
+    body.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| match entry.get("type").and_then(Value::as_str) {
+            Some("content") => content_block_text(entry.get("content")?),
+            Some("diff") => Some(format!(
+                "File: {}\n\nBefore:\n{}\n\nAfter:\n{}",
+                entry
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+                entry
+                    .get("oldText")
+                    .and_then(Value::as_str)
+                    .unwrap_or("(new file)"),
+                entry.get("newText").and_then(Value::as_str).unwrap_or("")
+            )),
+            Some("terminal") => entry
+                .get("terminalId")
+                .and_then(Value::as_str)
+                .map(|id| format!("Terminal: {id}")),
+            _ => content_block_text(entry),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn content_block_text(block: &Value) -> Option<String> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") => nonempty_string(block.get("text")),
+        Some("resource_link") => {
+            let label = block
+                .get("title")
+                .or_else(|| block.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("Resource");
+            let uri = block.get("uri").and_then(Value::as_str).unwrap_or("");
+            Some(format!("[{label}]({uri})"))
+        }
+        Some("resource") => block
+            .pointer("/resource/text")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                block
+                    .pointer("/resource/uri")
+                    .and_then(Value::as_str)
+                    .map(|uri| format!("Resource: {uri}"))
+            }),
+        Some("image") => Some(format!(
+            "Image: {}",
+            block
+                .get("uri")
+                .or_else(|| block.get("mimeType"))
+                .and_then(Value::as_str)
+                .unwrap_or("image")
+        )),
+        Some("audio") => Some(format!(
+            "Audio: {}",
+            block
+                .get("mimeType")
+                .and_then(Value::as_str)
+                .unwrap_or("audio")
+        )),
+        _ => None,
+    }
+}
+
+fn readable_output(output: &Value) -> String {
+    for pointer in [
+        "/output_for_prompt",
+        "/raw_output",
+        "/output",
+        "/content",
+        "/FileContent/content",
+    ] {
+        if let Some(text) = output.pointer(pointer).and_then(Value::as_str) {
+            return text.to_string();
+        }
+    }
+    pretty_json(output)
+}
+
+fn pretty_json(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 fn plan_steps(body: &Value) -> Option<Vec<(String, String)>> {
@@ -278,6 +463,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         kind: kind.into(),
         text,
         preview_text: None,
+        detail_text: None,
         status: Some(status.into()),
         sequence: None,
         source_turn_id: Some(turn_id.into()),
@@ -369,5 +555,56 @@ mod tests {
         }));
         assert_eq!(mapped.items[0].text, "git status");
         assert_eq!(mapped.items[0].status.as_deref(), Some("running"));
+    }
+
+    #[test]
+    fn tool_updates_retain_input_and_expose_result_detail() {
+        let mut mapper = TurnMapper::new("t1");
+        mapper.apply(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call-1",
+            "title": "run_terminal_command",
+            "rawInput": {
+                "command": "git status -sb",
+                "description": "Inspect repository status"
+            },
+            "_meta": {
+                "x.ai/tool": { "name": "run_terminal_command", "kind": "execute" }
+            }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1",
+            "kind": "execute",
+            "title": "Execute `git status -sb`",
+            "locations": [],
+            "status": "in_progress"
+        }));
+        let completed = mapper.apply(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1",
+            "status": "completed",
+            "content": [{
+                "type": "content",
+                "content": { "type": "text", "text": "## main...origin/main" }
+            }],
+            "rawOutput": {
+                "type": "Bash",
+                "output_for_prompt": "exit: 0\n## main...origin/main"
+            }
+        }));
+
+        let item = &completed.items[0];
+        assert_eq!(item.kind, "commandExecution");
+        assert_eq!(item.text, "git status -sb");
+        assert_eq!(item.preview_text.as_deref(), Some("git status -sb"));
+        let detail = item.detail_text.as_deref().unwrap();
+        assert!(detail.contains("Tool: run_terminal_command"), "{detail}");
+        assert!(detail.contains("Inspect repository status"), "{detail}");
+        assert!(
+            detail.contains("Result:\n## main...origin/main"),
+            "{detail}"
+        );
+        assert!(!detail.contains("output_for_prompt"), "{detail}");
     }
 }

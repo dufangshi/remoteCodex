@@ -41,6 +41,7 @@ fn item(id: &str, kind: &str, text: &str, turn_id: &str) -> ThreadHistoryItemDto
         kind: kind.into(),
         text: text.into(),
         preview_text: None,
+        detail_text: None,
         status: Some("completed".into()),
         sequence: None,
         source_turn_id: Some(turn_id.into()),

@@ -760,6 +760,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         kind: kind.into(),
         text,
         preview_text: None,
+        detail_text: None,
         status: Some(status.into()),
         sequence: None,
         source_turn_id: Some(turn_id.into()),

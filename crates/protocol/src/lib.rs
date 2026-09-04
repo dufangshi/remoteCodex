@@ -224,6 +224,8 @@ pub struct ThreadHistoryItemDto {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
