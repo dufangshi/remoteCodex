@@ -266,7 +266,7 @@ mod tests {
                 "/D".into(),
                 "/S".into(),
                 "/C".into(),
-                "ping -n 2 127.0.0.1 >NUL & set /P \"=ACP_TERMINAL_OK\" <NUL & exit /B 0".into(),
+                "ping -n 2 127.0.0.1 >NUL & echo ACP_TERMINAL_OK".into(),
             ],
         )
     }
@@ -295,6 +295,7 @@ mod tests {
             .unwrap();
         assert!(terminals.output(&id).unwrap()["exitStatus"].is_null());
         assert_eq!(terminals.wait_for_exit(&id).await.unwrap()["exitCode"], 0);
-        assert_eq!(terminals.output(&id).unwrap()["output"], "ACP_TERMINAL_OK");
+        let output = terminals.output(&id).unwrap();
+        assert_eq!(output["output"].as_str().unwrap().trim(), "ACP_TERMINAL_OK");
     }
 }
