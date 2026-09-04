@@ -533,7 +533,7 @@ test.describe('non-thread product UI regressions', () => {
     ]);
   });
 
-  test('new thread defaults to Full access and renders one backend chooser', async ({ page }, testInfo) => {
+  test('new thread hides approval controls and renders one backend chooser', async ({ page }, testInfo) => {
     await page.goto(`/threads/new?workspaceId=${encodeURIComponent(workspace.id)}`);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Start a backend session' }),
@@ -546,24 +546,21 @@ test.describe('non-thread product UI regressions', () => {
     await expect(backendFieldset.getByRole('radiogroup', { name: 'Backend' })).toHaveCount(1);
     await expect(backendFieldset.getByRole('combobox')).toHaveCount(0);
 
-    const guarded = page.getByRole('radio', { name: 'Guarded' });
-    const fullAccess = page.getByRole('radio', { name: 'Full access' });
-    await expect(guarded).not.toBeChecked();
-    await expect(fullAccess).toBeChecked();
-    await expect(page.getByRole('textbox', { name: 'Title' })).toHaveCount(0);
+    await expect(page.getByText('Approval mode', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: 'Guarded' })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: 'Full access' })).toHaveCount(0);
+    const titleInput = page.getByRole('textbox', { name: 'Title' });
+    await expect(titleInput).toBeVisible();
 
     const workspaceSelect = page.getByRole('combobox', { name: 'Workspace' });
     await expect(workspaceSelect).toHaveValue(workspace.id);
 
     const backendHitTarget = backendFieldset.locator('label').first();
-    const guardedHitTarget = guarded.locator('xpath=..');
-    const fullAccessHitTarget = fullAccess.locator('xpath=..');
     await expectMobileTouchTargets(Boolean(testInfo.project.use.isMobile), [
       ['back to threads', page.getByRole('button', { name: 'Back to threads' })],
       ['backend option', backendHitTarget],
       ['workspace selector', workspaceSelect],
-      ['Guarded mode', guardedHitTarget],
-      ['Full access mode', fullAccessHitTarget],
+      ['thread title', titleInput],
       ['create thread', page.getByRole('button', { name: 'Create Thread' })],
       ['cancel thread creation', page.getByRole('button', { name: 'Cancel' })],
     ]);

@@ -55,6 +55,7 @@ test.describe('Composer caret behavior', () => {
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
+    await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);

@@ -54,7 +54,7 @@ const model = {
 } as ModelOptionDto;
 
 describe('ThreadCreateForm', () => {
-  it('defaults to full access and creates threads without a title override', async () => {
+  it('creates full-access threads with a title and without approval controls', async () => {
     api.fetchWorkspaces.mockResolvedValue([workspace]);
     api.fetchAgentBackends.mockResolvedValue([backend]);
     api.fetchAgentBackendModelsFor.mockResolvedValue([model]);
@@ -67,9 +67,12 @@ describe('ThreadCreateForm', () => {
       </MemoryRouter>,
     );
 
-    const fullAccess = await screen.findByRole('radio', { name: 'Full access' });
-    expect(fullAccess).toBeChecked();
-    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Create Thread' });
+    expect(screen.queryByText('Approval mode')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Full access' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Named thread' },
+    });
 
     const createButton = screen.getByRole('button', { name: 'Create Thread' });
     await waitFor(() => expect(createButton).toBeEnabled());
@@ -81,6 +84,7 @@ describe('ThreadCreateForm', () => {
         provider: 'codex',
         model: 'gpt-test',
         approvalMode: 'yolo',
+        title: 'Named thread',
       }),
     );
     expect(onCreated).toHaveBeenCalledWith({ id: 'thread-1' });

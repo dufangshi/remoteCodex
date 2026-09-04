@@ -78,11 +78,13 @@ function Field({
 
 export function ThreadCreateForm({
   initialWorkspaceId,
+  initialTitle = '',
   onCreated,
   onCancel,
   variant = 'panel',
 }: {
   initialWorkspaceId?: string | null | undefined;
+  initialTitle?: string | null | undefined;
   onCreated: (thread: ThreadDto) => void;
   onCancel?: () => void;
   variant?: 'panel' | 'dialog';
@@ -104,7 +106,7 @@ export function ThreadCreateForm({
   const [agentId, setAgentId] = useState('');
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
-  const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
+  const [title, setTitle] = useState(() => initialTitle ?? '');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
@@ -125,6 +127,10 @@ export function ThreadCreateForm({
     setModel(next?.model ?? '');
     setReasoningEffort(next?.defaultReasoningEffort ?? null);
   }
+
+  useEffect(() => {
+    setTitle(initialTitle ?? '');
+  }, [initialTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -301,6 +307,7 @@ export function ThreadCreateForm({
     setBusy(true);
     setError(null);
     try {
+      const trimmed = title.trim();
       onCreated(
         await createThread({
           workspaceId,
@@ -308,7 +315,8 @@ export function ThreadCreateForm({
           ...(provider === 'acp' ? { agentId } : {}),
           model,
           ...(reasoningEffort ? { reasoningEffort } : {}),
-          approvalMode,
+          approvalMode: 'yolo',
+          ...(trimmed ? { title: trimmed } : {}),
         }),
       );
     } catch (caught) {
@@ -349,7 +357,7 @@ export function ThreadCreateForm({
         <div className="pr-8">
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">Create New Chat</h2>
           <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Choose the workspace, agent, and approval mode for this thread.
+            Choose the workspace and agent for this thread.
           </p>
         </div>
       ) : null}
@@ -579,40 +587,16 @@ export function ThreadCreateForm({
         ) : null}
       </div>
 
-      <fieldset>
-        <legend className="host-form-label text-xs font-medium">Approval mode</legend>
-        <div aria-label="Approval mode" className="product-segmented mt-2 w-full" role="radiogroup">
-          <label className="product-segment flex-1">
-            <input
-              checked={approvalMode === 'guarded'}
-              className="sr-only"
-              disabled={busy}
-              name={`${formId}-approval`}
-              onChange={() => setApprovalMode('guarded')}
-              type="radio"
-              value="guarded"
-            />
-            Guarded
-          </label>
-          <label className="product-segment flex-1">
-            <input
-              checked={approvalMode === 'yolo'}
-              className="sr-only"
-              disabled={busy}
-              name={`${formId}-approval`}
-              onChange={() => setApprovalMode('yolo')}
-              type="radio"
-              value="yolo"
-            />
-            Full access
-          </label>
-        </div>
-        <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
-          {approvalMode === 'guarded'
-            ? 'Pauses when an action needs your approval.'
-            : 'Runs tool actions without approval prompts. Use only in a trusted workspace.'}
-        </p>
-      </fieldset>
+      <Field id={`${formId}-thread-title`} label="Title">
+        <input
+          id={`${formId}-thread-title`}
+          disabled={busy}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Optional. Falls back to first prompt."
+          className={controlClass}
+        />
+      </Field>
 
       {error ? <div className="host-error rounded-md border px-4 py-3 text-sm" role="alert">{error}</div> : null}
 

@@ -12,6 +12,7 @@ export function ThreadNewPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedWorkspaceId = searchParams.get('workspaceId');
+  const requestedTitle = searchParams.get('title');
 
   function handleCancel() {
     if (requestedWorkspaceId) {
@@ -27,12 +28,13 @@ export function ThreadNewPage() {
       backLabel={requestedWorkspaceId ? 'Back to threads' : 'Back to workspaces'}
       eyebrow="New Thread"
       title="Start a backend session"
-      description="Choose a workspace, backend, model, and approval mode."
+      description="Choose a workspace, backend, and model."
       maxWidthClassName="!max-w-3xl"
       onBack={handleCancel}
     >
       <ThreadCreateForm
         initialWorkspaceId={requestedWorkspaceId}
+        initialTitle={requestedTitle}
         onCancel={handleCancel}
         onCreated={(thread) => navigate(currentThreadHref(thread.id))}
       />
