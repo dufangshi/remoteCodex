@@ -22,7 +22,8 @@ GitHub Release v0.12.0
   remote-codex-linux-arm64-musl
   remote-codex-linux-x64-gnu
   remote-codex-linux-x64-musl
-  remote-codex-win32-x64-msvc.exe
+  remote-codex-win32-x64-msvc-cli.exe
+  remote-codex-win32-x64-msvc.exe  # Native Windows Device Manager, not used by npm
 ```
 
 ## 方案取舍

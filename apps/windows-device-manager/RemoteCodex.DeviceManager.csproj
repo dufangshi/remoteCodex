@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RemoteCodex.DeviceManager</AssemblyName>
+    <RootNamespace>RemoteCodex.DeviceManager</RootNamespace>
+    <ApplicationIcon>Assets\RemoteCodex.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+    <Version>0.1.2</Version>
+    <AssemblyTitle>Remote Codex Device Manager</AssemblyTitle>
+    <Product>Remote Codex Device Manager</Product>
+    <Description>Windows tray application for a Remote Codex Relay Device.</Description>
+    <Company>Remote Codex</Company>
+    <Authors>Remote Codex contributors</Authors>
+    <RepositoryUrl>https://github.com/dufangshi/remoteCodex</RepositoryUrl>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <BundledRemoteCodexBinary Condition="'$(BundledRemoteCodexBinary)' == ''">$(MSBuildThisFileDirectory)..\..\target\release\remote-codex.exe</BundledRemoteCodexBinary>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\npm\remote-codex\bin\remote-codex.mjs" LogicalName="RemoteCodex.DeviceManager.BundledRuntime.remote-codex.mjs" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\npm\remote-codex\package.json" LogicalName="RemoteCodex.DeviceManager.BundledRuntime.package.json" />
+    <EmbeddedResource Include="$(BundledRemoteCodexBinary)" LogicalName="RemoteCodex.DeviceManager.BundledRuntime.remote-codex.exe" />
+  </ItemGroup>
+
+  <Target Name="ValidateBundledRemoteCodex" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(BundledRemoteCodexBinary)')" Text="Build the current Windows remote-codex.exe before publishing Device Manager: $(BundledRemoteCodexBinary)" />
+  </Target>
+</Project>

@@ -521,9 +521,10 @@ impl Supervisor {
             if dest.exists() {
                 bail!("The Git clone target directory already exists.");
             }
-            let status = std::process::Command::new("git")
-                .args(["clone", "--depth", "1", &git, &dest.to_string_lossy()])
-                .status()?;
+            let mut command = std::process::Command::new("git");
+            command.args(["clone", "--depth", "1", &git, &dest.to_string_lossy()]);
+            crate::child_process::hide_std(&mut command);
+            let status = command.status()?;
             if !status.success() {
                 bail!("git clone failed");
             }

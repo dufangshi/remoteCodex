@@ -36,9 +36,18 @@ remote-codex stop
 The npm launcher downloads a prebuilt Rust executable for the current OS, CPU,
 and Linux libc on first use, verifies its pinned SHA-256 digest, and caches it.
 It does not compile Rust or run network access in `postinstall`.
+
 See [the native npm release design](docs/npm-native-release.zh.md).
 The controlled main/relay rollout is documented in
 [the Rust main cutover runbook](docs/rust-main-cutover.zh.md).
+
+The Windows x64 GitHub Release asset named
+`remote-codex-win32-x64-msvc.exe` is the native Relay Device Manager. Its small
+WinForms UI manages pasted Relay configuration, workspace and port selection,
+the private `remote-codex` npm runtime, connect/disconnect, updates, login
+startup, recovery, logs, and the notification-area icon. It does not contain
+the browser Web UI. The separate `-cli.exe` asset is used by the npm launcher
+and retains the general-purpose command surface.
 
 Relay:
 

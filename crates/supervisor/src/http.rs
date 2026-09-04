@@ -266,7 +266,7 @@ fn static_content_type(path: &FsPath) -> &'static str {
     }
 }
 
-async fn spa_fallback(request: Request) -> Response {
+async fn spa_fallback(State(state): State<AppState>, request: Request) -> Response {
     if request.uri().path() == "/api"
         || request.uri().path().starts_with("/api/")
         || request.uri().path() == "/ws"
@@ -275,6 +275,14 @@ async fn spa_fallback(request: Request) -> Response {
     }
     if request.method() != Method::GET && request.method() != Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    if state.config.mode == remote_codex_protocol::Mode::Relay {
+        return err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Web UI is served by the Relay, not by the device supervisor",
+        )
+        .into_response();
     }
     let Some(dist) = configured_web_dist() else {
         return err(
@@ -383,6 +391,9 @@ async fn runtime_config(State(state): State<AppState>) -> Json<RuntimeConfigDto>
 }
 
 fn which_tmux() -> bool {
+    #[cfg(windows)]
+    return false;
+    #[cfg(not(windows))]
     std::process::Command::new("tmux")
         .arg("-V")
         .output()
