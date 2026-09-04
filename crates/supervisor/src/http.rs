@@ -1,29 +1,31 @@
+use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::multipart::Multipart;
-use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{DefaultBodyLimit, FromRequest, Path, Query, Request, State, WebSocketUpgrade};
-use axum::http::{header, StatusCode};
+use axum::http::{header, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Uri};
+use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
-use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{
-    now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput, HealthDto,
-    ImportThreadInput, PlatformCapabilitiesDto, Provider, RuntimeConfigDto, SendThreadPromptInput,
-    SupervisorConnectedEnvelope, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput,
-    VersionDto, APP_NAME, APP_VERSION,
+    now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput,
+    ForkThreadInput, HealthDto, ImportThreadInput, PlatformCapabilitiesDto, Provider,
+    RuntimeConfigDto, SendThreadPromptInput, ThreadWorkspaceTreeNodeDto,
+    UpdateWorkspaceSettingsInput, VersionDto, APP_NAME, APP_VERSION,
 };
 use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub type AppState = Arc<Supervisor>;
 
 const MAX_PROMPT_ATTACHMENTS: usize = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+const MAX_WORKSPACE_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +54,7 @@ struct ExportTranscriptQuery {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
@@ -121,6 +123,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
         .route("/api/threads/{id}/resume", post(thread_resume))
         .route("/api/threads/{id}/disconnect", post(thread_disconnect))
+        .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
         .route("/api/threads/{id}/fork", post(thread_fork))
         .route("/api/threads/{id}/compact", post(thread_compact))
         .route(
@@ -136,6 +139,14 @@ pub fn router(state: AppState) -> Router {
             "/api/threads/{id}/requests/{requestId}/respond",
             post(thread_respond),
         )
+        .route(
+            "/api/threads/{id}/pending-steers/{pendingSteerId}",
+            delete(cancel_pending_steer),
+        )
+        .route(
+            "/api/threads/{id}/pending-steers/{pendingSteerId}/steer",
+            post(steer_pending_prompt),
+        )
         .route("/api/threads/{id}/export-turns", get(export_turns))
         .route("/api/threads/{id}/exports/pdf", get(export_pdf))
         .route("/api/threads/{id}/exports/html", get(export_html))
@@ -143,22 +154,168 @@ pub fn router(state: AppState) -> Router {
             "/api/threads/{id}/shell",
             get(thread_shell).post(create_shell),
         )
+        .route("/api/shells/{id}", patch(update_shell))
+        .route("/api/shells/{id}/terminate", post(terminate_shell))
         .route(
             "/api/workspaces/{id}/files/download",
             get(workspace_download),
         )
+        .route("/api/workspaces/{id}/files/upload", post(workspace_upload))
         .route("/api/workspaces/{id}/files/move", patch(workspace_move))
         .route("/api/plugins", get(list_plugins))
-        .route("/api/plugins/{id}", patch(update_plugin))
-        .route("/ws", get(ws_upgrade))
-        .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
+        .route("/api/plugins/import", post(import_plugin_unsupported))
+        .route(
+            "/api/plugins/{id}",
+            get(get_plugin).patch(update_plugin).delete(delete_plugin),
         )
-        .with_state(state)
+        .route("/ws", get(ws_upgrade))
+        .fallback(spa_fallback)
+        .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require_auth,
+        ))
+        .with_state(state);
+    match webview_cors_layer() {
+        Some(layer) => router.layer(layer),
+        None => router,
+    }
+}
+
+fn webview_cors_layer() -> Option<CorsLayer> {
+    if std::env::var("REMOTE_CODEX_ENABLE_WEBVIEW_CORS").as_deref() != Ok("true") {
+        return None;
+    }
+    let configured = std::env::var("REMOTE_CODEX_WEBVIEW_CORS_ORIGINS")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .filter_map(|value| value.trim().parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>()
+        })
+        .filter(|origins| !origins.is_empty());
+    let origins = configured.unwrap_or_else(|| {
+        [
+            "null",
+            "capacitor://localhost",
+            "ionic://localhost",
+            "http://localhost",
+            "https://localhost",
+            "https://appassets.androidplatform.net",
+        ]
+        .into_iter()
+        .map(HeaderValue::from_static)
+        .collect()
+    });
+    Some(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PATCH,
+                Method::PUT,
+                Method::DELETE,
+            ])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+            .max_age(std::time::Duration::from_secs(600)),
+    )
+}
+
+fn configured_web_dist() -> Option<PathBuf> {
+    std::env::var("REMOTE_CODEX_WEB_DIST_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let candidate = PathBuf::from("apps/supervisor-web/dist");
+            candidate.join("index.html").is_file().then_some(candidate)
+        })
+}
+
+fn safe_static_path(dist: &FsPath, uri_path: &str) -> Option<PathBuf> {
+    let relative = uri_path.trim_start_matches('/');
+    let requested = FsPath::new(relative);
+    if requested
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(dist.join(requested))
+}
+
+fn static_content_type(path: &FsPath) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+    {
+        "css" => "text/css; charset=utf-8",
+        "html" => "text/html; charset=utf-8",
+        "ico" => "image/x-icon",
+        "jpeg" | "jpg" => "image/jpeg",
+        "js" => "text/javascript; charset=utf-8",
+        "json" | "webmanifest" => "application/json; charset=utf-8",
+        "png" => "image/png",
+        "svg" => "image/svg+xml",
+        "ttf" => "font/ttf",
+        "wasm" => "application/wasm",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn spa_fallback(request: Request) -> Response {
+    if request.uri().path() == "/api"
+        || request.uri().path().starts_with("/api/")
+        || request.uri().path() == "/ws"
+    {
+        return err(StatusCode::NOT_FOUND, "not_found", "Route not found").into_response();
+    }
+    if request.method() != Method::GET && request.method() != Method::HEAD {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let Some(dist) = configured_web_dist() else {
+        return err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Web UI is not installed",
+        )
+        .into_response();
+    };
+    let Some(candidate) = safe_static_path(&dist, request.uri().path()) else {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "Invalid asset path").into_response();
+    };
+    let path = if candidate.is_file() {
+        candidate
+    } else {
+        dist.join("index.html")
+    };
+    let Ok(bytes) = tokio::fs::read(&path).await else {
+        return err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Web UI is not installed",
+        )
+        .into_response();
+    };
+    let cache_control = if path.file_name().and_then(|value| value.to_str()) == Some("index.html") {
+        "no-cache"
+    } else {
+        "public, max-age=31536000, immutable"
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(header::CACHE_CONTROL, cache_control)
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(if request.method() == Method::HEAD {
+            Body::empty()
+        } else {
+            Body::from(bytes)
+        })
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 struct ApiErr(StatusCode, ApiError);
@@ -177,8 +334,12 @@ fn map_err(e: anyhow::Error) -> ApiErr {
     let message = e.to_string();
     if message.contains("not found") {
         err(StatusCode::NOT_FOUND, "not_found", message)
-    } else if message.contains("Resume / Connect") {
-        err(StatusCode::CONFLICT, "conflict", message)
+    } else if message.contains("Resume / Connect") || message.starts_with("conflict: ") {
+        err(
+            StatusCode::CONFLICT,
+            "conflict",
+            message.strip_prefix("conflict: ").unwrap_or(&message),
+        )
     } else if message.contains("not installed") || message.contains("not enabled") {
         err(StatusCode::BAD_REQUEST, "harness_unavailable", message)
     } else {
@@ -243,18 +404,12 @@ async fn patch_workspace_settings(
     ))
 }
 
-async fn auth_session(State(state): State<AppState>) -> Json<AuthSessionDto> {
-    Json(AuthSessionDto {
-        authenticated: !state.config.auth_required,
-        username: if state.config.auth_required {
-            None
-        } else {
-            Some("local".into())
-        },
-        expires_at: None,
-        mode: state.config.mode,
-        auth_required: state.config.auth_required,
-    })
+async fn auth_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Json<AuthSessionDto> {
+    Json(crate::auth::verify_request(&state.config, &headers, &uri))
 }
 
 #[derive(Deserialize)]
@@ -266,24 +421,43 @@ struct LoginInput {
 async fn auth_login(
     State(state): State<AppState>,
     Json(body): Json<LoginInput>,
-) -> Result<Json<Value>, ApiErr> {
-    if !state.config.auth_required {
-        return Ok(Json(json!({ "ok": true, "token": "local" })));
-    }
-    let user = state.config.admin_username.as_deref().unwrap_or("admin");
-    let pass = state.config.admin_password.as_deref().unwrap_or("");
-    if body.username.as_deref() != Some(user) || body.password.as_deref() != Some(pass) {
+) -> Result<Response, ApiErr> {
+    let Some((token, session)) = crate::auth::login(
+        &state.config,
+        body.username.as_deref().unwrap_or_default(),
+        body.password.as_deref().unwrap_or_default(),
+    ) else {
         return Err(err(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "Invalid credentials",
+            "Invalid username or password.",
         ));
+    };
+    let mut response = Json(json!({
+        "token": if token.is_empty() { Value::Null } else { json!(token) },
+        "session": session,
+    }))
+    .into_response();
+    if !token.is_empty() {
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            crate::auth::session_cookie(&token)
+                .parse()
+                .expect("valid session cookie"),
+        );
     }
-    Ok(Json(json!({ "ok": true, "token": "session" })))
+    Ok(response)
 }
 
-async fn auth_logout() -> Json<Value> {
-    Json(json!({ "ok": true }))
+async fn auth_logout(State(state): State<AppState>) -> Response {
+    let mut response = Json(crate::auth::unauthenticated_session(&state.config)).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        crate::auth::clear_session_cookie()
+            .parse()
+            .expect("valid cleared session cookie"),
+    );
+    response
 }
 
 async fn agent_runtimes(State(state): State<AppState>) -> Json<Vec<Value>> {
@@ -519,8 +693,14 @@ async fn workspace_raw(
     let path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    let preview = state.workspace_preview(&id, &path).map_err(map_err)?;
-    Ok((StatusCode::OK, preview.content).into_response())
+    let (path, bytes) = state.workspace_read_bytes(&id, &path).map_err(map_err)?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(Body::from(bytes))
+        .map_err(|error| map_err(error.into()))
 }
 
 #[derive(Deserialize)]
@@ -626,6 +806,8 @@ async fn import_candidates(
 #[derive(Deserialize)]
 struct DetailQuery {
     limit: Option<u32>,
+    #[serde(rename = "beforeTurnId")]
+    before_turn_id: Option<String>,
     view: Option<String>,
 }
 
@@ -634,11 +816,45 @@ async fn get_thread(
     Query(query): Query<DetailQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
+    if query.limit.is_some_and(|limit| limit == 0 || limit > 100) {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "limit must be between 1 and 100",
+        ));
+    }
+    if query
+        .before_turn_id
+        .as_deref()
+        .is_some_and(|turn_id| turn_id.trim().is_empty())
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "beforeTurnId must not be empty",
+        ));
+    }
+    if query
+        .view
+        .as_deref()
+        .is_some_and(|view| !matches!(view, "summary" | "full"))
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "view must be summary or full",
+        ));
+    }
     let summary_only = query.view.as_deref() == Some("summary");
     Ok(Json(
         serde_json::to_value(
             state
-                .get_thread_detail_view(&id, query.limit, summary_only)
+                .get_thread_detail_page(
+                    &id,
+                    query.limit.or(Some(10)),
+                    query.before_turn_id.as_deref(),
+                    summary_only,
+                )
                 .await
                 .map_err(map_err)?,
         )
@@ -926,14 +1142,12 @@ async fn thread_prompt(
     });
     for _ in 0..100 {
         if let Ok(thread) = state.get_thread(&id) {
-            if thread.status == "running"
-                || thread.status == "idle"
-                || thread.status == "interrupted"
-                || thread.status == "failed"
+            if matches!(
+                thread.status.as_str(),
+                "running" | "idle" | "interrupted" | "failed"
+            ) && (thread.status != "idle" || thread.last_turn_started_at.is_some())
             {
-                if thread.status != "idle" || thread.last_turn_started_at.is_some() {
-                    return Ok(Json(serde_json::to_value(thread).unwrap()));
-                }
+                return Ok(Json(serde_json::to_value(thread).unwrap()));
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -967,15 +1181,19 @@ async fn thread_disconnect(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
     Ok(Json(
-        serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap(),
+        serde_json::to_value(state.get_thread_detail(&id, None).await.map_err(map_err)?).unwrap(),
     ))
 }
 
 async fn thread_fork(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Json(body): Json<ForkThreadInput>,
 ) -> Result<Json<Value>, ApiErr> {
-    let thread = state.fork_thread(&id).await.map_err(map_err)?;
+    let (thread, source_turn_id, source_turn_index) = state
+        .fork_thread_at(&id, &body.mode, body.turn_id.as_deref())
+        .await
+        .map_err(map_err)?;
     let detail = state
         .get_thread_detail(&thread.id, None)
         .await
@@ -983,9 +1201,18 @@ async fn thread_fork(
     Ok(Json(json!({
         "thread": detail,
         "sourceThreadId": id,
-        "sourceTurnId": null,
-        "sourceTurnIndex": null
+        "sourceTurnId": source_turn_id,
+        "sourceTurnIndex": source_turn_index
     })))
+}
+
+async fn thread_fork_turns(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(state.list_fork_turn_options(&id).map_err(map_err)?).unwrap(),
+    ))
 }
 
 async fn thread_compact(
@@ -1002,6 +1229,35 @@ async fn thread_compact(
 struct GoalBody {
     objective: Option<String>,
     status: Option<String>,
+    #[serde(default = "missing_goal_token_budget")]
+    token_budget: Value,
+}
+
+fn missing_goal_token_budget() -> Value {
+    json!({ "missing": true })
+}
+
+fn parse_goal_token_budget(value: Value) -> Result<Option<Option<u64>>, ApiErr> {
+    match value {
+        Value::Object(object) if object.get("missing") == Some(&Value::Bool(true)) => Ok(None),
+        Value::Null => Ok(Some(None)),
+        Value::Number(number) => number
+            .as_u64()
+            .filter(|budget| *budget > 0)
+            .map(|budget| Some(Some(budget)))
+            .ok_or_else(|| {
+                err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "tokenBudget must be a positive integer or null.",
+                )
+            }),
+        _ => Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "tokenBudget must be a positive integer or null.",
+        )),
+    }
 }
 
 async fn thread_goal(
@@ -1009,12 +1265,19 @@ async fn thread_goal(
     State(state): State<AppState>,
     body: Option<Json<GoalBody>>,
 ) -> Result<Json<Value>, ApiErr> {
-    let (objective, status) = body
-        .map(|Json(b)| (b.objective, b.status))
-        .unwrap_or((None, None));
+    let (objective, status, token_budget) = body
+        .map(|Json(body)| {
+            Ok((
+                body.objective,
+                body.status,
+                parse_goal_token_budget(body.token_budget)?,
+            ))
+        })
+        .transpose()?
+        .unwrap_or((None, None, None));
     Ok(Json(
         state
-            .thread_goal(&id, objective, status, false)
+            .thread_goal(&id, objective, status, token_budget, false)
             .await
             .map_err(map_err)?,
     ))
@@ -1026,7 +1289,7 @@ async fn thread_goal_clear(
 ) -> Result<Json<Value>, ApiErr> {
     Ok(Json(
         state
-            .thread_goal(&id, None, None, true)
+            .thread_goal(&id, None, None, None, true)
             .await
             .map_err(map_err)?,
     ))
@@ -1084,11 +1347,45 @@ async fn thread_respond(
         ),
         None => (true, None),
     };
-    state
-        .respond_request(&id, &request_id, allow, answer.as_deref())
-        .await
-        .map_err(map_err)?;
-    Ok(Json(json!({ "ok": true, "requestId": request_id })))
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .respond_request(&id, &request_id, allow, answer.as_deref())
+                .await
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
+}
+
+async fn cancel_pending_steer(
+    Path((id, pending_steer_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .cancel_pending_steer(&id, &pending_steer_id)
+                .await
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
+}
+
+async fn steer_pending_prompt(
+    Path((id, pending_steer_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        serde_json::to_value(
+            state
+                .steer_pending_prompt(&id, &pending_steer_id)
+                .await
+                .map_err(map_err)?,
+        )
+        .unwrap(),
+    ))
 }
 
 async fn export_turns(
@@ -1232,11 +1529,29 @@ fn safe_export_stem(title: &str) -> String {
 async fn create_shell(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    body: Option<Json<ShellCreateBody>>,
 ) -> Result<Json<Value>, ApiErr> {
     let thread = state.get_thread(&id).map_err(map_err)?;
     let workspace = state.get_workspace(&thread.workspace_id).map_err(map_err)?;
+    let body = body.map(|Json(body)| body).unwrap_or_default();
+    let cols = body.cols.unwrap_or(80);
+    let rows = body.rows.unwrap_or(24);
+    if cols == 0 || rows == 0 {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Shell rows and columns must be positive.",
+        ));
+    }
     let (shell_id, shell) = crate::shells::hub()
-        .create(&thread.id, &workspace.abs_path)
+        .create(
+            &thread.id,
+            &workspace.id,
+            &workspace.abs_path,
+            cols,
+            rows,
+            body.label,
+        )
         .map_err(map_err)?;
     Ok(Json(json!({
         "threadId": thread.id,
@@ -1249,16 +1564,177 @@ async fn create_shell(
     })))
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShellCreateBody {
+    cols: Option<u16>,
+    rows: Option<u16>,
+    label: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ShellUpdateBody {
+    label: Option<String>,
+}
+
+async fn update_shell(
+    Path(id): Path<String>,
+    Json(body): Json<ShellUpdateBody>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        crate::shells::hub()
+            .update_label(&id, body.label)
+            .map_err(map_err)?,
+    ))
+}
+
+async fn terminate_shell(Path(id): Path<String>) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(crate::shells::hub().terminate(&id).map_err(map_err)?))
+}
+
 async fn workspace_download(
     Path(id): Path<String>,
     Query(query): Query<PathQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, ApiErr> {
-    let path = query
+    let requested_path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    let preview = state.workspace_preview(&id, &path).map_err(map_err)?;
-    Ok((StatusCode::OK, preview.content).into_response())
+    let (path, bytes) = state
+        .workspace_read_bytes(&id, &requested_path)
+        .map_err(map_err)?;
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("workspace-file");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(
+            header::CONTENT_DISPOSITION,
+            attachment_content_disposition(filename),
+        )
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(Body::from(bytes))
+        .map_err(|error| map_err(error.into()))
+}
+
+fn attachment_content_disposition(filename: &str) -> String {
+    let fallback = filename
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let fallback = if fallback.is_empty() {
+        "workspace-file".to_string()
+    } else {
+        fallback
+    };
+    let encoded = url::form_urlencoded::byte_serialize(filename.as_bytes()).collect::<String>();
+    format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}")
+}
+
+fn upload_file_name(filename: Option<&str>) -> String {
+    filename
+        .and_then(|name| FsPath::new(name).file_name())
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+        .unwrap_or("upload.bin")
+        .to_string()
+}
+
+async fn workspace_upload(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Json<Value>, ApiErr> {
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !content_type.contains("multipart/form-data") {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "File upload must use multipart/form-data.",
+        ));
+    }
+    let mut multipart = Multipart::from_request(request, &state)
+        .await
+        .map_err(|error| err(StatusCode::BAD_REQUEST, "bad_request", error.to_string()))?;
+    let mut requested_path = None;
+    let mut uploaded_file: Option<(String, Vec<u8>)> = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| err(StatusCode::BAD_REQUEST, "bad_request", error.to_string()))?
+    {
+        let field_name = field.name().unwrap_or_default().to_string();
+        let filename = field.file_name().map(str::to_string);
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|error| err(StatusCode::BAD_REQUEST, "bad_request", error.to_string()))?;
+        match field_name.as_str() {
+            "path" if filename.is_none() => {
+                requested_path = Some(String::from_utf8_lossy(&bytes).trim().to_string());
+            }
+            "file" => {
+                if uploaded_file.is_some() {
+                    return Err(err(
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        "Only one file can be uploaded at a time.",
+                    ));
+                }
+                if bytes.len() > MAX_WORKSPACE_UPLOAD_BYTES {
+                    return Err(err(
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        "Workspace uploads must be 50 MB or smaller.",
+                    ));
+                }
+                uploaded_file = Some((upload_file_name(filename.as_deref()), bytes.to_vec()));
+            }
+            _ if filename.is_some() => {
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    format!("Unexpected multipart file field: {field_name}."),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let (filename, bytes) = uploaded_file.ok_or_else(|| {
+        err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "A file field is required.",
+        )
+    })?;
+    let path = requested_path
+        .filter(|path| !path.is_empty())
+        .unwrap_or(filename);
+    let (path, size) = state
+        .workspace_write_bytes(&id, &path, &bytes)
+        .map_err(map_err)?;
+    let name = FsPath::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("upload.bin");
+    Ok(Json(json!({
+        "kind": "file",
+        "file": { "path": path, "name": name, "size": size }
+    })))
 }
 
 #[derive(Deserialize)]
@@ -1320,9 +1796,9 @@ fn terminal_plugin(state: &Supervisor) -> Value {
     json!({
         "id": TERMINAL_PLUGIN_ID,
         "name": "Terminal",
-        "version": "0.12.0",
+        "version": state.config.app_version.as_str(),
         "description": "Per-thread PTY terminal.",
-        "remoteCodex": ">=0.12.0",
+        "remoteCodex": format!(">={}", state.config.app_version),
         "capabilities": { "artifactTypes": [], "timelineRenderers": [], "threadPanels": [{ "id": "terminal", "label": "Terminal", "kind": "terminal", "artifactTypes": [] }] },
         "enabled": available && state.plugin_enabled(TERMINAL_PLUGIN_ID, true),
         "source": "builtin",
@@ -1334,6 +1810,43 @@ fn terminal_plugin(state: &Supervisor) -> Value {
 
 async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
     Json(json!([terminal_plugin(&state)]))
+}
+
+async fn get_plugin(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    if id != TERMINAL_PLUGIN_ID {
+        return Err(err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Plugin was not found.",
+        ));
+    }
+    Ok(Json(terminal_plugin(&state)))
+}
+
+async fn import_plugin_unsupported() -> ApiErr {
+    err(
+        StatusCode::NOT_IMPLEMENTED,
+        "unsupported",
+        "Imported plugins are not supported by the Rust supervisor yet.",
+    )
+}
+
+async fn delete_plugin(Path(id): Path<String>) -> Result<Json<Value>, ApiErr> {
+    if id == TERMINAL_PLUGIN_ID {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "unsupported",
+            "Built-in plugins cannot be uninstalled.",
+        ));
+    }
+    Err(err(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "Plugin was not found.",
+    ))
 }
 
 async fn update_plugin(
@@ -1351,93 +1864,5 @@ async fn update_plugin(
 }
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| socket_loop(socket, state))
-}
-
-async fn socket_loop(socket: WebSocket, state: AppState) {
-    let (mut sink, mut stream) = socket.split();
-    let _ = sink
-        .send(Message::Text(
-            serde_json::to_string(&SupervisorConnectedEnvelope {
-                event_type: "supervisor.connected".into(),
-                timestamp: now_rfc3339(),
-            })
-            .unwrap_or_else(|_| "{}".into())
-            .into(),
-        ))
-        .await;
-    let mut events = state.bus.subscribe();
-    let mut shells = crate::shells::hub().subscribe_all();
-    loop {
-        tokio::select! {
-            incoming = stream.next() => {
-                match incoming {
-                    Some(Ok(Message::Text(text))) => {
-                        if text.contains("supervisor.ping") {
-                            let pong = json!({
-                                "type": "supervisor.pong",
-                                "timestamp": now_rfc3339(),
-                                "payload": { "requestTimestamp": now_rfc3339() }
-                            });
-                            if sink.send(Message::Text(pong.to_string().into())).await.is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                        if let Ok(msg) = serde_json::from_str::<Value>(&text) {
-                            match msg.get("type").and_then(Value::as_str) {
-                                Some("shell.input") => {
-                                    if let (Some(id), Some(data)) = (
-                                        msg.get("shellId").and_then(Value::as_str),
-                                        msg.get("data").and_then(Value::as_str),
-                                    ) {
-                                        let _ = crate::shells::hub().write(id, data);
-                                    }
-                                }
-                                Some("shell.resize") => {
-                                    if let (Some(id), Some(cols), Some(rows)) = (
-                                        msg.get("shellId").and_then(Value::as_str),
-                                        msg.get("cols").and_then(Value::as_u64),
-                                        msg.get("rows").and_then(Value::as_u64),
-                                    ) {
-                                        let _ = crate::shells::hub().resize(id, cols as u16, rows as u16);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Err(_)) => break,
-                    _ => {}
-                }
-            }
-            event = events.recv() => {
-                match event {
-                    Ok(event) => {
-                        if sink.send(Message::Text(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into()).into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => continue,
-                }
-            }
-            output = shells.recv() => {
-                match output {
-                    Ok(output) => {
-                        let msg = json!({
-                            "type": "shell.output",
-                            "shellId": output.shell_id,
-                            "timestamp": now_rfc3339(),
-                            "payload": { "data": output.data }
-                        });
-                        if sink.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => continue,
-                }
-            }
-        }
-    }
+    ws.on_upgrade(move |socket| crate::socket::websocket_loop(socket, state))
 }

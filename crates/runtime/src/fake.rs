@@ -309,6 +309,10 @@ impl AgentRuntime for FakeRuntime {
         Ok(())
     }
 
+    async fn send_input(&self, _session_id: &str, _turn_id: &str, _prompt: &str) -> Result<()> {
+        Ok(())
+    }
+
     async fn respond_permission(
         &self,
         _request_id: &str,
@@ -359,19 +363,32 @@ impl AgentRuntime for FakeRuntime {
         if !self.caps().controls.goals {
             bail!("this harness does not support goals");
         }
+        let mut current = self.goal.lock().unwrap();
         let next = if objective.as_ref().map(|s| s.is_empty()).unwrap_or(true)
             && status.as_deref() == Some("clear")
         {
             None
+        } else if let Some(objective) = objective {
+            Some(GoalState {
+                objective,
+                status: status.unwrap_or_else(|| "active".into()),
+                tokens_used: 0,
+                time_used_seconds: 0,
+            })
+        } else if let Some(mut goal) = current.clone() {
+            if let Some(status) = status {
+                goal.status = status;
+            }
+            Some(goal)
         } else {
             Some(GoalState {
-                objective: objective.unwrap_or_else(|| "goal".into()),
+                objective: "goal".into(),
                 status: status.unwrap_or_else(|| "active".into()),
                 tokens_used: 0,
                 time_used_seconds: 0,
             })
         };
-        *self.goal.lock().unwrap() = next.clone();
+        *current = next.clone();
         Ok(next)
     }
 
@@ -419,5 +436,6 @@ fn item(id: &str, text: &str, status: Option<&str>) -> ThreadHistoryItemDto {
         sequence: None,
         source_turn_id: None,
         artifact: None,
+        extra: Default::default(),
     }
 }

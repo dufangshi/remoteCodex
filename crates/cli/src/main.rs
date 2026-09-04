@@ -22,6 +22,22 @@ enum Commands {
     Status,
     /// Run the public relay server.
     Relay,
+    /// Inspect or apply a non-destructive relay database migration.
+    RelayMigrate {
+        /// Relay data directory containing relay-store.sqlite or relay.sqlite.
+        #[arg(
+            long,
+            env = "REMOTE_CODEX_RELAY_DATA_DIR",
+            default_value = ".local/relay-server"
+        )]
+        data_dir: std::path::PathBuf,
+        /// Print the migration plan and row counts without writing any files.
+        #[arg(long)]
+        dry_run: bool,
+        /// Proceed while preserving data for relay features not yet implemented in Rust.
+        #[arg(long, conflicts_with = "dry_run")]
+        allow_unsupported_data: bool,
+    },
     /// Run a supervisor that connects out to a relay.
     RelaySupervisor,
     /// Print version.
@@ -52,6 +68,23 @@ async fn main() -> Result<()> {
         Commands::Relay => {
             remote_codex_relay::serve().await?;
         }
+        Commands::RelayMigrate {
+            data_dir,
+            dry_run,
+            allow_unsupported_data,
+        } => {
+            let report = if dry_run {
+                remote_codex_relay::inspect_relay_migration(&data_dir)?
+            } else {
+                remote_codex_relay::migrate_relay_data_dir_with_options(
+                    &data_dir,
+                    remote_codex_relay::RelayMigrationOptions {
+                        allow_unsupported_data,
+                    },
+                )?
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::RelaySupervisor => {
             std::env::set_var("REMOTE_CODEX_MODE", "relay");
             let state = remote_codex_runtime::boot().await?;
@@ -65,12 +98,9 @@ async fn main() -> Result<()> {
 }
 
 async fn reqwest_status(port: &str) -> Result<String> {
-    let body = tokio::process::Command::new("curl")
-        .args(["-fsS", &format!("http://127.0.0.1:{port}/healthz")])
-        .output()
-        .await?;
-    if !body.status.success() {
-        anyhow::bail!("unhealthy");
+    let response = reqwest::get(format!("http://127.0.0.1:{port}/healthz")).await?;
+    if !response.status().is_success() {
+        anyhow::bail!("unhealthy: HTTP {}", response.status());
     }
-    Ok(String::from_utf8_lossy(&body.stdout).into_owned())
+    Ok(response.text().await?)
 }

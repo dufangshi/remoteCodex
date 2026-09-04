@@ -153,7 +153,8 @@ export interface RelayAdminDeviceDto extends RelayDeviceDto {
 
 export interface RelayRegistrationSettingsDto {
   enabled: boolean;
-  registrationPassword: string | null;
+  registrationPasswordConfigured?: boolean;
+  registrationPassword?: string | null;
   approvalRequired: boolean;
   googleAuthEnabled: boolean;
   githubAuthEnabled: boolean;
@@ -1480,9 +1481,9 @@ export function mergeLatestThreadTurns(
     if (turn.status !== 'inProgress') {
       continue;
     }
-    const existingPrompt = turn.items.find(
-      (item) => item.kind === 'userMessage',
-    )?.text.trim();
+    const existingPrompt = turn.items
+      .find((item) => item.kind === 'userMessage')
+      ?.text.trim();
     const existingStartedAt = turn.startedAt
       ? Date.parse(turn.startedAt)
       : Number.NaN;
@@ -1490,9 +1491,9 @@ export function mergeLatestThreadTurns(
       continue;
     }
     const materializedReplacement = latestReplacements.find((replacement) => {
-      const replacementPrompt = replacement.items.find(
-        (item) => item.kind === 'userMessage',
-      )?.text.trim();
+      const replacementPrompt = replacement.items
+        .find((item) => item.kind === 'userMessage')
+        ?.text.trim();
       const replacementStartedAt = replacement.startedAt
         ? Date.parse(replacement.startedAt)
         : Number.NaN;

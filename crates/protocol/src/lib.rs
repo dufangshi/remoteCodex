@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -234,6 +236,8 @@ pub struct ThreadHistoryItemDto {
     pub source_turn_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact: Option<Value>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,6 +262,23 @@ pub struct ThreadTurnDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadForkTurnOptionDto {
+    pub turn_id: String,
+    pub turn_index: u32,
+    pub started_at: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkThreadInput {
+    pub mode: String,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadActionRequestDto {
     pub id: String,
     pub kind: String,
@@ -273,12 +294,26 @@ pub struct ThreadActionRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadPendingSteerDto {
     pub id: String,
-    pub thread_id: String,
+    pub client_request_id: Option<String>,
     pub turn_id: String,
-    pub display_prompt: String,
-    pub submitted_prompt: String,
+    pub prompt: String,
     pub delivery: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalDto {
+    pub thread_id: String,
+    pub local_goal_id: Option<String>,
+    pub objective: String,
+    pub status: String,
+    pub token_budget: Option<u64>,
+    pub tokens_used: u64,
+    pub time_used_seconds: u64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -727,5 +762,49 @@ pub fn truncate_title(value: &str) -> String {
         normalized
     } else {
         normalized.chars().take(15).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn history_item_preserves_unknown_node_metadata() {
+        let original = json!({
+            "id": "item-1",
+            "kind": "fileChange",
+            "text": "Updated source",
+            "hasDeferredDetail": true,
+            "transcriptOrder": 7,
+            "assetPath": "images/result.png",
+            "changedFiles": 2,
+            "addedLines": 8,
+            "removedLines": 3,
+            "hookEventName": "postToolUse",
+            "hookOutputEntries": [{ "kind": "stdout", "text": "done" }]
+        });
+
+        let item: ThreadHistoryItemDto = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(item.extra.get("transcriptOrder"), Some(&json!(7)));
+        assert_eq!(
+            item.extra.get("assetPath"),
+            Some(&json!("images/result.png"))
+        );
+
+        let round_trip = serde_json::to_value(item).unwrap();
+        for field in [
+            "hasDeferredDetail",
+            "transcriptOrder",
+            "assetPath",
+            "changedFiles",
+            "addedLines",
+            "removedLines",
+            "hookEventName",
+            "hookOutputEntries",
+        ] {
+            assert_eq!(round_trip.get(field), original.get(field), "field {field}");
+        }
     }
 }

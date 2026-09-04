@@ -1,0 +1,25 @@
+{
+  "name": "@remote-codex/native-darwin-arm64",
+  "version": "0.12.0",
+  "description": "Remote Codex native binary for macOS ARM64.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dufangshi/remoteCodex.git",
+    "directory": "npm/darwin-arm64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

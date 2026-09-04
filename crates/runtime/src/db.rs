@@ -1,9 +1,79 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
-use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{bail, ensure, Context, Result};
+use remote_codex_protocol::ThreadGoalDto;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use serde_json::{json, Value};
 use uuid::Uuid;
+
+const RUNTIME_MIGRATION_TABLE: &str = "__remote_codex_runtime_migrations";
+
+struct Migration {
+    version: i64,
+    name: &'static str,
+    apply: fn(&Connection) -> Result<()>,
+}
+
+const RUNTIME_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "runtime_schema",
+        apply: create_runtime_schema,
+    },
+    Migration {
+        version: 2,
+        name: "node_0030_compatibility",
+        apply: migrate_node_0030_data,
+    },
+    Migration {
+        version: 3,
+        name: "pending_steer_client_request_id",
+        apply: add_pending_steer_client_request_id,
+    },
+    Migration {
+        version: 4,
+        name: "guard_unsafe_approval_modes",
+        apply: guard_unsafe_approval_modes,
+    },
+    Migration {
+        version: 5,
+        name: "legacy_turn_metadata_fields",
+        apply: add_legacy_turn_metadata_fields,
+    },
+    Migration {
+        version: 6,
+        name: "legacy_thread_goals",
+        apply: migrate_legacy_thread_goals,
+    },
+];
+
+const NODE_0030_MIGRATIONS: &[&str] = &[
+    "0000_initial.sql",
+    "0001_thread_runtime_fields.sql",
+    "0002_thread_source.sql",
+    "0003_thread_runtime_settings.sql",
+    "0004_thread_connection_state.sql",
+    "0005_thread_turn_metadata.sql",
+    "0006_thread_sandbox_mode.sql",
+    "0007_thread_pending_steers.sql",
+    "0008_thread_fast_mode_and_activity_notes.sql",
+    "0009_thread_turn_token_usage.sql",
+    "0010_thread_turn_pricing_snapshot.sql",
+    "0011_thread_forks.sql",
+    "0012_thread_goals.sql",
+    "0013_thread_activity_note_anchor.sql",
+    "0014_thread_history_items.sql",
+    "0015_agent_provider_fields.sql",
+    "0016_remove_codex_thread_goal_id.sql",
+    "0017_remove_codex_thread_columns.sql",
+    "0018_shell_session_label.sql",
+    "0028_thread_turn_display_prompt.sql",
+    "0029_thread_turn_delivery.sql",
+    "0030_thread_agent_id.sql",
+];
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -15,93 +85,23 @@ impl Database {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn =
+        let mut conn =
             Connection::open(path).with_context(|| format!("open sqlite {}", path.display()))?;
+
+        validate_database_before_migration(&conn)
+            .with_context(|| format!("validate sqlite {}", path.display()))?;
+        create_pre_rust_backup(path, &conn)
+            .with_context(|| format!("back up Node sqlite {}", path.display()))?;
         conn.execute_batch(
             "
             PRAGMA journal_mode=WAL;
             PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS hosts (
-              id TEXT PRIMARY KEY,
-              hostname TEXT NOT NULL,
-              platform TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              last_seen_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS workspaces (
-              id TEXT PRIMARY KEY,
-              host_id TEXT NOT NULL,
-              label TEXT NOT NULL,
-              abs_path TEXT NOT NULL UNIQUE,
-              is_favorite INTEGER NOT NULL DEFAULT 0,
-              created_at TEXT NOT NULL,
-              last_opened_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS threads (
-              id TEXT PRIMARY KEY,
-              workspace_id TEXT NOT NULL,
-              provider TEXT NOT NULL,
-              agent_id TEXT,
-              provider_session_id TEXT,
-              source TEXT NOT NULL DEFAULT 'supervisor',
-              title TEXT NOT NULL,
-              model TEXT,
-              reasoning_effort TEXT,
-              fast_mode INTEGER NOT NULL DEFAULT 0,
-              collaboration_mode TEXT NOT NULL DEFAULT 'default',
-              approval_mode TEXT NOT NULL DEFAULT 'yolo',
-              sandbox_mode TEXT,
-              status TEXT,
-              summary_text TEXT,
-              last_error TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              last_turn_started_at TEXT,
-              last_turn_completed_at TEXT,
-              is_pinned INTEGER NOT NULL DEFAULT 0,
-              is_connected INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS thread_turns (
-              id TEXT PRIMARY KEY,
-              thread_id TEXT NOT NULL,
-              status TEXT NOT NULL,
-              error TEXT,
-              model TEXT,
-              reasoning_effort TEXT,
-              started_at TEXT,
-              completed_at TEXT,
-              ordinal INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS thread_history_items (
-              id TEXT PRIMARY KEY,
-              thread_id TEXT NOT NULL,
-              turn_id TEXT NOT NULL,
-              item_id TEXT NOT NULL,
-              item_json TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              UNIQUE(thread_id, turn_id, item_id)
-            );
-            CREATE TABLE IF NOT EXISTS thread_pending_steers (
-              id TEXT PRIMARY KEY,
-              thread_id TEXT NOT NULL,
-              turn_id TEXT NOT NULL,
-              display_prompt TEXT NOT NULL,
-              submitted_prompt TEXT NOT NULL,
-              delivery TEXT NOT NULL DEFAULT 'steer',
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS auth_sessions (
-              token TEXT PRIMARY KEY,
-              username TEXT NOT NULL,
-              expires_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS kv (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
             ",
         )?;
+        run_migrations(&mut conn).with_context(|| format!("migrate sqlite {}", path.display()))?;
+        validate_runtime_schema(&conn)
+            .with_context(|| format!("validate migrated sqlite {}", path.display()))?;
+
         let host_id = {
             let existing: Option<String> = conn
                 .query_row("SELECT id FROM hosts LIMIT 1", [], |row| row.get(0))
@@ -151,4 +151,1003 @@ impl Database {
             Ok(())
         })
     }
+}
+
+fn create_pre_rust_backup(path: &Path, conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "__migrations")? || table_exists(conn, RUNTIME_MIGRATION_TABLE)? {
+        return Ok(());
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("supervisor");
+    let backup_path = path.with_file_name(format!("{stem}.pre-rust-0.12.sqlite"));
+    if backup_path.exists() {
+        return Ok(());
+    }
+    let temporary_path =
+        backup_path.with_extension(format!("sqlite.tmp-{}", Uuid::new_v4().simple()));
+    let result = (|| -> Result<()> {
+        let mut destination = Connection::open(&temporary_path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        {
+            let backup = rusqlite::backup::Backup::new(conn, &mut destination)?;
+            backup.run_to_completion(128, Duration::from_millis(5), None)?;
+        }
+        let quick_check: String =
+            destination.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        ensure!(
+            quick_check == "ok",
+            "pre-Rust SQLite backup integrity check failed: {quick_check}"
+        );
+        drop(destination);
+        match std::fs::hard_link(&temporary_path, &backup_path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    })();
+    let _ = std::fs::remove_file(&temporary_path);
+    result
+}
+
+fn validate_database_before_migration(conn: &Connection) -> Result<()> {
+    let quick_check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+    ensure!(
+        quick_check == "ok",
+        "SQLite integrity check failed: {quick_check}"
+    );
+
+    let tables = table_names(conn)?;
+    let application_tables: HashSet<_> = tables
+        .iter()
+        .filter(|name| name.as_str() != "__migrations" && name.as_str() != RUNTIME_MIGRATION_TABLE)
+        .cloned()
+        .collect();
+    if application_tables.is_empty() {
+        validate_migration_ledgers(conn, &tables)?;
+        return Ok(());
+    }
+
+    for anchor in ["hosts", "workspaces", "threads"] {
+        ensure!(
+            application_tables.contains(anchor),
+            "unsupported SQLite schema: found application tables but `{anchor}` is missing"
+        );
+    }
+
+    ensure_columns(
+        conn,
+        "hosts",
+        &["id", "hostname", "platform", "created_at", "last_seen_at"],
+    )?;
+    ensure_columns(
+        conn,
+        "workspaces",
+        &[
+            "id",
+            "host_id",
+            "label",
+            "abs_path",
+            "is_favorite",
+            "created_at",
+            "last_opened_at",
+        ],
+    )?;
+    ensure_columns(
+        conn,
+        "threads",
+        &[
+            "id",
+            "workspace_id",
+            "provider",
+            "agent_id",
+            "provider_session_id",
+            "source",
+            "title",
+            "model",
+            "reasoning_effort",
+            "fast_mode",
+            "collaboration_mode",
+            "approval_mode",
+            "sandbox_mode",
+            "status",
+            "summary_text",
+            "last_error",
+            "created_at",
+            "updated_at",
+            "last_turn_started_at",
+            "last_turn_completed_at",
+            "is_pinned",
+            "is_connected",
+        ],
+    )?;
+
+    validate_optional_table(
+        conn,
+        &tables,
+        "thread_turns",
+        &[
+            "id",
+            "thread_id",
+            "status",
+            "error",
+            "model",
+            "reasoning_effort",
+            "started_at",
+            "completed_at",
+            "ordinal",
+        ],
+    )?;
+    validate_optional_table(
+        conn,
+        &tables,
+        "thread_turn_metadata",
+        &[
+            "id",
+            "thread_id",
+            "turn_id",
+            "model",
+            "reasoning_effort",
+            "token_usage_json",
+            "pricing_model_key",
+            "pricing_tier_key",
+            "display_prompt",
+            "created_at",
+            "updated_at",
+        ],
+    )?;
+    validate_optional_table(
+        conn,
+        &tables,
+        "thread_history_items",
+        &[
+            "id",
+            "thread_id",
+            "turn_id",
+            "item_id",
+            "item_json",
+            "created_at",
+            "updated_at",
+        ],
+    )?;
+    validate_optional_table(
+        conn,
+        &tables,
+        "thread_pending_steers",
+        &[
+            "id",
+            "thread_id",
+            "turn_id",
+            "display_prompt",
+            "submitted_prompt",
+            "delivery",
+            "created_at",
+        ],
+    )?;
+    validate_optional_table(
+        conn,
+        &tables,
+        "auth_sessions",
+        &["token", "username", "expires_at"],
+    )?;
+    validate_optional_table(conn, &tables, "kv", &["key", "value"])?;
+    validate_optional_table(conn, &tables, "policies", &["key", "value_json"])?;
+    validate_optional_table(
+        conn,
+        &tables,
+        "thread_goals",
+        &[
+            "id",
+            "thread_id",
+            "provider_session_id",
+            "objective",
+            "status",
+            "token_budget",
+            "tokens_used",
+            "time_used_seconds",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ],
+    )?;
+    validate_migration_ledgers(conn, &tables)
+}
+
+fn validate_migration_ledgers(conn: &Connection, tables: &HashSet<String>) -> Result<()> {
+    if tables.contains("__migrations") {
+        ensure_columns(conn, "__migrations", &["id", "name", "applied_at"])?;
+        let mut stmt = conn.prepare("SELECT name FROM __migrations ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let name = row?;
+            ensure!(
+                NODE_0030_MIGRATIONS.contains(&name.as_str()),
+                "database was created by an unsupported Node migration `{name}`"
+            );
+        }
+    }
+
+    if tables.contains(RUNTIME_MIGRATION_TABLE) {
+        ensure_columns(
+            conn,
+            RUNTIME_MIGRATION_TABLE,
+            &["version", "name", "applied_at"],
+        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT version, name FROM {RUNTIME_MIGRATION_TABLE} ORDER BY version"
+        ))?;
+        let records: Vec<(i64, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (index, (version, name)) in records.iter().enumerate() {
+            let expected_version = index as i64 + 1;
+            ensure!(
+                *version == expected_version,
+                "runtime migration history has a gap before version {version}"
+            );
+            let Some(expected) = RUNTIME_MIGRATIONS
+                .iter()
+                .find(|item| item.version == *version)
+            else {
+                bail!("database uses unsupported runtime migration version {version}");
+            };
+            ensure!(
+                name == expected.name,
+                "runtime migration {version} is named `{name}`, expected `{}`",
+                expected.name
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_runtime_schema(conn: &Connection) -> Result<()> {
+    for (table, columns) in [
+        (
+            "hosts",
+            &["id", "hostname", "platform", "created_at", "last_seen_at"][..],
+        ),
+        (
+            "workspaces",
+            &[
+                "id",
+                "host_id",
+                "label",
+                "abs_path",
+                "is_favorite",
+                "created_at",
+                "last_opened_at",
+            ][..],
+        ),
+        (
+            "threads",
+            &[
+                "id",
+                "workspace_id",
+                "provider",
+                "agent_id",
+                "provider_session_id",
+                "source",
+                "title",
+                "model",
+                "reasoning_effort",
+                "fast_mode",
+                "collaboration_mode",
+                "approval_mode",
+                "sandbox_mode",
+                "status",
+                "summary_text",
+                "last_error",
+                "created_at",
+                "updated_at",
+                "last_turn_started_at",
+                "last_turn_completed_at",
+                "is_pinned",
+                "is_connected",
+            ][..],
+        ),
+        (
+            "thread_turns",
+            &[
+                "id",
+                "thread_id",
+                "status",
+                "error",
+                "model",
+                "reasoning_effort",
+                "token_usage_json",
+                "pricing_model_key",
+                "pricing_tier_key",
+                "display_prompt",
+                "started_at",
+                "completed_at",
+                "ordinal",
+            ][..],
+        ),
+        (
+            "thread_history_items",
+            &[
+                "id",
+                "thread_id",
+                "turn_id",
+                "item_id",
+                "item_json",
+                "created_at",
+                "updated_at",
+            ][..],
+        ),
+        (
+            "thread_pending_steers",
+            &[
+                "id",
+                "thread_id",
+                "turn_id",
+                "client_request_id",
+                "display_prompt",
+                "submitted_prompt",
+                "delivery",
+                "created_at",
+                "updated_at",
+            ][..],
+        ),
+        ("auth_sessions", &["token", "username", "expires_at"][..]),
+        ("kv", &["key", "value"][..]),
+    ] {
+        ensure_columns(conn, table, columns)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_table(
+    conn: &Connection,
+    tables: &HashSet<String>,
+    table: &str,
+    columns: &[&str],
+) -> Result<()> {
+    if tables.contains(table) {
+        ensure_columns(conn, table, columns)?;
+    }
+    Ok(())
+}
+
+fn ensure_columns(conn: &Connection, table: &str, required: &[&str]) -> Result<()> {
+    let columns = table_columns(conn, table)?;
+    ensure!(!columns.is_empty(), "required table `{table}` is missing");
+    for column in required {
+        ensure!(
+            columns.contains(*column),
+            "unsupported `{table}` schema: required column `{column}` is missing"
+        );
+    }
+    Ok(())
+}
+
+fn table_names(conn: &Connection) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(names)
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let columns = stmt
+        .query_map(params![table], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(columns)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1",
+            params![table],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn run_migrations(conn: &mut Connection) -> Result<()> {
+    // Keep this ledger separate so the legacy Node migrator can still inspect its own history.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(&format!(
+        "
+        CREATE TABLE IF NOT EXISTS {RUNTIME_MIGRATION_TABLE} (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          applied_at TEXT NOT NULL
+        );
+        "
+    ))?;
+
+    let mut applied = HashMap::new();
+    {
+        let mut stmt = tx.prepare(&format!(
+            "SELECT version, name FROM {RUNTIME_MIGRATION_TABLE} ORDER BY version"
+        ))?;
+        for row in stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))? {
+            let (version, name): (i64, String) = row?;
+            applied.insert(version, name);
+        }
+    }
+
+    for migration in RUNTIME_MIGRATIONS {
+        if let Some(name) = applied.get(&migration.version) {
+            ensure!(
+                name == migration.name,
+                "runtime migration {} is named `{name}`, expected `{}`",
+                migration.version,
+                migration.name
+            );
+            continue;
+        }
+        (migration.apply)(&tx).with_context(|| {
+            format!(
+                "apply runtime migration {} ({})",
+                migration.version, migration.name
+            )
+        })?;
+        tx.execute(
+            &format!(
+                "INSERT INTO {RUNTIME_MIGRATION_TABLE}(version, name, applied_at) VALUES (?1,?2,?3)"
+            ),
+            params![
+                migration.version,
+                migration.name,
+                remote_codex_protocol::now_rfc3339()
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn create_runtime_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS hosts (
+          id TEXT PRIMARY KEY,
+          hostname TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS workspaces (
+          id TEXT PRIMARY KEY,
+          host_id TEXT NOT NULL,
+          label TEXT NOT NULL,
+          abs_path TEXT NOT NULL UNIQUE,
+          is_favorite INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          last_opened_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS threads (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          agent_id TEXT,
+          provider_session_id TEXT,
+          source TEXT NOT NULL DEFAULT 'supervisor',
+          title TEXT NOT NULL,
+          model TEXT,
+          reasoning_effort TEXT,
+          fast_mode INTEGER NOT NULL DEFAULT 0,
+          collaboration_mode TEXT NOT NULL DEFAULT 'default',
+          approval_mode TEXT NOT NULL DEFAULT 'guarded',
+          sandbox_mode TEXT,
+          status TEXT,
+          summary_text TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_turn_started_at TEXT,
+          last_turn_completed_at TEXT,
+          is_pinned INTEGER NOT NULL DEFAULT 0,
+          is_connected INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS thread_turns (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          error TEXT,
+          model TEXT,
+          reasoning_effort TEXT,
+          token_usage_json TEXT,
+          pricing_model_key TEXT,
+          pricing_tier_key TEXT,
+          display_prompt TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          ordinal INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS thread_turns_thread_ordinal_idx
+          ON thread_turns(thread_id, ordinal);
+        CREATE TABLE IF NOT EXISTS thread_history_items (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          item_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(thread_id, turn_id, item_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS thread_history_items_thread_turn_item_idx
+          ON thread_history_items(thread_id, turn_id, item_id);
+        CREATE TABLE IF NOT EXISTS thread_pending_steers (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          client_request_id TEXT,
+          display_prompt TEXT NOT NULL,
+          submitted_prompt TEXT NOT NULL,
+          delivery TEXT NOT NULL DEFAULT 'steer',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS thread_pending_steers_thread_created_idx
+          ON thread_pending_steers(thread_id, created_at);
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          token TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          expires_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS kv (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_node_0030_data(conn: &Connection) -> Result<()> {
+    let pending_columns = table_columns(conn, "thread_pending_steers")?;
+    if !pending_columns.contains("updated_at") {
+        conn.execute_batch(
+            "
+            ALTER TABLE thread_pending_steers
+              ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+            UPDATE thread_pending_steers
+              SET updated_at=created_at
+              WHERE updated_at='';
+            ",
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE thread_pending_steers SET updated_at=created_at WHERE updated_at IS NULL OR updated_at=''",
+            [],
+        )?;
+    }
+
+    backfill_legacy_turns(conn)?;
+    migrate_legacy_policies(conn)?;
+    Ok(())
+}
+
+fn add_pending_steer_client_request_id(conn: &Connection) -> Result<()> {
+    if !table_columns(conn, "thread_pending_steers")?.contains("client_request_id") {
+        conn.execute(
+            "ALTER TABLE thread_pending_steers ADD COLUMN client_request_id TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn guard_unsafe_approval_modes(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE threads
+         SET approval_mode='guarded'
+         WHERE approval_mode IS NULL
+            OR TRIM(approval_mode)=''
+            OR approval_mode NOT IN ('yolo','guarded')",
+        [],
+    )?;
+    Ok(())
+}
+
+fn add_legacy_turn_metadata_fields(conn: &Connection) -> Result<()> {
+    let mut columns = table_columns(conn, "thread_turns")?;
+    for column in [
+        "token_usage_json",
+        "pricing_model_key",
+        "pricing_tier_key",
+        "display_prompt",
+    ] {
+        if !columns.contains(column) {
+            conn.execute(
+                &format!("ALTER TABLE thread_turns ADD COLUMN {column} TEXT"),
+                [],
+            )?;
+            columns.insert(column.to_string());
+        }
+    }
+    if table_exists(conn, "thread_turn_metadata")? {
+        conn.execute_batch(
+            "
+            UPDATE thread_turns
+            SET token_usage_json=COALESCE(
+                  token_usage_json,
+                  (SELECT metadata.token_usage_json
+                   FROM thread_turn_metadata AS metadata
+                   WHERE metadata.thread_id=thread_turns.thread_id
+                     AND metadata.turn_id=thread_turns.id)
+                ),
+                pricing_model_key=COALESCE(
+                  pricing_model_key,
+                  (SELECT metadata.pricing_model_key
+                   FROM thread_turn_metadata AS metadata
+                   WHERE metadata.thread_id=thread_turns.thread_id
+                     AND metadata.turn_id=thread_turns.id)
+                ),
+                pricing_tier_key=COALESCE(
+                  pricing_tier_key,
+                  (SELECT metadata.pricing_tier_key
+                   FROM thread_turn_metadata AS metadata
+                   WHERE metadata.thread_id=thread_turns.thread_id
+                     AND metadata.turn_id=thread_turns.id)
+                ),
+                display_prompt=COALESCE(
+                  display_prompt,
+                  (SELECT metadata.display_prompt
+                   FROM thread_turn_metadata AS metadata
+                   WHERE metadata.thread_id=thread_turns.thread_id
+                     AND metadata.turn_id=thread_turns.id)
+                )
+            WHERE EXISTS (
+              SELECT 1
+              FROM thread_turn_metadata AS metadata
+              WHERE metadata.thread_id=thread_turns.thread_id
+                AND metadata.turn_id=thread_turns.id
+            );
+            ",
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_legacy_thread_goals(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "thread_goals")? {
+        return Ok(());
+    }
+
+    // Node keeps goal history, while the Rust runtime currently keeps one local snapshot.
+    // Match Node's fallback selection: newest active state, otherwise newest termination.
+    let goals = {
+        let mut stmt = conn.prepare(
+            "SELECT goals.id, goals.thread_id, goals.objective, goals.status,
+                    goals.token_budget, goals.tokens_used, goals.time_used_seconds,
+                    goals.created_at, goals.updated_at, goals.completed_at
+             FROM thread_goals AS goals
+             JOIN threads ON threads.id=goals.thread_id
+             WHERE goals.status IN ('active','paused','budgetLimited','terminated')
+               AND TRIM(goals.objective)<>''
+               AND (goals.token_budget IS NULL OR goals.token_budget>0)
+               AND goals.tokens_used>=0
+               AND goals.time_used_seconds>=0
+               AND TRIM(goals.created_at)<>''
+               AND TRIM(goals.updated_at)<>''
+             ORDER BY goals.thread_id,
+                      CASE WHEN goals.status IN ('active','paused','budgetLimited')
+                           THEN 0 ELSE 1 END,
+                      goals.updated_at DESC,
+                      goals.created_at DESC,
+                      goals.id DESC",
+        )?;
+        let records = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        records
+    };
+
+    let mut migrated_threads = HashSet::new();
+    for (
+        id,
+        thread_id,
+        objective,
+        status,
+        token_budget,
+        tokens_used,
+        time_used_seconds,
+        created_at,
+        updated_at,
+        completed_at,
+    ) in goals
+    {
+        if !migrated_threads.insert(thread_id.clone()) {
+            continue;
+        }
+        let terminal_completed_at = if matches!(status.as_str(), "complete" | "terminated") {
+            completed_at.or_else(|| Some(updated_at.clone()))
+        } else {
+            None
+        };
+        let goal = ThreadGoalDto {
+            // Rust routes identify the goal by the local thread id. The legacy table retains
+            // provider_session_id independently for a future Node rollback.
+            thread_id: thread_id.clone(),
+            local_goal_id: Some(id),
+            objective,
+            status,
+            token_budget: token_budget.map(u64::try_from).transpose()?,
+            tokens_used: u64::try_from(tokens_used)?,
+            time_used_seconds: u64::try_from(time_used_seconds)?,
+            created_at,
+            updated_at,
+            completed_at: terminal_completed_at,
+        };
+        conn.execute(
+            "INSERT INTO kv(key,value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
+            params![
+                format!("thread_goal:{thread_id}"),
+                serde_json::to_string(&goal)?
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct LegacyTurn {
+    thread_id: String,
+    turn_id: String,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    started_at: String,
+    completed_at: String,
+}
+
+fn backfill_legacy_turns(conn: &Connection) -> Result<()> {
+    // Metadata has richer turn settings; history supplies turns that were persisted without it.
+    let mut legacy = BTreeMap::<(String, String), LegacyTurn>::new();
+    if table_exists(conn, "thread_turn_metadata")? {
+        let records = {
+            let mut stmt = conn.prepare(
+                "SELECT thread_id, turn_id, model, reasoning_effort, created_at, updated_at
+                 FROM thread_turn_metadata",
+            )?;
+            let records = stmt
+                .query_map([], |row| {
+                    Ok(LegacyTurn {
+                        thread_id: row.get(0)?,
+                        turn_id: row.get(1)?,
+                        model: row.get(2)?,
+                        reasoning_effort: row.get(3)?,
+                        started_at: row.get(4)?,
+                        completed_at: row.get(5)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            records
+        };
+        for turn in records {
+            legacy.insert((turn.thread_id.clone(), turn.turn_id.clone()), turn);
+        }
+    }
+
+    if table_exists(conn, "thread_history_items")? {
+        let records = {
+            let mut stmt = conn.prepare(
+                "SELECT thread_id, turn_id, MIN(created_at), MAX(updated_at)
+                 FROM thread_history_items
+                 GROUP BY thread_id, turn_id",
+            )?;
+            let records = stmt
+                .query_map([], |row| {
+                    Ok(LegacyTurn {
+                        thread_id: row.get(0)?,
+                        turn_id: row.get(1)?,
+                        model: None,
+                        reasoning_effort: None,
+                        started_at: row.get(2)?,
+                        completed_at: row.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            records
+        };
+        for turn in records {
+            legacy
+                .entry((turn.thread_id.clone(), turn.turn_id.clone()))
+                .or_insert(turn);
+        }
+    }
+
+    let mut legacy_owners = HashMap::<String, String>::new();
+    for turn in legacy.values() {
+        ensure!(
+            !turn.thread_id.trim().is_empty() && !turn.turn_id.trim().is_empty(),
+            "legacy turn has an empty thread or turn id"
+        );
+        if let Some(owner) = legacy_owners.insert(turn.turn_id.clone(), turn.thread_id.clone()) {
+            ensure!(
+                owner == turn.thread_id,
+                "legacy turn id `{}` is shared by threads `{owner}` and `{}`; runtime turn ids must be globally unique",
+                turn.turn_id,
+                turn.thread_id
+            );
+        }
+    }
+
+    let existing_owners: HashMap<String, String> = {
+        let mut stmt = conn.prepare("SELECT id, thread_id FROM thread_turns")?;
+        let owners = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        owners
+    };
+    for turn in legacy.values() {
+        if let Some(owner) = existing_owners.get(&turn.turn_id) {
+            ensure!(
+                owner == &turn.thread_id,
+                "runtime turn id `{}` belongs to thread `{owner}`, but legacy data assigns it to `{}`",
+                turn.turn_id,
+                turn.thread_id
+            );
+        }
+    }
+
+    let active_turns: HashMap<String, String> =
+        if table_columns(conn, "threads")?.contains("provider_turn_id") {
+            let mut stmt = conn.prepare(
+                "SELECT id, provider_turn_id FROM threads
+                 WHERE status='running' AND provider_turn_id IS NOT NULL",
+            )?;
+            let active = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            active
+        } else {
+            HashMap::new()
+        };
+
+    let mut by_thread = BTreeMap::<String, Vec<LegacyTurn>>::new();
+    for turn in legacy.into_values() {
+        if !existing_owners.contains_key(&turn.turn_id) {
+            by_thread
+                .entry(turn.thread_id.clone())
+                .or_default()
+                .push(turn);
+        }
+    }
+    for (thread_id, turns) in &mut by_thread {
+        turns.sort_by(|left, right| {
+            left.started_at
+                .cmp(&right.started_at)
+                .then_with(|| left.turn_id.cmp(&right.turn_id))
+        });
+        let mut ordinal: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(ordinal), 0) FROM thread_turns WHERE thread_id=?1",
+            params![thread_id],
+            |row| row.get(0),
+        )?;
+        for turn in turns {
+            ordinal += 1;
+            let in_progress = active_turns.get(thread_id) == Some(&turn.turn_id);
+            let status = if in_progress {
+                "inProgress"
+            } else {
+                "completed"
+            };
+            let completed_at = (!in_progress).then_some(turn.completed_at.as_str());
+            conn.execute(
+                "INSERT INTO thread_turns(
+                   id, thread_id, status, error, model, reasoning_effort,
+                   started_at, completed_at, ordinal
+                 ) VALUES (?1,?2,?3,NULL,?4,?5,?6,?7,?8)",
+                params![
+                    turn.turn_id,
+                    turn.thread_id,
+                    status,
+                    turn.model,
+                    turn.reasoning_effort,
+                    turn.started_at,
+                    completed_at,
+                    ordinal
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_legacy_policies(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "policies")? {
+        return Ok(());
+    }
+    let policies: Vec<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT key, value_json FROM policies")?;
+        let policies = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        policies
+    };
+    let policy_map: HashMap<&str, &str> = policies
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+
+    for (key, value) in &policies {
+        // Unknown policies remain recoverable even when Rust has no equivalent setting yet.
+        conn.execute(
+            "INSERT INTO kv(key, value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
+            params![format!("legacy-policy:{key}"), value],
+        )?;
+    }
+
+    let dev_home = policy_map
+        .get("dev_home")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| {
+            value
+                .get("absPath")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    let default_backend = policy_map
+        .get("default_backend")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| {
+            value
+                .get("provider")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .filter(|provider| matches!(provider.as_str(), "codex" | "claude" | "opencode" | "acp"));
+    if dev_home.is_some() || default_backend.is_some() {
+        let workspace_settings = json!({
+            "workspaceRoot": "",
+            "devHome": dev_home.unwrap_or_default(),
+            "defaultBackend": default_backend.unwrap_or_else(|| "codex".to_string()),
+        });
+        conn.execute(
+            "INSERT INTO kv(key, value) VALUES ('workspace_settings',?1) ON CONFLICT(key) DO NOTHING",
+            params![serde_json::to_string(&workspace_settings)?],
+        )?;
+    }
+
+    if let Some(settings) = policy_map
+        .get("plugins")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+    {
+        if let Some(enabled) = settings.get("enabled").and_then(Value::as_object) {
+            for (plugin_id, setting) in enabled {
+                let enabled = setting
+                    .as_bool()
+                    .or_else(|| setting.get("enabled").and_then(Value::as_bool));
+                if let Some(enabled) = enabled {
+                    conn.execute(
+                        "INSERT INTO kv(key, value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
+                        params![format!("plugin:{plugin_id}:enabled"), enabled.to_string()],
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
 }

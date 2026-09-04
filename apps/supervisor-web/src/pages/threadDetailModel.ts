@@ -44,28 +44,28 @@ export function applyLiveItemTimestampsToTurns(
       return turn;
     }
 
-    const liveAgentItems = liveItems.items.filter(
-      (item) => item.kind === 'agentMessage' && item.createdAt,
+    const timestampedLiveItems = liveItems.items.filter(
+      (item) => item.createdAt,
     );
-    if (liveAgentItems.length === 0) {
+    if (timestampedLiveItems.length === 0) {
       return turn;
     }
 
-    const liveAgentItemsById = new Map(liveAgentItems.map((item) => [item.id, item]));
+    const liveItemsById = new Map(
+      timestampedLiveItems.map((item) => [item.id, item]),
+    );
     const usedLiveAgentIds = new Set<string>();
     let changed = false;
     const nextItems = turn.items.map((item) => {
-      if (
-        item.kind !== 'agentMessage' ||
-        (item.createdAt && item.createdAt !== turn.startedAt)
-      ) {
+      if (item.createdAt && item.createdAt !== turn.startedAt) {
         return item;
       }
 
-      let liveItem = liveAgentItemsById.get(item.id);
-      if (!liveItem) {
-        liveItem = liveAgentItems.find(
+      let liveItem = liveItemsById.get(item.id);
+      if (!liveItem && item.kind === 'agentMessage') {
+        liveItem = timestampedLiveItems.find(
           (candidate) =>
+            candidate.kind === 'agentMessage' &&
             !usedLiveAgentIds.has(candidate.id) &&
             candidate.text.trim().length >= 8 &&
             item.text.trim().includes(candidate.text.trim()),
@@ -133,7 +133,9 @@ export function mergePendingRequests(
     filteredIncoming.map((request) => [request.id, request] as const),
   );
   const merged = [
-    ...filteredCurrent.map((request) => incomingById.get(request.id) ?? request),
+    ...filteredCurrent.map(
+      (request) => incomingById.get(request.id) ?? request,
+    ),
     ...filteredIncoming.filter(
       (request) => !filteredCurrent.some((entry) => entry.id === request.id),
     ),
@@ -170,12 +172,16 @@ export function mergeLiveHistoryItem(
     return incoming;
   }
 
-  const mergeOrderingHints = (item: ThreadHistoryItemDto): ThreadHistoryItemDto => {
+  const mergeOrderingHints = (
+    item: ThreadHistoryItemDto,
+  ): ThreadHistoryItemDto => {
     let nextItem = item;
     const sequence =
-      typeof incoming.sequence === 'number' && Number.isFinite(incoming.sequence)
+      typeof incoming.sequence === 'number' &&
+      Number.isFinite(incoming.sequence)
         ? incoming.sequence
-        : typeof current.sequence === 'number' && Number.isFinite(current.sequence)
+        : typeof current.sequence === 'number' &&
+            Number.isFinite(current.sequence)
           ? current.sequence
           : null;
     if (sequence !== null && nextItem.sequence !== sequence) {
@@ -183,12 +189,17 @@ export function mergeLiveHistoryItem(
     }
 
     const transcriptOrder =
-      typeof incoming.transcriptOrder === 'number' && Number.isFinite(incoming.transcriptOrder)
+      typeof incoming.transcriptOrder === 'number' &&
+      Number.isFinite(incoming.transcriptOrder)
         ? incoming.transcriptOrder
-        : typeof current.transcriptOrder === 'number' && Number.isFinite(current.transcriptOrder)
+        : typeof current.transcriptOrder === 'number' &&
+            Number.isFinite(current.transcriptOrder)
           ? current.transcriptOrder
           : null;
-    if (transcriptOrder !== null && nextItem.transcriptOrder !== transcriptOrder) {
+    if (
+      transcriptOrder !== null &&
+      nextItem.transcriptOrder !== transcriptOrder
+    ) {
       nextItem = { ...nextItem, transcriptOrder };
     }
 
@@ -209,7 +220,9 @@ export function mergeLiveHistoryItem(
 
   const currentText = current.detailText?.trim() || current.text.trim();
   const incomingText = incoming.detailText?.trim() || incoming.text.trim();
-  return mergeOrderingHints(currentText.length > incomingText.length ? current : incoming);
+  return mergeOrderingHints(
+    currentText.length > incomingText.length ? current : incoming,
+  );
 }
 
 export function reconcileLiveItemsWithDetail(
@@ -247,11 +260,9 @@ export function reconcileLiveItemsWithDetail(
       }
       return (
         materialized.kind !== item.kind ||
-        (
-          typeof item.sequence === 'number' &&
+        (typeof item.sequence === 'number' &&
           Number.isFinite(item.sequence) &&
-          materialized.sequence !== item.sequence
-        )
+          materialized.sequence !== item.sequence)
       );
     });
     return remainingItems.length === 0
@@ -262,8 +273,12 @@ export function reconcileLiveItemsWithDetail(
         };
   }
 
-  const currentItemsById = new Map(current.items.map((item) => [item.id, item]));
-  const incomingItemsById = new Map(incoming.items.map((item) => [item.id, item]));
+  const currentItemsById = new Map(
+    current.items.map((item) => [item.id, item]),
+  );
+  const incomingItemsById = new Map(
+    incoming.items.map((item) => [item.id, item]),
+  );
   const orderedIds = [
     ...current.items.map((item) => item.id),
     ...incoming.items
@@ -276,7 +291,11 @@ export function reconcileLiveItemsWithDetail(
       const currentItem = currentItemsById.get(id);
       if (!incomingItem) {
         const materialized = materializedItemsById.get(id);
-        if (!materialized && currentItem && isCoveredByMaterializedAgentText(currentItem)) {
+        if (
+          !materialized &&
+          currentItem &&
+          isCoveredByMaterializedAgentText(currentItem)
+        ) {
           return null;
         }
         if (materialized && materialized.kind === currentItem?.kind) {
@@ -351,7 +370,9 @@ export function mergeGoalHistory(
   return normalizeGoalHistory([goal, ...existing]);
 }
 
-export function formatGoalTokenUsage(goal: NonNullable<ThreadDetailDto['goal']>) {
+export function formatGoalTokenUsage(
+  goal: NonNullable<ThreadDetailDto['goal']>,
+) {
   const formatter = new Intl.NumberFormat(undefined, {
     notation: 'compact',
     maximumFractionDigits: 1,
@@ -401,7 +422,8 @@ export function turnHasUserMessage(
 ) {
   return (
     turn?.items.some(
-      (item) => item.kind === 'userMessage' && item.text.trim() === prompt.trim(),
+      (item) =>
+        item.kind === 'userMessage' && item.text.trim() === prompt.trim(),
     ) ?? false
   );
 }
@@ -413,7 +435,10 @@ export function promptHasPhotoPlaceholder(prompt: string) {
 }
 
 function promptWithoutPhotoTokens(prompt: string) {
-  return prompt.replace(PHOTO_PLACEHOLDER_PATTERN, ' ').replace(/\s+/g, ' ').trim();
+  return prompt
+    .replace(PHOTO_PLACEHOLDER_PATTERN, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function turnHasPhotoPromptText(
@@ -441,7 +466,9 @@ export function turnHasPhotoAttachment(
     turn?.items.some(
       (item) =>
         item.kind === 'userMessage' &&
-        /\[(?:PHOTO\s+\.\/\.temp\/threads\/[^\]]+|localImage)\]/.test(item.text),
+        /\[(?:PHOTO\s+\.\/\.temp\/threads\/[^\]]+|localImage)\]/.test(
+          item.text,
+        ),
     ) ?? false
   );
 }
@@ -453,7 +480,7 @@ export function findTurnWithUserMessage(
   return (
     turns.find((turn) => turnHasUserMessage(turn, prompt)) ??
     (promptHasPhotoPlaceholder(prompt)
-      ? turns.find((turn) => turnHasPhotoPromptText(turn, prompt)) ?? null
+      ? (turns.find((turn) => turnHasPhotoPromptText(turn, prompt)) ?? null)
       : null)
   );
 }
@@ -462,28 +489,27 @@ export function findMaterializedOptimisticTurn(
   turns: ThreadDetailDto['turns'],
   optimistic: { id: string; serverTurnId: string | null; prompt: string },
 ) {
-  return turns.find((turn) => {
-    const matchesAuthoritativeId =
-      (optimistic.serverTurnId !== null && turn.id === optimistic.serverTurnId)
-      || turn.id === optimistic.id;
-    if (
-      matchesAuthoritativeId
-      && turn.items.some((item) => item.kind === 'userMessage')
-    ) {
-      return true;
-    }
+  return (
+    turns.find((turn) => {
+      const matchesAuthoritativeId =
+        (optimistic.serverTurnId !== null &&
+          turn.id === optimistic.serverTurnId) ||
+        turn.id === optimistic.id;
+      if (
+        matchesAuthoritativeId &&
+        turn.items.some((item) => item.kind === 'userMessage')
+      ) {
+        return true;
+      }
 
-    return (
-      turnHasUserMessage(turn, optimistic.prompt)
-      || (
-        promptHasPhotoPlaceholder(optimistic.prompt)
-        && (
-          turnHasPhotoPromptText(turn, optimistic.prompt)
-          || turnHasPhotoAttachment(turn)
-        )
-      )
-    );
-  }) ?? null;
+      return (
+        turnHasUserMessage(turn, optimistic.prompt) ||
+        (promptHasPhotoPlaceholder(optimistic.prompt) &&
+          (turnHasPhotoPromptText(turn, optimistic.prompt) ||
+            turnHasPhotoAttachment(turn)))
+      );
+    }) ?? null
+  );
 }
 
 export function mergeTurnTokenUsage(

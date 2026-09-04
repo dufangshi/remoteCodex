@@ -1,32 +1,67 @@
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::io::ErrorKind;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Result};
 use remote_codex_protocol::{ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto};
 use walkdir::WalkDir;
 
 pub fn assert_within(root: &Path, candidate: &Path) -> Result<PathBuf> {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root = root.canonicalize()?;
     let joined = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
         root.join(candidate)
     };
+    let normalized = normalize_path(&joined)?;
+    let resolved = resolve_existing_ancestor(&normalized)?;
+    if !resolved.starts_with(&root) {
+        bail!("path is outside the workspace");
+    }
+    Ok(resolved)
+}
+
+fn normalize_path(path: &Path) -> Result<PathBuf> {
     let mut out = PathBuf::new();
-    for comp in joined.components() {
+    for comp in path.components() {
         match comp {
-            std::path::Component::ParentDir => {
+            Component::ParentDir => {
                 if !out.pop() {
                     bail!("path is outside the workspace");
                 }
             }
-            std::path::Component::CurDir => {}
+            Component::CurDir => {}
             other => out.push(other),
         }
     }
-    if !out.starts_with(&root) {
-        bail!("path is outside the workspace");
-    }
     Ok(out)
+}
+
+fn resolve_existing_ancestor(path: &Path) -> Result<PathBuf> {
+    let mut ancestor = path.to_path_buf();
+    let mut suffix = Vec::<OsString>::new();
+
+    loop {
+        match std::fs::symlink_metadata(&ancestor) {
+            Ok(_) => {
+                let mut resolved = ancestor.canonicalize()?;
+                for component in suffix.into_iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                let Some(component) = ancestor.file_name().map(OsString::from) else {
+                    return Err(error.into());
+                };
+                suffix.push(component);
+                if !ancestor.pop() {
+                    return Err(error.into());
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 pub fn list_tree(root: &Path, rel: &str) -> Result<Vec<ThreadWorkspaceTreeNodeDto>> {
@@ -131,12 +166,8 @@ pub fn write_file_with_scope(
         } else {
             root.join(rel)
         }
-    } else if Path::new(rel).is_absolute() {
-        assert_within(root, Path::new(rel))?
     } else {
-        let joined = root.join(rel);
-        assert_within(root, &joined)?;
-        joined
+        assert_within(root, Path::new(rel))?
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -181,22 +212,22 @@ fn language_for(name: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn workspace_write_rejects_escape() {
-        let dir = std::env::temp_dir().join(format!("rc-files-{}", std::process::id()));
-        let root = dir.join("ws");
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
         fs::create_dir_all(&root).unwrap();
         let err = write_file(&root, "../escape.txt", "no").unwrap_err();
         assert!(err.to_string().contains("outside"));
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn unrestricted_write_allows_absolute_outside() {
-        let dir = std::env::temp_dir().join(format!("rc-files-full-{}", std::process::id()));
-        let root = dir.join("ws");
-        let outside = dir.join("outside.txt");
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let outside = dir.path().join("outside.txt");
         fs::create_dir_all(&root).unwrap();
         write_file_with_scope(
             &root,
@@ -206,6 +237,71 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read_to_string(&outside).unwrap(), "ok");
-        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn workspace_write_allows_missing_paths_inside_root() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        fs::create_dir_all(&root).unwrap();
+
+        write_file(&root, "new/nested/file.txt", "ok").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.join("new/nested/file.txt")).unwrap(),
+            "ok"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_reads_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), "secret").unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let error = read_bytes(&root, "linked/secret.txt").unwrap_err();
+
+        assert!(error.to_string().contains("outside"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_writes_reject_symlink_escape_for_missing_file() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let error = write_file(&root, "linked/new.txt", "no").unwrap_err();
+
+        assert!(error.to_string().contains("outside"));
+        assert!(!outside.join("new.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_writes_allow_symlinks_that_resolve_inside_root() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let target = root.join("target");
+        fs::create_dir_all(&target).unwrap();
+        symlink(&target, root.join("linked")).unwrap();
+
+        write_file(&root, "linked/new.txt", "ok").unwrap();
+
+        assert_eq!(fs::read_to_string(target.join("new.txt")).unwrap(), "ok");
     }
 }

@@ -19,7 +19,9 @@ pub struct MappedUpdate {
 pub struct TurnMapper {
     turn_id: String,
     agent_text: String,
+    agent_created_at: Option<String>,
     thought_text: String,
+    thought_created_at: Option<String>,
     tools: Vec<ThreadHistoryItemDto>,
     tool_payloads: HashMap<String, Value>,
     plans: Vec<ThreadHistoryItemDto>,
@@ -32,7 +34,9 @@ impl TurnMapper {
         Self {
             turn_id: turn_id.into(),
             agent_text: String::new(),
+            agent_created_at: None,
             thought_text: String::new(),
+            thought_created_at: None,
             tools: Vec::new(),
             tool_payloads: HashMap::new(),
             plans: Vec::new(),
@@ -48,9 +52,13 @@ impl TurnMapper {
             .and_then(Value::as_str)
             .unwrap_or("");
         let mut mapped = MappedUpdate::default();
+        let created_at = acp_update_created_at(update);
         match kind {
             "agent_message_chunk" => {
                 if let Some(text) = content_text(body) {
+                    if self.agent_created_at.is_none() {
+                        self.agent_created_at = created_at;
+                    }
                     self.agent_text.push_str(&text);
                     self.seq += 1;
                     let item_id = format!("{}:assistant", self.turn_id);
@@ -59,22 +67,37 @@ impl TurnMapper {
             }
             "agent_thought_chunk" => {
                 if let Some(text) = content_text(body) {
+                    if self.thought_created_at.is_none() {
+                        self.thought_created_at = created_at;
+                    }
                     self.thought_text.push_str(&text);
-                    mapped.items.push(item(
+                    let mut thought = item(
                         format!("{}:thought", self.turn_id),
                         "reasoning",
                         self.thought_text.clone(),
                         "running",
                         &self.turn_id,
-                    ));
+                    );
+                    if let Some(created_at) = &self.thought_created_at {
+                        thought.created_at = Some(created_at.clone());
+                    }
+                    mapped.items.push(thought);
                 }
             }
             "tool_call" | "tool_call_update" => {
                 if let Some(tool_id) = body.get("toolCallId").and_then(Value::as_str) {
+                    let existing_created_at = self
+                        .tools
+                        .iter()
+                        .find(|candidate| candidate.id == tool_id)
+                        .and_then(|candidate| candidate.created_at.clone());
                     let payload = merge_tool_payload(self.tool_payloads.get(tool_id), body);
                     self.tool_payloads
                         .insert(tool_id.to_string(), payload.clone());
-                    let item = tool_item(&self.turn_id, &payload);
+                    let mut item = tool_item(&self.turn_id, &payload);
+                    if let Some(created_at) = existing_created_at.or(created_at) {
+                        item.created_at = Some(created_at);
+                    }
                     if let Some(existing) = self
                         .tools
                         .iter_mut()
@@ -88,14 +111,30 @@ impl TurnMapper {
                 }
             }
             "plan" => {
-                if let Some(item) = plan_item(&self.turn_id, body) {
+                if let Some(mut item) = plan_item(&self.turn_id, body) {
+                    if let Some(created_at) = self
+                        .plans
+                        .first()
+                        .and_then(|current| current.created_at.clone())
+                        .or(created_at)
+                    {
+                        item.created_at = Some(created_at);
+                    }
                     self.plans = vec![item.clone()];
                     mapped.items.push(item);
                     mapped.plan = plan_steps(body);
                 }
             }
             "compaction_update" | "compaction_summary_chunk" => {
-                if let Some(item) = compaction_item(&self.turn_id, body) {
+                if let Some(mut item) = compaction_item(&self.turn_id, body) {
+                    if let Some(created_at) = self
+                        .compactions
+                        .first()
+                        .and_then(|current| current.created_at.clone())
+                        .or(created_at)
+                    {
+                        item.created_at = Some(created_at);
+                    }
                     self.compactions = vec![item.clone()];
                     mapped.items.push(item);
                 }
@@ -129,13 +168,17 @@ impl TurnMapper {
         };
         let mut items = Vec::new();
         if !self.thought_text.is_empty() {
-            items.push(item(
+            let mut thought = item(
                 format!("{}:thought", self.turn_id),
                 "reasoning",
                 self.thought_text,
                 status,
                 &self.turn_id,
-            ));
+            );
+            if let Some(created_at) = self.thought_created_at {
+                thought.created_at = Some(created_at);
+            }
+            items.push(thought);
         }
         items.extend(self.tools);
         items.extend(self.plans);
@@ -146,16 +189,32 @@ impl TurnMapper {
             self.agent_text
         };
         if !text.is_empty() {
-            items.push(item(
+            let mut agent = item(
                 format!("{}:assistant", self.turn_id),
                 "agentMessage",
                 text,
                 status,
                 &self.turn_id,
-            ));
+            );
+            if let Some(created_at) = self.agent_created_at {
+                agent.created_at = Some(created_at);
+            }
+            items.push(agent);
         }
         items
     }
+}
+
+fn acp_update_created_at(update: &Value) -> Option<String> {
+    let raw = update
+        .pointer("/_meta/agentTimestampMs")
+        .or_else(|| update.pointer("/update/_meta/agentTimestampMs"))?
+        .as_f64()?;
+    if !raw.is_finite() || raw <= 0.0 || raw > i64::MAX as f64 {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(raw.trunc() as i64)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }
 
 fn content_text(body: &Value) -> Option<String> {
@@ -468,6 +527,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         sequence: None,
         source_turn_id: Some(turn_id.into()),
         artifact: None,
+        extra: Default::default(),
     }
 }
 
@@ -606,5 +666,59 @@ mod tests {
             "{detail}"
         );
         assert!(!detail.contains("output_for_prompt"), "{detail}");
+    }
+
+    #[test]
+    fn applies_agent_timestamps_to_every_item_kind_and_preserves_the_first_update() {
+        let mut mapper = TurnMapper::new("t1");
+        mapper.apply(&json!({
+            "_meta": { "agentTimestampMs": 1_788_230_400_123_i64 },
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "answer" }
+            }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": { "type": "text", "text": "thought" },
+            "_meta": { "agentTimestampMs": 1_788_230_401_234_i64 }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call-1",
+            "kind": "execute",
+            "status": "in_progress",
+            "_meta": { "agentTimestampMs": 1_788_230_402_345_i64 }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1",
+            "status": "completed",
+            "_meta": { "agentTimestampMs": 1_788_230_499_999_i64 }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "plan",
+            "entries": [{ "content": "step", "status": "pending" }],
+            "_meta": { "agentTimestampMs": 1_788_230_403_456_i64 }
+        }));
+        mapper.apply(&json!({
+            "sessionUpdate": "compaction_update",
+            "summary": "summary",
+            "_meta": { "agentTimestampMs": 1_788_230_404_567_i64 }
+        }));
+
+        let items = mapper.finish(false);
+        let created_at = |kind: &str| {
+            items
+                .iter()
+                .find(|item| item.kind == kind)
+                .and_then(|item| item.created_at.as_deref())
+                .unwrap()
+        };
+        assert_eq!(created_at("agentMessage"), "2026-09-01T02:40:00.123Z");
+        assert_eq!(created_at("reasoning"), "2026-09-01T02:40:01.234Z");
+        assert_eq!(created_at("commandExecution"), "2026-09-01T02:40:02.345Z");
+        assert_eq!(created_at("plan"), "2026-09-01T02:40:03.456Z");
+        assert_eq!(created_at("contextCompaction"), "2026-09-01T02:40:04.567Z");
     }
 }

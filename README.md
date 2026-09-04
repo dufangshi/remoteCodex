@@ -24,6 +24,21 @@ pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port 517
 
 Open `http://localhost:5173`. Local mode has no login.
 
+The packaged supervisor serves the Web UI itself:
+
+```bash
+npm install -g remote-codex@next
+remote-codex start
+remote-codex status
+remote-codex stop
+```
+
+The npm launcher installs a prebuilt Rust executable for the current OS, CPU,
+and Linux libc. It does not compile Rust or download a binary in `postinstall`.
+See [the native npm release design](docs/npm-native-release.zh.md).
+The controlled main/relay rollout is documented in
+[the Rust main cutover runbook](docs/rust-main-cutover.zh.md).
+
 Relay:
 
 ```bash
@@ -31,6 +46,24 @@ cargo run -p remote-codex -- relay
 REMOTE_CODEX_MODE=relay REMOTE_CODEX_RELAY_SERVER_URL=ws://127.0.0.1:8788 \
   REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_... cargo run -p remote-codex -- relay-supervisor
 ```
+
+Before replacing a Node 0.11 relay, stop the Node process and inspect the
+existing data directory without changing it:
+
+```bash
+remote-codex relay-migrate --data-dir /var/lib/remote-codex-relay --dry-run
+remote-codex relay-migrate --data-dir /var/lib/remote-codex-relay
+```
+
+The migration keeps `relay-store.sqlite`, writes an online-backup snapshot, and
+does not delete a legacy `relay.sqlite`. Normal relay startup refuses an
+unmigrated legacy store unless `REMOTE_CODEX_RELAY_AUTO_MIGRATE=1` is explicitly
+set.
+
+The local supervisor keeps the Node 0.11 tables in
+`~/.remote-codex/supervisor.sqlite` and applies additive, transactional Rust
+migrations. Existing workspaces, turns, history, queued input, and settings are
+backfilled when the Rust supervisor first opens the database.
 
 ## Tests
 

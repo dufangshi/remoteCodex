@@ -1,0 +1,28 @@
+{
+  "name": "@remote-codex/native-linux-arm64-gnu",
+  "version": "0.12.0",
+  "description": "Remote Codex native binary for Linux ARM64 (glibc).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dufangshi/remoteCodex.git",
+    "directory": "npm/linux-arm64-gnu"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

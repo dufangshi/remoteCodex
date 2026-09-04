@@ -55,6 +55,9 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             blocks.push(json!({ "type": "text", "text": preceding }));
         }
         let abs = assert_within(cwd, Path::new(requested))?;
+        let uri = url::Url::from_file_path(&abs)
+            .map_err(|_| anyhow::anyhow!("cannot convert attachment path to a file URL"))?
+            .to_string();
         if kind == "PHOTO" {
             let file_bytes = std::fs::read(&abs)?;
             if file_bytes.len() > 20 * 1024 * 1024 {
@@ -64,7 +67,8 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             blocks.push(json!({
                 "type": "image",
                 "mimeType": mime_for(&abs),
-                "data": data
+                "data": data,
+                "uri": uri
             }));
         } else {
             let name = abs
@@ -74,7 +78,7 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             blocks.push(json!({
                 "type": "resource_link",
                 "name": name,
-                "uri": format!("file://{}", abs.display())
+                "uri": uri
             }));
         }
         cursor = end;
@@ -121,7 +125,11 @@ mod tests {
         assert_eq!(blocks[0]["type"], "text");
         assert_eq!(blocks[1]["type"], "image");
         assert_eq!(blocks[1]["mimeType"], "image/png");
-        assert!(blocks[1].get("uri").is_none());
+        let uri = blocks[1]["uri"].as_str().unwrap();
+        assert_eq!(
+            url::Url::parse(uri).unwrap().to_file_path().unwrap(),
+            dir.path().join("red.png").canonicalize().unwrap()
+        );
         assert_eq!(
             base64::engine::general_purpose::STANDARD
                 .decode(blocks[1]["data"].as_str().unwrap())
@@ -137,5 +145,22 @@ mod tests {
         std::fs::write(dir.path().join("red.png"), b"png").unwrap();
         let blocks = build_prompt_blocks("[PHOTO red.png]", dir.path(), false, &[]).unwrap();
         assert_eq!(blocks[0]["type"], "image");
+    }
+
+    #[test]
+    fn file_links_are_encoded_urls_that_round_trip_to_the_attachment() {
+        let dir = tempdir().unwrap();
+        let filename = "notes #1 %.txt";
+        let path = dir.path().join(filename);
+        std::fs::write(&path, "notes").unwrap();
+
+        let blocks =
+            build_prompt_blocks(&format!("[FILE {filename}]"), dir.path(), true, &[]).unwrap();
+        let uri = blocks[0]["uri"].as_str().unwrap();
+        assert!(uri.contains("notes%20%231%20%25.txt"), "{uri}");
+        assert_eq!(
+            url::Url::parse(uri).unwrap().to_file_path().unwrap(),
+            path.canonicalize().unwrap()
+        );
     }
 }

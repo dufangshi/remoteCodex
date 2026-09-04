@@ -46,6 +46,7 @@ fn item(id: &str, kind: &str, text: &str, turn_id: &str) -> ThreadHistoryItemDto
         sequence: None,
         source_turn_id: Some(turn_id.into()),
         artifact: None,
+        extra: Default::default(),
     }
 }
 

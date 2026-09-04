@@ -1,9 +1,6 @@
 name: Relay Deploy
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -72,6 +69,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: Deploy relay over SSH
     runs-on: ubuntu-latest
+    environment: relay-production
     needs: build-and-push
     timeout-minutes: 30
 
@@ -194,6 +192,7 @@ jobs:
     if: github.ref == 'refs/heads/rust/acp-rewrite'
     name: Deploy Rust relay to remote.lnz-study.com
     runs-on: ubuntu-latest
+    environment: relay-rust-canary
     timeout-minutes: 60
 
     steps:

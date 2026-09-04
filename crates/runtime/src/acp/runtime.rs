@@ -33,13 +33,19 @@ use super::modes::{
     PermissionChoice, ProductSessionPolicy, SessionMode,
 };
 use super::prompt::build_prompt_blocks;
-use super::rpc::AcpProcess;
+use super::rpc::{parse_spawn_command, AcpProcess};
 use super::terminal::AgentTerminals;
 
 struct ActiveTurn {
     thread_id: String,
     turn_id: String,
     bus: EventBus,
+}
+
+enum TurnOutcome {
+    Completed,
+    Interrupted,
+    Failed(anyhow::Error),
 }
 
 struct LiveSession {
@@ -380,15 +386,53 @@ impl AcpRuntime {
     }
 
     async fn models_from_live(&self, agent_id: &str) -> Option<Vec<ModelOptionDto>> {
-        let sessions = self.inner.sessions.lock().await;
-        let live = sessions
-            .values()
-            .find(|session| session.adapter_id == agent_id)?;
-        if !live.harness_models.is_empty() {
-            return Some(live.harness_models.clone());
+        let (cached, configured, process) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .values()
+                .find(|session| session.adapter_id == agent_id)?;
+            (
+                live.harness_models.clone(),
+                models_from_config_options(&live.config_options),
+                live.process.clone(),
+            )
+        };
+        if !cached.is_empty() {
+            return Some(cached);
         }
-        let models = models_from_config_options(&live.config_options);
-        (!models.is_empty()).then_some(models)
+        if !configured.is_empty() {
+            return Some(configured);
+        }
+        let models = self.request_adapter_models(agent_id, &process).await?;
+        if let Some(live) = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .values_mut()
+            .find(|session| session.adapter_id == agent_id)
+        {
+            live.harness_models = models.clone();
+        }
+        Some(models)
+    }
+
+    async fn request_adapter_models(
+        &self,
+        agent_id: &str,
+        process: &AcpProcess,
+    ) -> Option<Vec<ModelOptionDto>> {
+        let adapter = adapter_for(agent_id);
+        let method = adapter.model_list_method()?;
+        let response = process.request(method, json!({})).await.ok()?;
+        let models = adapter.project_model_list(&response)?;
+        if let Some(caps) = self.inner.caps_by_agent.lock().await.get_mut(agent_id) {
+            caps.management.models = true;
+            if adapter.model_list_supports_performance(&response) {
+                caps.controls.performance_mode = true;
+            }
+        }
+        Some(models)
     }
 
     async fn probe_models(&self, def: &AcpAgentDef, cwd: &str) -> Result<Vec<ModelOptionDto>> {
@@ -407,7 +451,14 @@ impl AcpRuntime {
         if !live.harness_models.is_empty() {
             return Ok(live.harness_models);
         }
-        Ok(models_from_config_options(&live.config_options))
+        let configured = models_from_config_options(&live.config_options);
+        if !configured.is_empty() {
+            return Ok(configured);
+        }
+        Ok(self
+            .request_adapter_models(&def.id, &live.process)
+            .await
+            .unwrap_or_default())
     }
 
     async fn apply_setting_op(
@@ -536,6 +587,7 @@ impl AcpRuntime {
         sandbox: Option<&str>,
         collab: Option<&str>,
         approval: Option<&str>,
+        performance: Option<bool>,
     ) -> Result<()> {
         let mut sessions = self.inner.sessions.lock().await;
         let Some(live) = sessions.get_mut(session_key) else {
@@ -588,10 +640,76 @@ impl AcpRuntime {
                 }
             }
         }
+        if let Some(enabled) = performance {
+            Self::apply_fast_mode(&live.process.clone(), live, enabled).await?;
+        }
         if sandbox.is_some() || collab.is_some() || approval.is_some() {
             if let Err(err) = Self::apply_product_mode(&live.process.clone(), live).await {
                 tracing::warn!(error = %err, "failed to apply ACP session mode");
             }
+        }
+        Ok(())
+    }
+
+    async fn apply_fast_mode(
+        process: &AcpProcess,
+        live: &mut LiveSession,
+        enabled: bool,
+    ) -> Result<()> {
+        let option = live.config_options.as_array().and_then(|options| {
+            options.iter().find(|option| {
+                matches!(
+                    option.get("id").and_then(Value::as_str),
+                    Some("fast" | "fast-mode")
+                )
+            })
+        });
+        let Some(option) = option else {
+            if enabled {
+                bail!("the selected ACP agent does not expose fast mode");
+            }
+            return Ok(());
+        };
+        let config_id = option
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("ACP fast mode config is missing its id"))?
+            .to_string();
+        let boolean = option.get("type").and_then(Value::as_str) == Some("boolean");
+        let value = if boolean {
+            json!(enabled)
+        } else {
+            let wanted = if enabled {
+                ["on", "true", "fast"].as_slice()
+            } else {
+                ["off", "false", "standard"].as_slice()
+            };
+            let selected = collect_select_options(option)
+                .into_iter()
+                .find_map(|entry| {
+                    let value = entry.get("value").and_then(Value::as_str)?;
+                    wanted
+                        .iter()
+                        .any(|candidate| value.eq_ignore_ascii_case(candidate))
+                        .then(|| value.to_string())
+                })
+                .ok_or_else(|| anyhow!("ACP fast mode config has no compatible value"))?;
+            json!(selected)
+        };
+        if option.get("currentValue") == Some(&value) {
+            return Ok(());
+        }
+        let mut params = json!({
+            "sessionId": live.session_id,
+            "configId": config_id,
+            "value": value
+        });
+        if boolean {
+            params["type"] = json!("boolean");
+        }
+        let response = process.request("session/set_config_option", params).await?;
+        if let Some(options) = response.get("configOptions") {
+            live.config_options = options.clone();
         }
         Ok(())
     }
@@ -945,35 +1063,59 @@ impl AgentRuntime for AcpRuntime {
         bus: EventBus,
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>> {
-        let _ = self
-            .apply_live_settings(
-                &input.provider_session_id,
-                input.model.as_deref(),
-                input.reasoning_effort.as_deref(),
-                input.sandbox_mode.as_deref(),
-                input.collaboration_mode.as_deref(),
-                input.approval_mode.as_deref(),
-            )
-            .await;
-        let (process, session_id, cwd, image_capable) = {
-            let mut sessions = self.inner.sessions.lock().await;
+        {
+            let sessions = self.inner.sessions.lock().await;
             let live = sessions
-                .get_mut(&input.provider_session_id)
+                .get(&input.provider_session_id)
                 .ok_or_else(|| anyhow!("ACP session is not running"))?;
-            live.active = Some(ActiveTurn {
-                thread_id: input.thread_id.clone(),
-                turn_id: input.turn_id.clone(),
-                bus: bus.clone(),
-            });
+            if live.active.is_some() {
+                bail!("ACP session already has an active turn");
+            }
+        }
+        self.apply_live_settings(
+            &input.provider_session_id,
+            input.model.as_deref(),
+            input.reasoning_effort.as_deref(),
+            input.sandbox_mode.as_deref(),
+            input.collaboration_mode.as_deref(),
+            input.approval_mode.as_deref(),
+            input.performance_mode,
+        )
+        .await?;
+        let (process, session_id, cwd, image_capable, adapter_id) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get(&input.provider_session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
             (
                 live.process.clone(),
                 live.session_id.clone(),
                 live.cwd.clone(),
                 live.negotiated.image,
+                live.adapter_id.clone(),
             )
         };
-        let prompt_blocks = build_prompt_blocks(&input.prompt, &cwd, image_capable, &input.images)?;
+        let adapter = adapter_for(&adapter_id);
+        let prompt = adapter
+            .prompt_preamble()
+            .map(|preamble| format!("{preamble}\n\n{}", input.prompt))
+            .unwrap_or_else(|| input.prompt.clone());
+        let prompt_blocks = build_prompt_blocks(&prompt, &cwd, image_capable, &input.images)?;
         let mut updates = self.inner.updates.subscribe();
+        {
+            let mut sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get_mut(&input.provider_session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            if live.active.is_some() {
+                bail!("ACP session already has an active turn");
+            }
+            live.active = Some(ActiveTurn {
+                thread_id: input.thread_id.clone(),
+                turn_id: input.turn_id.clone(),
+                bus: bus.clone(),
+            });
+        }
         let prompt_rpc = process.request(
             "session/prompt",
             json!({
@@ -992,28 +1134,28 @@ impl AgentRuntime for AcpRuntime {
         }
         tokio::pin!(prompt_rpc);
         let mut prompt_done = false;
-        loop {
+        let outcome = loop {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
                     let _ = process.notify("session/cancel", json!({ "sessionId": session_id })).await;
-                    break;
+                    break TurnOutcome::Interrupted;
                 }
                 result = &mut prompt_rpc, if !prompt_done => {
-                    prompt_done = true;
-                    if let Err(err) = result {
-                        tracing::warn!(
-                            error = %err,
-                            session_id = %session_id,
-                            "ACP session/prompt failed"
-                        );
-                        let _ = process
-                            .notify("session/cancel", json!({ "sessionId": session_id }))
-                            .await;
-                        if !cancel.is_cancelled() {
+                    match result {
+                        Ok(response) if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") => {
                             cancel.cancel();
+                            break TurnOutcome::Interrupted;
                         }
-                        break;
+                        Ok(_) => prompt_done = true,
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                session_id = %session_id,
+                                "ACP session/prompt failed"
+                            );
+                            break TurnOutcome::Failed(anyhow!("ACP session/prompt failed: {err}"));
+                        }
                     }
                 }
                 recv = updates.recv() => {
@@ -1047,19 +1189,31 @@ impl AgentRuntime for AcpRuntime {
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                             tracing::warn!(skipped, "ACP session/update receiver lagged");
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break if prompt_done {
+                                TurnOutcome::Completed
+                            } else {
+                                TurnOutcome::Failed(anyhow!("ACP update channel closed during session/prompt"))
+                            };
+                        }
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(250)), if prompt_done => {
-                    break;
+                    break TurnOutcome::Completed;
                 }
                 _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
-                    if process.exited().await.unwrap_or(false) {
-                        break;
+                    match process.exited().await {
+                        Ok(true) => {
+                            break TurnOutcome::Failed(anyhow!("ACP process exited before session/prompt completed"));
+                        }
+                        Ok(false) => {}
+                        Err(err) => {
+                            break TurnOutcome::Failed(anyhow!("failed to inspect ACP process: {err}"));
+                        }
                     }
                 }
             }
-        }
+        };
         if let Some(live) = self
             .inner
             .sessions
@@ -1067,10 +1221,25 @@ impl AgentRuntime for AcpRuntime {
             .await
             .get_mut(&input.provider_session_id)
         {
-            live.active = None;
+            if live
+                .active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == input.turn_id)
+            {
+                live.active = None;
+            }
         }
-        let interrupted = cancel.is_cancelled();
-        let items = mapper.finish(interrupted);
+        let (status, error) = match &outcome {
+            TurnOutcome::Completed => ("completed", None),
+            TurnOutcome::Interrupted => ("interrupted", None),
+            TurnOutcome::Failed(error) => ("failed", Some(error.to_string())),
+        };
+        let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
+        for item in &mut items {
+            if item.status.as_deref() != Some("failed") {
+                item.status = Some(status.into());
+            }
+        }
         if !input.hidden {
             for item in &items {
                 bus.emit(ThreadEventEnvelope {
@@ -1086,12 +1255,15 @@ impl AgentRuntime for AcpRuntime {
                 timestamp: now_rfc3339(),
                 payload: json!({
                     "turnId": input.turn_id,
-                    "status": if interrupted { "interrupted" } else { "completed" },
-                    "error": null
+                    "status": status,
+                    "error": error
                 }),
             });
         }
-        Ok(items)
+        match outcome {
+            TurnOutcome::Failed(error) => Err(error),
+            TurnOutcome::Completed | TurnOutcome::Interrupted => Ok(items),
+        }
     }
 
     async fn interrupt(&self, session_id: &str, _turn_id: &str) -> Result<()> {
@@ -1164,6 +1336,7 @@ impl AgentRuntime for AcpRuntime {
                     sandbox_mode: None,
                     collaboration_mode: None,
                     approval_mode: None,
+                    performance_mode: None,
                     thread_id: thread_id.into(),
                     turn_id: format!("compact-{}", Uuid::new_v4()),
                     hidden: true,
@@ -1380,6 +1553,7 @@ impl AgentRuntime for AcpRuntime {
             settings.sandbox_mode.as_deref(),
             settings.collaboration_mode.as_deref(),
             settings.approval_mode.as_deref(),
+            settings.performance_mode,
         )
         .await
     }
@@ -1387,11 +1561,9 @@ impl AgentRuntime for AcpRuntime {
     async fn install(&self, agent_id: Option<&str>) -> Result<AgentBackendDto> {
         let def = self.agent_def(agent_id)?;
         if let Some(cmd) = def.install_command.clone() {
-            let mut parts = cmd.split_whitespace();
-            let exe = parts.next().unwrap();
-            let args: Vec<&str> = parts.collect();
-            let status = tokio::process::Command::new(exe)
-                .args(args)
+            let parsed = parse_spawn_command(&cmd)?;
+            let status = tokio::process::Command::new(&parsed.program)
+                .args(&parsed.args)
                 .status()
                 .await?;
             if !status.success() {
@@ -1710,18 +1882,30 @@ async fn apply_mode_update(inner: &Inner, update: &Value) {
 }
 
 fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
-    let key = match def.id.as_str() {
-        "codex" => "CODEX_HOME",
-        "grok" => "GROK_HOME",
-        "claude" => "CLAUDE_CONFIG_DIR",
-        "opencode" => "OPENCODE_HOME",
-        _ => return Vec::new(),
+    let mut env = Vec::new();
+    let home_key = match def.id.as_str() {
+        "codex" => Some("CODEX_HOME"),
+        "grok" => Some("GROK_HOME"),
+        "claude" => Some("CLAUDE_CONFIG_DIR"),
+        "opencode" => Some("OPENCODE_HOME"),
+        _ => None,
     };
-    std::env::var(key)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| vec![(key, value)])
-        .unwrap_or_default()
+    if let Some(key) = home_key {
+        if let Some(value) = std::env::var(key)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.push((key, value));
+        }
+    }
+    if def.id == "codex" {
+        let codex_path = shell_words::split(&def.base_command)
+            .ok()
+            .and_then(|parts| parts.into_iter().next())
+            .unwrap_or_else(|| def.base_command.clone());
+        env.push(("CODEX_PATH", codex_path));
+    }
+    env
 }
 
 fn agent_server_command(def: &AcpAgentDef, auto_approve: bool) -> String {
@@ -1795,11 +1979,13 @@ fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
     let Some(command) = def.model_list_command.as_deref() else {
         return Vec::new();
     };
-    let mut parts = command.split_whitespace();
-    let Some(exe) = parts.next() else {
+    let Ok(parsed) = parse_spawn_command(command) else {
         return Vec::new();
     };
-    let output = std::process::Command::new(exe).args(parts).output().ok();
+    let output = std::process::Command::new(&parsed.program)
+        .args(&parsed.args)
+        .output()
+        .ok();
     let Some(output) = output.filter(|output| output.status.success()) else {
         return Vec::new();
     };

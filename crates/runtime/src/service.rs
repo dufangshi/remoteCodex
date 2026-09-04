@@ -6,19 +6,19 @@ use anyhow::{anyhow, bail, Result};
 use remote_codex_protocol::{
     now_rfc3339, truncate_title, AgentBackendDto, AgentCapabilitySnapshotDto, CreateThreadInput,
     CreateWorkspaceInput, ImportThreadCandidateDto, ImportThreadInput, ModelOptionDto, Provider,
-    SendThreadPromptInput, ThreadDetailDto, ThreadDto, ThreadHistoryItemDto, ThreadPendingSteerDto,
-    ThreadTurnDto, ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto,
-    UpdateWorkspaceSettingsInput, WorkspaceDto, WorkspaceSettingsDto,
+    SendThreadPromptInput, ThreadDetailDto, ThreadDto, ThreadForkTurnOptionDto, ThreadGoalDto,
+    ThreadHistoryItemDto, ThreadPendingSteerDto, ThreadTurnDto, ThreadWorkspaceFilePreviewDto,
+    ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput, WorkspaceDto, WorkspaceSettingsDto,
 };
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::actor::{
-    EventBus, ImportSessionMeta, PromptImage, SessionSettings, SharedRuntime, StartSessionInput,
-    StartTurnInput,
+    EventBus, GoalState, ImportSessionMeta, PromptImage, SessionSettings, SharedRuntime,
+    StartSessionInput, StartTurnInput,
 };
 use crate::config::RuntimeConfig;
 use crate::db::Database;
@@ -29,8 +29,227 @@ use crate::import_id::{
 };
 use crate::local_sessions::{find_local_session, list_local_sessions, LocalSessionHomes};
 
+const RESTART_INTERRUPTED_ERROR: &str =
+    "Turn interrupted because the supervisor restarted before it completed.";
+
+fn goal_status_is_terminal(status: &str) -> bool {
+    matches!(status, "complete" | "terminated")
+}
+
 struct LiveTurn {
     cancel: CancellationToken,
+}
+
+struct PendingSteerRecord {
+    id: String,
+    turn_id: String,
+    submitted_prompt: String,
+    delivery: String,
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1",
+            params![table],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn upsert_legacy_thread_goal(
+    conn: &Connection,
+    local_thread_id: &str,
+    goal: &ThreadGoalDto,
+) -> Result<()> {
+    if !sqlite_table_exists(conn, "thread_goals")? {
+        return Ok(());
+    }
+    let Some(local_goal_id) = goal.local_goal_id.as_deref() else {
+        return Ok(());
+    };
+    let provider_session_id = conn
+        .query_row(
+            "SELECT provider_session_id FROM threads WHERE id=?1",
+            params![local_thread_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(provider_session_id) = provider_session_id else {
+        return Ok(());
+    };
+
+    if let Some(owner) = conn
+        .query_row(
+            "SELECT thread_id FROM thread_goals WHERE id=?1",
+            params![local_goal_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        if owner != local_thread_id {
+            bail!(
+                "legacy goal id `{local_goal_id}` belongs to thread `{owner}`, not `{local_thread_id}`"
+            );
+        }
+    }
+
+    // A new current snapshot replaces all older active histories. Keeping the rows and marking
+    // them terminated prevents an old goal from resurfacing after rolling back to Node.
+    conn.execute(
+        "UPDATE thread_goals
+         SET status='terminated', completed_at=?1, updated_at=?1
+         WHERE thread_id=?2 AND id<>?3
+           AND status IN ('active','paused','budgetLimited')",
+        params![goal.updated_at, local_thread_id, local_goal_id],
+    )?;
+
+    let token_budget = goal.token_budget.map(i64::try_from).transpose()?;
+    let tokens_used = i64::try_from(goal.tokens_used)?;
+    let time_used_seconds = i64::try_from(goal.time_used_seconds)?;
+    let completed_at = if goal_status_is_terminal(&goal.status) {
+        goal.completed_at
+            .as_deref()
+            .or(Some(goal.updated_at.as_str()))
+    } else {
+        None
+    };
+    let updated = conn.execute(
+        "UPDATE thread_goals
+         SET provider_session_id=?1, objective=?2, status=?3, token_budget=?4,
+             tokens_used=?5, time_used_seconds=?6, started_at=?7,
+             completed_at=?8, updated_at=?9
+         WHERE id=?10 AND thread_id=?11",
+        params![
+            provider_session_id,
+            goal.objective,
+            goal.status,
+            token_budget,
+            tokens_used,
+            time_used_seconds,
+            goal.created_at,
+            completed_at,
+            goal.updated_at,
+            local_goal_id,
+            local_thread_id,
+        ],
+    )?;
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO thread_goals(
+               id,thread_id,provider_session_id,objective,status,token_budget,
+               tokens_used,time_used_seconds,started_at,completed_at,created_at,updated_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![
+                local_goal_id,
+                local_thread_id,
+                provider_session_id,
+                goal.objective,
+                goal.status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                goal.created_at,
+                completed_at,
+                goal.created_at,
+                goal.updated_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn legacy_turn_metadata_has_display_prompt(conn: &Connection) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('thread_turn_metadata') WHERE name='display_prompt'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_legacy_turn_metadata(
+    conn: &Connection,
+    thread_id: &str,
+    turn_id: &str,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+    display_prompt: Option<&str>,
+    created_at: Option<&str>,
+    updated_at: &str,
+) -> Result<()> {
+    if !sqlite_table_exists(conn, "thread_turn_metadata")? {
+        return Ok(());
+    }
+    let existing_id = conn
+        .query_row(
+            "SELECT id FROM thread_turn_metadata WHERE thread_id=?1 AND turn_id=?2",
+            params![thread_id, turn_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let has_display_prompt = legacy_turn_metadata_has_display_prompt(conn)?;
+    if let Some(id) = existing_id {
+        if has_display_prompt {
+            conn.execute(
+                "UPDATE thread_turn_metadata
+                 SET model=COALESCE(?1,model), reasoning_effort=COALESCE(?2,reasoning_effort),
+                     display_prompt=COALESCE(?3,display_prompt), updated_at=?4
+                 WHERE id=?5",
+                params![model, reasoning_effort, display_prompt, updated_at, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE thread_turn_metadata
+                 SET model=COALESCE(?1,model), reasoning_effort=COALESCE(?2,reasoning_effort),
+                     updated_at=?3 WHERE id=?4",
+                params![model, reasoning_effort, updated_at, id],
+            )?;
+        }
+        return Ok(());
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let created_at = created_at.unwrap_or(updated_at);
+    if has_display_prompt {
+        conn.execute(
+            "INSERT INTO thread_turn_metadata(
+               id, thread_id, turn_id, model, reasoning_effort,
+               display_prompt, created_at, updated_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                id,
+                thread_id,
+                turn_id,
+                model,
+                reasoning_effort,
+                display_prompt,
+                created_at,
+                updated_at
+            ],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO thread_turn_metadata(
+               id, thread_id, turn_id, model, reasoning_effort, created_at, updated_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                id,
+                thread_id,
+                turn_id,
+                model,
+                reasoning_effort,
+                created_at,
+                updated_at
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 pub struct UploadedPromptAttachment {
@@ -55,14 +274,18 @@ impl Supervisor {
             .into_iter()
             .map(|runtime| (runtime.provider(), runtime))
             .collect();
-        Self {
+        let supervisor = Self {
             config,
             db,
             bus: EventBus::new(),
             runtimes: map,
             live: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
+        };
+        if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
+            tracing::warn!(%error, "failed to reconcile stale turns at startup");
         }
+        supervisor
     }
 
     pub fn with_local_session_homes(mut self, homes: LocalSessionHomes) -> Self {
@@ -134,6 +357,55 @@ impl Supervisor {
         self.runtimes
             .get(&provider)
             .ok_or_else(|| anyhow!("{} is not enabled", provider.as_str()))
+    }
+
+    fn reconcile_stale_turns(
+        &self,
+        only_thread_id: Option<&str>,
+        include_disconnected: bool,
+    ) -> Result<usize> {
+        let now = now_rfc3339();
+        self.db.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let thread_ids = {
+                let mut stmt = tx.prepare(
+                    "SELECT t.id FROM threads t
+                     WHERE (?1 IS NULL OR t.id=?1)
+                       AND (?2=1 OR COALESCE(t.is_connected, 1)=1)
+                       AND (
+                         t.status='running' OR EXISTS (
+                           SELECT 1 FROM thread_turns tt
+                           WHERE tt.thread_id=t.id AND tt.status='inProgress'
+                         )
+                       )",
+                )?;
+                let ids = stmt
+                    .query_map(
+                        params![only_thread_id, include_disconnected as i64],
+                        |row| row.get::<_, String>(0),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                ids
+            };
+            for thread_id in &thread_ids {
+                tx.execute(
+                    "UPDATE thread_turns
+                     SET status='interrupted', error=COALESCE(error, ?1),
+                         completed_at=COALESCE(completed_at, ?2)
+                     WHERE thread_id=?3 AND status='inProgress'",
+                    params![RESTART_INTERRUPTED_ERROR, now, thread_id],
+                )?;
+                tx.execute(
+                    "UPDATE threads
+                     SET status='interrupted', last_error=?1, updated_at=?2,
+                         last_turn_completed_at=COALESCE(last_turn_completed_at, ?2)
+                     WHERE id=?3",
+                    params![RESTART_INTERRUPTED_ERROR, now, thread_id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(thread_ids.len())
+        })
     }
 
     pub fn backends(&self) -> Vec<AgentBackendDto> {
@@ -367,9 +639,38 @@ impl Supervisor {
         files::preview_file(Path::new(&ws.abs_path), rel, 64 * 1024)
     }
 
+    pub fn workspace_read_bytes(&self, id: &str, rel: &str) -> Result<(PathBuf, Vec<u8>)> {
+        let workspace = self.get_workspace(id)?;
+        let (path, bytes) = files::read_bytes(Path::new(&workspace.abs_path), rel)?;
+        if !path.is_file() {
+            bail!("Workspace download path must point to a file.");
+        }
+        Ok((path, bytes))
+    }
+
     pub fn workspace_write(&self, id: &str, rel: &str, content: &str) -> Result<()> {
         let ws = self.get_workspace(id)?;
         files::write_file(Path::new(&ws.abs_path), rel, content)
+    }
+
+    pub fn workspace_write_bytes(
+        &self,
+        id: &str,
+        rel: &str,
+        content: &[u8],
+    ) -> Result<(String, u64)> {
+        let workspace = self.get_workspace(id)?;
+        let root = PathBuf::from(&workspace.abs_path).canonicalize()?;
+        let path = files::assert_within(&root, Path::new(rel))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, content)?;
+        let relative = path
+            .strip_prefix(&root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        Ok((relative, u64::try_from(content.len()).unwrap_or(u64::MAX)))
     }
 
     pub fn list_threads(&self, workspace_id: Option<&str>) -> Result<Vec<ThreadDto>> {
@@ -430,8 +731,11 @@ impl Supervisor {
     }
 
     pub async fn create_thread(&self, input: CreateThreadInput) -> Result<ThreadDto> {
-        const DEFAULT_SANDBOX_MODE: &str = "danger-full-access";
-        const FULL_ACCESS_APPROVAL_MODE: &str = "yolo";
+        let (approval_mode, sandbox_mode) = match input.approval_mode.as_str() {
+            "yolo" => ("yolo", "danger-full-access"),
+            "guarded" => ("guarded", "workspace-write"),
+            _ => bail!("approvalMode must be yolo or guarded"),
+        };
         let workspace = self.get_workspace(&input.workspace_id)?;
         let provider = input.provider.unwrap_or_else(|| self.default_provider());
         let runtime = self.runtime(provider)?;
@@ -441,8 +745,8 @@ impl Supervisor {
                 agent_id: input.agent_id.clone(),
                 model: input.model.clone(),
                 reasoning_effort: input.reasoning_effort.clone(),
-                approval_mode: FULL_ACCESS_APPROVAL_MODE.into(),
-                sandbox_mode: Some(DEFAULT_SANDBOX_MODE.into()),
+                approval_mode: approval_mode.into(),
+                sandbox_mode: Some(sandbox_mode.into()),
             })
             .await?;
         let id = Uuid::new_v4().to_string();
@@ -465,8 +769,8 @@ impl Supervisor {
                     title,
                     started.model.clone().unwrap_or(input.model.clone()),
                     started.reasoning_effort.clone(),
-                    FULL_ACCESS_APPROVAL_MODE,
-                    DEFAULT_SANDBOX_MODE,
+                    approval_mode,
+                    sandbox_mode,
                     now,
                 ],
             )?;
@@ -672,9 +976,21 @@ impl Supervisor {
                 } else {
                     turn.id.clone()
                 };
+                let display_prompt = turn
+                    .items
+                    .iter()
+                    .find(|item| item.kind == "userMessage")
+                    .map(|item| item.text.as_str());
+                let token_usage_json = turn
+                    .token_usage
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
                 conn.execute(
-                    "INSERT INTO thread_turns(id, thread_id, status, error, model, reasoning_effort, started_at, ordinal)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    "INSERT INTO thread_turns(
+                       id, thread_id, status, error, model, reasoning_effort,
+                       token_usage_json, display_prompt, started_at, ordinal
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                     params![
                         turn_id,
                         thread_id,
@@ -686,9 +1002,21 @@ impl Supervisor {
                         turn.error.clone(),
                         turn.model.clone(),
                         turn.reasoning_effort.clone(),
+                        token_usage_json,
+                        display_prompt,
                         turn.started_at.clone(),
                         (index as i64) + 1
                     ],
+                )?;
+                upsert_legacy_turn_metadata(
+                    conn,
+                    thread_id,
+                    &turn_id,
+                    turn.model.as_deref(),
+                    turn.reasoning_effort.as_deref(),
+                    display_prompt,
+                    turn.started_at.as_deref(),
+                    &now,
                 )?;
                 for item in &turn.items {
                     conn.execute(
@@ -747,8 +1075,134 @@ impl Supervisor {
             .unwrap_or(false);
     }
 
+    fn stored_goal(&self, thread_id: &str) -> Result<Option<ThreadGoalDto>> {
+        Ok(self
+            .db
+            .get_kv(&format!("thread_goal:{thread_id}"))?
+            .and_then(|raw| serde_json::from_str(&raw).ok()))
+    }
+
+    fn save_goal(&self, thread_id: &str, goal: &ThreadGoalDto) -> Result<()> {
+        let serialized = serde_json::to_string(goal)?;
+        self.db.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            upsert_legacy_thread_goal(&tx, thread_id, goal)?;
+            tx.execute(
+                "INSERT INTO kv(key,value) VALUES(?1,?2)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![format!("thread_goal:{thread_id}"), serialized],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    fn delete_stored_goal(&self, thread_id: &str) -> Result<()> {
+        self.db.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            if sqlite_table_exists(&tx, "thread_goals")? {
+                let now = now_rfc3339();
+                tx.execute(
+                    "UPDATE thread_goals
+                     SET status='terminated', completed_at=?1, updated_at=?1
+                     WHERE thread_id=?2
+                       AND status IN ('active','paused','budgetLimited')",
+                    params![now, thread_id],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM kv WHERE key=?1",
+                params![format!("thread_goal:{thread_id}")],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    fn goal_snapshot(
+        &self,
+        thread_id: &str,
+        runtime_goal: Option<GoalState>,
+    ) -> Result<Option<ThreadGoalDto>> {
+        let stored = self.stored_goal(thread_id)?;
+        let Some(runtime_goal) = runtime_goal else {
+            return Ok(stored);
+        };
+        let now = now_rfc3339();
+        let mut goal = if let Some(existing) =
+            stored.filter(|goal| goal.objective == runtime_goal.objective)
+        {
+            existing
+        } else {
+            ThreadGoalDto {
+                thread_id: thread_id.into(),
+                local_goal_id: Some(Uuid::new_v4().to_string()),
+                objective: runtime_goal.objective.clone(),
+                status: runtime_goal.status.clone(),
+                token_budget: None,
+                tokens_used: runtime_goal.tokens_used.into(),
+                time_used_seconds: runtime_goal.time_used_seconds.into(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                completed_at: None,
+            }
+        };
+        let changed = goal.status != runtime_goal.status
+            || goal.tokens_used != u64::from(runtime_goal.tokens_used)
+            || goal.time_used_seconds != u64::from(runtime_goal.time_used_seconds);
+        goal.status = runtime_goal.status;
+        goal.tokens_used = runtime_goal.tokens_used.into();
+        goal.time_used_seconds = runtime_goal.time_used_seconds.into();
+        if changed {
+            goal.updated_at = now;
+        }
+        goal.completed_at = goal_status_is_terminal(&goal.status).then(|| goal.updated_at.clone());
+        self.save_goal(thread_id, &goal)?;
+        Ok(Some(goal))
+    }
+
+    fn updated_goal_snapshot(
+        &self,
+        thread_id: &str,
+        runtime_goal: GoalState,
+        requested_status: Option<&str>,
+        token_budget: Option<Option<u64>>,
+    ) -> Result<ThreadGoalDto> {
+        let now = now_rfc3339();
+        let stored = self.stored_goal(thread_id)?;
+        let mut goal = if let Some(existing) =
+            stored.filter(|goal| goal.objective == runtime_goal.objective)
+        {
+            existing
+        } else {
+            ThreadGoalDto {
+                thread_id: thread_id.into(),
+                local_goal_id: Some(Uuid::new_v4().to_string()),
+                objective: runtime_goal.objective.clone(),
+                status: "active".into(),
+                token_budget: None,
+                tokens_used: 0,
+                time_used_seconds: 0,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                completed_at: None,
+            }
+        };
+        goal.objective = runtime_goal.objective;
+        goal.status = requested_status.unwrap_or(&runtime_goal.status).into();
+        if let Some(token_budget) = token_budget {
+            goal.token_budget = token_budget;
+        }
+        goal.tokens_used = runtime_goal.tokens_used.into();
+        goal.time_used_seconds = runtime_goal.time_used_seconds.into();
+        goal.updated_at = now.clone();
+        goal.completed_at = goal_status_is_terminal(&goal.status).then_some(now);
+        self.save_goal(thread_id, &goal)?;
+        Ok(goal)
+    }
+
     pub async fn get_thread_detail(&self, id: &str, limit: Option<u32>) -> Result<ThreadDetailDto> {
-        self.get_thread_detail_view(id, limit, false).await
+        self.get_thread_detail_page(id, limit, None, false).await
     }
 
     pub async fn get_thread_detail_view(
@@ -757,19 +1211,24 @@ impl Supervisor {
         limit: Option<u32>,
         summary_only: bool,
     ) -> Result<ThreadDetailDto> {
+        self.get_thread_detail_page(id, limit, None, summary_only)
+            .await
+    }
+
+    pub async fn get_thread_detail_page(
+        &self,
+        id: &str,
+        limit: Option<u32>,
+        before_turn_id: Option<&str>,
+        summary_only: bool,
+    ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
-        let mut turns = if summary_only {
-            self.load_turn_summaries(id)?
+        let (turns, total) = if summary_only {
+            self.load_turn_summaries(id, limit, before_turn_id)?
         } else {
-            self.load_turns(id)?
+            self.load_turns(id, limit, before_turn_id)?
         };
-        let total = turns.len() as u32;
-        if let Some(limit) = limit {
-            if turns.len() > limit as usize {
-                turns = turns.split_off(turns.len() - limit as usize);
-            }
-        }
         let pending_steers = self.load_steers(id)?;
         let present = Path::new(&workspace.abs_path).exists();
         let runtime = self.runtime(thread.provider).ok().cloned();
@@ -780,19 +1239,16 @@ impl Supervisor {
         };
         let goal = if summary_only && thread.status != "running" {
             None
-        } else if let (Some(runtime), Some(session)) =
-            (runtime.as_ref(), thread.provider_session_id.as_deref())
-        {
-            runtime.get_goal(session).await.ok().flatten().map(|g| {
-                json!({
-                    "objective": g.objective,
-                    "status": g.status,
-                    "tokensUsed": g.tokens_used,
-                    "timeUsedSeconds": g.time_used_seconds
-                })
-            })
         } else {
-            None
+            let runtime_goal = if let (Some(runtime), Some(session)) =
+                (runtime.as_ref(), thread.provider_session_id.as_deref())
+            {
+                runtime.get_goal(session).await.ok().flatten()
+            } else {
+                None
+            };
+            self.goal_snapshot(id, runtime_goal)?
+                .and_then(|goal| serde_json::to_value(goal).ok())
         };
         Ok(ThreadDetailDto {
             thread,
@@ -807,50 +1263,17 @@ impl Supervisor {
         })
     }
 
-    fn load_turns(&self, thread_id: &str) -> Result<Vec<ThreadTurnDto>> {
-        self.db.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, status, error, model, reasoning_effort, started_at FROM thread_turns
-                 WHERE thread_id=?1 ORDER BY ordinal ASC",
-            )?;
-            let turns: Vec<(String, String, Option<String>, Option<String>, Option<String>, Option<String>)> = stmt
-                .query_map(params![thread_id], |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            let mut out = Vec::new();
-            for (id, status, error, model, effort, started_at) in turns {
-                let mut item_stmt = conn.prepare(
-                    "SELECT item_json FROM thread_history_items WHERE thread_id=?1 AND turn_id=?2 ORDER BY created_at ASC, rowid ASC",
-                )?;
-                let items = item_stmt
-                    .query_map(params![thread_id, id], |row| row.get::<_, String>(0))?
-                    .filter_map(|r| r.ok())
-                    .filter_map(|raw| serde_json::from_str::<ThreadHistoryItemDto>(&raw).ok())
-                    .collect();
-                out.push(ThreadTurnDto {
-                    id,
-                    started_at,
-                    status,
-                    error,
-                    model,
-                    reasoning_effort: effort,
-                    token_usage: None,
-                    has_deferred_items: None,
-                    deferred_item_count: None,
-                    items,
-                });
-            }
-            Ok(out)
-        })
+    fn load_turns(
+        &self,
+        thread_id: &str,
+        limit: Option<u32>,
+        before_turn_id: Option<&str>,
+    ) -> Result<(Vec<ThreadTurnDto>, u32)> {
+        let (mut turns, total) = self.load_turns_meta_page(thread_id, limit, before_turn_id)?;
+        for turn in &mut turns {
+            turn.items = self.load_items_for_turn(thread_id, &turn.id)?;
+        }
+        Ok((turns, total))
     }
 
     fn load_items_for_turn(
@@ -873,84 +1296,122 @@ impl Supervisor {
         })
     }
 
-    fn load_turn_summaries(&self, thread_id: &str) -> Result<Vec<ThreadTurnDto>> {
-        let mut turns = self.load_turns_meta(thread_id)?;
-        let counts = self.db.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT turn_id, COUNT(*) FROM thread_history_items WHERE thread_id=?1 GROUP BY turn_id",
-            )?;
-            let rows: Vec<(String, i64)> = stmt
-                .query_map(params![thread_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            Ok(rows)
-        })?;
-        let count_by_turn: std::collections::HashMap<String, i64> = counts.into_iter().collect();
-        let conversation = self.db.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT turn_id, item_json FROM thread_history_items
-                 WHERE thread_id=?1
-                   AND json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage')
-                 ORDER BY created_at ASC, rowid ASC",
-            )?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map(params![thread_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            Ok(rows)
-        })?;
-        let mut conversation_by_turn: std::collections::HashMap<String, Vec<ThreadHistoryItemDto>> =
-            std::collections::HashMap::new();
-        for (turn_id, raw) in conversation {
-            if let Ok(item) = serde_json::from_str::<ThreadHistoryItemDto>(&raw) {
-                conversation_by_turn.entry(turn_id).or_default().push(item);
-            }
-        }
+    fn load_turn_summaries(
+        &self,
+        thread_id: &str,
+        limit: Option<u32>,
+        before_turn_id: Option<&str>,
+    ) -> Result<(Vec<ThreadTurnDto>, u32)> {
+        let (mut turns, total_turn_count) =
+            self.load_turns_meta_page(thread_id, limit, before_turn_id)?;
         for turn in &mut turns {
             if turn.status == "inProgress" {
                 turn.items = self.load_items_for_turn(thread_id, &turn.id)?;
                 continue;
             }
-            let items = conversation_by_turn.remove(&turn.id).unwrap_or_default();
+            let (items, total_item_count) = self.load_turn_conversation(thread_id, &turn.id)?;
             let summarized = summarize_completed_turn(ThreadTurnDto {
                 items,
                 ..turn.clone()
             });
-            let total = count_by_turn.get(&turn.id).copied().unwrap_or(0) as usize;
-            let deferred = total.saturating_sub(summarized.items.len());
+            let deferred = total_item_count.saturating_sub(summarized.items.len());
             turn.items = summarized.items;
             if deferred > 0 {
                 turn.has_deferred_items = Some(true);
                 turn.deferred_item_count = Some(deferred as u32);
             }
         }
-        Ok(turns)
+        Ok((turns, total_turn_count))
+    }
+
+    fn load_turn_conversation(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<(Vec<ThreadHistoryItemDto>, usize)> {
+        self.db.with(|conn| {
+            let total_item_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM thread_history_items WHERE thread_id=?1 AND turn_id=?2",
+                params![thread_id, turn_id],
+                |row| row.get(0),
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT item_json FROM thread_history_items
+                 WHERE thread_id=?1 AND turn_id=?2
+                   AND json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage')
+                 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let items = stmt
+                .query_map(params![thread_id, turn_id], |row| row.get::<_, String>(0))?
+                .filter_map(|row| row.ok())
+                .filter_map(|raw| serde_json::from_str::<ThreadHistoryItemDto>(&raw).ok())
+                .collect();
+            Ok((
+                items,
+                usize::try_from(total_item_count).unwrap_or(usize::MAX),
+            ))
+        })
     }
 
     fn load_turns_meta(&self, thread_id: &str) -> Result<Vec<ThreadTurnDto>> {
+        self.load_turns_meta_page(thread_id, None, None)
+            .map(|(turns, _)| turns)
+    }
+
+    fn load_turns_meta_page(
+        &self,
+        thread_id: &str,
+        limit: Option<u32>,
+        before_turn_id: Option<&str>,
+    ) -> Result<(Vec<ThreadTurnDto>, u32)> {
         self.db.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, status, error, model, reasoning_effort, started_at FROM thread_turns
-                 WHERE thread_id=?1 ORDER BY ordinal ASC",
+            let total: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM thread_turns WHERE thread_id=?1",
+                params![thread_id],
+                |row| row.get(0),
             )?;
-            let turns = stmt
-                .query_map(params![thread_id], |row| {
+            let before_ordinal = before_turn_id
+                .map(|turn_id| {
+                    conn.query_row(
+                        "SELECT ordinal FROM thread_turns WHERE thread_id=?1 AND id=?2",
+                        params![thread_id, turn_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()
+                })
+                .transpose()?
+                .flatten();
+            let page_limit = limit
+                .map(i64::from)
+                .or_else(|| before_turn_id.map(|_| 10))
+                .unwrap_or(i64::MAX);
+            let mut stmt = conn.prepare(
+                "SELECT id, status, error, model, reasoning_effort, token_usage_json, started_at
+                 FROM thread_turns
+                 WHERE thread_id=?1 AND (?2 IS NULL OR ordinal < ?2)
+                 ORDER BY ordinal DESC, rowid DESC LIMIT ?3",
+            )?;
+            let mut turns = stmt
+                .query_map(params![thread_id, before_ordinal, page_limit], |row| {
                     Ok(ThreadTurnDto {
                         id: row.get(0)?,
-                        started_at: row.get(5)?,
+                        started_at: row.get(6)?,
                         status: row.get(1)?,
                         error: row.get(2)?,
                         model: row.get(3)?,
                         reasoning_effort: row.get(4)?,
-                        token_usage: None,
+                        token_usage: row
+                            .get::<_, Option<String>>(5)?
+                            .and_then(|raw| serde_json::from_str(&raw).ok()),
                         has_deferred_items: None,
                         deferred_item_count: None,
                         items: Vec::new(),
                     })
                 })?
                 .filter_map(|r| r.ok())
-                .collect();
-            Ok(turns)
+                .collect::<Vec<_>>();
+            turns.reverse();
+            Ok((turns, u32::try_from(total).unwrap_or(u32::MAX)))
         })
     }
 
@@ -999,18 +1460,17 @@ impl Supervisor {
     fn load_steers(&self, thread_id: &str) -> Result<Vec<ThreadPendingSteerDto>> {
         self.db.with(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, thread_id, turn_id, display_prompt, submitted_prompt, delivery, created_at
+                "SELECT id, client_request_id, turn_id, display_prompt, delivery, created_at
                  FROM thread_pending_steers WHERE thread_id=?1 ORDER BY created_at ASC",
             )?;
             let rows = stmt.query_map(params![thread_id], |row| {
                 Ok(ThreadPendingSteerDto {
                     id: row.get(0)?,
-                    thread_id: row.get(1)?,
+                    client_request_id: row.get(1)?,
                     turn_id: row.get(2)?,
-                    display_prompt: row.get(3)?,
-                    submitted_prompt: row.get(4)?,
-                    delivery: row.get(5)?,
-                    created_at: row.get(6)?,
+                    prompt: row.get(3)?,
+                    delivery: row.get(4)?,
+                    created_at: row.get(5)?,
                 })
             })?;
             Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1024,8 +1484,15 @@ impl Supervisor {
     ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(thread_id)?;
         self.ensure_prompt_allowed(&thread)?;
-        let images: Vec<PromptImage> = input
-            .images
+        let SendThreadPromptInput {
+            prompt,
+            client_request_id,
+            model,
+            reasoning_effort,
+            collaboration_mode: _,
+            images,
+        } = input;
+        let images: Vec<PromptImage> = images
             .into_iter()
             .map(|image| PromptImage {
                 mime_type: image.mime_type,
@@ -1033,46 +1500,35 @@ impl Supervisor {
             })
             .collect();
         if thread.status == "running" {
-            let runtime = self.runtime(thread.provider)?;
-            let caps = runtime.negotiated_caps(thread.agent_id.as_deref());
-            if caps.turns.steer {
-                if let Some(session) = &thread.provider_session_id {
-                    runtime
-                        .send_input(
-                            session,
-                            thread.active_turn_id.as_deref().unwrap_or(""),
-                            &input.prompt,
-                        )
-                        .await?;
-                    return self.get_thread_detail(thread_id, None).await;
-                }
-            }
             self.enqueue_steer(
                 thread_id,
                 thread.active_turn_id.as_deref().unwrap_or(""),
-                &input.prompt,
+                client_request_id.as_deref(),
+                &prompt,
             )?;
             return self.get_thread_detail(thread_id, None).await;
         }
-        self.run_turn(
-            thread,
-            input.prompt,
-            input.model,
-            input.reasoning_effort,
-            images,
-        )
-        .await?;
+        self.run_turn(thread, prompt, model, reasoning_effort, images)
+            .await?;
         self.get_thread_detail(thread_id, None).await
     }
 
-    fn enqueue_steer(&self, thread_id: &str, turn_id: &str, prompt: &str) -> Result<()> {
+    fn enqueue_steer(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        client_request_id: Option<&str>,
+        prompt: &str,
+    ) -> Result<()> {
         let id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         self.db.with(|conn| {
             conn.execute(
-                "INSERT INTO thread_pending_steers(id, thread_id, turn_id, display_prompt, submitted_prompt, delivery, created_at)
-                 VALUES (?1,?2,?3,?4,?4,'steer',?5)",
-                params![id, thread_id, turn_id, prompt, now],
+                "INSERT INTO thread_pending_steers(
+                   id, thread_id, turn_id, client_request_id, display_prompt,
+                   submitted_prompt, delivery, created_at, updated_at
+                 ) VALUES (?1,?2,?3,?4,?5,?5,'continuation',?6,?6)",
+                params![id, thread_id, turn_id, client_request_id, prompt, now],
             )?;
             Ok(())
         })
@@ -1107,12 +1563,15 @@ impl Supervisor {
                         sandbox_mode: thread.sandbox_mode.clone(),
                         collaboration_mode: Some(thread.collaboration_mode.clone()),
                         approval_mode: Some(thread.approval_mode.clone()),
+                        performance_mode: thread.fast_mode.then_some(true),
                     },
                 )
                 .await;
         }
         let turn_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
+        let turn_model = model.clone().or_else(|| thread.model.clone());
+        let turn_reasoning_effort = effort.clone().or_else(|| thread.reasoning_effort.clone());
         let title = if thread.title == "New thread" {
             Some(truncate_title(&prompt))
         } else {
@@ -1126,9 +1585,19 @@ impl Supervisor {
                     |row| row.get(0),
                 )?;
             conn.execute(
-                "INSERT INTO thread_turns(id, thread_id, status, model, reasoning_effort, started_at, ordinal)
-                 VALUES (?1,?2,'inProgress',?3,?4,?5,?6)",
-                params![turn_id, thread.id, model.clone().or(thread.model.clone()), effort.clone(), now, ordinal],
+                "INSERT INTO thread_turns(
+                   id, thread_id, status, model, reasoning_effort,
+                   display_prompt, started_at, ordinal
+                 ) VALUES (?1,?2,'inProgress',?3,?4,?5,?6,?7)",
+                params![
+                    turn_id,
+                    thread.id,
+                    turn_model,
+                    turn_reasoning_effort,
+                    prompt,
+                    now,
+                    ordinal
+                ],
             )?;
             let user_item = ThreadHistoryItemDto {
                 id: format!("{turn_id}:user"),
@@ -1141,6 +1610,7 @@ impl Supervisor {
                 sequence: None,
                 source_turn_id: Some(turn_id.clone()),
                 artifact: None,
+                extra: Default::default(),
             };
             conn.execute(
                 "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
@@ -1157,6 +1627,16 @@ impl Supervisor {
             conn.execute(
                 "UPDATE threads SET status='running', updated_at=?1, last_turn_started_at=?1, title=COALESCE(?2,title) WHERE id=?3",
                 params![now, title, thread.id],
+            )?;
+            upsert_legacy_turn_metadata(
+                conn,
+                &thread.id,
+                &turn_id,
+                turn_model.as_deref(),
+                turn_reasoning_effort.as_deref(),
+                Some(&prompt),
+                Some(&now),
+                &now,
             )?;
             Ok(())
         })?;
@@ -1184,6 +1664,7 @@ impl Supervisor {
                     sandbox_mode: thread.sandbox_mode.clone(),
                     collaboration_mode: Some(thread.collaboration_mode.clone()),
                     approval_mode: Some(thread.approval_mode.clone()),
+                    performance_mode: thread.fast_mode.then_some(true),
                     thread_id: thread.id.clone(),
                     turn_id: turn_id.clone(),
                     hidden: false,
@@ -1263,6 +1744,32 @@ impl Supervisor {
                 "UPDATE threads SET status=?1, last_error=?2, updated_at=?3, last_turn_completed_at=?3 WHERE id=?4",
                 params![thread_status, error, now, thread_id],
             )?;
+            let (model, reasoning_effort, display_prompt, started_at): (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = conn.query_row(
+                "SELECT model, reasoning_effort, display_prompt, started_at
+                 FROM thread_turns WHERE id=?1",
+                params![turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+            upsert_legacy_turn_metadata(
+                conn,
+                thread_id,
+                turn_id,
+                model.as_deref(),
+                reasoning_effort.as_deref(),
+                display_prompt.as_deref(),
+                started_at.as_deref(),
+                now,
+            )?;
+            conn.execute(
+                "DELETE FROM thread_pending_steers
+                 WHERE thread_id=?1 AND turn_id=?2 AND delivery='steer'",
+                params![thread_id, turn_id],
+            )?;
             Ok(())
         })?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -1278,7 +1785,9 @@ impl Supervisor {
         let next = self.db.with(|conn| {
             let row: Option<(String, String)> = conn
                 .query_row(
-                    "SELECT id, submitted_prompt FROM thread_pending_steers WHERE thread_id=?1 ORDER BY created_at ASC LIMIT 1",
+                    "SELECT id, submitted_prompt FROM thread_pending_steers
+                     WHERE thread_id=?1 AND delivery='continuation'
+                     ORDER BY created_at ASC LIMIT 1",
                     params![thread_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -1297,10 +1806,126 @@ impl Supervisor {
         Ok(())
     }
 
-    pub async fn interrupt(&self, thread_id: &str) -> Result<ThreadDetailDto> {
-        if let Some(live) = self.live.lock().await.get(thread_id) {
-            live.cancel.cancel();
+    fn find_pending_steer(
+        &self,
+        thread_id: &str,
+        pending_steer_id: &str,
+    ) -> Result<Option<PendingSteerRecord>> {
+        self.db.with(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT id, turn_id, submitted_prompt, delivery
+                     FROM thread_pending_steers WHERE thread_id=?1 AND id=?2",
+                    params![thread_id, pending_steer_id],
+                    |row| {
+                        Ok(PendingSteerRecord {
+                            id: row.get(0)?,
+                            turn_id: row.get(1)?,
+                            submitted_prompt: row.get(2)?,
+                            delivery: row.get(3)?,
+                        })
+                    },
+                )
+                .optional()?)
+        })
+    }
+
+    pub async fn cancel_pending_steer(
+        &self,
+        thread_id: &str,
+        pending_steer_id: &str,
+    ) -> Result<ThreadDetailDto> {
+        self.get_thread(thread_id)?;
+        let removed = self.db.with(|conn| {
+            Ok(conn.execute(
+                "DELETE FROM thread_pending_steers WHERE thread_id=?1 AND id=?2",
+                params![thread_id, pending_steer_id],
+            )?)
+        })?;
+        if removed == 0 {
+            bail!("Pending queued prompt was not found.");
         }
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({ "reason": "pending_steer_updated" }),
+        });
+        self.get_thread_detail(thread_id, None).await
+    }
+
+    pub async fn steer_pending_prompt(
+        &self,
+        thread_id: &str,
+        pending_steer_id: &str,
+    ) -> Result<ThreadDetailDto> {
+        let thread = self.get_thread(thread_id)?;
+        let pending = self
+            .find_pending_steer(thread_id, pending_steer_id)?
+            .ok_or_else(|| anyhow!("Pending queued prompt was not found."))?;
+        if pending.delivery != "continuation" {
+            bail!("conflict: This prompt has already been steered.");
+        }
+        let active_turn_id = thread
+            .active_turn_id
+            .as_deref()
+            .filter(|_| thread.status == "running")
+            .ok_or_else(|| {
+                anyhow!("conflict: The active turn finished before this prompt could be steered.")
+            })?;
+        let provider_session_id = thread
+            .provider_session_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        let runtime = self.runtime(thread.provider)?;
+        if !runtime
+            .negotiated_caps(thread.agent_id.as_deref())
+            .turns
+            .steer
+        {
+            bail!("conflict: This backend does not support steering an active turn.");
+        }
+        runtime
+            .send_input(
+                provider_session_id,
+                active_turn_id,
+                &pending.submitted_prompt,
+            )
+            .await?;
+
+        let now = now_rfc3339();
+        self.db.with(|conn| {
+            conn.execute(
+                "UPDATE thread_pending_steers
+                 SET delivery='steer', turn_id=?1, updated_at=?2
+                 WHERE thread_id=?3 AND id=?4",
+                params![active_turn_id, now, thread_id, pending.id],
+            )?;
+            Ok(())
+        })?;
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now,
+            payload: json!({
+                "reason": "pending_steer_updated",
+                "turnId": active_turn_id,
+                "previousTurnId": pending.turn_id
+            }),
+        });
+        self.get_thread_detail(thread_id, None).await
+    }
+
+    pub async fn interrupt(&self, thread_id: &str) -> Result<ThreadDetailDto> {
+        let had_live_turn = {
+            let live_turns = self.live.lock().await;
+            if let Some(live) = live_turns.get(thread_id) {
+                live.cancel.cancel();
+                true
+            } else {
+                false
+            }
+        };
         if let Ok(thread) = self.get_thread(thread_id) {
             if let Some(session) = thread.provider_session_id {
                 let _ = self
@@ -1309,11 +1934,26 @@ impl Supervisor {
                     .await;
             }
         }
+        if !had_live_turn {
+            let reconciled = self.reconcile_stale_turns(Some(thread_id), true)?;
+            if reconciled > 0 {
+                self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                    event_type: "thread.updated".into(),
+                    thread_id: thread_id.into(),
+                    timestamp: now_rfc3339(),
+                    payload: json!({ "status": "interrupted" }),
+                });
+            }
+            return self.get_thread_detail(thread_id, None).await;
+        }
         for _ in 0..100 {
             if self.active_turn_id(thread_id)?.is_none() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        if self.active_turn_id(thread_id)?.is_some() {
+            self.reconcile_stale_turns(Some(thread_id), true)?;
         }
         self.get_thread_detail(thread_id, None).await
     }
@@ -1363,8 +2003,16 @@ impl Supervisor {
             }
         });
         if let Some(session) = thread.provider_session_id.as_deref() {
-            let _ = self
-                .runtime(thread.provider)?
+            let runtime = self.runtime(thread.provider)?;
+            if fast == Some(true)
+                && !runtime
+                    .negotiated_caps(thread.agent_id.as_deref())
+                    .controls
+                    .performance_mode
+            {
+                bail!("This backend does not support Fast mode.");
+            }
+            runtime
                 .apply_session_settings(
                     session,
                     SessionSettings {
@@ -1373,9 +2021,10 @@ impl Supervisor {
                         sandbox_mode: sandbox.clone(),
                         collaboration_mode: collab.clone(),
                         approval_mode: approval.clone(),
+                        performance_mode: fast,
                     },
                 )
-                .await;
+                .await?;
         }
         self.db.with(|conn| {
             if let Some(model) = model {
@@ -1417,10 +2066,56 @@ impl Supervisor {
         self.get_thread(id)
     }
 
+    pub fn list_fork_turn_options(&self, id: &str) -> Result<Vec<ThreadForkTurnOptionDto>> {
+        self.get_thread(id)?;
+        Ok(self
+            .load_turns_meta(id)?
+            .into_iter()
+            .enumerate()
+            .map(|(index, turn)| ThreadForkTurnOptionDto {
+                turn_id: turn.id,
+                turn_index: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                started_at: turn.started_at,
+                status: turn.status,
+            })
+            .collect())
+    }
+
     pub async fn fork_thread(&self, id: &str) -> Result<ThreadDto> {
+        self.fork_thread_at(id, "latest", None)
+            .await
+            .map(|(thread, _, _)| thread)
+    }
+
+    pub async fn fork_thread_at(
+        &self,
+        id: &str,
+        mode: &str,
+        requested_turn_id: Option<&str>,
+    ) -> Result<(ThreadDto, Option<String>, Option<u32>)> {
+        if !matches!(mode, "latest" | "turn") {
+            bail!("mode must be latest or turn");
+        }
         let detail = self.get_thread_detail(id, None).await?;
         if detail.thread.status == "running" {
-            bail!("Cannot fork a thread while it is still running.");
+            bail!("conflict: Cannot fork a thread while it is still running.");
+        }
+        let turn_options = self.list_fork_turn_options(id)?;
+        let selected = if mode == "turn" {
+            let requested_turn_id = requested_turn_id
+                .filter(|turn_id| !turn_id.trim().is_empty())
+                .ok_or_else(|| anyhow!("turnId is required when mode is turn"))?;
+            turn_options
+                .iter()
+                .find(|turn| turn.turn_id == requested_turn_id)
+                .ok_or_else(|| anyhow!("The selected fork turn was not found."))?
+        } else if let Some(latest) = turn_options.last() {
+            latest
+        } else {
+            return self.fork_empty_thread(&detail).await;
+        };
+        if selected.turn_index < u32::try_from(turn_options.len()).unwrap_or(u32::MAX) {
+            bail!("conflict: This backend supports latest-session fork only.");
         }
         let runtime = self.runtime(detail.thread.provider)?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
@@ -1433,6 +2128,41 @@ impl Supervisor {
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let forked = runtime.fork_session(&session).await?;
+        self.persist_forked_thread(
+            &detail,
+            forked,
+            usize::try_from(selected.turn_index).unwrap_or(usize::MAX),
+            Some(selected.turn_id.clone()),
+            Some(selected.turn_index),
+        )
+    }
+
+    async fn fork_empty_thread(
+        &self,
+        detail: &ThreadDetailDto,
+    ) -> Result<(ThreadDto, Option<String>, Option<u32>)> {
+        let session = detail
+            .thread
+            .provider_session_id
+            .clone()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        let runtime = self.runtime(detail.thread.provider)?;
+        let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
+        if !caps.branching.fork {
+            bail!("this harness does not support session/fork");
+        }
+        let forked = runtime.fork_session(&session).await?;
+        self.persist_forked_thread(detail, forked, 0, None, None)
+    }
+
+    fn persist_forked_thread(
+        &self,
+        detail: &ThreadDetailDto,
+        forked: crate::actor::StartSessionResult,
+        turn_count: usize,
+        selected_turn_id: Option<String>,
+        selected_turn_index: Option<u32>,
+    ) -> Result<(ThreadDto, Option<String>, Option<u32>)> {
         let new_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         let title = format!("{} / fork", detail.thread.title);
@@ -1454,11 +2184,23 @@ impl Supervisor {
                     now
                 ],
             )?;
-            for (ordinal, turn) in detail.turns.iter().enumerate() {
+            for (ordinal, turn) in detail.turns.iter().take(turn_count).enumerate() {
                 let new_turn_id = Uuid::new_v4().to_string();
+                let display_prompt = turn
+                    .items
+                    .iter()
+                    .find(|item| item.kind == "userMessage")
+                    .map(|item| item.text.as_str());
+                let token_usage_json = turn
+                    .token_usage
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
                 conn.execute(
-                    "INSERT INTO thread_turns(id, thread_id, status, error, model, reasoning_effort, started_at, ordinal)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    "INSERT INTO thread_turns(
+                       id, thread_id, status, error, model, reasoning_effort,
+                       token_usage_json, display_prompt, started_at, ordinal
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                     params![
                         new_turn_id,
                         new_id,
@@ -1466,9 +2208,21 @@ impl Supervisor {
                         turn.error,
                         turn.model,
                         turn.reasoning_effort,
+                        token_usage_json,
+                        display_prompt,
                         turn.started_at,
                         ordinal as i64 + 1
                     ],
+                )?;
+                upsert_legacy_turn_metadata(
+                    conn,
+                    &new_id,
+                    &new_turn_id,
+                    turn.model.as_deref(),
+                    turn.reasoning_effort.as_deref(),
+                    display_prompt,
+                    turn.started_at.as_deref(),
+                    &now,
                 )?;
                 for item in &turn.items {
                     let mut copied = item.clone();
@@ -1489,10 +2243,14 @@ impl Supervisor {
             }
             Ok(())
         })?;
-        Ok(self.get_thread(&new_id)?)
+        Ok((
+            self.get_thread(&new_id)?,
+            selected_turn_id,
+            selected_turn_index,
+        ))
     }
 
-    pub async fn compact_thread(&self, id: &str) -> Result<ThreadDetailDto> {
+    pub async fn compact_thread(&self, id: &str) -> Result<ThreadDto> {
         let thread = self.get_thread(id)?;
         let session = thread
             .provider_session_id
@@ -1501,7 +2259,7 @@ impl Supervisor {
         self.runtime(thread.provider)?
             .compact_session(&session, id, self.bus.clone())
             .await?;
-        self.get_thread_detail(id, None).await
+        self.get_thread(id)
     }
 
     pub async fn resume_thread(&self, id: &str) -> Result<ThreadDetailDto> {
@@ -1522,6 +2280,7 @@ impl Supervisor {
                         sandbox_mode: thread.sandbox_mode.clone(),
                         collaboration_mode: Some(thread.collaboration_mode.clone()),
                         approval_mode: Some(thread.approval_mode.clone()),
+                        performance_mode: thread.fast_mode.then_some(true),
                     },
                 )
                 .await;
@@ -1571,6 +2330,7 @@ impl Supervisor {
         id: &str,
         objective: Option<String>,
         status: Option<String>,
+        token_budget: Option<Option<u64>>,
         clear: bool,
     ) -> Result<serde_json::Value> {
         let thread = self.get_thread(id)?;
@@ -1579,21 +2339,63 @@ impl Supervisor {
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let runtime = self.runtime(thread.provider)?;
-        let goal = if clear {
+        if clear {
             runtime
                 .set_goal(&session, None, Some("clear".into()))
+                .await?;
+            self.delete_stored_goal(id)?;
+            return Ok(json!({ "cleared": true, "goalHistory": [] }));
+        }
+        if objective
+            .as_deref()
+            .is_some_and(|objective| objective.trim().is_empty())
+        {
+            bail!("objective must not be empty");
+        }
+        if status.as_deref().is_some_and(|status| {
+            !matches!(
+                status,
+                "active" | "paused" | "budgetLimited" | "complete" | "terminated"
+            )
+        }) {
+            bail!("invalid goal status");
+        }
+        if token_budget == Some(Some(0)) {
+            bail!("tokenBudget must be positive");
+        }
+
+        let stored = self.stored_goal(id)?;
+        let updates_goal = objective.is_some() || status.is_some() || token_budget.is_some();
+        let runtime_goal = if objective.is_some() || status.is_some() {
+            runtime
+                .set_goal(&session, objective, status.clone())
                 .await?
-        } else if objective.is_some() || status.is_some() {
-            runtime.set_goal(&session, objective, status).await?
         } else {
             runtime.get_goal(&session).await?
         };
-        Ok(json!({ "goal": goal.map(|g| json!({
-            "objective": g.objective,
-            "status": g.status,
-            "tokensUsed": g.tokens_used,
-            "timeUsedSeconds": g.time_used_seconds
-        })) }))
+        let runtime_goal = runtime_goal.or_else(|| {
+            stored.as_ref().map(|goal| GoalState {
+                objective: goal.objective.clone(),
+                status: goal.status.clone(),
+                tokens_used: u32::try_from(goal.tokens_used).unwrap_or(u32::MAX),
+                time_used_seconds: u32::try_from(goal.time_used_seconds).unwrap_or(u32::MAX),
+            })
+        });
+        let goal = if let Some(runtime_goal) = runtime_goal {
+            if updates_goal {
+                Some(self.updated_goal_snapshot(
+                    id,
+                    runtime_goal,
+                    status.as_deref(),
+                    token_budget,
+                )?)
+            } else {
+                self.goal_snapshot(id, Some(runtime_goal))?
+            }
+        } else {
+            None
+        };
+        Ok(json!({ "goal": goal }))
     }
 
     pub async fn respond_request(
@@ -1602,7 +2404,7 @@ impl Supervisor {
         request_id: &str,
         allow: bool,
         answer: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(id)?;
         self.runtime(thread.provider)?
             .respond_permission(request_id, allow, answer)
@@ -1613,7 +2415,7 @@ impl Supervisor {
             timestamp: now_rfc3339(),
             payload: json!({ "requestId": request_id }),
         });
-        Ok(())
+        self.get_thread_detail(id, None).await
     }
 
     pub fn active_turn_count(&self) -> u32 {
@@ -1740,7 +2542,7 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
         reasoning_effort: row.get(8).unwrap_or(None),
         fast_mode: row.get::<_, i64>(9).unwrap_or(0) != 0,
         collaboration_mode: row.get(10).unwrap_or_else(|_| "default".into()),
-        approval_mode: row.get(11).unwrap_or_else(|_| "yolo".into()),
+        approval_mode: row.get(11).unwrap_or_else(|_| "guarded".into()),
         sandbox_mode: row.get(12).unwrap_or(None),
         status: row
             .get::<_, Option<String>>(13)

@@ -1,6 +1,8 @@
+mod auth;
 mod export;
 mod http;
 mod shells;
+mod socket;
 mod tunnel;
 
 use std::net::SocketAddr;
@@ -14,6 +16,7 @@ pub use http::router;
 pub use tunnel::run_relay_tunnel;
 
 pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
+    auth::validate_config(&state.config)?;
     state.spawn_live_item_persister();
     let addr: SocketAddr = format!("{}:{}", state.config.host, state.config.port).parse()?;
     let listener = TcpListener::bind(addr).await?;

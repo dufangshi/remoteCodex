@@ -1,0 +1,232 @@
+name: Native npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Package only, publish to next, or promote a stable release
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - next
+          - latest
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: native-npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_VERSION: 1.89.0
+  THREAD_UI_COMMIT: 4b426dbfe6eb8b2e0c801b6a515911172791c0f1
+
+jobs:
+  verify:
+    name: Release test gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+      - name: Test workspace and migrations
+        run: cargo +${{ env.RUST_VERSION }} test --workspace --locked
+
+  native:
+    name: Native ${{ matrix.key }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: darwin-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            cargo_target: aarch64-apple-darwin
+            binary: remote-codex
+            runnable: true
+            linux: false
+          - key: darwin-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            cargo_target: x86_64-apple-darwin
+            binary: remote-codex
+            runnable: true
+            linux: false
+          - key: linux-arm64-gnu
+            runner: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu.2.28
+            cargo_target: aarch64-unknown-linux-gnu
+            binary: remote-codex
+            runnable: false
+            linux: true
+          - key: linux-arm64-musl
+            runner: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
+            cargo_target: aarch64-unknown-linux-musl
+            binary: remote-codex
+            runnable: false
+            linux: true
+          - key: linux-x64-gnu
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu.2.28
+            cargo_target: x86_64-unknown-linux-gnu
+            binary: remote-codex
+            runnable: true
+            linux: true
+          - key: linux-x64-musl
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            cargo_target: x86_64-unknown-linux-musl
+            binary: remote-codex
+            runnable: true
+            linux: true
+          - key: win32-x64-msvc
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            cargo_target: x86_64-pc-windows-msvc
+            binary: remote-codex.exe
+            runnable: true
+            linux: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "${RUST_VERSION}" --profile minimal --target '${{ matrix.cargo_target }}'
+
+      - name: Install Linux Zig linker
+        if: matrix.linux
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install cargo-zigbuild
+        if: matrix.linux
+        shell: bash
+        run: python -m pip install 'cargo-zigbuild==0.23.4'
+
+      - name: Build native executable
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+        run: |
+          set -euo pipefail
+          if [ '${{ matrix.linux }}' = 'true' ]; then
+            cargo +"${RUST_VERSION}" zigbuild --locked --release --package remote-codex --target '${{ matrix.target }}'
+          else
+            cargo +"${RUST_VERSION}" build --locked --release --package remote-codex --target '${{ matrix.target }}'
+          fi
+
+      - name: Smoke native executable
+        if: matrix.runnable
+        shell: bash
+        run: target/'${{ matrix.cargo_target }}'/release/'${{ matrix.binary }}' version
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p 'artifacts/${{ matrix.key }}'
+          cp 'target/${{ matrix.cargo_target }}/release/${{ matrix.binary }}' 'artifacts/${{ matrix.key }}/${{ matrix.binary }}'
+          if [ '${{ runner.os }}' != 'Windows' ]; then
+            chmod 0755 'artifacts/${{ matrix.key }}/${{ matrix.binary }}'
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.key }}
+          path: artifacts/${{ matrix.key }}/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Assemble and verify npm packages
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Check out pinned thread UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/dufangshi/remote-codex-thread-ui.git ../remote-codex-thread-ui
+          git -C ../remote-codex-thread-ui checkout --detach "${THREAD_UI_COMMIT}"
+
+      - name: Build Web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
+          pnpm --dir ../remote-codex-thread-ui --filter @remote-codex/thread-ui build
+          pnpm install --frozen-lockfile
+          pnpm --filter @remote-codex/supervisor-web build
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/native
+
+      - name: Prepare and pack release
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/prepare-npm-release.mjs --artifacts-dir artifacts/native --require-all
+          node scripts/verify-npm-package.mjs --prepared
+          node scripts/pack-npm-release.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-codex-npm-${{ github.sha }}
+          path: dist/npm/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: inputs.channel != 'dry-run'
+    name: Publish npm ${{ inputs.channel }}
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: npm-release
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@11.19.1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: remote-codex-npm-${{ github.sha }}
+          path: dist/npm
+
+      - name: Publish native packages before launcher
+        env:
+          REMOTE_CODEX_ALLOW_LATEST: ${{ inputs.channel == 'latest' && '1' || '0' }}
+        run: node scripts/publish-npm-release.mjs '${{ inputs.channel }}'

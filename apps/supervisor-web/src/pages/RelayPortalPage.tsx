@@ -33,7 +33,11 @@ function errorMessage(caught: unknown, fallback: string) {
 }
 
 function safeReturnTo(value: unknown) {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) {
+  if (
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value.startsWith('//')
+  ) {
     return null;
   }
 
@@ -154,7 +158,11 @@ export function RelayPortalPage() {
   if (loading) {
     return (
       <RelayFrame>
-        <div aria-live="polite" className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]" role="status">
+        <div
+          aria-live="polite"
+          className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]"
+          role="status"
+        >
           Checking relay session...
         </div>
       </RelayFrame>
@@ -184,7 +192,11 @@ export function RelayPortalPage() {
 
   return (
     <RelayFrame>
-      <div aria-live="polite" className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]" role="status">
+      <div
+        aria-live="polite"
+        className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]"
+        role="status"
+      >
         Opening your relay workspace...
       </div>
     </RelayFrame>
@@ -220,7 +232,9 @@ function RelayAuthPanel({
   const [error, setError] = useState(initialError ?? oauthError);
   const [notice, setNotice] = useState<string | null>(oauthNotice);
   const [submitting, setSubmitting] = useState(false);
-  const registrationPasswordRequired = Boolean(settings?.registrationPassword);
+  const registrationPasswordRequired =
+    settings?.registrationPasswordConfigured ??
+    Boolean(settings?.registrationPassword);
 
   useEffect(() => {
     setError(initialError ?? oauthError);
@@ -254,7 +268,9 @@ function RelayAuthPanel({
             : 'login';
     selectMode(nextMode);
     window.requestAnimationFrame(() => {
-      document.getElementById(nextMode === 'login' ? loginTabId : registerTabId)?.focus();
+      document
+        .getElementById(nextMode === 'login' ? loginTabId : registerTabId)
+        ?.focus();
     });
   }
 
@@ -283,7 +299,9 @@ function RelayAuthPanel({
           ...(code ? { registrationPassword: code } : {}),
         });
         if (result.pendingApproval) {
-          setNotice('Registration request sent. An admin must approve it before you can sign in.');
+          setNotice(
+            'Registration request sent. An admin must approve it before you can sign in.',
+          );
           setMode('login');
           return;
         }
@@ -298,7 +316,9 @@ function RelayAuthPanel({
 
   return (
     <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
-      <p className="text-sm font-medium text-[var(--theme-accent-strong)]">Relay access</p>
+      <p className="text-sm font-medium text-[var(--theme-accent-strong)]">
+        Relay access
+      </p>
       <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
         {mode === 'login' ? 'Welcome back' : 'Create your account'}
       </h1>
@@ -352,15 +372,21 @@ function RelayAuthPanel({
         </button>
       </div>
 
-      {(settings?.googleAuthEnabled || settings?.githubAuthEnabled) ? (
+      {settings?.googleAuthEnabled || settings?.githubAuthEnabled ? (
         <div className="mt-5 grid gap-2">
           {settings.googleAuthEnabled ? (
-            <a className="relay-button-secondary flex h-11 items-center justify-center" href="/relay/auth/oauth/google/start">
+            <a
+              className="relay-button-secondary flex h-11 items-center justify-center"
+              href="/relay/auth/oauth/google/start"
+            >
               Continue with Google
             </a>
           ) : null}
           {settings.githubAuthEnabled ? (
-            <a className="relay-button-secondary flex h-11 items-center justify-center" href="/relay/auth/oauth/github/start">
+            <a
+              className="relay-button-secondary flex h-11 items-center justify-center"
+              href="/relay/auth/oauth/github/start"
+            >
               Continue with GitHub
             </a>
           ) : null}
@@ -391,13 +417,39 @@ function RelayAuthPanel({
           />
         ) : (
           <>
-            <RelayInput autoComplete="email" disabled={submitting} label="Email" name="email" onChange={setEmail} required type="email" value={email} />
-            <RelayInput autoComplete="username" disabled={submitting} label="Username" minLength={3} name="username" onChange={setUsername} required value={username} />
+            <RelayInput
+              autoComplete="email"
+              disabled={submitting}
+              label="Email"
+              name="email"
+              onChange={setEmail}
+              required
+              type="email"
+              value={email}
+            />
+            <RelayInput
+              autoComplete="username"
+              disabled={submitting}
+              label="Username"
+              minLength={3}
+              name="username"
+              onChange={setUsername}
+              required
+              value={username}
+            />
             <RelayInput
               autoComplete="one-time-code"
               disabled={submitting}
-              description={registrationPasswordRequired ? 'Required by this relay.' : 'Enter the invite code if this relay requires one.'}
-              label={registrationPasswordRequired ? 'Registration code' : 'Registration code (if required)'}
+              description={
+                registrationPasswordRequired
+                  ? 'Required by this relay.'
+                  : 'Enter the invite code if this relay requires one.'
+              }
+              label={
+                registrationPasswordRequired
+                  ? 'Registration code'
+                  : 'Registration code (if required)'
+              }
               name="registrationCode"
               onChange={setRegistrationPassword}
               required={registrationPasswordRequired}
@@ -436,8 +488,16 @@ function RelayAuthPanel({
         ) : null}
         {notice ? <RelayNotice tone="accent">{notice}</RelayNotice> : null}
 
-        <button className="relay-button-primary h-11 w-full" disabled={submitting} type="submit">
-          {submitting ? 'Working...' : mode === 'login' ? 'Sign in' : 'Create account'}
+        <button
+          className="relay-button-primary h-11 w-full"
+          disabled={submitting}
+          type="submit"
+        >
+          {submitting
+            ? 'Working...'
+            : mode === 'login'
+              ? 'Sign in'
+              : 'Create account'}
         </button>
       </form>
     </section>
@@ -448,19 +508,27 @@ function RelayFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-5 text-[var(--app-fg)] sm:px-6 sm:py-6">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 border-b border-[var(--theme-border)] pb-4">
-        <Link className="flex min-h-11 min-w-0 items-center gap-2 text-sm font-semibold text-[var(--theme-fg)]" to="/">
+        <Link
+          className="flex min-h-11 min-w-0 items-center gap-2 text-sm font-semibold text-[var(--theme-fg)]"
+          to="/"
+        >
           <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-accent-soft)] text-xs text-[var(--theme-accent-strong)]">
             RC
           </span>
           <span className="truncate">Relay home</span>
         </Link>
-        <Link className="relay-button-secondary inline-flex h-11 shrink-0 items-center gap-2" to="/relay-guide">
+        <Link
+          className="relay-button-secondary inline-flex h-11 shrink-0 items-center gap-2"
+          to="/relay-guide"
+        >
           <BookOpen aria-hidden="true" className="h-4 w-4" />
           Guide
         </Link>
       </header>
-      <div className="mx-auto flex w-full max-w-5xl justify-center py-8 sm:py-12">{children}</div>
+      <div className="mx-auto flex w-full max-w-5xl justify-center py-8 sm:py-12">
+        {children}
+      </div>
     </main>
   );
 }
@@ -496,33 +564,44 @@ function RelayInput({
     <div className="text-sm text-[var(--theme-fg-soft)]">
       <label htmlFor={inputId}>{label}</label>
       <div className="relative mt-2">
-      <input
-        aria-describedby={description ? descriptionId : undefined}
-        autoComplete={autoComplete}
-        className={`relay-input min-h-11 w-full ${passwordField ? 'pr-12' : ''}`}
-        disabled={disabled}
-        id={inputId}
-        minLength={minLength}
-        name={name}
-        onChange={(event) => onChange(event.target.value)}
-        required={required}
-        type={passwordField && passwordVisible ? 'text' : type}
-        value={value}
-      />
+        <input
+          aria-describedby={description ? descriptionId : undefined}
+          autoComplete={autoComplete}
+          className={`relay-input min-h-11 w-full ${passwordField ? 'pr-12' : ''}`}
+          disabled={disabled}
+          id={inputId}
+          minLength={minLength}
+          name={name}
+          onChange={(event) => onChange(event.target.value)}
+          required={required}
+          type={passwordField && passwordVisible ? 'text' : type}
+          value={value}
+        />
         {passwordField ? (
           <button
-            aria-label={passwordVisible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+            aria-label={
+              passwordVisible
+                ? `Hide ${label.toLowerCase()}`
+                : `Show ${label.toLowerCase()}`
+            }
             className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)]"
             disabled={disabled}
             onClick={() => setPasswordVisible((visible) => !visible)}
             type="button"
           >
-            {passwordVisible ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
+            {passwordVisible ? (
+              <EyeOff aria-hidden="true" className="h-4 w-4" />
+            ) : (
+              <Eye aria-hidden="true" className="h-4 w-4" />
+            )}
           </button>
         ) : null}
       </div>
       {description ? (
-        <span className="mt-1.5 block text-xs text-[var(--theme-fg-muted)]" id={descriptionId}>
+        <span
+          className="mt-1.5 block text-xs text-[var(--theme-fg-muted)]"
+          id={descriptionId}
+        >
           {description}
         </span>
       ) : null}

@@ -294,6 +294,27 @@ fn prompt_input(prompt: &str) -> SendThreadPromptInput {
     }
 }
 
+fn insert_stale_turn(supervisor: &Supervisor, thread_id: &str, turn_id: &str) {
+    let now = remote_codex_protocol::now_rfc3339();
+    supervisor
+        .db
+        .with(|conn| {
+            conn.execute(
+                "INSERT INTO thread_turns(
+                   id, thread_id, status, error, model, reasoning_effort,
+                   started_at, completed_at, ordinal
+                 ) VALUES (?1,?2,'inProgress',NULL,NULL,NULL,?3,NULL,1)",
+                (turn_id, thread_id, &now),
+            )?;
+            conn.execute(
+                "UPDATE threads SET status='running', updated_at=?1 WHERE id=?2",
+                (&now, thread_id),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+}
+
 async fn seeded_thread(
     provider: Provider,
 ) -> (
@@ -385,6 +406,51 @@ async fn long_turn_can_be_interrupted() {
     let detail = supervisor.interrupt(&thread.id).await.unwrap();
     assert_ne!(detail.thread.status, "running");
     let _ = run.await;
+}
+
+#[tokio::test]
+async fn restart_reconciles_stale_turn_and_allows_another_prompt() {
+    let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    let config = supervisor.config.clone();
+    insert_stale_turn(&supervisor, &thread.id, "stale-before-restart");
+    drop(supervisor);
+
+    let db = Database::open(&config.database_url).unwrap();
+    let runtime: SharedRuntime = Arc::new(FakeRuntime::new(Provider::Codex));
+    let restarted = Supervisor::new(config, db, vec![runtime]);
+    let recovered = restarted.get_thread(&thread.id).unwrap();
+    assert_eq!(recovered.status, "interrupted");
+    assert_eq!(recovered.active_turn_id, None);
+    let recovered_detail = restarted.get_thread_detail(&thread.id, None).await.unwrap();
+    assert_eq!(recovered_detail.turns[0].status, "interrupted");
+    assert!(recovered_detail.turns[0]
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("supervisor restarted"));
+
+    restarted
+        .prompt(&thread.id, prompt_input("hello after restart"))
+        .await
+        .unwrap();
+    let completed = restarted.get_thread_detail(&thread.id, None).await.unwrap();
+    assert_eq!(completed.thread.status, "idle");
+    assert_eq!(completed.turns.len(), 2);
+    assert_eq!(completed.turns[1].status, "completed");
+}
+
+#[tokio::test]
+async fn interrupt_immediately_reconciles_a_turn_without_a_live_task() {
+    let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    insert_stale_turn(&supervisor, &thread.id, "stale-before-interrupt");
+
+    let started = std::time::Instant::now();
+    let detail = supervisor.interrupt(&thread.id).await.unwrap();
+
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    assert_eq!(detail.thread.status, "interrupted");
+    assert_eq!(detail.thread.active_turn_id, None);
+    assert_eq!(detail.turns[0].status, "interrupted");
 }
 
 #[tokio::test]

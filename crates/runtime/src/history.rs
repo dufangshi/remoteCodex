@@ -47,6 +47,7 @@ mod tests {
             sequence: None,
             source_turn_id: None,
             artifact: None,
+            extra: Default::default(),
         }
     }
 

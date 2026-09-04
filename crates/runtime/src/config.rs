@@ -32,15 +32,28 @@ impl RuntimeConfig {
             "relay" => Mode::Relay,
             _ => Mode::Local,
         };
-        let port = env::var("PORT")
+        let port_names = if mode == Mode::Relay {
+            &["REMOTE_CODEX_RELAY_SUPERVISOR_PORT", "PORT"][..]
+        } else {
+            &["PORT"][..]
+        };
+        let port = first_env(port_names)
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(8787);
-        let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-        let workspace_root =
-            PathBuf::from(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| default_workspace_root()));
-        let database_url =
-            PathBuf::from(env::var("DATABASE_URL").unwrap_or_else(|_| default_database_path()));
+        let host_names = if mode == Mode::Relay {
+            &["REMOTE_CODEX_RELAY_SUPERVISOR_HOST", "HOST"][..]
+        } else {
+            &["HOST"][..]
+        };
+        let host = first_env(host_names).unwrap_or_else(|_| "127.0.0.1".into());
+        let environment = env::var("NODE_ENV").unwrap_or_else(|_| "development".into());
+        let workspace_root = PathBuf::from(
+            nonempty_env("WORKSPACE_ROOT").unwrap_or_else(|| default_workspace_root()),
+        );
+        let database_url = PathBuf::from(
+            nonempty_env("DATABASE_URL").unwrap_or_else(|| default_database_path(&environment)),
+        );
         let enabled_providers = parse_providers(
             env::var("REMOTE_CODEX_ENABLED_AGENT_PROVIDERS")
                 .ok()
@@ -55,7 +68,7 @@ impl RuntimeConfig {
             database_url,
             app_name: env::var("APP_NAME").unwrap_or_else(|_| "Remote Codex".into()),
             app_version: remote_codex_protocol::APP_VERSION.to_string(),
-            environment: env::var("NODE_ENV").unwrap_or_else(|_| "development".into()),
+            environment,
             auth_required: mode != Mode::Local,
             admin_username: env::var("REMOTE_CODEX_ADMIN_USERNAME").ok(),
             admin_password: env::var("REMOTE_CODEX_ADMIN_PASSWORD").ok(),
@@ -69,7 +82,7 @@ impl RuntimeConfig {
             acp_startup_timeout_ms: env::var("ACP_STARTUP_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(20_000),
+                .unwrap_or(10_000),
             fake_runtime,
         }
     }
@@ -80,6 +93,20 @@ fn env_flag(name: &str) -> bool {
         env::var(name).unwrap_or_default().to_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn first_env(names: &[&str]) -> Result<String, env::VarError> {
+    names
+        .iter()
+        .find_map(|name| nonempty_env(name))
+        .ok_or(env::VarError::NotPresent)
 }
 
 fn parse_providers(raw: Option<&str>) -> Vec<Provider> {
@@ -95,6 +122,9 @@ fn parse_providers(raw: Option<&str>) -> Vec<Provider> {
             })
             .collect();
     }
+    if cfg!(windows) {
+        return vec![Provider::Codex, Provider::Acp];
+    }
     vec![
         Provider::Codex,
         Provider::Claude,
@@ -104,19 +134,79 @@ fn parse_providers(raw: Option<&str>) -> Vec<Provider> {
 }
 
 fn default_workspace_root() -> String {
-    dirs_fallback().join("workspaces").to_string_lossy().into()
+    home_dir().to_string_lossy().into()
 }
 
-fn default_database_path() -> String {
-    dirs_fallback()
-        .join("supervisor.sqlite")
+fn default_database_path(environment: &str) -> String {
+    if environment == "production" {
+        return home_dir()
+            .join(".remote-codex")
+            .join("supervisor.sqlite")
+            .to_string_lossy()
+            .into();
+    }
+    PathBuf::from(".local")
+        .join("supervisor-dev.sqlite")
         .to_string_lossy()
         .into()
 }
 
-fn dirs_fallback() -> PathBuf {
-    env::var("HOME")
+pub(crate) fn home_dir() -> PathBuf {
+    select_home_dir(
+        nonempty_env("HOME"),
+        nonempty_env("USERPROFILE"),
+        nonempty_env("HOMEDRIVE"),
+        nonempty_env("HOMEPATH"),
+    )
+}
+
+fn select_home_dir(
+    home: Option<String>,
+    user_profile: Option<String>,
+    home_drive: Option<String>,
+    home_path: Option<String>,
+) -> PathBuf {
+    home.or(user_profile)
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".remote-codex")
+        .or_else(|| {
+            let drive = home_drive?;
+            let path = home_path?;
+            Some(PathBuf::from(format!("{drive}{path}")))
+        })
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_defaults_keep_node_layout() {
+        assert_eq!(
+            default_database_path("development"),
+            PathBuf::from(".local")
+                .join("supervisor-dev.sqlite")
+                .to_string_lossy()
+                .into_owned()
+        );
+        assert!(PathBuf::from(default_database_path("production"))
+            .ends_with(PathBuf::from(".remote-codex").join("supervisor.sqlite")));
+    }
+
+    #[test]
+    fn home_directory_supports_windows_environment_layouts() {
+        assert_eq!(
+            select_home_dir(None, Some(r"C:\Users\remote".into()), None, None),
+            PathBuf::from(r"C:\Users\remote")
+        );
+        assert_eq!(
+            select_home_dir(
+                None,
+                None,
+                Some("D:".into()),
+                Some(r"\Profiles\remote".into())
+            ),
+            PathBuf::from(r"D:\Profiles\remote")
+        );
+    }
 }

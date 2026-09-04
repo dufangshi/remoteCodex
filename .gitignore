@@ -5,6 +5,12 @@ remote-codex-thread-ui
 .DS_Store
 .local
 target/
+npm/*/bin/remote-codex
+npm/*/bin/remote-codex.exe
+npm/*/LICENSE
+npm/*/README.md
+!npm/remote-codex/README.md
+npm/remote-codex/web/
 .worktrees/
 .env
 .env.local

@@ -33,6 +33,18 @@ pub trait HarnessAdapter: Send + Sync {
     fn initialize_client_meta(&self) -> Value {
         json!({})
     }
+    fn prompt_preamble(&self) -> Option<&'static str> {
+        None
+    }
+    fn model_list_method(&self) -> Option<&'static str> {
+        None
+    }
+    fn project_model_list(&self, _response: &Value) -> Option<Vec<ModelOptionDto>> {
+        None
+    }
+    fn model_list_supports_performance(&self, _response: &Value) -> bool {
+        false
+    }
     fn fs_read_text_file(&self) -> bool {
         true
     }
@@ -140,6 +152,59 @@ impl HarnessAdapter for ClaudeAdapter {
     }
 }
 
+pub struct CursorAdapter;
+
+impl HarnessAdapter for CursorAdapter {
+    fn id(&self) -> &'static str {
+        "cursor"
+    }
+    fn initialize_client_meta(&self) -> Value {
+        json!({ "parameterizedModelPicker": true })
+    }
+    fn prompt_preamble(&self) -> Option<&'static str> {
+        Some(
+            "Cursor ACP client constraint: do not launch background subagents. If you delegate \
+             work, wait for every subagent result in the current turn and deliver the complete \
+             requested answer before ending the turn.",
+        )
+    }
+    fn model_list_method(&self) -> Option<&'static str> {
+        Some("cursor/list_available_models")
+    }
+    fn project_model_list(&self, response: &Value) -> Option<Vec<ModelOptionDto>> {
+        let models = response.get("models")?.as_array()?;
+        let projected: Vec<_> = models
+            .iter()
+            .enumerate()
+            .filter_map(|(index, model)| cursor_model(model, index))
+            .collect();
+        (!projected.is_empty()).then_some(projected)
+    }
+    fn model_list_supports_performance(&self, response: &Value) -> bool {
+        response
+            .get("models")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|model| {
+                model
+                    .get("configOptions")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .any(is_fast_option)
+    }
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
+        apply_negotiated(caps, negotiated);
+        caps.management.models = true;
+    }
+}
+
 pub struct GrokAdapter;
 
 impl HarnessAdapter for GrokAdapter {
@@ -193,10 +258,87 @@ pub fn adapter_for(agent_id: &str) -> Box<dyn HarnessAdapter> {
     match agent_id {
         "codex" => Box::new(CodexAdapter),
         "claude" => Box::new(ClaudeAdapter),
+        "cursor" => Box::new(CursorAdapter),
         "grok" => Box::new(GrokAdapter),
         "deepseek" => Box::new(DeepSeekAdapter),
         _ => Box::new(StandardAdapter),
     }
+}
+
+fn cursor_model(model: &Value, index: usize) -> Option<ModelOptionDto> {
+    let value = model.get("value").and_then(Value::as_str)?;
+    let config_options = model
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let reasoning = config_options.iter().find(|option| {
+        option.get("category").and_then(Value::as_str) == Some("thought_level")
+            && !select_options(option).is_empty()
+    });
+    let efforts: Vec<_> = reasoning
+        .into_iter()
+        .flat_map(select_options)
+        .filter_map(|entry| {
+            let raw = entry.get("value").and_then(Value::as_str)?;
+            Some(remote_codex_protocol::ReasoningEffortOptionDto {
+                reasoning_effort: grok::normalize_acp_effort(Some(raw))?,
+                description: entry
+                    .get("description")
+                    .or_else(|| entry.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+        .collect();
+    let default_reasoning_effort = reasoning
+        .and_then(|option| option.get("currentValue"))
+        .and_then(Value::as_str)
+        .and_then(|value| grok::normalize_acp_effort(Some(value)));
+    Some(ModelOptionDto {
+        id: value.to_string(),
+        model: value.to_string(),
+        display_name: model
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(value)
+            .to_string(),
+        description: model
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        is_default: index == 0,
+        hidden: false,
+        supported_reasoning_efforts: efforts,
+        default_reasoning_effort,
+        selection_kind: Some("model".into()),
+        acp_agent: None,
+    })
+}
+
+fn select_options(option: &Value) -> Vec<&Value> {
+    option
+        .get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            if entry.get("options").is_some() {
+                select_options(entry)
+            } else {
+                vec![entry]
+            }
+        })
+        .collect()
+}
+
+fn is_fast_option(option: &Value) -> bool {
+    matches!(
+        option.get("id").and_then(Value::as_str),
+        Some("fast" | "fast-mode")
+    )
 }
 
 fn apply_negotiated(caps: &mut AgentProviderCapabilitiesDto, negotiated: &NegotiatedCaps) {
@@ -365,5 +507,54 @@ mod tests {
             .expect("grok projection");
         assert_eq!(projected.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(projected.models[0].supported_reasoning_efforts.len(), 2);
+    }
+
+    #[test]
+    fn cursor_opts_into_and_projects_the_parameterized_model_picker() {
+        let adapter = CursorAdapter;
+        assert_eq!(
+            adapter.initialize_client_meta(),
+            json!({ "parameterizedModelPicker": true })
+        );
+        let response = json!({
+            "models": [
+                {
+                    "value": "cursor-fast",
+                    "name": "Cursor Fast",
+                    "configOptions": [
+                        {
+                            "id": "thought-level",
+                            "category": "thought_level",
+                            "type": "select",
+                            "currentValue": "high",
+                            "options": [
+                                { "value": "low", "name": "Low" },
+                                { "value": "high", "name": "High" }
+                            ]
+                        },
+                        { "id": "fast-mode", "type": "boolean", "currentValue": false }
+                    ]
+                },
+                { "value": "cursor-accurate", "name": "Cursor Accurate" }
+            ]
+        });
+        let models = adapter.project_model_list(&response).unwrap();
+        assert_eq!(models.len(), 2);
+        assert!(models[0].is_default);
+        assert_eq!(models[0].model, "cursor-fast");
+        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            models[0]
+                .supported_reasoning_efforts
+                .iter()
+                .map(|effort| effort.reasoning_effort.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low", "high"]
+        );
+        assert!(adapter.model_list_supports_performance(&response));
+        assert!(adapter
+            .prompt_preamble()
+            .unwrap()
+            .contains("background subagents"));
     }
 }

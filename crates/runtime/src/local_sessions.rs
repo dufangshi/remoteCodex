@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,9 +20,7 @@ pub struct LocalSessionHomes {
 
 impl LocalSessionHomes {
     pub fn from_env() -> Self {
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
+        let home = crate::config::home_dir();
         Self {
             codex_home: env_dir("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
             grok_home: env_dir("GROK_HOME").unwrap_or_else(|| home.join(".grok")),
@@ -161,16 +160,101 @@ fn query_codex_threads(
 }
 
 fn load_codex_history(home: &Path, session_id: &str, cwd: Option<&str>) -> Vec<ThreadTurnDto> {
-    if let Some(turns) = load_codex_paginated_history(home, session_id) {
-        if !turns.is_empty() {
-            return turns;
-        }
-    }
-    find_codex_rollout(home, session_id)
+    let paginated = load_codex_paginated_history(home, session_id).unwrap_or_default();
+    let rollout = find_codex_rollout(home, session_id)
         .and_then(|path| parse_codex_rollout(&path))
         .filter(|session| cwd.map(|value| session.cwd == value).unwrap_or(true))
         .map(|session| session.turns)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    merge_codex_turns(paginated, rollout)
+}
+
+fn merge_codex_turns(
+    paginated: Vec<ThreadTurnDto>,
+    rollout: Vec<ThreadTurnDto>,
+) -> Vec<ThreadTurnDto> {
+    if paginated.is_empty() {
+        return rollout;
+    }
+    let rollout_order: Vec<_> = rollout.iter().map(|turn| turn.id.clone()).collect();
+    let mut rollout_by_id: HashMap<_, _> = rollout
+        .into_iter()
+        .map(|turn| (turn.id.clone(), turn))
+        .collect();
+    let mut merged = Vec::new();
+    for mut turn in paginated {
+        if let Some(transcript) = rollout_by_id.remove(&turn.id) {
+            let item_ids: HashSet<_> = turn.items.iter().map(|item| item.id.clone()).collect();
+            turn.items.extend(
+                transcript
+                    .items
+                    .into_iter()
+                    .filter(|item| !item_ids.contains(&item.id)),
+            );
+            turn.items = stable_sort_history_items(turn.items);
+            turn.started_at = turn.started_at.or(transcript.started_at);
+            turn.status = transcript.status;
+            turn.error = transcript.error.or(turn.error);
+        }
+        merged.push(turn);
+    }
+    for turn_id in rollout_order {
+        if let Some(turn) = rollout_by_id.remove(&turn_id) {
+            merged.push(turn);
+        }
+    }
+    let mut indexed: Vec<_> = merged.into_iter().enumerate().collect();
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        timestamp_sort_key(left.started_at.as_deref())
+            .cmp(&timestamp_sort_key(right.started_at.as_deref()))
+            .then_with(|| left_index.cmp(right_index))
+    });
+    indexed.into_iter().map(|(_, turn)| turn).collect()
+}
+
+fn stable_sort_history_items(items: Vec<ThreadHistoryItemDto>) -> Vec<ThreadHistoryItemDto> {
+    let mut indexed: Vec<_> = items.into_iter().enumerate().collect();
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        match (
+            timestamp_sort_key(left.created_at.as_deref()),
+            timestamp_sort_key(right.created_at.as_deref()),
+        ) {
+            (Some(left), Some(right)) => left.cmp(&right).then_with(|| left_index.cmp(right_index)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left_index.cmp(right_index),
+        }
+    });
+    indexed
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, (_, mut item))| {
+            item.sequence = Some(sequence as i64);
+            item
+        })
+        .collect()
+}
+
+fn timestamp_sort_key(value: Option<&str>) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value?)
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis())
+}
+
+fn parse_codex_turn_error(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(value)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| Some(value.to_string()))
 }
 
 fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<ThreadTurnDto>> {
@@ -178,17 +262,18 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
     let conn = open_readonly(&path).ok()?;
     let mut stmt = conn
         .prepare(
-            "SELECT turn_id, status, started_at FROM thread_turns
+            "SELECT turn_id, status, error_json, started_at FROM thread_turns
              WHERE thread_id = ?1 ORDER BY rollout_ordinal ASC",
         )
         .ok()?;
-    let turns: Vec<(String, String, Option<i64>)> = stmt
+    let turns: Vec<(String, String, Option<String>, Option<i64>)> = stmt
         .query_map(params![session_id], |row| {
             Ok((
                 row.get(0)?,
                 row.get::<_, String>(1)
                     .unwrap_or_else(|_| "completed".into()),
                 row.get(2).ok(),
+                row.get(3).ok(),
             ))
         })
         .ok()?
@@ -199,18 +284,26 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
     }
     let mut item_stmt = conn
         .prepare(
-            "SELECT turn_id, item_json FROM thread_items
+            "SELECT turn_id, rollout_ordinal, created_at_ms, item_type, item_json
+             FROM thread_items
              WHERE thread_id = ?1 ORDER BY rollout_ordinal ASC",
         )
         .ok()?;
-    let mut items_by_turn: std::collections::HashMap<String, Vec<ThreadHistoryItemDto>> =
-        std::collections::HashMap::new();
+    let mut items_by_turn: HashMap<String, Vec<ThreadHistoryItemDto>> = HashMap::new();
     if let Ok(rows) = item_stmt.query_map(params![session_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
     }) {
         for row in rows.flatten() {
-            if let Ok(value) = serde_json::from_str::<Value>(&row.1) {
-                if let Some(item) = history_item_from_codex_json(&row.0, &value) {
+            if let Ok(value) = serde_json::from_str::<Value>(&row.4) {
+                if let Some(item) =
+                    history_item_from_codex_json(&row.0, &value, &row.3, row.2, Some(row.1))
+                {
                     items_by_turn.entry(row.0).or_default().push(item);
                 }
             }
@@ -219,11 +312,11 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
     Some(
         turns
             .into_iter()
-            .map(|(id, status, started)| ThreadTurnDto {
+            .map(|(id, status, error, started)| ThreadTurnDto {
                 id: id.clone(),
                 started_at: int_to_rfc3339(started),
                 status: normalize_status(&status),
-                error: None,
+                error: parse_codex_turn_error(error.as_deref()),
                 model: None,
                 reasoning_effort: None,
                 token_usage: None,
@@ -235,40 +328,251 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
     )
 }
 
-fn history_item_from_codex_json(turn_id: &str, value: &Value) -> Option<ThreadHistoryItemDto> {
-    let kind = value
+fn history_item_from_codex_json(
+    turn_id: &str,
+    value: &Value,
+    fallback_kind: &str,
+    created_at_ms: Option<i64>,
+    sequence: Option<i64>,
+) -> Option<ThreadHistoryItemDto> {
+    let raw_kind = value
         .get("type")
         .or_else(|| value.get("kind"))
         .and_then(Value::as_str)
-        .unwrap_or("");
-    let mapped = match kind {
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or(fallback_kind);
+    let kind = match raw_kind {
         "userMessage" | "user_message" | "user" => "userMessage",
-        "agentMessage" | "agent_message" | "assistant" => "agentMessage",
+        "agentMessage" | "agent_message" | "assistant" | "text" => "agentMessage",
         "reasoning" | "thought" => "reasoning",
-        "commandExecution" | "command" => "commandExecution",
+        "commandExecution" | "command_execution" | "command" => "commandExecution",
         "fileChange" | "file_change" => "fileChange",
-        _ => return None,
+        "plan" => "plan",
+        "contextCompaction" | "context_compaction" => "contextCompaction",
+        "webSearch" | "web_search" | "webSearchCall" | "web_search_call" => "webSearch",
+        "imageView" | "image_view" | "viewImage" | "view_image" => "imageView",
+        "mcpToolCall" | "mcp_tool_call" | "dynamicToolCall" | "dynamic_tool_call" => "toolCall",
+        "collabAgentToolCall" | "collab_agent_tool_call" => "agentToolCall",
+        _ => "other",
     };
-    let text = value
-        .get("text")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| content_text(value.get("content").unwrap_or(value)))
-        .unwrap_or_default();
-    if text.trim().is_empty() {
+    let direct_text = codex_text(value);
+    let command = codex_record_text(value, &["command", "cmd", "argv"]);
+    let output = codex_record_text(
+        value,
+        &[
+            "aggregatedOutput",
+            "aggregated_output",
+            "output",
+            "stdout",
+            "stderr",
+        ],
+    );
+    let summary = codex_record_text(
+        value,
+        &[
+            "summary",
+            "summaryText",
+            "summary_text",
+            "rawContent",
+            "raw_content",
+        ],
+    );
+    let label = codex_record_text(
+        value,
+        &[
+            "query",
+            "path",
+            "filePath",
+            "file_path",
+            "title",
+            "name",
+            "tool",
+            "toolName",
+        ],
+    );
+    let (text, preview_text, detail_text) = match kind {
+        "reasoning" | "contextCompaction" => {
+            let text = [summary, direct_text]
+                .into_iter()
+                .flatten()
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            (text, None, None)
+        }
+        "commandExecution" => {
+            let title = command.or(label).unwrap_or_else(|| "Command output".into());
+            let detail = output
+                .filter(|output| !output.trim().is_empty())
+                .map(|output| format!("{title}\n\n{output}"));
+            (title.clone(), Some(title), detail)
+        }
+        "toolCall" | "agentToolCall" => {
+            let title = label.unwrap_or_else(|| "Tool call".into());
+            let detail = serde_json::to_string_pretty(value).ok();
+            (title.clone(), Some(title), detail)
+        }
+        "webSearch" => {
+            let text = label.or(direct_text).unwrap_or_else(|| "Web search".into());
+            (text, None, None)
+        }
+        "imageView" => {
+            let text = label.or(direct_text).unwrap_or_else(|| "Image".into());
+            (text, None, None)
+        }
+        "fileChange" | "plan" => {
+            let text = direct_text
+                .or(label)
+                .unwrap_or_else(|| raw_kind.to_string());
+            (text, None, None)
+        }
+        "other" => {
+            let text = direct_text
+                .or(label)
+                .unwrap_or_else(|| raw_kind.to_string());
+            (text, None, serde_json::to_string_pretty(value).ok())
+        }
+        _ => (direct_text.unwrap_or_default(), None, None),
+    };
+    if text.trim().is_empty() && kind != "other" {
         return None;
     }
-    Some(item(
-        value
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or(&format!("{turn_id}:{mapped}"))
-            .to_string(),
-        mapped,
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{turn_id}:{kind}:{}", sequence.unwrap_or_default()));
+    let created_at = created_at_ms
+        .and_then(epoch_millis_to_rfc3339)
+        .or_else(|| codex_item_created_at(value));
+    let status = value
+        .get("status")
+        .and_then(Value::as_str)
+        .map(normalize_item_status)
+        .unwrap_or_else(|| "completed".into());
+    let mut extra: BTreeMap<String, Value> = value
+        .as_object()
+        .into_iter()
+        .flat_map(|object| object.iter())
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "id" | "kind"
+                    | "text"
+                    | "createdAt"
+                    | "created_at"
+                    | "previewText"
+                    | "preview_text"
+                    | "detailText"
+                    | "detail_text"
+                    | "status"
+                    | "sequence"
+                    | "sourceTurnId"
+                    | "source_turn_id"
+                    | "artifact"
+            )
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    extra.insert("providerItemType".into(), Value::String(raw_kind.into()));
+    Some(ThreadHistoryItemDto {
+        id,
+        created_at,
+        kind: kind.into(),
         text,
-        "completed",
-        turn_id,
-    ))
+        preview_text,
+        detail_text,
+        status: Some(status),
+        sequence,
+        source_turn_id: Some(turn_id.into()),
+        artifact: value.get("artifact").cloned(),
+        extra,
+    })
+}
+
+fn codex_text(value: &Value) -> Option<String> {
+    codex_record_text(value, &["text", "message"])
+        .or_else(|| content_text(value.get("content").unwrap_or(value)))
+}
+
+fn codex_record_text(value: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(candidate) = value.get(*key) else {
+            continue;
+        };
+        let text = match candidate {
+            Value::String(text) => text.clone(),
+            Value::Array(entries) => entries
+                .iter()
+                .filter_map(|entry| {
+                    entry.as_str().map(str::to_string).or_else(|| {
+                        entry
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => continue,
+        };
+        if !text.trim().is_empty() {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn codex_item_created_at(value: &Value) -> Option<String> {
+    for key in [
+        "createdAt",
+        "created_at",
+        "startedAt",
+        "started_at",
+        "completedAt",
+        "completed_at",
+    ] {
+        let Some(candidate) = value.get(key) else {
+            continue;
+        };
+        if let Some(timestamp) = timestamp_to_rfc3339(candidate) {
+            return Some(timestamp);
+        }
+    }
+    None
+}
+
+fn timestamp_to_rfc3339(value: &Value) -> Option<String> {
+    if let Some(number) = value.as_f64() {
+        if !number.is_finite() || number <= 0.0 {
+            return None;
+        }
+        let millis = if number < 10_000_000_000.0 {
+            number * 1000.0
+        } else {
+            number
+        };
+        return epoch_millis_to_rfc3339(millis.trunc() as i64);
+    }
+    let text = value.as_str()?.trim();
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
+fn epoch_millis_to_rfc3339(value: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(value)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
+fn normalize_item_status(status: &str) -> String {
+    match status {
+        "in_progress" | "inProgress" | "running" => "running".into(),
+        "failed" => "failed".into(),
+        "interrupted" | "cancelled" => "interrupted".into(),
+        _ => "completed".into(),
+    }
 }
 
 fn find_codex_rollout(home: &Path, session_id: &str) -> Option<PathBuf> {
@@ -291,92 +595,238 @@ fn find_codex_rollout(home: &Path, session_id: &str) -> Option<PathBuf> {
 
 fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
     let raw = fs::read_to_string(path).ok()?;
+    let entries: Vec<Value> = raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let mut segment_index = -1_i64;
+    let indexed_entries: Vec<_> = entries
+        .into_iter()
+        .map(|entry| {
+            if entry.get("type").and_then(Value::as_str) == Some("event_msg")
+                && entry.pointer("/payload/type").and_then(Value::as_str) == Some("task_started")
+            {
+                segment_index += 1;
+            }
+            (entry, segment_index)
+        })
+        .collect();
+    let legacy_segments: HashSet<_> = indexed_entries
+        .iter()
+        .filter(|(entry, _)| {
+            entry.get("type").and_then(Value::as_str) == Some("event_msg")
+                && matches!(
+                    entry.pointer("/payload/type").and_then(Value::as_str),
+                    Some("user_message" | "agent_message")
+                )
+        })
+        .map(|(_, segment)| *segment)
+        .collect();
     let mut session_id = String::new();
     let mut cwd = String::new();
     let mut title = String::new();
     let mut model = None;
     let mut turns: Vec<ThreadTurnDto> = Vec::new();
     let mut current: Option<ThreadTurnDto> = None;
-    for line in raw.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
+    let mut fallback_turn_count = 0_usize;
+    let mut user_item_count = 0_usize;
+    let mut agent_item_count = 0_usize;
+    let mut created_at = None;
+    let mut updated_at = None;
+    for (value, segment) in indexed_entries {
+        let timestamp = value
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if created_at.is_none() {
+            created_at = timestamp.clone();
+        }
+        if timestamp.is_some() {
+            updated_at = timestamp.clone();
+        }
         let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
-        let payload = value.get("payload").cloned().unwrap_or(value.clone());
-        match kind {
-            "session_meta" => {
-                session_id = payload
-                    .get("id")
-                    .or_else(|| payload.get("session_id"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(&session_id)
-                    .to_string();
-                cwd = payload
-                    .get("cwd")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&cwd)
-                    .to_string();
-                title = payload
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&title)
-                    .to_string();
-                model = payload
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
+        let payload = value.get("payload").unwrap_or(&value);
+        if kind == "session_meta" {
+            session_id = payload
+                .get("id")
+                .or_else(|| payload.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or(&session_id)
+                .to_string();
+            cwd = payload
+                .get("cwd")
+                .and_then(Value::as_str)
+                .unwrap_or(&cwd)
+                .to_string();
+            title = payload
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or(&title)
+                .to_string();
+            model = payload
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            continue;
+        }
+
+        if kind == "response_item"
+            && !legacy_segments.contains(&segment)
+            && payload.get("type").and_then(Value::as_str) == Some("message")
+        {
+            let role = payload.get("role").and_then(Value::as_str).unwrap_or("");
+            let text = content_text(payload.get("content").unwrap_or(payload)).unwrap_or_default();
+            if text.trim().is_empty() || !matches!(role, "user" | "assistant") {
+                continue;
             }
-            "response_item" => {
-                if payload.get("type").and_then(Value::as_str) != Some("message") {
+            let turn =
+                ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+            let (item_kind, item_count) = if role == "user" {
+                user_item_count += 1;
+                ("userMessage", user_item_count)
+            } else {
+                agent_item_count += 1;
+                ("agentMessage", agent_item_count)
+            };
+            let id = payload
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{}:{role}:{item_count}", turn.id));
+            let status = if role == "assistant" {
+                payload
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                None
+            };
+            turn.items.push(ThreadHistoryItemDto {
+                id,
+                created_at: timestamp,
+                kind: item_kind.into(),
+                text,
+                preview_text: None,
+                detail_text: None,
+                status,
+                sequence: Some(turn.items.len() as i64),
+                source_turn_id: Some(turn.id.clone()),
+                artifact: None,
+                extra: Default::default(),
+            });
+            continue;
+        }
+
+        if kind != "event_msg" {
+            continue;
+        }
+        match payload.get("type").and_then(Value::as_str).unwrap_or("") {
+            "task_started" => {
+                finish_codex_turn(&mut current, &mut turns);
+                fallback_turn_count += 1;
+                let id = payload
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.trim().is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("local-turn-{fallback_turn_count}"));
+                current = Some(empty_codex_turn(id, timestamp));
+                user_item_count = 0;
+                agent_item_count = 0;
+            }
+            "user_message" | "agent_message" => {
+                let Some(text) = payload
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+                else {
                     continue;
-                }
-                let role = payload.get("role").and_then(Value::as_str).unwrap_or("");
-                let text =
-                    content_text(payload.get("content").unwrap_or(&payload)).unwrap_or_default();
-                if text.trim().is_empty() {
+                };
+                let turn =
+                    ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+                let user = payload.get("type").and_then(Value::as_str) == Some("user_message");
+                let count = if user {
+                    user_item_count += 1;
+                    user_item_count
+                } else {
+                    agent_item_count += 1;
+                    agent_item_count
+                };
+                let role = if user { "user" } else { "agent" };
+                turn.items.push(ThreadHistoryItemDto {
+                    id: format!("{}:{role}:{count}", turn.id),
+                    created_at: timestamp,
+                    kind: if user { "userMessage" } else { "agentMessage" }.into(),
+                    text: text.to_string(),
+                    preview_text: None,
+                    detail_text: None,
+                    status: None,
+                    sequence: Some(turn.items.len() as i64),
+                    source_turn_id: Some(turn.id.clone()),
+                    artifact: None,
+                    extra: Default::default(),
+                });
+            }
+            "item_completed" => {
+                let Some(raw_item) = payload.get("item") else {
                     continue;
-                }
-                if role == "user" {
-                    if let Some(turn) = current.take() {
-                        turns.push(turn);
+                };
+                let turn =
+                    ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+                let created_at_ms = payload.get("started_at_ms").and_then(Value::as_i64);
+                if let Some(mut item) = history_item_from_codex_json(
+                    &turn.id,
+                    raw_item,
+                    raw_item
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("other"),
+                    created_at_ms,
+                    Some(turn.items.len() as i64),
+                ) {
+                    if created_at_ms.is_none() {
+                        item.created_at = item.created_at.or(timestamp);
                     }
-                    let id = format!("imported-{}", turns.len() + 1);
-                    current = Some(ThreadTurnDto {
-                        id: id.clone(),
-                        started_at: None,
-                        status: "completed".into(),
-                        error: None,
-                        model: None,
-                        reasoning_effort: None,
-                        token_usage: None,
-                        has_deferred_items: None,
-                        deferred_item_count: None,
-                        items: vec![item(
-                            format!("{id}:user"),
-                            "userMessage",
-                            text,
-                            "completed",
-                            &id,
-                        )],
-                    });
-                } else if role == "assistant" {
-                    if let Some(turn) = current.as_mut() {
-                        turn.items.push(item(
-                            format!("{}:assistant", turn.id),
-                            "agentMessage",
-                            text,
-                            "completed",
-                            &turn.id,
-                        ));
+                    if let Some(existing) = turn.items.iter_mut().find(|entry| entry.id == item.id)
+                    {
+                        *existing = item;
+                    } else {
+                        turn.items.push(item);
                     }
                 }
+            }
+            "error" => {
+                let turn =
+                    ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+                turn.status = "failed".into();
+                turn.error = Some(
+                    payload
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Local Codex session failed")
+                        .to_string(),
+                );
+            }
+            "turn_aborted" | "task_cancelled" => {
+                let turn =
+                    ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+                turn.status = "interrupted".into();
+                finish_codex_turn(&mut current, &mut turns);
+            }
+            "task_complete" => {
+                if let Some(turn) = current.as_mut() {
+                    if turn.error.is_none() && turn.status != "interrupted" {
+                        turn.status = "completed".into();
+                    }
+                }
+                finish_codex_turn(&mut current, &mut turns);
             }
             _ => {}
         }
     }
-    if let Some(turn) = current {
-        turns.push(turn);
-    }
+    finish_codex_turn(&mut current, &mut turns);
     if cwd.is_empty() {
         return None;
     }
@@ -396,11 +846,47 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
                 .unwrap_or("Untitled imported session"),
         ),
         preview,
-        created_at: None,
-        updated_at: None,
+        created_at,
+        updated_at,
         model,
         turns,
     })
+}
+
+fn empty_codex_turn(id: String, started_at: Option<String>) -> ThreadTurnDto {
+    ThreadTurnDto {
+        id,
+        started_at,
+        status: "inProgress".into(),
+        error: None,
+        model: None,
+        reasoning_effort: None,
+        token_usage: None,
+        has_deferred_items: None,
+        deferred_item_count: None,
+        items: Vec::new(),
+    }
+}
+
+fn ensure_codex_turn<'a>(
+    current: &'a mut Option<ThreadTurnDto>,
+    fallback_turn_count: &mut usize,
+    started_at: Option<&str>,
+) -> &'a mut ThreadTurnDto {
+    if current.is_none() {
+        *fallback_turn_count += 1;
+        *current = Some(empty_codex_turn(
+            format!("local-turn-{fallback_turn_count}"),
+            started_at.map(str::to_string),
+        ));
+    }
+    current.as_mut().expect("turn initialized")
+}
+
+fn finish_codex_turn(current: &mut Option<ThreadTurnDto>, turns: &mut Vec<ThreadTurnDto>) {
+    if let Some(turn) = current.take().filter(|turn| !turn.items.is_empty()) {
+        turns.push(turn);
+    }
 }
 
 fn list_grok_sessions(home: &Path) -> Vec<ImportSessionMeta> {
@@ -765,6 +1251,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         sequence: None,
         source_turn_id: Some(turn_id.into()),
         artifact: None,
+        extra: Default::default(),
     }
 }
 
@@ -922,5 +1409,116 @@ mod tests {
         assert_eq!(session.cwd, cwd.to_string_lossy());
         assert_eq!(session.turns[0].items[0].text, "imported prompt");
         assert_eq!(session.turns[0].items[1].text, "imported reply");
+    }
+
+    #[test]
+    fn merges_paginated_history_with_rollout_only_items_and_turns() {
+        let history_item = |id: &str, kind: &str, timestamp: &str| {
+            let mut item = item(id.into(), kind, id.into(), "completed", "turn-rich");
+            item.created_at = Some(timestamp.into());
+            item
+        };
+        let paginated = vec![ThreadTurnDto {
+            id: "turn-rich".into(),
+            started_at: Some("2026-08-31T00:00:01.000Z".into()),
+            status: "failed".into(),
+            error: Some("cached error".into()),
+            model: None,
+            reasoning_effort: None,
+            token_usage: None,
+            has_deferred_items: None,
+            deferred_item_count: None,
+            items: vec![
+                history_item("user-rich", "userMessage", "2026-08-31T00:00:02.000Z"),
+                history_item(
+                    "command-rich",
+                    "commandExecution",
+                    "2026-08-31T00:00:04.000Z",
+                ),
+            ],
+        }];
+        let rollout = vec![
+            ThreadTurnDto {
+                id: "turn-rich".into(),
+                started_at: Some("2026-08-31T00:00:01.000Z".into()),
+                status: "completed".into(),
+                error: None,
+                model: None,
+                reasoning_effort: None,
+                token_usage: None,
+                has_deferred_items: None,
+                deferred_item_count: None,
+                items: vec![
+                    history_item("user-rich", "userMessage", "2026-08-31T00:00:02.000Z"),
+                    history_item(
+                        "agent-commentary",
+                        "agentMessage",
+                        "2026-08-31T00:00:03.000Z",
+                    ),
+                ],
+            },
+            ThreadTurnDto {
+                id: "turn-new".into(),
+                started_at: Some("2026-08-31T00:01:00.000Z".into()),
+                status: "inProgress".into(),
+                error: None,
+                model: None,
+                reasoning_effort: None,
+                token_usage: None,
+                has_deferred_items: None,
+                deferred_item_count: None,
+                items: vec![],
+            },
+        ];
+
+        let merged = merge_codex_turns(paginated, rollout);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].status, "completed");
+        assert_eq!(merged[0].error.as_deref(), Some("cached error"));
+        assert_eq!(
+            merged[0]
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["user-rich", "agent-commentary", "command-rich"]
+        );
+        assert_eq!(merged[1].id, "turn-new");
+    }
+
+    #[test]
+    fn paginated_items_keep_error_timestamp_and_extended_kinds() {
+        assert_eq!(
+            parse_codex_turn_error(Some(r#"{"message":"provider failed"}"#)).as_deref(),
+            Some("provider failed")
+        );
+        let cases = [
+            ("text", "agentMessage"),
+            ("plan", "plan"),
+            ("context_compaction", "contextCompaction"),
+            ("web_search_call", "webSearch"),
+            ("view_image", "imageView"),
+            ("dynamicToolCall", "toolCall"),
+            ("collabAgentToolCall", "agentToolCall"),
+            ("future_item", "other"),
+        ];
+        for (raw_kind, expected) in cases {
+            let value = serde_json::json!({
+                "id": format!("item-{raw_kind}"),
+                "type": raw_kind,
+                "text": "detail"
+            });
+            let item = history_item_from_codex_json(
+                "turn-1",
+                &value,
+                raw_kind,
+                Some(1_788_134_403_456),
+                Some(3),
+            )
+            .unwrap();
+            assert_eq!(item.kind, expected);
+            assert_eq!(item.created_at.as_deref(), Some("2026-08-31T00:00:03.456Z"));
+            assert_eq!(item.sequence, Some(3));
+        }
     }
 }

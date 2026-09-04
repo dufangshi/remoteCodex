@@ -250,6 +250,27 @@ fn terminate_process(child_id: u32) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn delayed_output_command() -> (String, Vec<String>) {
+        (
+            "/bin/sh".into(),
+            vec!["-lc".into(), "sleep 0.05; printf ACP_TERMINAL_OK".into()],
+        )
+    }
+
+    #[cfg(windows)]
+    fn delayed_output_command() -> (String, Vec<String>) {
+        (
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()),
+            vec![
+                "/D".into(),
+                "/S".into(),
+                "/C".into(),
+                "ping -n 2 127.0.0.1 >NUL & <NUL set /P =ACP_TERMINAL_OK".into(),
+            ],
+        )
+    }
+
     #[test]
     fn parses_grok_shell_command() {
         let (command, args) =
@@ -261,10 +282,11 @@ mod tests {
     #[tokio::test]
     async fn waits_for_real_exit_and_returns_output() {
         let terminals = AgentTerminals::default();
+        let (command, args) = delayed_output_command();
         let id = terminals
             .create(
-                "/bin/sh -lc 'sleep 0.05; printf ACP_TERMINAL_OK'",
-                &[],
+                &command,
+                &args,
                 std::env::current_dir().unwrap(),
                 &[],
                 Some(1_000),

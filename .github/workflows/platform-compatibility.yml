@@ -5,100 +5,115 @@ on:
   push:
     branches:
       - main
+      - rust/acp-rewrite
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  RUST_VERSION: 1.89.0
+  THREAD_UI_COMMIT: 4b426dbfe6eb8b2e0c801b6a515911172791c0f1
+
 jobs:
-  core:
-    name: Core (${{ matrix.os }})
+  rust:
+    name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-2022]
-
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2022
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.11.1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-
-      - name: Configure thread-ui package access
+      - name: Install pinned Rust toolchain
         shell: bash
-        env:
-          REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
-        run: bash scripts/setup-thread-ui-git-auth.sh
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt,clippy
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Check formatting
+        run: cargo +${{ env.RUST_VERSION }} fmt --all --check
 
-      - name: Install thread-ui workspace dependencies
-        shell: bash
-        run: pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
+      - name: Test workspace
+        run: cargo +${{ env.RUST_VERSION }} test --workspace --locked
 
-      - name: Build
-        run: pnpm build
+      - name: Clippy workspace
+        run: cargo +${{ env.RUST_VERSION }} clippy --workspace --all-targets --locked
 
-      - name: Typecheck
-        run: pnpm typecheck
+      - name: Build Windows release executable
+        if: runner.os == 'Windows'
+        run: cargo +${{ env.RUST_VERSION }} build --locked --release --package remote-codex
 
-      - name: Test backend and platform packages
-        run: pnpm -r --filter '!@remote-codex/supervisor-web' --if-present test
+      - name: Smoke Windows release executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $metadata = cargo +${{ env.RUST_VERSION }} metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $expected = ($metadata.packages | Where-Object { $_.name -eq 'remote-codex' }).version
+          $version = & target/release/remote-codex.exe version
+          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $expected) {
+            throw "Unexpected remote-codex.exe version: $version"
+          }
 
-      - name: Test supervisor web outside known thread-ui baseline failures
-        run: pnpm --filter @remote-codex/supervisor-web exec vitest run --exclude src/components/ThreadTimeline.test.tsx
+      - name: Upload Windows release executable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-codex-windows-x64-${{ github.sha }}
+          path: target/release/remote-codex.exe
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Relay supervisor end-to-end smoke
-        run: pnpm verify:relay
-
-  windows-package-smoke:
-    name: Windows production package smoke
-    runs-on: windows-2022
+  web:
+    name: Web and npm package
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - uses: pnpm/action-setup@v4
         with:
           version: 10.11.1
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-
-      - name: Configure thread-ui package access
+      - name: Check out pinned thread UI
         shell: bash
-        env:
-          REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
-        run: bash scripts/setup-thread-ui-git-auth.sh
+        run: |
+          set -euo pipefail
+          git clone https://github.com/dufangshi/remote-codex-thread-ui.git ../remote-codex-thread-ui
+          git -C ../remote-codex-thread-ui checkout --detach "${THREAD_UI_COMMIT}"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install thread-ui workspace dependencies
         shell: bash
-        run: pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
+        run: |
+          set -euo pipefail
+          pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
+          pnpm install --frozen-lockfile
 
-      - name: Build thread-ui workspace packages
+      - name: Build thread UI before supervisor validation
+        run: pnpm --dir ../remote-codex-thread-ui --filter @remote-codex/thread-ui build
+
+      - name: Typecheck and test Web
         shell: bash
-        run: pnpm --dir ../remote-codex-thread-ui build
+        run: |
+          set -euo pipefail
+          pnpm --filter @remote-codex/supervisor-web typecheck
+          pnpm --filter @remote-codex/supervisor-web test
+          pnpm --filter @remote-codex/supervisor-web build
 
-      - name: Verify packed installation and graceful shutdown
-        run: pnpm verify:package
+      - name: Build release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          cargo +"${RUST_VERSION}" build --locked --release --package remote-codex
+
+      - name: Verify installed npm product
+        run: node scripts/verify-npm-package.mjs

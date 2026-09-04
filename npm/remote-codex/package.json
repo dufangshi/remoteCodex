@@ -1,0 +1,36 @@
+{
+  "name": "remote-codex",
+  "version": "0.12.0",
+  "description": "Self-hosted Rust control plane for coding agents with a web UI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dufangshi/remoteCodex.git",
+    "directory": "npm/remote-codex"
+  },
+  "type": "module",
+  "bin": {
+    "remote-codex": "bin/remote-codex.mjs"
+  },
+  "files": [
+    "bin/",
+    "web/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@remote-codex/native-darwin-arm64": "0.12.0",
+    "@remote-codex/native-darwin-x64": "0.12.0",
+    "@remote-codex/native-linux-arm64-gnu": "0.12.0",
+    "@remote-codex/native-linux-arm64-musl": "0.12.0",
+    "@remote-codex/native-linux-x64-gnu": "0.12.0",
+    "@remote-codex/native-linux-x64-musl": "0.12.0",
+    "@remote-codex/native-win32-x64-msvc": "0.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

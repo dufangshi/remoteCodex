@@ -15,13 +15,97 @@ pub struct Pending {
     pub tx: oneshot::Sender<Result<Value>>,
 }
 
+#[derive(Default)]
+struct RpcState {
+    pending: HashMap<i64, Pending>,
+    closed_reason: Option<String>,
+}
+
+struct PendingGuard {
+    id: i64,
+    state: Arc<Mutex<RpcState>>,
+    armed: bool,
+}
+
+impl PendingGuard {
+    async fn remove(&mut self) {
+        self.state.lock().await.pending.remove(&self.id);
+        self.armed = false;
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Ok(mut state) = self.state.try_lock() {
+            state.pending.remove(&self.id);
+            return;
+        }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let state = self.state.clone();
+            let id = self.id;
+            handle.spawn(async move {
+                state.lock().await.pending.remove(&id);
+            });
+        }
+    }
+}
+
 /// One ACP stdio process. stdin is locked only for the write, so multiple
 /// sessions on the same process can request/notify concurrently.
 pub struct AcpProcess {
     stdin: Mutex<ChildStdin>,
-    child: Mutex<Child>,
-    pending: Arc<Mutex<HashMap<i64, Pending>>>,
+    child: Arc<Mutex<Child>>,
+    state: Arc<Mutex<RpcState>>,
     next_id: AtomicI64,
+}
+
+pub(crate) struct ParsedCommand {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+pub(crate) fn parse_spawn_command(command: &str) -> Result<ParsedCommand> {
+    let parts =
+        shell_words::split(command).with_context(|| format!("parse ACP command `{command}`"))?;
+    let program = parts
+        .first()
+        .filter(|program| !program.is_empty())
+        .cloned()
+        .ok_or_else(|| anyhow!("empty ACP command"))?;
+
+    #[cfg(windows)]
+    if resolves_to_windows_batch_script(&program) {
+        return Ok(ParsedCommand {
+            program: std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()),
+            args: vec!["/D".into(), "/S".into(), "/C".into(), command.into()],
+        });
+    }
+
+    Ok(ParsedCommand {
+        program,
+        args: parts.into_iter().skip(1).collect(),
+    })
+}
+
+#[cfg(windows)]
+fn resolves_to_windows_batch_script(program: &str) -> bool {
+    fn is_batch(path: &std::path::Path) -> bool {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+            })
+    }
+
+    is_batch(std::path::Path::new(program))
+        || which::which(program).ok().as_deref().is_some_and(is_batch)
 }
 
 impl AcpProcess {
@@ -34,11 +118,9 @@ impl AcpProcess {
         mpsc::UnboundedReceiver<Value>,
         mpsc::UnboundedReceiver<(i64, String, Value)>,
     )> {
-        let mut parts = command.split_whitespace();
-        let exe = parts.next().ok_or_else(|| anyhow!("empty ACP command"))?;
-        let args: Vec<&str> = parts.collect();
-        let mut cmd = Command::new(exe);
-        cmd.args(args)
+        let parsed = parse_spawn_command(command)?;
+        let mut cmd = Command::new(&parsed.program);
+        cmd.args(&parsed.args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -68,20 +150,27 @@ impl AcpProcess {
                 }
             });
         }
-        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let state = Arc::new(Mutex::new(RpcState::default()));
         let (updates_tx, updates_rx) = mpsc::unbounded_channel();
         let (req_tx, req_rx) = mpsc::unbounded_channel();
-        let pending_reader = pending.clone();
+        let reader_state = state.clone();
         tokio::spawn(async move {
-            if let Err(err) = read_loop(stdout, pending_reader, updates_tx, req_tx).await {
-                tracing::warn!(error = %err, "ACP reader exited");
-            }
+            let reason = match read_loop(stdout, reader_state.clone(), updates_tx, req_tx).await {
+                Ok(()) => "ACP stdout closed".to_string(),
+                Err(err) => {
+                    tracing::warn!(error = %err, "ACP reader exited");
+                    format!("ACP reader failed: {err}")
+                }
+            };
+            close_rpc_state(&reader_state, reason).await;
         });
+        let child = Arc::new(Mutex::new(child));
+        spawn_exit_monitor(child.clone(), state.clone());
         Ok((
             Self {
                 stdin: Mutex::new(stdin),
-                child: Mutex::new(child),
-                pending,
+                child,
+                state,
                 next_id: AtomicI64::new(1),
             },
             updates_rx,
@@ -102,7 +191,18 @@ impl AcpProcess {
     ) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, Pending { tx });
+        {
+            let mut state = self.state.lock().await;
+            if let Some(reason) = &state.closed_reason {
+                return Err(anyhow!(reason.clone()));
+            }
+            state.pending.insert(id, Pending { tx });
+        }
+        let mut guard = PendingGuard {
+            id,
+            state: self.state.clone(),
+            armed: true,
+        };
         {
             let mut stdin = self.stdin.lock().await;
             if let Err(err) = write_message(
@@ -111,7 +211,7 @@ impl AcpProcess {
             )
             .await
             {
-                self.pending.lock().await.remove(&id);
+                guard.remove().await;
                 return Err(err);
             }
         }
@@ -119,13 +219,14 @@ impl AcpProcess {
             match timeout(wait, rx).await {
                 Ok(result) => result,
                 Err(_) => {
-                    self.pending.lock().await.remove(&id);
+                    guard.remove().await;
                     return Err(anyhow!("ACP request timeout ({method})"));
                 }
             }
         } else {
             rx.await
         };
+        guard.disarm();
         result.map_err(|_| anyhow!("ACP request dropped"))?
     }
 
@@ -175,7 +276,7 @@ async fn write_message(stdin: &mut ChildStdin, value: &Value) -> Result<()> {
 
 async fn read_loop(
     stdout: tokio::process::ChildStdout,
-    pending: Arc<Mutex<HashMap<i64, Pending>>>,
+    state: Arc<Mutex<RpcState>>,
     updates: mpsc::UnboundedSender<Value>,
     requests: mpsc::UnboundedSender<(i64, String, Value)>,
 ) -> Result<()> {
@@ -212,14 +313,14 @@ async fn read_loop(
             }
             serde_json::from_str::<Value>(trimmed)?
         };
-        dispatch(msg, &pending, &updates, &requests).await;
+        dispatch(msg, &state, &updates, &requests).await;
     }
     Ok(())
 }
 
 async fn dispatch(
     msg: Value,
-    pending: &Arc<Mutex<HashMap<i64, Pending>>>,
+    state: &Arc<Mutex<RpcState>>,
     updates: &mpsc::UnboundedSender<Value>,
     requests: &mpsc::UnboundedSender<(i64, String, Value)>,
 ) {
@@ -233,7 +334,7 @@ async fn dispatch(
             ));
             return;
         }
-        if let Some(pending) = pending.lock().await.remove(&id) {
+        if let Some(pending) = state.lock().await.pending.remove(&id) {
             if let Some(error) = msg.get("error") {
                 let _ = pending.tx.send(Err(anyhow!("{error}")));
             } else {
@@ -249,10 +350,52 @@ async fn dispatch(
     }
 }
 
+async fn close_rpc_state(state: &Arc<Mutex<RpcState>>, reason: String) {
+    let pending = {
+        let mut state = state.lock().await;
+        if state.closed_reason.is_none() {
+            state.closed_reason = Some(reason.clone());
+        }
+        std::mem::take(&mut state.pending)
+    };
+    for (_, pending) in pending {
+        let _ = pending.tx.send(Err(anyhow!(reason.clone())));
+    }
+}
+
+fn spawn_exit_monitor(child: Arc<Mutex<Child>>, state: Arc<Mutex<RpcState>>) {
+    tokio::spawn(async move {
+        loop {
+            let status = {
+                let mut child = child.lock().await;
+                child.try_wait()
+            };
+            match status {
+                Ok(Some(status)) => {
+                    // Let the reader dispatch any response already buffered before the exit.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    close_rpc_state(&state, format!("ACP process exited ({status})")).await;
+                    break;
+                }
+                Ok(None) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(err) => {
+                    close_rpc_state(&state, format!("failed to inspect ACP process: {err}")).await;
+                    break;
+                }
+            }
+        }
+    });
+}
+
 impl Drop for AcpProcess {
     fn drop(&mut self) {
         if let Ok(mut child) = self.child.try_lock() {
             let _ = child.start_kill();
+        } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let child = self.child.clone();
+            handle.spawn(async move {
+                let _ = child.lock().await.start_kill();
+            });
         }
     }
 }
@@ -271,6 +414,23 @@ pub(crate) fn timeout_for_method(method: &str) -> Option<Duration> {
 mod tests {
     use super::*;
 
+    fn python_command(script: &std::path::Path) -> String {
+        static PYTHON: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        let python = PYTHON.get_or_init(|| {
+            ["python3", "python"]
+                .into_iter()
+                .filter_map(|candidate| which::which(candidate).ok())
+                .find(|candidate| {
+                    std::process::Command::new(candidate)
+                        .args(["-c", "import sys; sys.exit(0)"])
+                        .status()
+                        .is_ok_and(|status| status.success())
+                })
+                .expect("Python is required for ACP RPC tests")
+        });
+        format!(r#""{}" "{}""#, python.display(), script.display())
+    }
+
     #[test]
     fn prompt_has_no_rpc_timeout() {
         assert_eq!(timeout_for_method("session/prompt"), None);
@@ -284,19 +444,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_quoted_commands_without_losing_argument_boundaries() {
+        let parsed = parse_spawn_command(r#""/tmp/acp agent" --mode "two words""#).unwrap();
+        assert_eq!(parsed.program, "/tmp/acp agent");
+        assert_eq!(parsed.args, ["--mode", "two words"]);
+    }
+
+    #[tokio::test]
+    async fn spawn_preserves_a_quoted_script_path() {
+        let dir = std::env::temp_dir().join(format!("acp rpc {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("quoted agent.py");
+        std::fs::write(
+            &script,
+            concat!(
+                "import json, sys\n",
+                "msg = json.loads(sys.stdin.readline())\n",
+                "print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'ok':True}}), flush=True)\n",
+            ),
+        )
+        .unwrap();
+        let (process, _updates, _requests) =
+            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
+                .await
+                .expect("spawn command with quoted path");
+        let result = process.request("initialize", json!({})).await.unwrap();
+        assert_eq!(result["ok"], true);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wraps_windows_batch_shims_with_hardened_cmd_flags() {
+        let command = r#""C:\Program Files\nodejs\agent.cmd" --mode "two words""#;
+        let parsed = parse_spawn_command(command).unwrap();
+        assert_eq!(
+            parsed.program,
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())
+        );
+        assert_eq!(parsed.args, ["/D", "/S", "/C", command]);
+    }
+
     #[tokio::test]
     async fn bounded_request_times_out_and_clears_pending() {
         let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("hang.py");
         std::fs::write(&script, "import time\ntime.sleep(30)\n").unwrap();
-        let (process, _updates, _requests) = AcpProcess::spawn(
-            &format!("python3 {}", script.display()),
-            dir.to_str().unwrap(),
-            &[],
-        )
-        .await
-        .expect("spawn hanging process");
+        let (process, _updates, _requests) =
+            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
+                .await
+                .expect("spawn hanging process");
         let started = std::time::Instant::now();
         let err = process
             .request_with_timeout("initialize", json!({}), Some(Duration::from_millis(80)))
@@ -304,6 +502,115 @@ mod tests {
             .expect_err("initialize should time out");
         assert!(err.to_string().contains("timeout"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert!(process.pending.lock().await.is_empty());
+        assert!(process.state.lock().await.pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reader_eof_fails_all_pending_requests_and_closes_the_connection() {
+        let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("exit_after_request.py");
+        std::fs::write(
+            &script,
+            "import sys\nsys.stdin.readline()\nsys.stdin.readline()\n",
+        )
+        .unwrap();
+        let (process, _updates, _requests) =
+            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
+                .await
+                .expect("spawn exiting process");
+
+        let (first, second) = timeout(Duration::from_secs(2), async {
+            tokio::join!(
+                process.request("session/prompt", json!({ "sequence": 1 })),
+                process.request("session/prompt", json!({ "sequence": 2 })),
+            )
+        })
+        .await
+        .expect("reader EOF should settle every unbounded prompt request");
+        for result in [first, second] {
+            let error = result.expect_err("reader EOF must fail pending requests");
+            assert!(error.to_string().contains("stdout closed"), "{error:#}");
+        }
+        let state = process.state.lock().await;
+        assert!(state.pending.is_empty());
+        assert_eq!(state.closed_reason.as_deref(), Some("ACP stdout closed"));
+        drop(state);
+
+        let next_error = process
+            .request("initialize", json!({}))
+            .await
+            .expect_err("requests after EOF must fail immediately");
+        assert!(next_error.to_string().contains("stdout closed"));
+    }
+
+    #[tokio::test]
+    async fn process_exit_drains_pending_even_when_a_descendant_holds_stdout_open() {
+        let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("exit_with_inherited_stdout.py");
+        std::fs::write(
+            &script,
+            concat!(
+                "import subprocess, sys\n",
+                "sys.stdin.readline()\n",
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(1)'], stdout=sys.stdout)\n",
+                "sys.exit(17)\n",
+            ),
+        )
+        .unwrap();
+        let (process, _updates, _requests) =
+            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
+                .await
+                .expect("spawn exiting process");
+
+        let error = timeout(
+            Duration::from_millis(800),
+            process.request("session/prompt", json!({})),
+        )
+        .await
+        .expect("child exit monitor should not wait for inherited stdout to close")
+        .expect_err("process exit must fail pending requests");
+        assert!(error.to_string().contains("process exited"), "{error:#}");
+        assert!(process.state.lock().await.pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_request_future_removes_its_pending_entry() {
+        let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hang.py");
+        std::fs::write(&script, "import time\ntime.sleep(30)\n").unwrap();
+        let (process, _updates, _requests) =
+            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
+                .await
+                .expect("spawn hanging process");
+        let process = Arc::new(process);
+        let request_process = process.clone();
+        let request =
+            tokio::spawn(async move { request_process.request("session/prompt", json!({})).await });
+
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if process.state.lock().await.pending.len() == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("request should become pending");
+        request.abort();
+        let _ = request.await;
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if process.state.lock().await.pending.is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropping request future should clean its pending entry");
     }
 }

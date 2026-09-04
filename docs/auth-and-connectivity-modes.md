@@ -14,12 +14,11 @@ The supervisor is treated as a trusted local or private-network service, such as
 
 Use this for development and trusted LAN/VPN setups.
 
-`remote-codex start` listens on `0.0.0.0` for both the Web UI and supervisor API
-unless `SERVICE_HOST` or `SERVICE_API_HOST` is set. Other devices on the same
-trusted LAN can therefore connect using the host machine's LAN address. Local
-mode has no login requirement, so do not expose these ports to an untrusted
-network. To restrict access to the host machine, set both listener variables to
-`127.0.0.1`.
+`remote-codex start` listens on `127.0.0.1` for both the Web UI and supervisor
+API unless `SERVICE_HOST` or `SERVICE_API_HOST` is set. Local mode has no login
+requirement. To connect from a trusted LAN or VPN, explicitly set the listener
+to the appropriate interface. Use `server` mode with credentials whenever the
+listener is reachable from an untrusted network.
 
 ### `server`
 
@@ -71,7 +70,7 @@ REMOTE_CODEX_ADMIN_USERNAME=admin
 REMOTE_CODEX_ADMIN_PASSWORD=change-me
 REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
 REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
-REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal
+REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
 ```
 
 Relay mode still requires the local supervisor admin configuration, but public
@@ -118,7 +117,7 @@ REMOTE_CODEX_ADMIN_USERNAME=admin
 REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally
 REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
 REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
-REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal
+REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
 HOST=127.0.0.1
 PORT=8787
 remote-codex relay-supervisor
@@ -144,8 +143,7 @@ service, also set separate values for:
 for a plain relay port, or `wss://relay.example.com` when the relay is behind
 TLS.
 
-In a source checkout, the same relay can still be developed and tested through
-`pnpm --filter @remote-codex/relay-server dev`.
+In a source checkout, run the Rust relay with `cargo run -p remote-codex -- relay`.
 
 The relay server also serves the built web frontend when
 `apps/supervisor-web/dist/index.html` is present in the installed package or
@@ -179,7 +177,7 @@ The current implementation establishes the supervisor-initiated outbound tunnel,
 - `/relay/api/...` remains a compatibility path that selects the first accessible connected device,
 - the relay authenticates clients with relay user sessions,
 - the relay forwards allowed requests to the home supervisor through the outbound websocket tunnel,
-- the home supervisor executes the request locally with Fastify injection and returns the response over the tunnel.
+- the home supervisor executes the request against its loopback Axum API and returns the response over the tunnel.
 - clients can connect to `GET /relay/devices/:deviceId/ws` on the public relay,
 - `/relay/ws` remains a compatibility path that selects the first accessible connected device,
 - the relay authenticates websocket clients with relay user sessions,
@@ -189,8 +187,12 @@ The current implementation establishes the supervisor-initiated outbound tunnel,
 
 ## Relay Users, Devices, And Sharing
 
-The relay server stores users, devices, and shares in
-`REMOTE_CODEX_RELAY_DATA_DIR/relay-store.json` by default. The first admin user
+The relay server stores users, devices, shares, grants, and settings in
+`REMOTE_CODEX_RELAY_DATA_DIR/relay-store.sqlite`. Before replacing a Node 0.11
+relay, stop it and run `remote-codex relay-migrate --data-dir <path> --dry-run`,
+then repeat without `--dry-run`. Migration uses SQLite Online Backup and keeps
+`relay-store.pre-rust-0.12.sqlite`; it never deletes the old Rust
+`relay.sqlite`. The first admin user
 is seeded from `REMOTE_CODEX_ADMIN_USERNAME`,
 `REMOTE_CODEX_ADMIN_PASSWORD`, and optional `REMOTE_CODEX_ADMIN_EMAIL`.
 

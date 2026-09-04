@@ -56,6 +56,7 @@ pub struct StartTurnInput {
     pub sandbox_mode: Option<String>,
     pub collaboration_mode: Option<String>,
     pub approval_mode: Option<String>,
+    pub performance_mode: Option<bool>,
     pub thread_id: String,
     pub turn_id: String,
     pub hidden: bool,
@@ -69,6 +70,7 @@ pub struct SessionSettings {
     pub sandbox_mode: Option<String>,
     pub collaboration_mode: Option<String>,
     pub approval_mode: Option<String>,
+    pub performance_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
