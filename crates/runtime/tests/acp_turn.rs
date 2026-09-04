@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use remote_codex_runtime::acp::AcpRuntime;
@@ -53,6 +54,83 @@ async fn live_prompt_streams_tools_and_waits_for_agent() {
         .any(|item| item.kind == "agentMessage" && item.text == "done"));
     assert!(items.iter().any(|item| item.kind == "commandExecution"));
     assert!(items.iter().all(|item| item.text != "(no output)"));
+}
+
+#[tokio::test]
+async fn interleaved_text_and_tools_keep_provider_order() {
+    let python = which_python();
+    let dir = tempdir().unwrap();
+    let (runtime, session_id) = start_runtime(dir.path(), &python).await;
+    let bus = EventBus::new();
+    let mut events = bus.subscribe();
+
+    let items = runtime
+        .start_turn(
+            turn_input(&session_id, "interleaved-order", "ordered-turn"),
+            bus,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("complete interleaved ACP turn");
+
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| (item.kind.as_str(), item.text.as_str(), item.sequence))
+            .collect::<Vec<_>>(),
+        vec![
+            ("agentMessage", "Before tools.", Some(1)),
+            ("commandExecution", "first command", Some(2)),
+            ("reasoning", "Checking the result.", Some(3)),
+            ("commandExecution", "second command", Some(4)),
+            ("agentMessage", "After tools.", Some(5)),
+        ]
+    );
+
+    let mut streamed = Vec::new();
+    let mut seen_sequences = HashSet::new();
+    while let Ok(event) = events.try_recv() {
+        let streamed_item = match event.event_type.as_str() {
+            "thread.output.delta" => Some((
+                "agentMessage".to_string(),
+                event.payload["delta"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                event.payload["sequence"].as_i64(),
+            )),
+            "thread.item.started" | "thread.item.completed" => Some((
+                event.payload["item"]["kind"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                event.payload["item"]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                event.payload["item"]["sequence"].as_i64(),
+            )),
+            _ => None,
+        };
+        if let Some(streamed_item) = streamed_item {
+            if streamed_item
+                .2
+                .is_some_and(|sequence| seen_sequences.insert(sequence))
+            {
+                streamed.push(streamed_item);
+            }
+        }
+    }
+    assert_eq!(
+        streamed,
+        vec![
+            ("agentMessage".into(), "Before tools.".into(), Some(1)),
+            ("commandExecution".into(), "first command".into(), Some(2)),
+            ("reasoning".into(), "Checking the result.".into(), Some(3)),
+            ("commandExecution".into(), "second command".into(), Some(4)),
+            ("agentMessage".into(), "After tools.".into(), Some(5)),
+        ]
+    );
 }
 
 #[tokio::test]

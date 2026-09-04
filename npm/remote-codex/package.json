@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Self-hosted Rust control plane for coding agents with a web UI.",
   "license": "MIT",
   "repository": {

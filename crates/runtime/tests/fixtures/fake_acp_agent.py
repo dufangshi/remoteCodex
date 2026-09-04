@@ -102,6 +102,45 @@ def handle(msg):
         if "cancelled-response" in text:
             send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "cancelled"}})
             return
+        if text == "interleaved-order":
+            updates = [
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "Before tools."},
+                },
+                {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "interleaved-call-1",
+                    "title": "first command",
+                    "kind": "execute",
+                    "status": "completed",
+                },
+                {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "content": {"type": "text", "text": "Checking the result."},
+                },
+                {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "interleaved-call-2",
+                    "title": "second command",
+                    "kind": "execute",
+                    "status": "completed",
+                },
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "After tools."},
+                },
+            ]
+            for update in updates:
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {"sessionId": sid, "update": update},
+                    }
+                )
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+            return
         response_text = "fast=true" if text == "check-fast" and fast_enabled else "done"
         send(
             {
