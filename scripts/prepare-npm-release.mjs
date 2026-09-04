@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -51,19 +52,6 @@ assertEqual(
   cargoVersion,
   'launcher and Cargo workspace versions',
 );
-for (const entry of packages) {
-  const manifest = readJson(path.join(npmRoot, entry.dir, 'package.json'));
-  assertEqual(
-    manifest.version,
-    cargoVersion,
-    `${manifest.name} and Cargo workspace versions`,
-  );
-  assertEqual(
-    launcherManifest.optionalDependencies?.[manifest.name],
-    cargoVersion,
-    `${manifest.name} optional dependency version`,
-  );
-}
 
 const webSource = path.join(repoRoot, 'apps', 'supervisor-web', 'dist');
 if (!fs.existsSync(path.join(webSource, 'index.html'))) {
@@ -127,6 +115,33 @@ if (requireAll) {
       throw new Error(`Native artifact was not staged: ${entry.key}`);
   }
 }
+
+const nativeAssets = {};
+for (const entry of packages) {
+  const executable = entry.executable.endsWith('.exe')
+    ? `remote-codex-${entry.key}.exe`
+    : `remote-codex-${entry.key}`;
+  const staged = path.join(npmRoot, entry.dir, 'bin', entry.executable);
+  if (!fs.existsSync(staged)) continue;
+  const contents = fs.readFileSync(staged);
+  nativeAssets[entry.key] = {
+    name: executable,
+    sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+    size: contents.length,
+  };
+}
+fs.writeFileSync(
+  path.join(launcherRoot, 'native-manifest.json'),
+  `${JSON.stringify(
+    {
+      version: cargoVersion,
+      releaseBaseUrl: `https://github.com/dufangshi/remoteCodex/releases/download/v${cargoVersion}`,
+      assets: nativeAssets,
+    },
+    null,
+    2,
+  )}\n`,
+);
 
 console.log(`Prepared remote-codex npm packages at version ${cargoVersion}.`);
 

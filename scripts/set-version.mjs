@@ -32,7 +32,7 @@ updateJson(
   path.join(repoRoot, 'npm', 'remote-codex', 'package.json'),
   (manifest) => {
     manifest.version = version;
-    for (const dependency of Object.keys(manifest.optionalDependencies)) {
+    for (const dependency of Object.keys(manifest.optionalDependencies ?? {})) {
       manifest.optionalDependencies[dependency] = version;
     }
   },

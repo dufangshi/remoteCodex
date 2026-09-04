@@ -12,27 +12,11 @@ const manifest = {
       filename: 'remote-codex-0.12.0.tgz',
       integrity: 'sha512-launcher',
     },
-    {
-      kind: 'native',
-      name: '@dufangshi/remote-codex-native-linux-x64-gnu',
-      version: '0.12.0',
-      filename: 'native-linux-x64-gnu-0.12.0.tgz',
-      integrity: 'sha512-linux',
-    },
-    {
-      kind: 'native',
-      name: '@dufangshi/remote-codex-native-darwin-arm64',
-      version: '0.12.0',
-      filename: 'native-darwin-arm64-0.12.0.tgz',
-      integrity: 'sha512-darwin',
-    },
   ],
 };
 
-test('promotes every matching package to latest with the launcher last', () => {
+test('promotes an existing matching package to latest', () => {
   const npm = mockNpm({
-    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
-    '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
     'remote-codex@0.12.0': 'sha512-launcher',
   });
 
@@ -47,27 +31,13 @@ test('promotes every matching package to latest with the launcher last', () => {
 
   assert.deepEqual(npm.commands('publish'), []);
   assert.deepEqual(npm.commands('dist-tag'), [
-    [
-      'dist-tag',
-      'add',
-      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0',
-      'latest',
-    ],
-    [
-      'dist-tag',
-      'add',
-      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0',
-      'latest',
-    ],
     ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
   ]);
 });
 
-test('detects every integrity conflict before changing the registry', () => {
+test('detects an integrity conflict before changing the registry', () => {
   const npm = mockNpm({
-    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
-    '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-wrong',
-    'remote-codex@0.12.0': 'sha512-launcher',
+    'remote-codex@0.12.0': 'sha512-wrong',
   });
 
   assert.throws(
@@ -85,48 +55,8 @@ test('detects every integrity conflict before changing the registry', () => {
   assert.deepEqual(npm.mutations(), []);
 });
 
-test('does not promote the launcher after a native dist-tag failure', () => {
-  const npm = mockNpm(
-    {
-      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
-      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
-      'remote-codex@0.12.0': 'sha512-launcher',
-    },
-    { failTagFor: '@dufangshi/remote-codex-native-darwin-arm64@0.12.0' },
-  );
-
-  assert.throws(
-    () =>
-      publishRelease({
-        channel: 'latest',
-        inputDir: '/release',
-        manifest,
-        allowLatest: true,
-        runNpm: npm.run,
-        log() {},
-      }),
-    /npm dist-tag add failed/,
-  );
-  assert.deepEqual(npm.commands('dist-tag'), [
-    [
-      'dist-tag',
-      'add',
-      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0',
-      'latest',
-    ],
-    [
-      'dist-tag',
-      'add',
-      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0',
-      'latest',
-    ],
-  ]);
-});
-
-test('finishes native publishing and tagging before touching the launcher', () => {
-  const npm = mockNpm({
-    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
-  });
+test('publishes and tags the launcher', () => {
+  const npm = mockNpm({});
 
   publishRelease({
     channel: 'latest',
@@ -140,14 +70,6 @@ test('finishes native publishing and tagging before touching the launcher', () =
   assert.deepEqual(npm.commands('publish'), [
     [
       'publish',
-      '/release/native-darwin-arm64-0.12.0.tgz',
-      '--tag',
-      'latest',
-      '--access',
-      'public',
-    ],
-    [
-      'publish',
       '/release/remote-codex-0.12.0.tgz',
       '--tag',
       'latest',
@@ -155,24 +77,13 @@ test('finishes native publishing and tagging before touching the launcher', () =
       'public',
     ],
   ]);
-  const launcherPublish = npm.calls.findIndex(
-    (args) =>
-      args[0] === 'publish' && args[1] === '/release/remote-codex-0.12.0.tgz',
-  );
-  const lastNativeTag = npm.calls.findLastIndex(
-    (args) => args[0] === 'dist-tag' && args[2].startsWith('@remote-codex/'),
-  );
-  assert.ok(launcherPublish > lastNativeTag);
+  assert.deepEqual(npm.commands('dist-tag'), [
+    ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
+  ]);
 });
 
 test('does not treat an npm view transport failure as an unpublished version', () => {
-  const npm = mockNpm(
-    {
-      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
-      'remote-codex@0.12.0': 'sha512-launcher',
-    },
-    { viewErrorFor: '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0' },
-  );
+  const npm = mockNpm({}, { viewErrorFor: 'remote-codex@0.12.0' });
 
   assert.throws(
     () =>

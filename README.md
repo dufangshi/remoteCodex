@@ -33,8 +33,9 @@ remote-codex status
 remote-codex stop
 ```
 
-The npm launcher installs a prebuilt Rust executable for the current OS, CPU,
-and Linux libc. It does not compile Rust or download a binary in `postinstall`.
+The npm launcher downloads a prebuilt Rust executable for the current OS, CPU,
+and Linux libc on first use, verifies its pinned SHA-256 digest, and caches it.
+It does not compile Rust or run network access in `postinstall`.
 See [the native npm release design](docs/npm-native-release.zh.md).
 The controlled main/relay rollout is documented in
 [the Rust main cutover runbook](docs/rust-main-cutover.zh.md).

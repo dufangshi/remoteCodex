@@ -7,10 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { spawn, spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
 const launcherPath = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(launcherPath), '..');
 for (const envFile of new Set([
@@ -43,37 +41,6 @@ const relayLogPath = process.env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG
 const relayTmuxSession =
   process.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION?.trim() ||
   'remote-codex-relay-supervisor';
-
-const platformPackages = new Map([
-  [
-    'darwin-arm64',
-    ['@dufangshi/remote-codex-native-darwin-arm64', 'bin/remote-codex'],
-  ],
-  [
-    'darwin-x64',
-    ['@dufangshi/remote-codex-native-darwin-x64', 'bin/remote-codex'],
-  ],
-  [
-    'linux-arm64-gnu',
-    ['@dufangshi/remote-codex-native-linux-arm64-gnu', 'bin/remote-codex'],
-  ],
-  [
-    'linux-arm64-musl',
-    ['@dufangshi/remote-codex-native-linux-arm64-musl', 'bin/remote-codex'],
-  ],
-  [
-    'linux-x64-gnu',
-    ['@dufangshi/remote-codex-native-linux-x64-gnu', 'bin/remote-codex'],
-  ],
-  [
-    'linux-x64-musl',
-    ['@dufangshi/remote-codex-native-linux-x64-musl', 'bin/remote-codex'],
-  ],
-  [
-    'win32-x64-msvc',
-    ['@dufangshi/remote-codex-native-win32-x64-msvc', 'bin/remote-codex.exe'],
-  ],
-]);
 
 const relayConfigKeys = [
   'REMOTE_CODEX_RELAY_SERVER_URL',
@@ -136,7 +103,7 @@ try {
   process.exitCode = 1;
 }
 
-function resolveNativeBinary() {
+async function resolveNativeBinary() {
   if (process.env.REMOTE_CODEX_NATIVE_BINARY) {
     const override = path.resolve(process.env.REMOTE_CODEX_NATIVE_BINARY);
     if (!fs.existsSync(override)) {
@@ -145,18 +112,84 @@ function resolveNativeBinary() {
     return override;
   }
   const key = platformKey();
-  const target = platformPackages.get(key);
-  if (!target) {
+  const nativeManifest = JSON.parse(
+    fs.readFileSync(path.join(packageRoot, 'native-manifest.json'), 'utf8'),
+  );
+  if (nativeManifest.version !== packageVersion) {
+    throw new Error(
+      `Native manifest version ${nativeManifest.version} does not match package ${packageVersion}.`,
+    );
+  }
+  const target = nativeManifest.assets?.[key];
+  if (!target?.name || !target?.sha256) {
     throw new Error(
       `Remote Codex does not publish a native binary for ${key}.`,
     );
   }
+  const cacheRoot = process.env.REMOTE_CODEX_NATIVE_CACHE_DIR
+    ? path.resolve(process.env.REMOTE_CODEX_NATIVE_CACHE_DIR)
+    : path.join(os.homedir(), '.remote-codex', 'bin');
+  const binary = path.join(cacheRoot, packageVersion, key, target.name);
+  if (await validNativeBinary(binary, target.sha256)) return binary;
+
+  const baseUrl = (
+    process.env.REMOTE_CODEX_NATIVE_DOWNLOAD_BASE_URL ??
+    nativeManifest.releaseBaseUrl
+  ).replace(/\/$/, '');
+  const url = `${baseUrl}/${encodeURIComponent(target.name)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  let contents;
   try {
-    return require.resolve(`${target[0]}/${target[1]}`);
-  } catch {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} from ${url}`);
+    }
+    contents = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
     throw new Error(
-      `The native package ${target[0]}@${packageVersion} is missing. Reinstall remote-codex without --omit=optional and do not copy node_modules between operating systems.`,
+      `Unable to download Remote Codex ${packageVersion} for ${key} from ${url}: ${error instanceof Error ? error.message : error}`,
     );
+  } finally {
+    clearTimeout(timer);
+  }
+  const actual = crypto.createHash('sha256').update(contents).digest('hex');
+  if (actual !== target.sha256) {
+    throw new Error(
+      `Downloaded Remote Codex ${packageVersion} for ${key} failed SHA-256 verification.`,
+    );
+  }
+  fs.mkdirSync(path.dirname(binary), { recursive: true, mode: 0o700 });
+  const temporary = `${binary}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  fs.writeFileSync(temporary, contents, { mode: 0o700, flag: 'wx' });
+  try {
+    fs.renameSync(temporary, binary);
+  } catch (error) {
+    if (!['EEXIST', 'EPERM'].includes(error?.code)) throw error;
+    if (!(await validNativeBinary(binary, target.sha256))) {
+      removeFile(binary);
+      fs.renameSync(temporary, binary);
+    }
+  } finally {
+    removeFile(temporary);
+  }
+  if (!(await validNativeBinary(binary, target.sha256))) {
+    throw new Error(
+      `Cached Remote Codex binary failed verification: ${binary}`,
+    );
+  }
+  return binary;
+}
+
+async function validNativeBinary(binary, expectedSha256) {
+  try {
+    const contents = await fs.promises.readFile(binary);
+    const actual = crypto.createHash('sha256').update(contents).digest('hex');
+    if (actual !== expectedSha256) return false;
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o700);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -222,7 +255,7 @@ function relayEnvironment() {
 }
 
 async function runForeground(args, environment) {
-  const binary = resolveNativeBinary();
+  const binary = await resolveNativeBinary();
   const child = spawn(binary, args, {
     cwd: process.cwd(),
     env: environment,
@@ -280,7 +313,7 @@ async function startService() {
     delete environment.REMOTE_CODEX_RELAY_AGENT_TOKEN;
   }
   const pid = spawnDetached(
-    resolveNativeBinary(),
+    await resolveNativeBinary(),
     ['supervisor'],
     logPath,
     environment,
@@ -434,7 +467,7 @@ async function relaySupervisor(action) {
   fs.mkdirSync(path.dirname(relayLogPath), { recursive: true, mode: 0o700 });
   rotateLog(relayLogPath);
   const pid = spawnDetached(
-    resolveNativeBinary(),
+    await resolveNativeBinary(),
     ['relay-supervisor'],
     relayLogPath,
     environment,
@@ -820,6 +853,7 @@ Commands:
   relay-supervisor [action]     start, run, status, stop, or reset
   version                       Print the installed version
 
-The npm package runs a platform-specific Rust binary. Set
-REMOTE_CODEX_NATIVE_BINARY only when testing a local build.`);
+The npm package downloads and verifies the matching Rust binary from the
+same-version GitHub release on first use. Set REMOTE_CODEX_NATIVE_BINARY only
+when testing a local build.`);
 }

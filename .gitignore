@@ -11,6 +11,7 @@ npm/*/LICENSE
 npm/*/README.md
 !npm/remote-codex/README.md
 npm/remote-codex/web/
+npm/remote-codex/native-manifest.json
 .worktrees/
 .env
 .env.local

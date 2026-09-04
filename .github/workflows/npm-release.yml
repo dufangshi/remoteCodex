@@ -202,10 +202,59 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  release:
+    if: inputs.channel != 'dry-run'
+    name: Publish GitHub native assets
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create or verify immutable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          mkdir -p release-assets
+          for key in darwin-arm64 darwin-x64 linux-arm64-gnu linux-arm64-musl linux-x64-gnu linux-x64-musl; do
+            cp "artifacts/${key}/remote-codex" "release-assets/remote-codex-${key}"
+            chmod 0755 "release-assets/remote-codex-${key}"
+          done
+          cp artifacts/win32-x64-msvc/remote-codex.exe release-assets/remote-codex-win32-x64-msvc.exe
+          (cd release-assets && sha256sum remote-codex-* > SHA256SUMS)
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            target=$(gh release view "${tag}" --json targetCommitish --jq .targetCommitish)
+            test "${target}" = "${GITHUB_SHA}" || {
+              echo "Release ${tag} targets ${target}, expected ${GITHUB_SHA}" >&2
+              exit 1
+            }
+            mkdir existing-assets
+            gh release download "${tag}" --dir existing-assets
+            for asset in release-assets/*; do
+              cmp "${asset}" "existing-assets/$(basename "${asset}")"
+            done
+          else
+            gh release create "${tag}" release-assets/* \
+              --target "${GITHUB_SHA}" \
+              --title "Remote Codex ${version}" \
+              --notes "Rust supervisor and relay release. Native binaries are unsigned; verify downloads with SHA256SUMS."
+          fi
+
   publish:
     if: inputs.channel != 'dry-run'
     name: Publish npm ${{ inputs.channel }}
-    needs: package
+    needs: [package, release]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: npm-release

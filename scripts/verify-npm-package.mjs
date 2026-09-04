@@ -37,10 +37,8 @@ try {
     );
   }
 
-  const platformDir = path.join(repoRoot, 'npm', currentPackageDir());
   const packDir = path.join(temporaryRoot, 'packs');
   fs.mkdirSync(packDir);
-  const platformPack = await npmPack(platformDir, packDir);
   const launcherPack = await npmPack(
     path.join(repoRoot, 'npm', 'remote-codex'),
     packDir,
@@ -54,7 +52,6 @@ try {
         private: true,
         dependencies: {
           'remote-codex': `file:${launcherPack.path}`,
-          [platformPack.metadata.name]: `file:${platformPack.path}`,
         },
       },
       null,
@@ -88,6 +85,13 @@ try {
     DATABASE_URL: path.join(temporaryRoot, 'supervisor.sqlite'),
     WORKSPACE_ROOT: workspaceRoot,
     REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
+    REMOTE_CODEX_NATIVE_BINARY: path.join(
+      repoRoot,
+      'npm',
+      currentPackageDir(),
+      'bin',
+      executableName(),
+    ),
   };
   await run(process.execPath, [launcher, 'start'], {
     cwd: installRoot,
@@ -143,6 +147,7 @@ function assertPackageContents(metadata) {
   const files = new Set(metadata.files.map((entry) => entry.path));
   for (const required of [
     'bin/remote-codex.mjs',
+    'native-manifest.json',
     'web/index.html',
     'package.json',
   ]) {

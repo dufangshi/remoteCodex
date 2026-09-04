@@ -12,20 +12,10 @@ const repoRoot = path.resolve(
 const outputDir = path.resolve(
   process.argv[2] ?? path.join(repoRoot, 'dist', 'npm'),
 );
-const platformDirs = [
-  'darwin-arm64',
-  'darwin-x64',
-  'linux-arm64-gnu',
-  'linux-arm64-musl',
-  'linux-x64-gnu',
-  'linux-x64-musl',
-  'win32-x64-msvc',
-];
-
 fs.rmSync(outputDir, { recursive: true, force: true });
 fs.mkdirSync(outputDir, { recursive: true });
 const packages = [];
-for (const directory of [...platformDirs, 'remote-codex']) {
+for (const directory of ['remote-codex']) {
   const packageDir = path.join(repoRoot, 'npm', directory);
   assertPrepared(packageDir, directory);
   const result = spawnSync(
@@ -40,7 +30,7 @@ for (const directory of [...platformDirs, 'remote-codex']) {
   }
   const metadata = JSON.parse(result.stdout)[0];
   packages.push({
-    kind: directory === 'remote-codex' ? 'launcher' : 'native',
+    kind: 'launcher',
     name: metadata.name,
     version: metadata.version,
     filename: metadata.filename,
@@ -60,7 +50,12 @@ console.log(`Packed ${packages.length} npm packages into ${outputDir}.`);
 
 function assertPrepared(packageDir, directory) {
   if (directory === 'remote-codex') {
-    for (const file of ['bin/remote-codex.mjs', 'web/index.html', 'LICENSE']) {
+    for (const file of [
+      'bin/remote-codex.mjs',
+      'web/index.html',
+      'native-manifest.json',
+      'LICENSE',
+    ]) {
       if (!fs.existsSync(path.join(packageDir, file))) {
         throw new Error(
           `Package ${directory} is not prepared: missing ${file}`,
