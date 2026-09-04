@@ -54,13 +54,6 @@ jobs:
             binary: remote-codex
             runnable: true
             linux: false
-          - key: darwin-x64
-            runner: macos-15-intel
-            target: x86_64-apple-darwin
-            cargo_target: x86_64-apple-darwin
-            binary: remote-codex
-            runnable: true
-            linux: false
           - key: linux-arm64-gnu
             runner: ubuntu-24.04
             target: aarch64-unknown-linux-gnu.2.28
@@ -68,24 +61,10 @@ jobs:
             binary: remote-codex
             runnable: false
             linux: true
-          - key: linux-arm64-musl
-            runner: ubuntu-24.04
-            target: aarch64-unknown-linux-musl
-            cargo_target: aarch64-unknown-linux-musl
-            binary: remote-codex
-            runnable: false
-            linux: true
           - key: linux-x64-gnu
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu.2.28
             cargo_target: x86_64-unknown-linux-gnu
-            binary: remote-codex
-            runnable: true
-            linux: true
-          - key: linux-x64-musl
-            runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            cargo_target: x86_64-unknown-linux-musl
             binary: remote-codex
             runnable: true
             linux: true
@@ -228,7 +207,7 @@ jobs:
           version=$(node -p "require('./package.json').version")
           tag="v${version}"
           mkdir -p release-assets
-          for key in darwin-arm64 darwin-x64 linux-arm64-gnu linux-arm64-musl linux-x64-gnu linux-x64-musl; do
+          for key in darwin-arm64 linux-arm64-gnu linux-x64-gnu; do
             cp "artifacts/${key}/remote-codex" "release-assets/remote-codex-${key}"
             chmod 0755 "release-assets/remote-codex-${key}"
           done

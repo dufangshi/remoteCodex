@@ -22,19 +22,12 @@ const requireAll = args.includes('--require-all');
 
 const packages = [
   { key: 'darwin-arm64', dir: 'darwin-arm64', executable: 'remote-codex' },
-  { key: 'darwin-x64', dir: 'darwin-x64', executable: 'remote-codex' },
   {
     key: 'linux-arm64-gnu',
     dir: 'linux-arm64-gnu',
     executable: 'remote-codex',
   },
-  {
-    key: 'linux-arm64-musl',
-    dir: 'linux-arm64-musl',
-    executable: 'remote-codex',
-  },
   { key: 'linux-x64-gnu', dir: 'linux-x64-gnu', executable: 'remote-codex' },
-  { key: 'linux-x64-musl', dir: 'linux-x64-musl', executable: 'remote-codex' },
   {
     key: 'win32-x64-msvc',
     dir: 'win32-x64-msvc',

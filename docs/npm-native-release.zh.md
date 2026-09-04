@@ -15,13 +15,10 @@ remote-codex
   native-manifest.json
   web/
 
-GitHub Release v0.12.0
+后续 GitHub runtime Release
   remote-codex-darwin-arm64
-  remote-codex-darwin-x64
   remote-codex-linux-arm64-gnu
-  remote-codex-linux-arm64-musl
   remote-codex-linux-x64-gnu
-  remote-codex-linux-x64-musl
   remote-codex-win32-x64-msvc-cli.exe
 ```
 
@@ -85,25 +82,24 @@ Rust supervisor 直接托管 `web/`，所以正常服务只有一个后端进程
 
 ## 平台与 ABI
 
-第一批 release gate：
+当前 release gate：
 
-- macOS arm64、x64，deployment target 12.0
-- Linux arm64、x64，分别提供 glibc 与 musl
+- macOS arm64，deployment target 12.0
+- Linux arm64、x64，glibc 2.28+
 - Windows x64 MSVC
 
-Linux GNU artifact 使用 cargo-zigbuild 声明 glibc 2.28 最低版本；musl artifact 用于 Alpine 等环境。不能直接把 Debian Bookworm 或 Ubuntu 最新 runner 的普通 release binary 当成通用 GNU npm artifact，否则会无意提高用户机器的 glibc 下限。
+不再发布 macOS Intel 或 Alpine/musl artifact。Linux GNU artifact 使用 cargo-zigbuild
+声明 glibc 2.28 最低版本；不能直接把 Debian Bookworm 或 Ubuntu 最新 runner 的普通
+release binary 当成通用 GNU npm artifact，否则会无意提高用户机器的 glibc 下限。
 
 每个平台必须执行 `remote-codex version`；可在对应 runner 原生执行的平台还必须跑 npm 安装、Web/API 启动和退出 smoke。不能把在 macOS arm64 本机通过 `cargo build` 当作 Windows/Linux 发布验证。
 
 ## 版本和 dist-tag
 
-当前稳定版为 Node `0.11.64`，Rust 使用新的 `0.12` 版本线：
-
-1. 保持 `latest=0.11.64`，并增加 `legacy` tag。
-2. 首个 Rust 包使用 `0.12.0-rc.1`，发布到 `next`。
-3. RC 必须通过真实 0.11.64 数据库升级、本地服务、relay supervisor 和生产数据副本演练。
-4. 再发布不可变的 `0.12.0`，最后移动 `latest`。
-5. 降级 npm 包并不等于数据库回滚；必须同时选择保留的旧数据库或兼容 schema。
+当前 `latest=0.12.2`，Node 最终版保留为 `legacy=0.11.64`。后续 Rust runtime
+继续使用 `0.12.x` 或更高的不可变 SemVer。预发布版本进入 `next`，稳定版本通过显式
+release workflow 移动 `latest`。降级 npm 包并不等于数据库回滚；必须同时选择保留的旧
+数据库或兼容 schema。
 
 npm 版本和 GitHub Release 标签都不可覆盖。必须先发布带全部原生资产的 `v<version>`
 Release，再发布包含对应 hash manifest 的 npm 包，最后移动 `latest`。
