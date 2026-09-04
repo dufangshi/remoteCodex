@@ -926,6 +926,38 @@ async fn workspace_upload_raw_and_download_preserve_binary_bytes() {
         download.bytes().await.unwrap().as_ref(),
         expected.as_slice()
     );
+
+    std::fs::create_dir_all(workspace_path.join("folder/empty")).unwrap();
+    std::fs::write(workspace_path.join("folder/notes.txt"), "archived notes").unwrap();
+    let directory_download = client
+        .get(format!(
+            "{base}/api/workspaces/{workspace_id}/files/download?path=folder"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(directory_download.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        directory_download.headers().get("content-type").unwrap(),
+        "application/zip"
+    );
+    assert!(directory_download
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("folder.zip"));
+    let archive_bytes = directory_download.bytes().await.unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(archive_bytes)).unwrap();
+    assert!(archive.by_name("folder/empty/").is_ok());
+    let mut notes = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("folder/notes.txt").unwrap(),
+        &mut notes,
+    )
+    .unwrap();
+    assert_eq!(notes, "archived notes");
 }
 
 #[tokio::test]

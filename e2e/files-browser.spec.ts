@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -15,6 +16,13 @@ test.describe('workspace file browser and long turn', () => {
   test('lists, previews, writes, and moves files', async ({ page }) => {
     const name = `files-${randomUUID().slice(0, 8)}`;
     const absPath = await ensureWorkspaceDir(workspaceRoot, name);
+    const tooManyPath = path.join(absPath, 'too-many');
+    await fs.mkdir(tooManyPath);
+    await Promise.all(
+      Array.from({ length: 1_000 }, (_, index) =>
+        fs.writeFile(path.join(tooManyPath, `${index}.txt`), ''),
+      ),
+    );
     const workspace = await api<any>(apiBaseUrl, '/api/workspaces', {
       method: 'POST',
       body: JSON.stringify({ absPath, label: name }),
@@ -64,6 +72,20 @@ test.describe('workspace file browser and long turn', () => {
     if (await filesTab.count()) {
       await filesTab.click();
       await expect(page.getByText('README.md').first()).toBeVisible();
+
+      const downloadPromise = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Download src' }).click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe('src.zip');
+      const archivePath = await download.path();
+      expect(archivePath).toBeTruthy();
+      const signature = await fs.readFile(archivePath as string);
+      expect(signature.subarray(0, 2).toString('ascii')).toBe('PK');
+
+      await page.getByRole('button', { name: 'Download too-many' }).click();
+      await expect(
+        page.getByText(/Directory download is limited to fewer than 1,000 files/),
+      ).toBeVisible();
     }
   });
 

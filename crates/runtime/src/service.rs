@@ -649,6 +649,11 @@ impl Supervisor {
         Ok((path, bytes))
     }
 
+    pub fn workspace_download(&self, id: &str, rel: &str) -> Result<files::WorkspaceDownload> {
+        let workspace = self.get_workspace(id)?;
+        files::prepare_download(Path::new(&workspace.abs_path), rel)
+    }
+
     pub fn workspace_write(&self, id: &str, rel: &str, content: &str) -> Result<()> {
         let ws = self.get_workspace(id)?;
         files::write_file(Path::new(&ws.abs_path), rel, content)

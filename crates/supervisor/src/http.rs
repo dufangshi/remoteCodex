@@ -2,6 +2,7 @@ use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::multipart::Multipart;
 use axum::extract::{DefaultBodyLimit, FromRequest, Path, Query, Request, State, WebSocketUpgrade};
 use axum::http::{header, Method, StatusCode};
@@ -16,9 +17,11 @@ use remote_codex_protocol::{
     RuntimeConfigDto, SendThreadPromptInput, ThreadWorkspaceTreeNodeDto,
     UpdateWorkspaceSettingsInput, VersionDto, APP_NAME, APP_VERSION,
 };
+use remote_codex_runtime::files::WorkspaceDownload;
 use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub type AppState = Arc<Supervisor>;
@@ -1611,23 +1614,72 @@ async fn workspace_download(
     let requested_path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    let (path, bytes) = state
-        .workspace_read_bytes(&id, &requested_path)
-        .map_err(map_err)?;
-    let filename = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("workspace-file");
+    let download =
+        tokio::task::spawn_blocking(move || state.workspace_download(&id, &requested_path))
+            .await
+            .map_err(|error| map_err(error.into()))?
+            .map_err(map_err)?;
+    match download {
+        WorkspaceDownload::File { path, bytes } => {
+            let filename = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("workspace-file");
+            download_response(
+                filename,
+                static_content_type(&path),
+                bytes.len() as u64,
+                Body::from(bytes),
+            )
+        }
+        WorkspaceDownload::DirectoryArchive { filename, archive } => {
+            let content_length = archive
+                .as_file()
+                .metadata()
+                .map_err(|error| map_err(error.into()))?
+                .len();
+            let file =
+                tokio::fs::File::from_std(archive.reopen().map_err(|error| map_err(error.into()))?);
+            let stream = futures_util::stream::try_unfold(
+                (file, archive),
+                |(mut file, archive)| async move {
+                    let mut buffer = vec![0u8; 64 * 1024];
+                    let read = file.read(&mut buffer).await?;
+                    if read == 0 {
+                        Ok::<_, std::io::Error>(None)
+                    } else {
+                        buffer.truncate(read);
+                        Ok::<_, std::io::Error>(Some((Bytes::from(buffer), (file, archive))))
+                    }
+                },
+            );
+            download_response(
+                &filename,
+                "application/zip",
+                content_length,
+                Body::from_stream(stream),
+            )
+        }
+    }
+}
+
+fn download_response(
+    filename: &str,
+    content_type: &str,
+    content_length: u64,
+    body: Body,
+) -> Result<Response, ApiErr> {
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, content_length)
         .header(
             header::CONTENT_DISPOSITION,
             attachment_content_disposition(filename),
         )
         .header(header::CACHE_CONTROL, "private, no-store")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .body(Body::from(bytes))
+        .body(body)
         .map_err(|error| map_err(error.into()))
 }
 

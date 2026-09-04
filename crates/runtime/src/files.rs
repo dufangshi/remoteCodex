@@ -1,10 +1,29 @@
 use std::ffi::OsString;
+use std::fs::File;
 use std::io::ErrorKind;
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Result};
 use remote_codex_protocol::{ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto};
+use tempfile::NamedTempFile;
 use walkdir::WalkDir;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
+
+pub const DIRECTORY_DOWNLOAD_MAX_FILES_EXCLUSIVE: usize = 1_000;
+pub const DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE: u64 = 1_000_000_000;
+
+pub enum WorkspaceDownload {
+    File {
+        path: PathBuf,
+        bytes: Vec<u8>,
+    },
+    DirectoryArchive {
+        filename: String,
+        archive: NamedTempFile,
+    },
+}
 
 pub fn assert_within(root: &Path, candidate: &Path) -> Result<PathBuf> {
     let root = root.canonicalize()?;
@@ -123,6 +142,88 @@ pub fn read_bytes(root: &Path, rel: &str) -> Result<(PathBuf, Vec<u8>)> {
     let path = assert_within(root, Path::new(rel))?;
     let bytes = std::fs::read(&path)?;
     Ok((path, bytes))
+}
+
+pub fn prepare_download(root: &Path, rel: &str) -> Result<WorkspaceDownload> {
+    let path = assert_within(root, Path::new(rel))?;
+    if path.is_file() {
+        let bytes = std::fs::read(&path)?;
+        return Ok(WorkspaceDownload::File { path, bytes });
+    }
+    if !path.is_dir() {
+        bail!("Workspace download path must point to a file or directory.");
+    }
+
+    let archive_root = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("workspace"));
+    let mut entries = Vec::new();
+    let mut file_count = 0usize;
+    let mut total_bytes = 0u64;
+
+    for entry in WalkDir::new(&path).follow_links(false).sort_by_file_name() {
+        let entry = entry?;
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_file() {
+            file_count += 1;
+            if file_count >= DIRECTORY_DOWNLOAD_MAX_FILES_EXCLUSIVE {
+                bail!(
+                    "Directory download is limited to fewer than 1,000 files; `{rel}` contains 1,000 files or more."
+                );
+            }
+            total_bytes = total_bytes
+                .checked_add(entry.metadata()?.len())
+                .ok_or_else(|| anyhow::anyhow!("Directory download size overflowed."))?;
+            if total_bytes >= DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE {
+                bail!(
+                    "Directory download is limited to less than 1 GB (1,000,000,000 bytes); `{rel}` contains 1 GB or more."
+                );
+            }
+        }
+        if file_type.is_dir() || file_type.is_file() {
+            entries.push(entry.into_path());
+        }
+    }
+
+    let mut archive = NamedTempFile::new()?;
+    {
+        let mut writer = ZipWriter::new(archive.as_file_mut());
+        let file_options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+        let directory_options = SimpleFileOptions::default().unix_permissions(0o755);
+        let mut archived_bytes = 0u64;
+        for entry in entries {
+            let relative = entry.strip_prefix(&path)?;
+            let archive_path = archive_root.join(relative);
+            if entry.is_dir() {
+                writer.add_directory_from_path(&archive_path, directory_options)?;
+            } else {
+                writer.start_file_from_path(&archive_path, file_options)?;
+                let input = File::open(&entry)?;
+                let remaining =
+                    (DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE - 1).saturating_sub(archived_bytes);
+                let copied = io::copy(&mut input.take(remaining + 1), &mut writer)?;
+                if copied > remaining {
+                    bail!(
+                        "Directory download is limited to less than 1 GB (1,000,000,000 bytes); `{rel}` contains 1 GB or more."
+                    );
+                }
+                archived_bytes += copied;
+            }
+        }
+        writer.finish()?;
+    }
+
+    Ok(WorkspaceDownload::DirectoryArchive {
+        filename: format!("{}.zip", archive_root.to_string_lossy()),
+        archive,
+    })
 }
 
 pub fn image_mime(path: &Path) -> &'static str {
@@ -251,6 +352,58 @@ mod tests {
             fs::read_to_string(root.join("new/nested/file.txt")).unwrap(),
             "ok"
         );
+    }
+
+    #[test]
+    fn directory_download_creates_a_zip_with_the_selected_root() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        fs::create_dir_all(root.join("docs/empty")).unwrap();
+        fs::write(root.join("README.md"), "hello").unwrap();
+        fs::write(root.join("docs/notes.txt"), "notes").unwrap();
+
+        let WorkspaceDownload::DirectoryArchive { filename, archive } =
+            prepare_download(&root, ".").unwrap()
+        else {
+            panic!("expected a directory archive");
+        };
+        assert_eq!(filename, "ws.zip");
+        let mut zip = zip::ZipArchive::new(archive.reopen().unwrap()).unwrap();
+        let mut readme = String::new();
+        zip.by_name("ws/README.md")
+            .unwrap()
+            .read_to_string(&mut readme)
+            .unwrap();
+        assert_eq!(readme, "hello");
+        assert!(zip.by_name("ws/docs/empty/").is_ok());
+    }
+
+    #[test]
+    fn directory_download_rejects_one_thousand_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        fs::create_dir_all(&root).unwrap();
+        for index in 0..DIRECTORY_DOWNLOAD_MAX_FILES_EXCLUSIVE {
+            fs::write(root.join(format!("{index}.txt")), []).unwrap();
+        }
+
+        let error = prepare_download(&root, ".").err().unwrap();
+
+        assert!(error.to_string().contains("fewer than 1,000 files"));
+    }
+
+    #[test]
+    fn directory_download_rejects_one_gigabyte() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        fs::create_dir_all(&root).unwrap();
+        let file = File::create(root.join("large.bin")).unwrap();
+        file.set_len(DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE)
+            .unwrap();
+
+        let error = prepare_download(&root, ".").err().unwrap();
+
+        assert!(error.to_string().contains("less than 1 GB"));
     }
 
     #[cfg(unix)]
