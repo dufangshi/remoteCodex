@@ -303,10 +303,10 @@ jobs:
             unit="$(sudo systemctl cat "${service}")"
             printf '%s' "${unit}" | grep -Fq 'remote.lnz-study.com'
             printf '%s' "${unit}" | grep -Fq 'ExecStart=/opt/remote-codex-rust-relay/remote-codex relay'
-            grep -Fxq 'HOST=127.0.0.1' "${base}/relay.env"
-            grep -Fxq 'PORT=18791' "${base}/relay.env"
-            grep -Fxq 'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-rust-relay' "${base}/relay.env"
-            grep -Fxq 'REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex-rust-relay/web' "${base}/relay.env"
+            sudo grep -Fxq 'HOST=127.0.0.1' "${base}/relay.env"
+            sudo grep -Fxq 'PORT=18791' "${base}/relay.env"
+            sudo grep -Fxq 'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-rust-relay' "${base}/relay.env"
+            sudo grep -Fxq 'REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex-rust-relay/web' "${base}/relay.env"
             test -f "${archive}"
             test -x "${base}/remote-codex"
             test -d "${base}/web"
