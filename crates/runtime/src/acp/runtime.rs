@@ -150,9 +150,10 @@ impl AcpRuntime {
         }
         let adapter = adapter_for(&def.id);
         let extra_env = extra_env_for(def);
+        let server_command = agent_server_command(def, yolo);
         let (process, updates_rx, requests_rx) = tokio::time::timeout(
             self.startup_timeout,
-            AcpProcess::spawn(&def.server_command, cwd, &extra_env),
+            AcpProcess::spawn(&server_command, cwd, &extra_env),
         )
         .await
         .map_err(|_| anyhow!("ACP spawn timeout"))??;
@@ -288,9 +289,10 @@ impl AcpRuntime {
         let cwd = std::env::temp_dir();
         let extra_env = extra_env_for(def);
         let adapter = adapter_for(&def.id);
+        let server_command = agent_server_command(def, false);
         let (process, _updates_rx, _requests_rx) = tokio::time::timeout(
             self.startup_timeout,
-            AcpProcess::spawn(&def.server_command, &cwd.to_string_lossy(), &extra_env),
+            AcpProcess::spawn(&server_command, &cwd.to_string_lossy(), &extra_env),
         )
         .await
         .map_err(|_| anyhow!("ACP spawn timeout"))??;
@@ -1690,6 +1692,38 @@ fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
         .filter(|value| !value.trim().is_empty())
         .map(|value| vec![(key, value)])
         .unwrap_or_default()
+}
+
+fn agent_server_command(def: &AcpAgentDef, auto_approve: bool) -> String {
+    if def.id != "grok" {
+        return def.server_command.clone();
+    }
+    if auto_approve {
+        "grok agent --always-approve --no-leader stdio".into()
+    } else {
+        "grok agent --no-leader stdio".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grok_process_flags_follow_the_product_permission_policy() {
+        let grok = builtin_agents(None)
+            .into_iter()
+            .find(|agent| agent.id == "grok")
+            .unwrap();
+        assert_eq!(
+            agent_server_command(&grok, true),
+            "grok agent --always-approve --no-leader stdio"
+        );
+        assert_eq!(
+            agent_server_command(&grok, false),
+            "grok agent --no-leader stdio"
+        );
+    }
 }
 
 fn apply_projection(live: &mut LiveSession, proj: super::adapter::HarnessProjection) {
