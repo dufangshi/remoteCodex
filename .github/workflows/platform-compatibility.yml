@@ -13,7 +13,8 @@ permissions:
 
 env:
   RUST_VERSION: 1.89.0
-  THREAD_UI_COMMIT: 4b426dbfe6eb8b2e0c801b6a515911172791c0f1
+  THREAD_UI_REPO: https://github.com/dufangshi/remote-codex-thread-ui-rust.git
+  THREAD_UI_REF: main
 
 jobs:
   rust:
@@ -83,12 +84,12 @@ jobs:
         with:
           version: 10.11.1
 
-      - name: Check out pinned thread UI
+      - name: Check out thread UI
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/dufangshi/remote-codex-thread-ui.git ./remote-codex-thread-ui
-          git -C ./remote-codex-thread-ui checkout --detach "${THREAD_UI_COMMIT}"
+          git clone --depth 1 --branch "${THREAD_UI_REF}" "${THREAD_UI_REPO}" ./remote-codex-thread-ui
+          echo "Thread UI: $(git -C ./remote-codex-thread-ui rev-parse HEAD)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install dependencies
         shell: bash

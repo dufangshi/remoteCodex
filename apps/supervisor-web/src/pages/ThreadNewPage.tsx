@@ -12,7 +12,6 @@ export function ThreadNewPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedWorkspaceId = searchParams.get('workspaceId');
-  const requestedTitle = searchParams.get('title');
 
   function handleCancel() {
     if (requestedWorkspaceId) {
@@ -34,7 +33,6 @@ export function ThreadNewPage() {
     >
       <ThreadCreateForm
         initialWorkspaceId={requestedWorkspaceId}
-        initialTitle={requestedTitle}
         onCancel={handleCancel}
         onCreated={(thread) => navigate(currentThreadHref(thread.id))}
       />

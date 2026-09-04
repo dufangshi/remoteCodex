@@ -533,7 +533,7 @@ test.describe('non-thread product UI regressions', () => {
     ]);
   });
 
-  test('new thread defaults to Guarded and renders one backend chooser', async ({ page }, testInfo) => {
+  test('new thread defaults to Full access and renders one backend chooser', async ({ page }, testInfo) => {
     await page.goto(`/threads/new?workspaceId=${encodeURIComponent(workspace.id)}`);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Start a backend session' }),
@@ -548,8 +548,9 @@ test.describe('non-thread product UI regressions', () => {
 
     const guarded = page.getByRole('radio', { name: 'Guarded' });
     const fullAccess = page.getByRole('radio', { name: 'Full access' });
-    await expect(guarded).toBeChecked();
-    await expect(fullAccess).not.toBeChecked();
+    await expect(guarded).not.toBeChecked();
+    await expect(fullAccess).toBeChecked();
+    await expect(page.getByRole('textbox', { name: 'Title' })).toHaveCount(0);
 
     const workspaceSelect = page.getByRole('combobox', { name: 'Workspace' });
     await expect(workspaceSelect).toHaveValue(workspace.id);
@@ -561,7 +562,6 @@ test.describe('non-thread product UI regressions', () => {
       ['back to threads', page.getByRole('button', { name: 'Back to threads' })],
       ['backend option', backendHitTarget],
       ['workspace selector', workspaceSelect],
-      ['thread title', page.getByRole('textbox', { name: 'Title' })],
       ['Guarded mode', guardedHitTarget],
       ['Full access mode', fullAccessHitTarget],
       ['create thread', page.getByRole('button', { name: 'Create Thread' })],

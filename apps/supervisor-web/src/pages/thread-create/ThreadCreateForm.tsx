@@ -78,13 +78,11 @@ function Field({
 
 export function ThreadCreateForm({
   initialWorkspaceId,
-  initialTitle = '',
   onCreated,
   onCancel,
   variant = 'panel',
 }: {
   initialWorkspaceId?: string | null | undefined;
-  initialTitle?: string | null | undefined;
   onCreated: (thread: ThreadDto) => void;
   onCancel?: () => void;
   variant?: 'panel' | 'dialog';
@@ -106,8 +104,7 @@ export function ThreadCreateForm({
   const [agentId, setAgentId] = useState('');
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
-  const [title, setTitle] = useState(() => initialTitle ?? '');
-  const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('guarded');
+  const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
@@ -128,10 +125,6 @@ export function ThreadCreateForm({
     setModel(next?.model ?? '');
     setReasoningEffort(next?.defaultReasoningEffort ?? null);
   }
-
-  useEffect(() => {
-    setTitle(initialTitle ?? '');
-  }, [initialTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,7 +301,6 @@ export function ThreadCreateForm({
     setBusy(true);
     setError(null);
     try {
-      const trimmed = title.trim();
       onCreated(
         await createThread({
           workspaceId,
@@ -317,7 +309,6 @@ export function ThreadCreateForm({
           model,
           ...(reasoningEffort ? { reasoningEffort } : {}),
           approvalMode,
-          ...(trimmed ? { title: trimmed } : {}),
         }),
       );
     } catch (caught) {
@@ -587,17 +578,6 @@ export function ThreadCreateForm({
           </Field>
         ) : null}
       </div>
-
-      <Field id={`${formId}-thread-title`} label="Title">
-        <input
-          id={`${formId}-thread-title`}
-          disabled={busy}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Optional. Falls back to first prompt."
-          className={controlClass}
-        />
-      </Field>
 
       <fieldset>
         <legend className="host-form-label text-xs font-medium">Approval mode</legend>

@@ -60,7 +60,6 @@ test.describe('Phase 2 acceptance', () => {
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
-    await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);
@@ -74,6 +73,19 @@ test.describe('Phase 2 acceptance', () => {
     await expect(page.getByText('hello', { exact: true })).toBeVisible({
       timeout: 30_000,
     });
+    const assistantContent = page
+      .locator('.thread-graph-message-content.is-assistant')
+      .last();
+    const assistantWidth = await assistantContent.evaluate((node) => {
+      const message = node.closest('.thread-graph-message');
+      return {
+        content: node.getBoundingClientRect().width,
+        available: message?.getBoundingClientRect().width ?? 0,
+      };
+    });
+    expect(assistantWidth.content).toBeGreaterThanOrEqual(
+      assistantWidth.available * 0.9,
+    );
     await expect(page.getByText('Showing 1 of 1 turns')).toBeVisible({
       timeout: 30_000,
     });
@@ -96,7 +108,6 @@ test.describe('Phase 2 acceptance', () => {
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
-    await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);
@@ -146,7 +157,6 @@ test.describe('Phase 2 acceptance', () => {
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
-    await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);
@@ -157,6 +167,6 @@ test.describe('Phase 2 acceptance', () => {
     await expect(page.getByRole('button', { name: 'Close rooms' }).first()).toBeVisible();
     const mobileSidebar = page.locator('aside:visible').first();
     await expect(mobileSidebar.getByText('Rooms', { exact: true })).toBeVisible();
-    await expect(mobileSidebar.getByRole('link', { name: new RegExp(`${workspaceName} thread`) })).toBeVisible();
+    await expect(mobileSidebar.getByRole('link', { name: 'New thread' })).toBeVisible();
   });
 });

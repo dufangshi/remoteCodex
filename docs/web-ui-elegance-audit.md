@@ -147,7 +147,7 @@
 
 ### E. Threads 与 Shared Workspace
 
-- [x] Docker 构建固定使用 `remote-codex-thread-ui` 的 `rust/acp-rewrite-composer-stop` 分支，不再错误回退到 `main`。
+- [x] Docker 构建使用独立仓库 `remote-codex-thread-ui-rust` 的 `main`，不再依赖原仓库的长期功能分支或固定提交。
 - [x] Threads 主区改为连续产品表面：状态并入顶部信息行，最近线程使用单一列表和分隔线，不再嵌套浮卡。
 - [x] Shared Workspace、Rooms、线程行和顶栏改用与 Workspaces 一致的暖中性色与琥珀主色，移除冷蓝底色和多余阴影。
 - [x] 保留 Rust 分支已经优化的聊天 thread、composer、停止与消息样式，并重新构建 `@remote-codex/thread-ui` 的 `dist`。
@@ -183,7 +183,7 @@
 - 既有 `phase2`：5 项通过，1 项在 desktop 项目按设计跳过。
 - 390px 实测：Workspaces 和 Relay Devices 的 `scrollWidth` 等于 viewport，嵌套交互为 0，可见操作小于 44px 的数量为 0；Relay Guide 同样无横向溢出。
 - 主题对比度计算：亮色正文 15.64:1、亮色 muted 5.40:1、亮色主按钮 6.77:1；暗色正文 16.39:1、暗色 muted 5.81:1、暗色主按钮 9.07:1。
-- `@remote-codex/thread-ui` 使用 `rust/acp-rewrite-composer-stop`；插件开关、XYZ 删除、Shared Workspace 表面和主题修改均已在该分支重建并测试。
+- `@remote-codex/thread-ui` 使用 `remote-codex-thread-ui-rust/main`；插件开关、XYZ 删除、Shared Workspace 表面和主题修改均已在该代码线上重建并测试。
 - `@remote-codex/thread-ui` 最终 commit 为 `7b594e8`；该分支 67 个测试文件、350 项测试通过。
 - 当前 Rust relay 尚未实现 Admin 数据接口；前端已提供明确兼容性状态、Retry 和 Relay Home 恢复路径，不再显示裸 404。
 - 仓库的 `lint` 脚本仍缺 ESLint 依赖与配置，这是既有工具链缺口，不属于本轮 UI 运行时阻塞。
