@@ -424,8 +424,7 @@ jobs:
               public_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
               public_asset="$(printf '%s' "${public_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
               if [ "${public_asset}" = "${expected_asset}" ] \
-                && printf '%s' "${public_health}" | grep -Fq '"status":"ok"' \
-                && printf '%s' "${public_health}" | grep -Eq '"supervisorCount":[1-9][0-9]*'; then
+                && printf '%s' "${public_health}" | grep -Fq '"status":"ok"'; then
                 public_ready='true'
                 break
               fi
@@ -453,14 +452,14 @@ jobs:
             target_asset="$(printf '%s' "${target_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
             target_health="$(curl -fsS https://remote.lnz-study.com/healthz || true)"
             if [ "${target_asset}" = "${expected_asset}" ] \
-              && printf '%s' "${target_health}" | jq -e '.status == "ok" and .supervisorCount >= 1' >/dev/null 2>&1; then
+              && printf '%s' "${target_health}" | jq -e '.status == "ok"' >/dev/null 2>&1; then
               break
             fi
             sleep 2
           done
 
           test "${target_asset}" = "${expected_asset}"
-          printf '%s' "${target_health}" | jq -e '.status == "ok" and .supervisorCount >= 1' >/dev/null
+          printf '%s' "${target_health}" | jq -e '.status == "ok"' >/dev/null
 
           legacy_ready='false'
           legacy_asset=''

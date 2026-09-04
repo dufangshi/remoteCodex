@@ -82,6 +82,25 @@ test('publishes and tags the launcher', () => {
   ]);
 });
 
+test('retries registry visibility after publishing', () => {
+  const npm = mockNpm({}, { notFoundViews: 2 });
+
+  publishRelease({
+    channel: 'latest',
+    inputDir: '/release',
+    manifest,
+    allowLatest: true,
+    registryRetryDelayMs: 0,
+    runNpm: npm.run,
+    log() {},
+  });
+
+  assert.equal(npm.commands('publish').length, 1);
+  assert.deepEqual(npm.commands('dist-tag'), [
+    ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
+  ]);
+});
+
 test('does not treat an npm view transport failure as an unpublished version', () => {
   const npm = mockNpm({}, { viewErrorFor: 'remote-codex@0.12.0' });
 
@@ -103,6 +122,7 @@ test('does not treat an npm view transport failure as an unpublished version', (
 function mockNpm(initialRegistry, options = {}) {
   const registry = new Map(Object.entries(initialRegistry));
   const calls = [];
+  let notFoundViews = options.notFoundViews ?? 0;
 
   return {
     run(args) {
@@ -110,6 +130,10 @@ function mockNpm(initialRegistry, options = {}) {
       if (args[0] === 'view') {
         if (args[1] === options.viewErrorFor) {
           return { status: 1, stdout: '', stderr: 'ECONNRESET' };
+        }
+        if (notFoundViews > 0) {
+          notFoundViews -= 1;
+          return { status: 1, stdout: '', stderr: 'npm error code E404' };
         }
         const integrity = registry.get(args[1]);
         if (!integrity) {

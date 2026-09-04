@@ -41,6 +41,7 @@ export function publishRelease({
   allowLatest = false,
   runNpm,
   log = console.log,
+  registryRetryDelayMs = 2_000,
 }) {
   if (!['next', 'latest'].includes(channel)) {
     throw new Error('Release channel must be next or latest');
@@ -102,7 +103,11 @@ export function publishRelease({
       assertCommandSucceeded(result, `npm publish failed for ${spec}`);
 
       if (!dryRun) {
-        const published = registryIntegrity(spec, runNpm);
+        let published = null;
+        for (let attempt = 0; attempt < 6 && !published; attempt += 1) {
+          if (attempt > 0) sleepSync(registryRetryDelayMs);
+          published = registryIntegrity(spec, runNpm);
+        }
         if (published !== entry.integrity) {
           throw new Error(`Published integrity mismatch for ${spec}`);
         }
@@ -124,6 +129,11 @@ export function publishRelease({
       log(`Set npm dist-tag ${channel}: ${spec}`);
     }
   }
+}
+
+function sleepSync(milliseconds) {
+  if (milliseconds <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 function registryIntegrity(spec, runNpm) {
