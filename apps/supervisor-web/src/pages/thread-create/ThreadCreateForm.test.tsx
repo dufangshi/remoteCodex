@@ -71,7 +71,9 @@ describe('ThreadCreateForm', () => {
     expect(fullAccess).toBeChecked();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Thread' }));
+    const createButton = screen.getByRole('button', { name: 'Create Thread' });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
 
     await waitFor(() =>
       expect(api.createThread).toHaveBeenCalledWith({
