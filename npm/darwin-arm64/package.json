@@ -1,5 +1,5 @@
 {
-  "name": "@remote-codex/native-darwin-arm64",
+  "name": "@dufangshi/remote-codex-native-darwin-arm64",
   "version": "0.12.0",
   "description": "Remote Codex native binary for macOS ARM64.",
   "license": "MIT",

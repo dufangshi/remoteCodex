@@ -22,13 +22,13 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@remote-codex/native-darwin-arm64": "0.12.0",
-    "@remote-codex/native-darwin-x64": "0.12.0",
-    "@remote-codex/native-linux-arm64-gnu": "0.12.0",
-    "@remote-codex/native-linux-arm64-musl": "0.12.0",
-    "@remote-codex/native-linux-x64-gnu": "0.12.0",
-    "@remote-codex/native-linux-x64-musl": "0.12.0",
-    "@remote-codex/native-win32-x64-msvc": "0.12.0"
+    "@dufangshi/remote-codex-native-darwin-arm64": "0.12.0",
+    "@dufangshi/remote-codex-native-darwin-x64": "0.12.0",
+    "@dufangshi/remote-codex-native-linux-arm64-gnu": "0.12.0",
+    "@dufangshi/remote-codex-native-linux-arm64-musl": "0.12.0",
+    "@dufangshi/remote-codex-native-linux-x64-gnu": "0.12.0",
+    "@dufangshi/remote-codex-native-linux-x64-musl": "0.12.0",
+    "@dufangshi/remote-codex-native-win32-x64-msvc": "0.12.0"
   },
   "publishConfig": {
     "access": "public"

@@ -45,24 +45,33 @@ const relayTmuxSession =
   'remote-codex-relay-supervisor';
 
 const platformPackages = new Map([
-  ['darwin-arm64', ['@remote-codex/native-darwin-arm64', 'bin/remote-codex']],
-  ['darwin-x64', ['@remote-codex/native-darwin-x64', 'bin/remote-codex']],
+  [
+    'darwin-arm64',
+    ['@dufangshi/remote-codex-native-darwin-arm64', 'bin/remote-codex'],
+  ],
+  [
+    'darwin-x64',
+    ['@dufangshi/remote-codex-native-darwin-x64', 'bin/remote-codex'],
+  ],
   [
     'linux-arm64-gnu',
-    ['@remote-codex/native-linux-arm64-gnu', 'bin/remote-codex'],
+    ['@dufangshi/remote-codex-native-linux-arm64-gnu', 'bin/remote-codex'],
   ],
   [
     'linux-arm64-musl',
-    ['@remote-codex/native-linux-arm64-musl', 'bin/remote-codex'],
+    ['@dufangshi/remote-codex-native-linux-arm64-musl', 'bin/remote-codex'],
   ],
-  ['linux-x64-gnu', ['@remote-codex/native-linux-x64-gnu', 'bin/remote-codex']],
+  [
+    'linux-x64-gnu',
+    ['@dufangshi/remote-codex-native-linux-x64-gnu', 'bin/remote-codex'],
+  ],
   [
     'linux-x64-musl',
-    ['@remote-codex/native-linux-x64-musl', 'bin/remote-codex'],
+    ['@dufangshi/remote-codex-native-linux-x64-musl', 'bin/remote-codex'],
   ],
   [
     'win32-x64-msvc',
-    ['@remote-codex/native-win32-x64-msvc', 'bin/remote-codex.exe'],
+    ['@dufangshi/remote-codex-native-win32-x64-msvc', 'bin/remote-codex.exe'],
   ],
 ]);
 

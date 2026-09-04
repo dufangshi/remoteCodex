@@ -1,5 +1,5 @@
 {
-  "name": "@remote-codex/native-linux-x64-gnu",
+  "name": "@dufangshi/remote-codex-native-linux-x64-gnu",
   "version": "0.12.0",
   "description": "Remote Codex native binary for Linux x64 (glibc).",
   "license": "MIT",

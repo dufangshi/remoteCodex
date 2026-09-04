@@ -11,13 +11,13 @@ remote-codex
   bin/remote-codex.mjs
   web/
   optionalDependencies:
-    @remote-codex/native-darwin-arm64
-    @remote-codex/native-darwin-x64
-    @remote-codex/native-linux-arm64-gnu
-    @remote-codex/native-linux-arm64-musl
-    @remote-codex/native-linux-x64-gnu
-    @remote-codex/native-linux-x64-musl
-    @remote-codex/native-win32-x64-msvc
+    @dufangshi/remote-codex-native-darwin-arm64
+    @dufangshi/remote-codex-native-darwin-x64
+    @dufangshi/remote-codex-native-linux-arm64-gnu
+    @dufangshi/remote-codex-native-linux-arm64-musl
+    @dufangshi/remote-codex-native-linux-x64-gnu
+    @dufangshi/remote-codex-native-linux-x64-musl
+    @dufangshi/remote-codex-native-win32-x64-msvc
 ```
 
 ## 为什么采用平台 optionalDependencies

@@ -14,14 +14,14 @@ const manifest = {
     },
     {
       kind: 'native',
-      name: '@remote-codex/native-linux-x64-gnu',
+      name: '@dufangshi/remote-codex-native-linux-x64-gnu',
       version: '0.12.0',
       filename: 'native-linux-x64-gnu-0.12.0.tgz',
       integrity: 'sha512-linux',
     },
     {
       kind: 'native',
-      name: '@remote-codex/native-darwin-arm64',
+      name: '@dufangshi/remote-codex-native-darwin-arm64',
       version: '0.12.0',
       filename: 'native-darwin-arm64-0.12.0.tgz',
       integrity: 'sha512-darwin',
@@ -31,8 +31,8 @@ const manifest = {
 
 test('promotes every matching package to latest with the launcher last', () => {
   const npm = mockNpm({
-    '@remote-codex/native-linux-x64-gnu@0.12.0': 'sha512-linux',
-    '@remote-codex/native-darwin-arm64@0.12.0': 'sha512-darwin',
+    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
+    '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
     'remote-codex@0.12.0': 'sha512-launcher',
   });
 
@@ -47,16 +47,26 @@ test('promotes every matching package to latest with the launcher last', () => {
 
   assert.deepEqual(npm.commands('publish'), []);
   assert.deepEqual(npm.commands('dist-tag'), [
-    ['dist-tag', 'add', '@remote-codex/native-linux-x64-gnu@0.12.0', 'latest'],
-    ['dist-tag', 'add', '@remote-codex/native-darwin-arm64@0.12.0', 'latest'],
+    [
+      'dist-tag',
+      'add',
+      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0',
+      'latest',
+    ],
+    [
+      'dist-tag',
+      'add',
+      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0',
+      'latest',
+    ],
     ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
   ]);
 });
 
 test('detects every integrity conflict before changing the registry', () => {
   const npm = mockNpm({
-    '@remote-codex/native-linux-x64-gnu@0.12.0': 'sha512-linux',
-    '@remote-codex/native-darwin-arm64@0.12.0': 'sha512-wrong',
+    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
+    '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-wrong',
     'remote-codex@0.12.0': 'sha512-launcher',
   });
 
@@ -78,11 +88,11 @@ test('detects every integrity conflict before changing the registry', () => {
 test('does not promote the launcher after a native dist-tag failure', () => {
   const npm = mockNpm(
     {
-      '@remote-codex/native-linux-x64-gnu@0.12.0': 'sha512-linux',
-      '@remote-codex/native-darwin-arm64@0.12.0': 'sha512-darwin',
+      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
+      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
       'remote-codex@0.12.0': 'sha512-launcher',
     },
-    { failTagFor: '@remote-codex/native-darwin-arm64@0.12.0' },
+    { failTagFor: '@dufangshi/remote-codex-native-darwin-arm64@0.12.0' },
   );
 
   assert.throws(
@@ -98,14 +108,24 @@ test('does not promote the launcher after a native dist-tag failure', () => {
     /npm dist-tag add failed/,
   );
   assert.deepEqual(npm.commands('dist-tag'), [
-    ['dist-tag', 'add', '@remote-codex/native-linux-x64-gnu@0.12.0', 'latest'],
-    ['dist-tag', 'add', '@remote-codex/native-darwin-arm64@0.12.0', 'latest'],
+    [
+      'dist-tag',
+      'add',
+      '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0',
+      'latest',
+    ],
+    [
+      'dist-tag',
+      'add',
+      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0',
+      'latest',
+    ],
   ]);
 });
 
 test('finishes native publishing and tagging before touching the launcher', () => {
   const npm = mockNpm({
-    '@remote-codex/native-linux-x64-gnu@0.12.0': 'sha512-linux',
+    '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0': 'sha512-linux',
   });
 
   publishRelease({
@@ -148,10 +168,10 @@ test('finishes native publishing and tagging before touching the launcher', () =
 test('does not treat an npm view transport failure as an unpublished version', () => {
   const npm = mockNpm(
     {
-      '@remote-codex/native-darwin-arm64@0.12.0': 'sha512-darwin',
+      '@dufangshi/remote-codex-native-darwin-arm64@0.12.0': 'sha512-darwin',
       'remote-codex@0.12.0': 'sha512-launcher',
     },
-    { viewErrorFor: '@remote-codex/native-linux-x64-gnu@0.12.0' },
+    { viewErrorFor: '@dufangshi/remote-codex-native-linux-x64-gnu@0.12.0' },
   );
 
   assert.throws(
