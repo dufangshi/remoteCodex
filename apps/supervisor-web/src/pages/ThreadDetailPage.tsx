@@ -231,7 +231,7 @@ interface OptimisticTurnState {
   id: string;
   serverTurnId: string | null;
   startedAt: string;
-  status: 'sending' | 'inProgress' | 'completed' | 'failed';
+  status: 'sending' | 'inProgress' | 'completed' | 'interrupted' | 'failed';
   error: string | null;
   prompt: string;
   attachmentPreviews: OptimisticAttachmentPreview[];
@@ -1739,7 +1739,9 @@ export function ThreadDetailPage() {
               : current,
           );
         }
-        refreshThreadDetailSilently();
+        if (event.type !== 'thread.turn.completed') {
+          refreshThreadDetailSilently();
+        }
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
           setLiveOutput('');
@@ -1772,23 +1774,44 @@ export function ThreadDetailPage() {
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
           if (eventTurnId) {
             terminalTurnPendingRef.current = eventTurnId;
-            if (event.type === 'thread.turn.failed') {
-              setOptimisticTurn((current) =>
-                current &&
-                (current.serverTurnId === eventTurnId ||
-                  current.id === eventTurnId)
-                  ? {
-                      ...current,
-                      status: 'failed',
-                      error:
-                        typeof event.payload.error === 'string'
-                          ? event.payload.error
-                          : 'Unable to complete the turn.',
-                      tokenUsage: current.tokenUsage,
-                    }
-                  : current,
-              );
-            }
+            const terminalStatus =
+              event.type === 'thread.turn.failed'
+                ? 'failed'
+                : event.payload.status;
+            const terminalError =
+              typeof event.payload.error === 'string'
+                ? event.payload.error
+                : event.type === 'thread.turn.failed'
+                  ? 'Unable to complete the turn.'
+                  : null;
+            setDetail((current) =>
+              current
+                ? {
+                    ...current,
+                    turns: current.turns.map((turn) =>
+                      turn.id === eventTurnId
+                        ? {
+                            ...turn,
+                            status: terminalStatus,
+                            completedAt: event.timestamp,
+                            error: terminalError,
+                          }
+                        : turn,
+                    ),
+                  }
+                : current,
+            );
+            setOptimisticTurn((current) =>
+              current &&
+              (current.serverTurnId === eventTurnId || current.id === eventTurnId)
+                ? {
+                    ...current,
+                    status: terminalStatus,
+                    error: terminalError,
+                    tokenUsage: current.tokenUsage,
+                  }
+                : current,
+            );
           }
         }
       }

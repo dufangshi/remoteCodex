@@ -315,6 +315,7 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
             .map(|(id, status, error, started)| ThreadTurnDto {
                 id: id.clone(),
                 started_at: int_to_rfc3339(started),
+                completed_at: None,
                 status: normalize_status(&status),
                 error: parse_codex_turn_error(error.as_deref()),
                 model: None,
@@ -857,6 +858,7 @@ fn empty_codex_turn(id: String, started_at: Option<String>) -> ThreadTurnDto {
     ThreadTurnDto {
         id,
         started_at,
+        completed_at: None,
         status: "inProgress".into(),
         error: None,
         model: None,
@@ -995,6 +997,7 @@ fn parse_grok_history(path: &Path) -> Vec<ThreadTurnDto> {
                 current = Some(ThreadTurnDto {
                     id: id.clone(),
                     started_at: None,
+                    completed_at: None,
                     status: "completed".into(),
                     error: None,
                     model: None,
@@ -1116,6 +1119,7 @@ fn parse_claude_jsonl(path: &Path, with_history: bool) -> Option<ImportSessionMe
                         .get("timestamp")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    completed_at: None,
                     status: "completed".into(),
                     error: None,
                     model: None,
@@ -1421,6 +1425,7 @@ mod tests {
         let paginated = vec![ThreadTurnDto {
             id: "turn-rich".into(),
             started_at: Some("2026-08-31T00:00:01.000Z".into()),
+            completed_at: None,
             status: "failed".into(),
             error: Some("cached error".into()),
             model: None,
@@ -1441,6 +1446,7 @@ mod tests {
             ThreadTurnDto {
                 id: "turn-rich".into(),
                 started_at: Some("2026-08-31T00:00:01.000Z".into()),
+                completed_at: None,
                 status: "completed".into(),
                 error: None,
                 model: None,
@@ -1460,6 +1466,7 @@ mod tests {
             ThreadTurnDto {
                 id: "turn-new".into(),
                 started_at: Some("2026-08-31T00:01:00.000Z".into()),
+                completed_at: None,
                 status: "inProgress".into(),
                 error: None,
                 model: None,

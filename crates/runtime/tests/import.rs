@@ -70,6 +70,7 @@ async fn imports_codex_uri_and_requires_resume() {
         turns: vec![ThreadTurnDto {
             id: "turn-imported-1".into(),
             started_at: None,
+            completed_at: None,
             status: "completed".into(),
             error: None,
             model: None,
@@ -180,6 +181,7 @@ async fn imports_grok_session_through_acp_catalog() {
         turns: vec![ThreadTurnDto {
             id: "g1".into(),
             started_at: None,
+            completed_at: None,
             status: "completed".into(),
             error: None,
             model: None,

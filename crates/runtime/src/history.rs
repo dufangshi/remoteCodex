@@ -55,6 +55,7 @@ mod tests {
         ThreadTurnDto {
             id: "turn-1".into(),
             started_at: Some("2026-09-02T12:00:00.000Z".into()),
+            completed_at: None,
             status: status.into(),
             error: None,
             model: None,

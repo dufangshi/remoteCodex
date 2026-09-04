@@ -245,6 +245,8 @@ pub struct ThreadHistoryItemDto {
 pub struct ThreadTurnDto {
     pub id: String,
     pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
     pub status: String,
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

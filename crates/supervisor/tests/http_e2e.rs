@@ -1263,6 +1263,11 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
     .await;
     let interrupted = wait_thread(&client, &base, &long_id).await;
     assert_ne!(interrupted["thread"]["status"], "running");
+    assert!(interrupted["turns"]
+        .as_array()
+        .and_then(|turns| turns.last())
+        .and_then(|turn| turn["completedAt"].as_str())
+        .is_some());
 }
 
 #[tokio::test]
@@ -1423,6 +1428,7 @@ async fn import_extracts_codex_uri_and_hydrates_history() {
         turns: vec![ThreadTurnDto {
             id: "turn-imported-1".into(),
             started_at: None,
+            completed_at: None,
             status: "completed".into(),
             error: None,
             model: None,

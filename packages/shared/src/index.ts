@@ -1166,6 +1166,7 @@ export interface ThreadTurnPriceEstimateDto {
 export interface ThreadTurnDto {
   id: string;
   startedAt: string | null;
+  completedAt?: string | null;
   status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
   error: string | null;
   model?: string | null;

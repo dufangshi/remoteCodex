@@ -1392,7 +1392,7 @@ impl Supervisor {
                 .or_else(|| before_turn_id.map(|_| 10))
                 .unwrap_or(i64::MAX);
             let mut stmt = conn.prepare(
-                "SELECT id, status, error, model, reasoning_effort, token_usage_json, started_at
+                "SELECT id, status, error, model, reasoning_effort, token_usage_json, started_at, completed_at
                  FROM thread_turns
                  WHERE thread_id=?1 AND (?2 IS NULL OR ordinal < ?2)
                  ORDER BY ordinal DESC, rowid DESC LIMIT ?3",
@@ -1402,6 +1402,7 @@ impl Supervisor {
                     Ok(ThreadTurnDto {
                         id: row.get(0)?,
                         started_at: row.get(6)?,
+                        completed_at: row.get(7)?,
                         status: row.get(1)?,
                         error: row.get(2)?,
                         model: row.get(3)?,
@@ -1682,6 +1683,7 @@ impl Supervisor {
             .await;
         self.live.lock().await.remove(&thread.id);
         let completed_at = now_rfc3339();
+        let result_failed = result.is_err();
         match result {
             Ok(items) => {
                 let interrupted = cancel.is_cancelled();
@@ -1710,6 +1712,23 @@ impl Supervisor {
                 )?;
             }
         }
+        let thread_status = if cancel.is_cancelled() {
+            "interrupted"
+        } else if result_failed {
+            "failed"
+        } else {
+            "idle"
+        };
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(),
+            thread_id: thread.id.clone(),
+            timestamp: completed_at.clone(),
+            payload: json!({
+                "status": thread_status,
+                "turnId": turn_id,
+                "completedAt": completed_at
+            }),
+        });
         self.drain_steers(&thread.id).await?;
         Ok(())
     }

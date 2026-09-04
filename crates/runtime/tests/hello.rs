@@ -405,6 +405,11 @@ async fn long_turn_can_be_interrupted() {
     }
     let detail = supervisor.interrupt(&thread.id).await.unwrap();
     assert_ne!(detail.thread.status, "running");
+    assert!(detail
+        .turns
+        .last()
+        .and_then(|turn| turn.completed_at.as_ref())
+        .is_some());
     let _ = run.await;
 }
 
@@ -423,6 +428,7 @@ async fn restart_reconciles_stale_turn_and_allows_another_prompt() {
     assert_eq!(recovered.active_turn_id, None);
     let recovered_detail = restarted.get_thread_detail(&thread.id, None).await.unwrap();
     assert_eq!(recovered_detail.turns[0].status, "interrupted");
+    assert!(recovered_detail.turns[0].completed_at.is_some());
     assert!(recovered_detail.turns[0]
         .error
         .as_deref()
@@ -451,6 +457,7 @@ async fn interrupt_immediately_reconciles_a_turn_without_a_live_task() {
     assert_eq!(detail.thread.status, "interrupted");
     assert_eq!(detail.thread.active_turn_id, None);
     assert_eq!(detail.turns[0].status, "interrupted");
+    assert!(detail.turns[0].completed_at.is_some());
 }
 
 #[tokio::test]
