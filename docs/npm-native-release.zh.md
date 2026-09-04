@@ -23,8 +23,11 @@ GitHub Release v0.12.0
   remote-codex-linux-x64-gnu
   remote-codex-linux-x64-musl
   remote-codex-win32-x64-msvc-cli.exe
-  remote-codex-win32-x64-msvc.exe  # Native Windows Device Manager, not used by npm
 ```
+
+Windows Device Manager 是独立发布、低频更新的 bootstrap，不属于每个 runtime
+Release。它通过 npm registry 检查新版 `remote-codex`，停止当前 supervisor、安装并验证
+新 runtime 后再恢复服务。因此只有 Device Manager 自身代码变化时才重新构建和发布 EXE。
 
 ## 方案取舍
 

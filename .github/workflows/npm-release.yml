@@ -101,11 +101,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-dotnet@v5
-        if: matrix.key == 'win32-x64-msvc'
-        with:
-          dotnet-version: '8.0.x'
-
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -140,54 +135,6 @@ jobs:
         shell: bash
         run: target/'${{ matrix.cargo_target }}'/release/'${{ matrix.binary }}' version
 
-      - name: Build and verify Windows Device Manager
-        if: matrix.key == 'win32-x64-msvc'
-        shell: pwsh
-        run: ./scripts/windows/build-device-manager.ps1 -BundledRemoteCodexBinary "target/${{ matrix.cargo_target }}/release/remote-codex.exe"
-
-      - name: Sign Windows Device Manager when a certificate is configured
-        if: matrix.key == 'win32-x64-msvc'
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)) {
-            Write-Host 'Windows signing certificate is not configured; keeping the verified unsigned artifact.'
-            exit 0
-          }
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'remote-codex-signing.pfx'
-          [IO.File]::WriteAllBytes(
-            $certificatePath,
-            [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
-          )
-          $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          try {
-            $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1
-            if (-not $signTool) { throw 'signtool.exe was not found.' }
-            $executable = 'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe'
-            & $signTool.FullName sign /sha1 $certificate.Thumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $executable
-            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE." }
-            & $signTool.FullName verify /pa /v $executable
-            if ($LASTEXITCODE -ne 0) { throw "Signature verification failed with exit code $LASTEXITCODE." }
-            $hash = Get-FileHash -LiteralPath $executable -Algorithm SHA256
-            $hashLine = '{0}  RemoteCodex.DeviceManager.exe' -f $hash.Hash.ToLowerInvariant()
-            [IO.File]::WriteAllText(
-              'artifacts\windows-device-manager\win-x64\RemoteCodex.DeviceManager.exe.sha256',
-              "$hashLine`n",
-              [Text.UTF8Encoding]::new($false)
-            )
-          }
-          finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-            if ($certificate) {
-              Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
-            }
-          }
-
       - name: Stage artifact
         shell: bash
         run: |
@@ -202,14 +149,6 @@ jobs:
         with:
           name: ${{ matrix.key }}
           path: artifacts/${{ matrix.key }}/${{ matrix.binary }}
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v4
-        if: matrix.key == 'win32-x64-msvc'
-        with:
-          name: windows-device-manager
-          path: artifacts/windows-device-manager/win-x64/
           if-no-files-found: error
           retention-days: 7
 
@@ -294,7 +233,6 @@ jobs:
             chmod 0755 "release-assets/remote-codex-${key}"
           done
           cp artifacts/win32-x64-msvc/remote-codex.exe release-assets/remote-codex-win32-x64-msvc-cli.exe
-          cp artifacts/windows-device-manager/RemoteCodex.DeviceManager.exe release-assets/remote-codex-win32-x64-msvc.exe
           (cd release-assets && sha256sum remote-codex-* > SHA256SUMS)
 
           if gh release view "${tag}" >/dev/null 2>&1; then
@@ -312,7 +250,7 @@ jobs:
             gh release create "${tag}" release-assets/* \
               --target "${GITHUB_SHA}" \
               --title "Remote Codex ${version}" \
-              --notes "Rust supervisor and relay release. The Windows asset without the -cli suffix is the native Relay Device Manager. Native binaries are unsigned; verify downloads with SHA256SUMS."
+              --notes "Rust supervisor and relay runtime release. The Windows CLI asset uses the -cli suffix; the separately released Device Manager updates this runtime through npm. Native binaries are unsigned; verify downloads with SHA256SUMS."
           fi
 
   publish:

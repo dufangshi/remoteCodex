@@ -41,13 +41,13 @@ See [the native npm release design](docs/npm-native-release.zh.md).
 The controlled main/relay rollout is documented in
 [the Rust main cutover runbook](docs/rust-main-cutover.zh.md).
 
-The Windows x64 GitHub Release asset named
-`remote-codex-win32-x64-msvc.exe` is the native Relay Device Manager. Its small
+The native Windows Relay Device Manager is a stable bootstrap application. Its
 WinForms UI manages pasted Relay configuration, workspace and port selection,
-the private `remote-codex` npm runtime, connect/disconnect, updates, login
-startup, recovery, logs, and the notification-area icon. It does not contain
-the browser Web UI. The separate `-cli.exe` asset is used by the npm launcher
-and retains the general-purpose command surface.
+the private `remote-codex` npm runtime, connect/disconnect, runtime updates,
+login startup, recovery, logs, and the notification-area icon. Runtime releases
+do not rebuild the Device Manager: its Check and Update actions install the
+newest `remote-codex` npm version. The `-cli.exe` asset in each runtime release
+is used by the npm launcher and retains the general-purpose command surface.
 
 Relay:
 

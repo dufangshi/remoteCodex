@@ -1,6 +1,6 @@
 {
   "name": "@dufangshi/remote-codex-native-darwin-x64",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Remote Codex native binary for macOS x64.",
   "license": "MIT",
   "repository": {
