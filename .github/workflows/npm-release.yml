@@ -228,5 +228,6 @@ jobs:
 
       - name: Publish native packages before launcher
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           REMOTE_CODEX_ALLOW_LATEST: ${{ inputs.channel == 'latest' && '1' || '0' }}
         run: node scripts/publish-npm-release.mjs '${{ inputs.channel }}'

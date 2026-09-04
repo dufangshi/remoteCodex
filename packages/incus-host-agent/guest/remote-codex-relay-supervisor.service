@@ -1,0 +1,27 @@
+[Unit]
+Description=Remote Codex relay supervisor in hosted VM
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/remote-codex/supervisor.env
+
+[Service]
+Type=simple
+User=remote-codex
+Group=remote-codex
+Environment=HOME=/home/remote-codex
+Environment=CODEX_HOME=/home/remote-codex/.codex
+EnvironmentFile=/etc/remote-codex/supervisor.env
+WorkingDirectory=/home/remote-codex
+ExecStart=/usr/local/bin/remote-codex relay-supervisor run
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/remote-codex
+
+[Install]
+WantedBy=multi-user.target

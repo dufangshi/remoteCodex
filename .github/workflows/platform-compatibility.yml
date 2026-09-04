@@ -108,6 +108,16 @@ jobs:
           pnpm --filter @remote-codex/supervisor-web test
           pnpm --filter @remote-codex/supervisor-web build
 
+      - name: Validate Incus host agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @remote-codex/incus-host-agent typecheck
+          pnpm --filter @remote-codex/incus-host-agent test
+          pnpm --filter @remote-codex/incus-host-agent build
+          bash -n packages/incus-host-agent/deploy/*.sh
+          bash -n packages/incus-host-agent/guest/*.sh packages/incus-host-agent/guest/remote-codex-provision
+
       - name: Build release binary
         shell: bash
         run: |

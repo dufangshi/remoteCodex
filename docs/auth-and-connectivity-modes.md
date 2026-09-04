@@ -108,6 +108,41 @@ It should normally also be given:
 - `HOST`
 - `PORT`
 
+Google and GitHub OAuth are enabled only when both credentials for that
+provider are configured. `REMOTE_CODEX_PUBLIC_BASE_URL` must be the public
+HTTPS relay origin so the generated callback exactly matches the provider
+configuration:
+
+```bash
+REMOTE_CODEX_PUBLIC_BASE_URL=https://relay.example.com
+REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID=...
+REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET=...
+REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID=...
+REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET=...
+```
+
+The callback paths are `/relay/auth/oauth/google/callback` and
+`/relay/auth/oauth/github/callback`. OAuth identities are stored in
+`relay_user_identities`. When registration approval is enabled, a new OAuth
+identity enters `relay_pending_registrations`; approval creates the user and
+identity in one transaction.
+
+Hosted supervisor VMs use the separately deployed Incus host-agent:
+
+```bash
+REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER=incus
+REMOTE_CODEX_INCUS_HOST_AGENT_URL=http://172.30.0.1:8801
+REMOTE_CODEX_INCUS_HOST_AGENT_TOKEN=...
+REMOTE_CODEX_HOSTED_RELAY_SERVER_URL=wss://relay.example.com
+REMOTE_CODEX_HOSTED_IDLE_TIMEOUT_MS=1800000
+REMOTE_CODEX_HOSTED_RECONCILE_INTERVAL_MS=300000
+```
+
+The Rust relay implements the existing Node database and host-agent contracts:
+credential creation, VM create/start/stop/snapshot/delete, reprovisioning,
+credential rotation, restart reconciliation, idle stop, active-turn tracking,
+multi-user workspace isolation, and orphan inventory cleanup.
+
 On the private machine that will run Codex and access local workspaces, run the
 relay-connected supervisor backend:
 
@@ -171,6 +206,9 @@ The current implementation establishes the supervisor-initiated outbound tunnel,
 - the relay authenticates that tunnel with a per-device token created in `/relay-portal`,
 - optional `REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN` remains as a legacy bootstrap token path,
 - `/healthz` on the relay reports whether a supervisor is connected.
+- OAuth login supports existing Google/GitHub identity rows and approval flows.
+- Hosted Incus supervisors retain their existing sandbox, operation, member,
+  workspace, thread, credential-reference, and idle-lifecycle records.
 - relay users register with email, username, and password at `/relay-portal`,
 - relay users create devices and configure the returned `rcd_...` token on the private supervisor as `REMOTE_CODEX_RELAY_AGENT_TOKEN`,
 - clients call `GET|POST|PATCH|DELETE /relay/devices/:deviceId/api/...` on the public relay,

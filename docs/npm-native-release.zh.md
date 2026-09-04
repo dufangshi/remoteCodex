@@ -104,6 +104,11 @@ GitHub workflow 使用 cloud-hosted runner、`id-token: write`、Node 24 和 npm
 
 新平台包在 npm 上还不存在时，需要先由拥有 scope 的账号完成一次受控 bootstrap 发布，然后才能在包设置页绑定 trusted publisher。bootstrap 后应撤销临时 token，并禁止传统 token 发布。`npm-release` GitHub Environment 应要求人工审批；`latest` 还要求 workflow 内的第二个显式开关。
 
+本次 `0.12.0` 首发可以把本机 `.npmrc` 中已验证的 granular token 写入
+GitHub repository secret `NPM_TOKEN`。发布 job 通过 `NODE_AUTH_TOKEN` 使用它完成
+七个平台包和 launcher 的首次创建；所有包创建并绑定 trusted publisher 后，再移除
+该 secret，后续版本只使用 OIDC。
+
 官方参考：
 
 - npm package.json 的 `optionalDependencies`、`os`、`cpu`、`libc`：<https://docs.npmjs.com/files/package.json/>

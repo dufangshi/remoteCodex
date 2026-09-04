@@ -1812,11 +1812,13 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "chrono",
  "futures-util",
  "hex",
  "hmac",
  "rand 0.8.8",
  "remote-codex-protocol",
+ "reqwest",
  "rusqlite",
  "scrypt",
  "serde",
@@ -1825,6 +1827,7 @@ dependencies = [
  "subtle",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

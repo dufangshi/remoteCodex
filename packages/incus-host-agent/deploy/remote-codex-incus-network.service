@@ -1,0 +1,13 @@
+[Unit]
+Description=Allow managed Incus VM egress through Docker forwarding policy
+After=incus.service docker.service
+Wants=incus.service
+
+[Service]
+Type=oneshot
+Environment=REMOTE_CODEX_INCUS_BRIDGE=rcdbr0
+ExecStart=/usr/local/sbin/remote-codex-configure-incus-network
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

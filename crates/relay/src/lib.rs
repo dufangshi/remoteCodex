@@ -1,16 +1,19 @@
-use std::collections::HashMap;
+mod hosted;
+mod oauth;
+
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Result};
-use axum::body::{Body, Bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::http::{header, HeaderMap, Method, Uri};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -28,8 +31,10 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
+use oauth::{ExternalIdentity, OAuthConfig, OAuthProvider};
+
 struct RelayStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
     session_secret: String,
 }
 
@@ -142,16 +147,9 @@ pub fn migrate_relay_data_dir_with_options(
     let data_dir = data_dir.as_ref();
     std::fs::create_dir_all(data_dir)?;
     let plan = inspect_relay_migration(data_dir)?;
-    let unsupported_count =
-        plan.hosted_sandbox_count + plan.oauth_identity_count + plan.pending_registration_count;
-    if !options.allow_unsupported_data
-        && (unsupported_count > 0 || !plan.active_unsupported_settings.is_empty())
-    {
+    if !options.allow_unsupported_data && !plan.active_unsupported_settings.is_empty() {
         bail!(
-            "relay migration blocked by unsupported active data: hostedSandboxes={}, oauthIdentities={}, pendingRegistrations={}, settings={:?}; rerun only after resolving them or explicitly pass --allow-unsupported-data",
-            plan.hosted_sandbox_count,
-            plan.oauth_identity_count,
-            plan.pending_registration_count,
+            "relay migration blocked by unsupported active settings: {:?}; rerun only after resolving them or explicitly pass --allow-unsupported-data",
             plan.active_unsupported_settings
         );
     }
@@ -239,22 +237,16 @@ fn unsupported_relay_data(path: &FsPath) -> Result<(i64, i64, i64, Vec<String>)>
     };
     let mut active_settings = Vec::new();
     if table_exists(&conn, "relay_settings") {
-        for key in [
-            "registrationApprovalRequired",
-            "googleAuthEnabled",
-            "githubAuthEnabled",
-            "emailVerificationEnabled",
-        ] {
-            let enabled: Option<String> = conn
-                .query_row(
-                    "SELECT value FROM relay_settings WHERE key=?1",
-                    params![key],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if enabled.as_deref() == Some("true") {
-                active_settings.push(key.to_string());
-            }
+        let key = "emailVerificationEnabled";
+        let enabled: Option<String> = conn
+            .query_row(
+                "SELECT value FROM relay_settings WHERE key=?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if enabled.as_deref() == Some("true") {
+            active_settings.push(key.to_string());
         }
     }
     Ok((
@@ -457,9 +449,10 @@ impl RelayStore {
             CREATE INDEX IF NOT EXISTS relay_access_grants_device_scope_idx ON relay_access_grants(device_id, scope);
             ",
         )?;
+        hosted::ensure_schema(&conn)?;
         migrate_legacy_rust_tables(&mut conn)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
             session_secret,
         })
     }
@@ -643,6 +636,10 @@ struct AppState {
     pending: StdMutex<HashMap<String, tokio::sync::oneshot::Sender<Value>>>,
     web_dist: Option<PathBuf>,
     legacy_supervisor_token: Option<String>,
+    oauth: OAuthConfig,
+    oauth_client: reqwest::Client,
+    hosted: Arc<hosted::HostedService>,
+    hosted_bootstraps: Mutex<HashSet<String>>,
 }
 
 pub async fn serve() -> Result<()> {
@@ -735,6 +732,30 @@ pub async fn serve() -> Result<()> {
             )?;
         }
     }
+    let oauth = OAuthConfig::from_env();
+    {
+        let conn = store.conn.lock().await;
+        for (key, available) in [
+            (
+                "googleAuthEnabled",
+                oauth.initially_enabled(OAuthProvider::Google),
+            ),
+            (
+                "githubAuthEnabled",
+                oauth.initially_enabled(OAuthProvider::Github),
+            ),
+        ] {
+            conn.execute(
+                "INSERT OR IGNORE INTO relay_settings(key,value) VALUES (?1,?2)",
+                params![key, if available { "true" } else { "false" }],
+            )?;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO relay_settings(key,value) VALUES ('emailVerificationEnabled','false')",
+            [],
+        )?;
+    }
+    let hosted = hosted::HostedService::new(store.conn.clone(), hosted::HostedConfig::from_env())?;
     let state = Arc::new(AppState {
         store,
         sockets: RwLock::new(HashMap::new()),
@@ -742,13 +763,22 @@ pub async fn serve() -> Result<()> {
         pending: StdMutex::new(HashMap::new()),
         web_dist,
         legacy_supervisor_token,
+        oauth,
+        oauth_client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()?,
+        hosted,
+        hosted_bootstraps: Mutex::new(HashSet::new()),
     });
+    state.hosted.start_background().await;
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
         .route("/relay/auth/logout", post(logout))
         .route("/relay/auth/session", get(session))
+        .route("/relay/auth/oauth/{provider}/start", get(oauth_start))
+        .route("/relay/auth/oauth/{provider}/callback", get(oauth_callback))
         .route("/relay/account", patch(update_account))
         .route("/relay/account/password", patch(update_account_password))
         .route("/relay/portal", get(portal))
@@ -771,6 +801,62 @@ pub async fn serve() -> Result<()> {
             get(hosted_sandbox_capability),
         )
         .route(
+            "/relay/admin/hosted-sandboxes",
+            get(list_hosted_sandboxes).post(create_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/reconciliation",
+            get(hosted_reconciliation),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/reconciliation/run",
+            post(run_hosted_reconciliation),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/{sandbox_id}",
+            delete(delete_hosted_orphan_instance),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/reconciliation/orphan-credentials/{credential_ref}",
+            delete(delete_hosted_orphan_credential),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}",
+            get(get_hosted_sandbox).delete(delete_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/members",
+            axum::routing::put(update_hosted_sandbox_members),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/settings",
+            patch(update_hosted_sandbox_settings),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/retry",
+            post(retry_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/start",
+            post(start_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/stop",
+            post(stop_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/snapshots",
+            post(snapshot_hosted_sandbox),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/rotate-credential",
+            post(rotate_hosted_sandbox_credential),
+        )
+        .route(
+            "/relay/admin/hosted-sandboxes/{sandbox_id}/backends/codex/files",
+            get(read_hosted_codex_files).put(write_hosted_codex_files),
+        )
+        .route(
             "/relay/admin/settings/registration",
             patch(update_registration_settings),
         )
@@ -781,6 +867,14 @@ pub async fn serve() -> Result<()> {
         .route(
             "/relay/admin/users/{user_id}/reset-password",
             post(admin_reset_password),
+        )
+        .route(
+            "/relay/admin/registrations/{request_id}/approve",
+            post(approve_registration),
+        )
+        .route(
+            "/relay/admin/registrations/{request_id}/reject",
+            post(reject_registration),
         )
         .route("/relay/devices/{device_id}/api/{*rest}", any(device_api))
         .route("/relay/api/{*rest}", any(relay_api_compat))
@@ -966,7 +1060,7 @@ fn relay_setting(conn: &Connection, key: &str) -> Option<String> {
     .flatten()
 }
 
-fn registration_settings(conn: &Connection) -> Value {
+fn registration_settings(conn: &Connection, oauth: &OAuthConfig) -> Value {
     let enabled = relay_setting(conn, "registrationEnabled").as_deref() != Some("false");
     let registration_password_configured = relay_setting(conn, "registrationPassword").is_some();
     json!({
@@ -977,14 +1071,14 @@ fn registration_settings(conn: &Connection) -> Value {
         "googleAuthEnabled": relay_setting(conn, "googleAuthEnabled").as_deref() == Some("true"),
         "githubAuthEnabled": relay_setting(conn, "githubAuthEnabled").as_deref() == Some("true"),
         "emailVerificationEnabled": relay_setting(conn, "emailVerificationEnabled").as_deref() == Some("true"),
-        "googleAuthAvailable": false,
-        "githubAuthAvailable": false,
+        "googleAuthAvailable": oauth.available(OAuthProvider::Google),
+        "githubAuthAvailable": oauth.available(OAuthProvider::Github),
         "emailVerificationAvailable": false
     })
 }
 
-fn session_json(conn: &Connection, user: Option<&UserRow>) -> Value {
-    let settings = registration_settings(conn);
+fn session_json(conn: &Connection, user: Option<&UserRow>, oauth: &OAuthConfig) -> Value {
+    let settings = registration_settings(conn, oauth);
     json!({
         "authenticated": user.is_some(),
         "user": user.map(user_json),
@@ -1225,16 +1319,6 @@ async fn register(
         )
             .into_response();
     }
-    if relay_setting(&conn, "registrationApprovalRequired").as_deref() == Some("true") {
-        return (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(ApiError::new(
-                "not_implemented",
-                "Registration approval is not available in the Rust relay yet",
-            )),
-        )
-            .into_response();
-    }
     if let Some(expected) = relay_setting(&conn, "registrationPassword") {
         if body.registration_password.as_deref().unwrap_or_default() != expected {
             return (
@@ -1243,6 +1327,33 @@ async fn register(
             )
                 .into_response();
         }
+    }
+    let email = body.email.trim().to_ascii_lowercase();
+    if relay_setting(&conn, "registrationApprovalRequired").as_deref() == Some("true") {
+        let (password_salt, password_hash) = match hash_password(&body.password) {
+            Ok(hash) => hash,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
+        return match insert_pending_registration(
+            &conn,
+            &email,
+            &username,
+            &password_salt,
+            &password_hash,
+            "password",
+            None,
+        ) {
+            Ok(request) => (
+                StatusCode::ACCEPTED,
+                Json(json!({ "pendingApproval": true, "request": request })),
+            )
+                .into_response(),
+            Err(error) => (
+                StatusCode::CONFLICT,
+                Json(ApiError::new("conflict", error.to_string())),
+            )
+                .into_response(),
+        };
     }
     let id = Uuid::new_v4().to_string();
     let (password_salt, password_hash) = match hash_password(&body.password) {
@@ -1261,7 +1372,7 @@ async fn register(
          VALUES (?1,?2,?3,?4,?5,'user',1,NULL,?6)",
         params![
             id,
-            body.email.trim().to_ascii_lowercase(),
+            email,
             username,
             password_hash,
             password_salt,
@@ -1284,7 +1395,7 @@ async fn register(
                 StatusCode::OK,
                 Json(json!({
                     "token": &token,
-                    "session": session_json(&conn, user.as_ref())
+                    "session": session_json(&conn, user.as_ref(), &state.oauth)
                 })),
             )
                 .into_response();
@@ -1296,6 +1407,74 @@ async fn register(
         )
             .into_response(),
     }
+}
+
+fn insert_pending_registration(
+    conn: &Connection,
+    email: &str,
+    username: &str,
+    password_salt: &str,
+    password_hash: &str,
+    provider: &str,
+    provider_subject: Option<&str>,
+) -> Result<Value> {
+    let user_exists = conn
+        .query_row(
+            "SELECT 1 FROM relay_users WHERE email=?1 OR username=?2 LIMIT 1",
+            params![email, username],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if user_exists {
+        bail!("A user with that email or username already exists.");
+    }
+    let existing = conn
+        .query_row(
+            "SELECT id,email,username,created_at,provider
+             FROM relay_pending_registrations
+             WHERE status='pending' AND (email=?1 OR username=?2)
+             ORDER BY created_at DESC LIMIT 1",
+            params![email, username],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "email": row.get::<_, String>(1)?,
+                    "username": row.get::<_, String>(2)?,
+                    "createdAt": row.get::<_, String>(3)?,
+                    "provider": row.get::<_, String>(4)?
+                }))
+            },
+        )
+        .optional()?;
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+    let id = Uuid::new_v4().to_string();
+    let created_at = now_rfc3339();
+    conn.execute(
+        "INSERT INTO relay_pending_registrations(
+           id,email,username,password_salt,password_hash,created_at,status,
+           reviewed_at,reviewed_by_user_id,provider,provider_subject
+         ) VALUES (?1,?2,?3,?4,?5,?6,'pending',NULL,NULL,?7,?8)",
+        params![
+            id,
+            email,
+            username,
+            password_salt,
+            password_hash,
+            created_at,
+            provider,
+            provider_subject
+        ],
+    )?;
+    Ok(json!({
+        "id": id,
+        "email": email,
+        "username": username,
+        "createdAt": created_at,
+        "provider": provider
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1348,7 +1527,7 @@ async fn login(
                 StatusCode::OK,
                 Json(json!({
                     "token": &token,
-                    "session": session_json(&conn, user.as_ref())
+                    "session": session_json(&conn, user.as_ref(), &state.oauth)
                 })),
             )
                 .into_response();
@@ -1364,7 +1543,7 @@ async fn login(
 
 async fn logout(State(state): State<Arc<AppState>>) -> Response {
     let conn = state.store.conn.lock().await;
-    with_cleared_session_cookie(Json(session_json(&conn, None)).into_response())
+    with_cleared_session_cookie(Json(session_json(&conn, None, &state.oauth)).into_response())
 }
 
 async fn session(
@@ -1375,7 +1554,258 @@ async fn session(
     let conn = state.store.conn.lock().await;
     let user = extract_session_token(&headers, &query)
         .and_then(|token| load_user_by_session(&conn, &state.store.session_secret, &token));
-    Json(session_json(&conn, user.as_ref()))
+    Json(session_json(&conn, user.as_ref(), &state.oauth))
+}
+
+async fn oauth_start(
+    Path(provider): Path<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let Some(provider) = OAuthProvider::parse(&provider) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new("not_found", "OAuth provider was not found")),
+        )
+            .into_response();
+    };
+    let enabled = {
+        let conn = state.store.conn.lock().await;
+        relay_setting(
+            &conn,
+            if provider == OAuthProvider::Google {
+                "googleAuthEnabled"
+            } else {
+                "githubAuthEnabled"
+            },
+        )
+        .as_deref()
+            == Some("true")
+    };
+    if !enabled || !state.oauth.available(provider) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "forbidden",
+                format!("{} authentication is disabled.", provider.display_name()),
+            )),
+        )
+            .into_response();
+    }
+    let callback = state.oauth.callback_url(&headers, provider);
+    let target = oauth::sign_state(provider, &state.store.session_secret)
+        .and_then(|signed| state.oauth.authorization_url(provider, &callback, &signed));
+    match target {
+        Ok(target) => Redirect::temporary(&target).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build OAuth authorization URL");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct OAuthCallbackQuery {
+    code: String,
+    state: String,
+}
+
+async fn oauth_callback(
+    Path(provider): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<OAuthCallbackQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let Some(provider) = OAuthProvider::parse(&provider) else {
+        return Redirect::temporary("/relay-portal?oauthError=OAuth%20provider%20is%20invalid.")
+            .into_response();
+    };
+    if !oauth::verify_state(&query.state, provider, &state.store.session_secret) {
+        return Redirect::temporary(
+            "/relay-portal?oauthError=OAuth%20request%20expired%20or%20was%20invalid.",
+        )
+        .into_response();
+    }
+    let callback = state.oauth.callback_url(&headers, provider);
+    let identity = match state
+        .oauth
+        .fetch_identity(&state.oauth_client, provider, &query.code, &callback)
+        .await
+    {
+        Ok(identity) => identity,
+        Err(error) => {
+            tracing::warn!(error = %error, provider = provider.as_str(), "OAuth identity lookup failed");
+            return oauth_error_redirect("OAuth authentication failed.");
+        }
+    };
+    let outcome = {
+        let conn = state.store.conn.lock().await;
+        authenticate_external_identity(&conn, &state.store.session_secret, &identity)
+    };
+    match outcome {
+        Ok(OAuthOutcome::Pending) => {
+            Redirect::temporary("/relay-portal?oauthPending=1").into_response()
+        }
+        Ok(OAuthOutcome::Login(token)) => {
+            with_session_cookie(Redirect::temporary("/relay-portal").into_response(), &token)
+        }
+        Err(message) => oauth_error_redirect(&message),
+    }
+}
+
+enum OAuthOutcome {
+    Login(String),
+    Pending,
+}
+
+fn authenticate_external_identity(
+    conn: &Connection,
+    session_secret: &str,
+    identity: &ExternalIdentity,
+) -> std::result::Result<OAuthOutcome, String> {
+    let linked: Option<String> = conn
+        .query_row(
+            "SELECT user_id FROM relay_user_identities
+             WHERE provider=?1 AND provider_subject=?2",
+            params![identity.provider.as_str(), identity.subject],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| "OAuth identity lookup failed.".to_string())?;
+    if let Some(user_id) = linked {
+        let enabled: Option<i64> = conn
+            .query_row(
+                "SELECT enabled FROM relay_users WHERE id=?1",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| "OAuth account lookup failed.".to_string())?;
+        if enabled != Some(1) {
+            return Err("This relay account is disabled.".into());
+        }
+        let token = create_session(session_secret, &user_id)
+            .map_err(|_| "OAuth session creation failed.".to_string())?;
+        let _ = conn.execute(
+            "UPDATE relay_users SET last_seen_at=?1 WHERE id=?2",
+            params![now_rfc3339(), user_id],
+        );
+        return Ok(OAuthOutcome::Login(token));
+    }
+    if relay_setting(conn, "registrationEnabled").as_deref() == Some("false") {
+        return Err("Registration is currently disabled.".into());
+    }
+    let email_exists = conn
+        .query_row(
+            "SELECT 1 FROM relay_users WHERE email=?1",
+            params![identity.email],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|_| "OAuth account lookup failed.".to_string())?
+        .is_some();
+    if email_exists {
+        return Err(
+            "An account with this email already exists. Sign in with its current method before linking OAuth."
+                .into(),
+        );
+    }
+    let username = available_username(conn, &identity.username)
+        .map_err(|_| "OAuth username allocation failed.".to_string())?;
+    let mut password_bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut password_bytes);
+    let generated_password =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(password_bytes);
+    let (password_salt, password_hash) = hash_password(&generated_password)
+        .map_err(|_| "OAuth account creation failed.".to_string())?;
+    if relay_setting(conn, "registrationApprovalRequired").as_deref() == Some("true") {
+        insert_pending_registration(
+            conn,
+            &identity.email,
+            &username,
+            &password_salt,
+            &password_hash,
+            identity.provider.as_str(),
+            Some(&identity.subject),
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(OAuthOutcome::Pending);
+    }
+    let user_id = Uuid::new_v4().to_string();
+    let now = now_rfc3339();
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| "OAuth account creation failed.".to_string())?;
+    tx.execute(
+        "INSERT INTO relay_users
+         (id,email,username,password_hash,password_salt,role,enabled,last_seen_at,created_at)
+         VALUES (?1,?2,?3,?4,?5,'user',1,?6,?6)",
+        params![
+            user_id,
+            identity.email,
+            username,
+            password_hash,
+            password_salt,
+            now
+        ],
+    )
+    .map_err(|_| "OAuth account creation failed.".to_string())?;
+    tx.execute(
+        "INSERT INTO relay_user_identities
+         (id,user_id,provider,provider_subject,provider_email,created_at)
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            user_id,
+            identity.provider.as_str(),
+            identity.subject,
+            identity.email,
+            now
+        ],
+    )
+    .map_err(|_| "OAuth identity creation failed.".to_string())?;
+    tx.commit()
+        .map_err(|_| "OAuth account creation failed.".to_string())?;
+    let token = create_session(session_secret, &user_id)
+        .map_err(|_| "OAuth session creation failed.".to_string())?;
+    Ok(OAuthOutcome::Login(token))
+}
+
+fn available_username(conn: &Connection, value: &str) -> rusqlite::Result<String> {
+    let mut base = normalize_username(value);
+    base.truncate(48);
+    if base.is_empty() {
+        base = "user".into();
+    }
+    if base.len() < 3 {
+        base.push_str("user");
+    }
+    let mut candidate = base.clone();
+    let mut suffix = 1_u32;
+    loop {
+        let taken = conn
+            .query_row(
+                "SELECT 1 FROM relay_users WHERE username=?1
+                 UNION ALL
+                 SELECT 1 FROM relay_pending_registrations
+                 WHERE username=?1 AND status='pending' LIMIT 1",
+                params![candidate],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !taken {
+            return Ok(candidate);
+        }
+        let prefix: String = base.chars().take(42).collect();
+        candidate = format!("{prefix}-{suffix}");
+        suffix += 1;
+    }
+}
+
+fn oauth_error_redirect(message: &str) -> Response {
+    let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
+    Redirect::temporary(&format!("/relay-portal?oauthError={encoded}")).into_response()
 }
 
 #[derive(Deserialize)]
@@ -1492,8 +1922,14 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
     let conn = state.store.conn.lock().await;
     let mut stmt = conn
         .prepare(
-            "SELECT id, owner_user_id, name, created_at, token, token_preview
-                  FROM relay_devices WHERE owner_user_id=?1 ORDER BY created_at ASC",
+            "SELECT id,owner_user_id,name,created_at,token,token_preview
+             FROM relay_devices
+             WHERE owner_user_id=?1 OR id IN (
+               SELECT s.device_id FROM relay_hosted_sandboxes s
+               JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
+               WHERE m.user_id=?1
+             )
+             ORDER BY created_at ASC",
         )
         .expect("stmt");
     stmt.query_map(params![user_id], |row| {
@@ -1503,7 +1939,15 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
         let created_at: String = row.get(3)?;
         let token: Option<String> = row.get(4)?;
         let token_preview: Option<String> = row.get(5)?;
-        Ok(device_json(DeviceJsonInput {
+        let hosted: Option<(String, i64, Option<String>)> = conn
+            .query_row(
+                "SELECT status,active_turn_count,idle_deadline_at
+                 FROM relay_hosted_sandboxes WHERE device_id=?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let mut value = device_json(DeviceJsonInput {
             id: &id,
             owner_user_id: &owner,
             name: &name,
@@ -1515,9 +1959,19 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
             last_heartbeat_at: connected
                 .get(&id)
                 .map(|socket| socket.last_heartbeat_at.as_str()),
-            token: token.as_deref(),
+            token: if hosted.is_none() {
+                token.as_deref()
+            } else {
+                None
+            },
             token_preview: token_preview.as_deref(),
-        }))
+        });
+        if let Some((status, active_turns, idle_deadline)) = hosted {
+            value["hostedStatus"] = Value::String(status);
+            value["hostedActiveTurnCount"] = Value::from(active_turns);
+            value["hostedIdleDeadlineAt"] = idle_deadline.map_or(Value::Null, Value::String);
+        }
+        Ok(value)
     })
     .ok()
     .map(|rows| rows.filter_map(|row| row.ok()).collect())
@@ -2770,11 +3224,19 @@ async fn relay_admin(
     let devices: Vec<Value> = stmt
         .query_map([], |row| {
             let id: String = row.get(0)?;
+            let hosted: Option<(String, i64, Option<String>)> = conn
+                .query_row(
+                    "SELECT status,active_turn_count,idle_deadline_at
+                     FROM relay_hosted_sandboxes WHERE device_id=?1",
+                    params![id],
+                    |hosted| Ok((hosted.get(0)?, hosted.get(1)?, hosted.get(2)?)),
+                )
+                .optional()?;
             Ok(json!({
                 "id": id,
                 "ownerUserId": row.get::<_, String>(1)?,
                 "name": row.get::<_, String>(2)?,
-                "token": row.get::<_, Option<String>>(3)?,
+                "token": if hosted.is_some() { None } else { row.get::<_, Option<String>>(3)? },
                 "tokenPreview": row.get::<_, String>(4)?,
                 "connected": connected.iter().any(|connected_id| connected_id == &id),
                 "connectedAt": Value::Null,
@@ -2784,7 +3246,10 @@ async fn relay_admin(
                 "ownerEmail": row.get::<_, String>(7)?,
                 "ipAddress": Value::Null,
                 "workspaces": [],
-                "threads": []
+                "threads": [],
+                "hostedStatus": hosted.as_ref().map(|value| value.0.as_str()),
+                "hostedActiveTurnCount": hosted.as_ref().map(|value| value.1).unwrap_or(0),
+                "hostedIdleDeadlineAt": hosted.and_then(|value| value.2)
             }))
         })
         .ok()
@@ -2827,7 +3292,7 @@ async fn relay_admin(
     } else {
         Vec::new()
     };
-    let settings = registration_settings(&conn);
+    let settings = registration_settings(&conn, &state.oauth);
     let registration_enabled = settings
         .get("enabled")
         .and_then(Value::as_bool)
@@ -2850,20 +3315,265 @@ async fn hosted_sandbox_capability(
     Query(query): Query<TokenQuery>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let conn = state.store.conn.lock().await;
-    if authenticated_admin_user(&conn, &state.store.session_secret, &headers, &query).is_none() {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
         return unauthorized();
     }
-    Json(json!({
-        "provider": "disabled",
-        "configured": false,
-        "reachable": false,
-        "available": false,
-        "reasonCode": "provider_disabled",
-        "reason": "Hosted sandboxes are not implemented by the Rust relay yet.",
-        "checkedAt": now_rfc3339()
-    }))
-    .into_response()
+    Json(state.hosted.capability().await).into_response()
+}
+
+async fn hosted_admin_allowed(state: &AppState, headers: &HeaderMap, query: &TokenQuery) -> bool {
+    let conn = state.store.conn.lock().await;
+    authenticated_admin_user(&conn, &state.store.session_secret, headers, query).is_some()
+}
+
+fn hosted_response(result: std::result::Result<Value, hosted::HostedError>) -> Response {
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => {
+            (error.status, Json(ApiError::new(error.code, error.message))).into_response()
+        }
+    }
+}
+
+async fn list_hosted_sandboxes(
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.list().await)
+}
+
+async fn create_hosted_sandbox(
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::CreateHostedInput>,
+) -> Response {
+    let admin = {
+        let conn = state.store.conn.lock().await;
+        authenticated_admin_user(&conn, &state.store.session_secret, &headers, &query)
+    };
+    let Some(admin) = admin else {
+        return unauthorized();
+    };
+    hosted_response(state.hosted.create(&admin.id, body).await)
+}
+
+async fn get_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.detail(&sandbox_id).await)
+}
+
+async fn update_hosted_sandbox_members(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::HostedMembersInput>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    let result = state
+        .hosted
+        .update_members(&sandbox_id, &body.assigned_user_ids)
+        .await;
+    if let Ok(value) = &result {
+        if value
+            .get("workspaceIsolationEnabled")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            if let Some(device_id) = value.get("deviceId").and_then(Value::as_str) {
+                schedule_hosted_bootstraps(state.clone(), device_id.to_string()).await;
+            }
+        }
+    }
+    hosted_response(result)
+}
+
+async fn update_hosted_sandbox_settings(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::HostedSettingsInput>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    let result = state
+        .hosted
+        .update_settings(&sandbox_id, body.workspace_isolation_enabled)
+        .await;
+    if body.workspace_isolation_enabled {
+        if let Ok(value) = &result {
+            if let Some(device_id) = value.get("deviceId").and_then(Value::as_str) {
+                schedule_hosted_bootstraps(state.clone(), device_id.to_string()).await;
+            }
+        }
+    }
+    hosted_response(result)
+}
+
+async fn retry_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.retry(&sandbox_id).await)
+}
+
+async fn start_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.start(&sandbox_id).await)
+}
+
+async fn stop_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.stop(&sandbox_id).await)
+}
+
+async fn snapshot_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::HostedSnapshotInput>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.snapshot(&sandbox_id, &body.name).await)
+}
+
+async fn delete_hosted_sandbox(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.delete(&sandbox_id).await)
+}
+
+async fn rotate_hosted_sandbox_credential(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::RotateCredentialInput>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(
+        state
+            .hosted
+            .rotate_credential(&sandbox_id, &body.openai_api_key)
+            .await,
+    )
+}
+
+async fn read_hosted_codex_files(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.read_codex_files(&sandbox_id).await)
+}
+
+async fn write_hosted_codex_files(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<hosted::CodexFiles>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.write_codex_files(&sandbox_id, &body).await)
+}
+
+async fn hosted_reconciliation(
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    Json(state.hosted.reconciliation().await).into_response()
+}
+
+async fn run_hosted_reconciliation(
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    Json(state.hosted.run_reconciliation().await).into_response()
+}
+
+async fn delete_hosted_orphan_instance(
+    Path(sandbox_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.delete_orphan_instance(&sandbox_id).await)
+}
+
+async fn delete_hosted_orphan_credential(
+    Path(credential_ref): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if !hosted_admin_allowed(&state, &headers, &query).await {
+        return unauthorized();
+    }
+    hosted_response(state.hosted.delete_orphan_credential(&credential_ref).await)
 }
 
 fn set_relay_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()> {
@@ -2886,18 +3596,39 @@ async fn update_registration_settings(
         return unauthorized();
     }
     if body.get("googleAuthEnabled").and_then(Value::as_bool) == Some(true)
-        || body.get("githubAuthEnabled").and_then(Value::as_bool) == Some(true)
-        || body.get("approvalRequired").and_then(Value::as_bool) == Some(true)
-        || body
-            .get("emailVerificationEnabled")
-            .and_then(Value::as_bool)
-            == Some(true)
+        && !state.oauth.available(OAuthProvider::Google)
     {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiError::new(
                 "bad_request",
-                "Registration approval, OAuth, and email verification are not implemented in the Rust relay",
+                "Google OAuth credentials are not configured.",
+            )),
+        )
+            .into_response();
+    }
+    if body.get("githubAuthEnabled").and_then(Value::as_bool) == Some(true)
+        && !state.oauth.available(OAuthProvider::Github)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "bad_request",
+                "GitHub OAuth credentials are not configured.",
+            )),
+        )
+            .into_response();
+    }
+    if body
+        .get("emailVerificationEnabled")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "bad_request",
+                "Email verification is not configured in the Rust relay.",
             )),
         )
             .into_response();
@@ -2958,7 +3689,7 @@ async fn update_registration_settings(
             }
         }
     }
-    let settings = registration_settings(&conn);
+    let settings = registration_settings(&conn, &state.oauth);
     Json(json!({
         "registrationEnabled": settings.get("enabled").cloned().unwrap_or(Value::Bool(true)),
         "settings": settings
@@ -3039,6 +3770,30 @@ async fn admin_delete_user(
         )
             .into_response();
     }
+    let sole_hosted_member = conn
+        .query_row(
+            "SELECT 1 FROM relay_hosted_sandbox_members m
+             WHERE m.user_id=?1 AND (
+               SELECT COUNT(*) FROM relay_hosted_sandbox_members all_members
+               WHERE all_members.sandbox_id=m.sandbox_id
+             )=1 LIMIT 1",
+            params![user_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some();
+    if sole_hosted_member {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "conflict",
+                "Reassign or delete the user's hosted VM before deleting this account.",
+            )),
+        )
+            .into_response();
+    }
     if conn
         .execute("DELETE FROM relay_users WHERE id=?1", params![user_id])
         .is_err()
@@ -3103,6 +3858,142 @@ async fn admin_reset_password(
     Json(user_json(&user)).into_response()
 }
 
+async fn approve_registration(
+    Path(request_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let conn = state.store.conn.lock().await;
+    let Some(admin) =
+        authenticated_admin_user(&conn, &state.store.session_secret, &headers, &query)
+    else {
+        return unauthorized();
+    };
+    let record: Option<(String, String, String, String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT email,username,password_salt,password_hash,provider,provider_subject
+             FROM relay_pending_registrations WHERE id=?1 AND status='pending'",
+            params![request_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .ok()
+        .flatten();
+    let Some((email, username, salt, hash, provider, provider_subject)) = record else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new(
+                "not_found",
+                "Pending registration was not found.",
+            )),
+        )
+            .into_response();
+    };
+    let duplicate = conn
+        .query_row(
+            "SELECT 1 FROM relay_users WHERE email=?1 OR username=?2 LIMIT 1",
+            params![email, username],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some();
+    if duplicate {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "conflict",
+                "A user with that email or username already exists.",
+            )),
+        )
+            .into_response();
+    }
+    let user_id = Uuid::new_v4().to_string();
+    let now = now_rfc3339();
+    let result = (|| -> Result<()> {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO relay_users
+             (id,email,username,password_hash,password_salt,role,enabled,last_seen_at,created_at)
+             VALUES (?1,?2,?3,?4,?5,'user',1,NULL,?6)",
+            params![user_id, email, username, hash, salt, now],
+        )?;
+        if matches!(provider.as_str(), "google" | "github") {
+            if let Some(subject) = provider_subject.as_deref() {
+                tx.execute(
+                    "INSERT INTO relay_user_identities
+                     (id,user_id,provider,provider_subject,provider_email,created_at)
+                     VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![
+                        Uuid::new_v4().to_string(),
+                        user_id,
+                        provider,
+                        subject,
+                        email,
+                        now
+                    ],
+                )?;
+            }
+        }
+        tx.execute(
+            "UPDATE relay_pending_registrations
+             SET status='approved',reviewed_at=?1,reviewed_by_user_id=?2 WHERE id=?3",
+            params![now, admin.id, request_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let Some(user) = load_user_by_id(&conn, &user_id) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    Json(user_json(&user)).into_response()
+}
+
+async fn reject_registration(
+    Path(request_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let conn = state.store.conn.lock().await;
+    let Some(admin) =
+        authenticated_admin_user(&conn, &state.store.session_secret, &headers, &query)
+    else {
+        return unauthorized();
+    };
+    match conn.execute(
+        "UPDATE relay_pending_registrations
+         SET status='rejected',reviewed_at=?1,reviewed_by_user_id=?2
+         WHERE id=?3 AND status='pending'",
+        params![now_rfc3339(), admin.id, request_id],
+    ) {
+        Ok(1) => Json(json!({ "id": request_id })).into_response(),
+        Ok(_) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new(
+                "not_found",
+                "Pending registration was not found.",
+            )),
+        )
+            .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 async fn device_healthz(
     Path(device_id): Path<String>,
     headers: HeaderMap,
@@ -3117,6 +4008,17 @@ async fn device_healthz(
     };
     if !allowed {
         return unauthorized();
+    }
+    if state.hosted.wake_for_request(&device_id, false).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "code": "service_unavailable",
+                "message": "Hosted supervisor VM is starting. Retry shortly.",
+                "details": { "reason": "hosted_sandbox_starting" }
+            })),
+        )
+            .into_response();
     }
     forward_device(
         state,
@@ -3142,7 +4044,7 @@ async fn device_api(
     let path = relay_api_target_path(&rest, &uri);
     let thread_id = resource_id_from_path(&path, "threads");
     let workspace_id = resource_id_from_path(&path, "workspaces");
-    let access = {
+    let resolved = {
         let conn = state.store.conn.lock().await;
         authenticated_user(&conn, &state.store.session_secret, &headers, &query).and_then(|user| {
             effective_access(
@@ -3152,9 +4054,13 @@ async fn device_api(
                 thread_id.as_deref(),
                 workspace_id.as_deref(),
             )
+            .map(|access| {
+                let isolation = hosted_isolation_for_user(&conn, &device_id, &user.id);
+                (user.id, access, isolation)
+            })
         })
     };
-    let Some(access) = access else {
+    let Some((user_id, access, isolation)) = resolved else {
         return unauthorized();
     };
     if !relay_target_allowed(&path) || !access_allows(&access, &method, &path) {
@@ -3164,6 +4070,45 @@ async fn device_api(
                 "forbidden",
                 "This relay session does not allow that operation",
             )),
+        )
+            .into_response();
+    }
+    if let Some(sandbox_id) = isolation.as_deref() {
+        let allowed = {
+            let conn = state.store.conn.lock().await;
+            hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id,
+                    user_id: &user_id,
+                    thread_id: thread_id.as_deref(),
+                    workspace_id: workspace_id.as_deref(),
+                    method: &method,
+                    path: &path,
+                    body: &body,
+                },
+            )
+        };
+        if !allowed {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError::new(
+                    "forbidden",
+                    "This workspace or thread belongs to another hosted VM user.",
+                )),
+            )
+                .into_response();
+        }
+    }
+    let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+    if state.hosted.wake_for_request(&device_id, is_activity).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "code": "service_unavailable",
+                "message": "Hosted supervisor VM is starting. Retry shortly.",
+                "details": { "reason": "hosted_sandbox_starting" }
+            })),
         )
             .into_response();
     }
@@ -3177,16 +4122,21 @@ async fn device_api(
         })
         .collect::<serde_json::Map<String, Value>>();
     let (body, body_encoding) = encode_relay_request_body(&body);
-    forward_device(
-        state,
-        device_id,
+    let response = forward_device(
+        state.clone(),
+        device_id.clone(),
         method.as_str().to_string(),
-        path,
+        path.clone(),
         body,
         body_encoding,
         Value::Object(forwarded_headers),
     )
-    .await
+    .await;
+    if let Some(sandbox_id) = isolation {
+        transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
+    } else {
+        response
+    }
 }
 
 async fn relay_api_compat(
@@ -3201,7 +4151,20 @@ async fn relay_api_compat(
     let path = relay_api_target_path(&rest, &uri);
     let thread_id = resource_id_from_path(&path, "threads");
     let workspace_id = resource_id_from_path(&path, "workspaces");
-    let connected_device_ids: Vec<String> = state.sockets.read().await.keys().cloned().collect();
+    let mut connected_device_ids: Vec<String> =
+        state.sockets.read().await.keys().cloned().collect();
+    {
+        let conn = state.store.conn.lock().await;
+        if let Ok(mut stmt) = conn.prepare("SELECT id FROM relay_devices ORDER BY created_at") {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                for id in rows.flatten() {
+                    if !connected_device_ids.contains(&id) {
+                        connected_device_ids.push(id);
+                    }
+                }
+            }
+        };
+    }
     let resolved = {
         let conn = state.store.conn.lock().await;
         let Some(user) = authenticated_user(&conn, &state.store.session_secret, &headers, &query)
@@ -3216,10 +4179,13 @@ async fn relay_api_compat(
                 thread_id.as_deref(),
                 workspace_id.as_deref(),
             )
-            .map(|access| (device_id.clone(), access))
+            .map(|access| {
+                let isolation = hosted_isolation_for_user(&conn, device_id, &user.id);
+                (device_id.clone(), user.id.clone(), access, isolation)
+            })
         })
     };
-    let Some((device_id, access)) = resolved else {
+    let Some((device_id, user_id, access, isolation)) = resolved else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiError::new(
@@ -3239,6 +4205,45 @@ async fn relay_api_compat(
         )
             .into_response();
     }
+    if let Some(sandbox_id) = isolation.as_deref() {
+        let allowed = {
+            let conn = state.store.conn.lock().await;
+            hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id,
+                    user_id: &user_id,
+                    thread_id: thread_id.as_deref(),
+                    workspace_id: workspace_id.as_deref(),
+                    method: &method,
+                    path: &path,
+                    body: &body,
+                },
+            )
+        };
+        if !allowed {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError::new(
+                    "forbidden",
+                    "This workspace or thread belongs to another hosted VM user.",
+                )),
+            )
+                .into_response();
+        }
+    }
+    let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+    if state.hosted.wake_for_request(&device_id, is_activity).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "code": "service_unavailable",
+                "message": "Hosted supervisor VM is starting. Retry shortly.",
+                "details": { "reason": "hosted_sandbox_starting" }
+            })),
+        )
+            .into_response();
+    }
     let forwarded_headers = [header::CONTENT_TYPE, header::ACCEPT]
         .into_iter()
         .filter_map(|name| {
@@ -3249,16 +4254,424 @@ async fn relay_api_compat(
         })
         .collect::<serde_json::Map<String, Value>>();
     let (body, body_encoding) = encode_relay_request_body(&body);
-    forward_device(
-        state,
-        device_id,
+    let response = forward_device(
+        state.clone(),
+        device_id.clone(),
         method.as_str().to_string(),
-        path,
+        path.clone(),
         body,
         body_encoding,
         Value::Object(forwarded_headers),
     )
-    .await
+    .await;
+    if let Some(sandbox_id) = isolation {
+        transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
+    } else {
+        response
+    }
+}
+
+fn hosted_isolation_for_user(conn: &Connection, device_id: &str, user_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT s.id FROM relay_hosted_sandboxes s
+         JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
+         WHERE s.device_id=?1 AND m.user_id=?2 AND s.workspace_isolation_enabled=1",
+        params![device_id, user_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+struct HostedResourceRequest<'a> {
+    sandbox_id: &'a str,
+    user_id: &'a str,
+    thread_id: Option<&'a str>,
+    workspace_id: Option<&'a str>,
+    method: &'a Method,
+    path: &'a str,
+    body: &'a [u8],
+}
+
+fn hosted_resource_allowed(conn: &Connection, request: HostedResourceRequest<'_>) -> bool {
+    if let Some(workspace_id) = request.workspace_id {
+        let owns = conn
+            .query_row(
+                "SELECT 1 FROM relay_hosted_user_workspaces
+                 WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3",
+                params![request.sandbox_id, request.user_id, workspace_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some();
+        if !owns {
+            return false;
+        }
+    }
+    if let Some(thread_id) = request.thread_id {
+        let owns = conn
+            .query_row(
+                "SELECT 1 FROM relay_hosted_user_threads
+                 WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
+                params![request.sandbox_id, request.user_id, thread_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some();
+        if !owns {
+            return false;
+        }
+    }
+    let pathname = request.path.split('?').next().unwrap_or(request.path);
+    if request.method == Method::POST && pathname == "/api/threads/import" {
+        return false;
+    }
+    if request.method == Method::POST && pathname == "/api/threads/start" {
+        let requested_workspace =
+            serde_json::from_slice::<Value>(request.body)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("workspaceId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
+        return requested_workspace.is_some_and(|workspace_id| {
+            conn.query_row(
+                "SELECT 1 FROM relay_hosted_user_workspaces
+                     WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3",
+                params![request.sandbox_id, request.user_id, workspace_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+        });
+    }
+    true
+}
+
+async fn transform_hosted_response(
+    state: &AppState,
+    sandbox_id: &str,
+    user_id: &str,
+    method: &Method,
+    path: &str,
+    response: Response,
+) -> Response {
+    if !response.status().is_success() {
+        return response;
+    }
+    let pathname = path.split('?').next().unwrap_or(path);
+    let transforms = (method == Method::GET
+        && matches!(pathname, "/api/workspaces" | "/api/threads"))
+        || (method == Method::POST && matches!(pathname, "/api/workspaces" | "/api/threads/start"));
+    if !transforms {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    let Ok(bytes) = to_bytes(body, 32 * 1024 * 1024).await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(mut payload) = serde_json::from_slice::<Value>(&bytes) else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    {
+        let conn = state.store.conn.lock().await;
+        if method == Method::GET && pathname == "/api/workspaces" {
+            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
+            if let Some(values) = payload.as_array_mut() {
+                values.retain(|value| {
+                    value
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| owned.contains(id))
+                });
+            }
+        } else if method == Method::GET && pathname == "/api/threads" {
+            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
+            if let Some(values) = payload.as_array_mut() {
+                values.retain(|value| {
+                    let thread_id = value.get("id").and_then(Value::as_str);
+                    let workspace_id = value.get("workspaceId").and_then(Value::as_str);
+                    let keep = workspace_id.is_some_and(|id| owned.contains(id));
+                    if keep {
+                        if let (Some(thread_id), Some(workspace_id)) = (thread_id, workspace_id) {
+                            let _ = record_hosted_thread(
+                                &conn,
+                                sandbox_id,
+                                user_id,
+                                thread_id,
+                                workspace_id,
+                            );
+                        }
+                    }
+                    keep
+                });
+            }
+        } else if method == Method::POST && pathname == "/api/workspaces" {
+            if let Some(workspace_id) = payload.get("id").and_then(Value::as_str) {
+                let _ = record_hosted_workspace(&conn, sandbox_id, user_id, workspace_id, false);
+            }
+        } else if method == Method::POST && pathname == "/api/threads/start" {
+            if let (Some(thread_id), Some(workspace_id)) = (
+                payload.get("id").and_then(Value::as_str),
+                payload.get("workspaceId").and_then(Value::as_str),
+            ) {
+                let _ = record_hosted_thread(&conn, sandbox_id, user_id, thread_id, workspace_id);
+            }
+        }
+    }
+    let bytes = serde_json::to_vec(&payload).unwrap_or_default();
+    let mut response = Response::builder()
+        .status(parts.status)
+        .header(header::CONTENT_TYPE, "application/json; charset=utf-8");
+    if let Some(cache) = parts.headers.get(header::CACHE_CONTROL) {
+        response = response.header(header::CACHE_CONTROL, cache);
+    }
+    response
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn hosted_workspace_ids(conn: &Connection, sandbox_id: &str, user_id: &str) -> HashSet<String> {
+    conn.prepare(
+        "SELECT workspace_id FROM relay_hosted_user_workspaces
+         WHERE sandbox_id=?1 AND user_id=?2",
+    )
+    .ok()
+    .and_then(|mut stmt| {
+        stmt.query_map(params![sandbox_id, user_id], |row| row.get::<_, String>(0))
+            .ok()
+            .map(|rows| rows.flatten().collect())
+    })
+    .unwrap_or_default()
+}
+
+fn record_hosted_workspace(
+    conn: &Connection,
+    sandbox_id: &str,
+    user_id: &str,
+    workspace_id: &str,
+    initial: bool,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO relay_hosted_user_workspaces
+         (sandbox_id,user_id,workspace_id,initial_workspace,created_at)
+         VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(sandbox_id,workspace_id) DO UPDATE SET
+           initial_workspace=MAX(initial_workspace,excluded.initial_workspace)",
+        params![
+            sandbox_id,
+            user_id,
+            workspace_id,
+            i64::from(initial),
+            now_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+fn record_hosted_thread(
+    conn: &Connection,
+    sandbox_id: &str,
+    user_id: &str,
+    thread_id: &str,
+    workspace_id: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO relay_hosted_user_threads
+         (sandbox_id,user_id,thread_id,workspace_id,created_at)
+         VALUES (?1,?2,?3,?4,?5)",
+        params![sandbox_id, user_id, thread_id, workspace_id, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+async fn schedule_hosted_bootstraps(state: Arc<AppState>, device_id: String) {
+    let users: Vec<(String, String, String)> = {
+        let conn = state.store.conn.lock().await;
+        let mut stmt = match conn.prepare(
+            "SELECT s.id,m.user_id,u.username
+             FROM relay_hosted_sandboxes s
+             JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
+             JOIN relay_users u ON u.id=m.user_id
+             WHERE s.device_id=?1 AND s.workspace_isolation_enabled=1 AND u.enabled=1
+             ORDER BY m.position,m.created_at",
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => return,
+        };
+        let values = stmt
+            .query_map(params![device_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .ok()
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default();
+        values
+    };
+    for (sandbox_id, user_id, username) in users {
+        let key = format!("{sandbox_id}:{user_id}");
+        if !state.hosted_bootstraps.lock().await.insert(key.clone()) {
+            continue;
+        }
+        let state = state.clone();
+        let device_id = device_id.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                ensure_hosted_user_bootstrap(&state, &device_id, &sandbox_id, &user_id, &username)
+                    .await
+            {
+                tracing::warn!(
+                    error = %error,
+                    device_id,
+                    sandbox_id,
+                    user_id,
+                    "hosted VM user bootstrap failed"
+                );
+            }
+            state.hosted_bootstraps.lock().await.remove(&key);
+        });
+    }
+}
+
+async fn ensure_hosted_user_bootstrap(
+    state: &Arc<AppState>,
+    device_id: &str,
+    sandbox_id: &str,
+    user_id: &str,
+    username: &str,
+) -> Result<()> {
+    let existing_workspace: Option<String> = {
+        let conn = state.store.conn.lock().await;
+        conn.query_row(
+            "SELECT workspace_id FROM relay_hosted_user_workspaces
+             WHERE sandbox_id=?1 AND user_id=?2 AND initial_workspace=1
+             ORDER BY created_at LIMIT 1",
+            params![sandbox_id, user_id],
+            |row| row.get(0),
+        )
+        .optional()?
+    };
+    let workspace_id = if let Some(id) = existing_workspace {
+        id
+    } else {
+        let slug = normalize_username(username);
+        let suffix: String = user_id.chars().take(8).collect();
+        let directory = format!("{}-{suffix}", if slug.is_empty() { "user" } else { &slug });
+        let abs_path = format!("/home/remote-codex/workspaces/{directory}");
+        let label = format!("{username}'s workspace");
+        let current =
+            internal_forward_json(state, device_id, "GET", "/api/workspaces", None).await?;
+        let existing = current.as_array().and_then(|workspaces| {
+            workspaces.iter().find(|workspace| {
+                workspace.get("absPath").and_then(Value::as_str) == Some(abs_path.as_str())
+            })
+        });
+        let workspace = if let Some(existing) = existing {
+            existing.clone()
+        } else {
+            internal_forward_json(
+                state,
+                device_id,
+                "POST",
+                "/api/workspaces",
+                Some(json!({ "absPath": abs_path, "label": label })),
+            )
+            .await?
+        };
+        let workspace_id = workspace
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("initial workspace creation returned no id"))?
+            .to_string();
+        {
+            let conn = state.store.conn.lock().await;
+            record_hosted_workspace(&conn, sandbox_id, user_id, &workspace_id, true)?;
+        }
+        workspace_id
+    };
+    let has_thread = {
+        let conn = state.store.conn.lock().await;
+        conn.query_row(
+            "SELECT 1 FROM relay_hosted_user_threads
+             WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3 LIMIT 1",
+            params![sandbox_id, user_id, workspace_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
+    };
+    if !has_thread {
+        let thread = internal_forward_json(
+            state,
+            device_id,
+            "POST",
+            "/api/threads/start",
+            Some(json!({
+                "workspaceId": workspace_id,
+                "title": "Getting started",
+                "provider": "codex",
+                "agentId": "codex",
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "low",
+                "approvalMode": "yolo"
+            })),
+        )
+        .await?;
+        let thread_id = thread
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("initial thread creation returned no id"))?;
+        let conn = state.store.conn.lock().await;
+        record_hosted_thread(&conn, sandbox_id, user_id, thread_id, &workspace_id)?;
+    }
+    Ok(())
+}
+
+async fn internal_forward_json(
+    state: &Arc<AppState>,
+    device_id: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value> {
+    let response = forward_device(
+        state.clone(),
+        device_id.to_string(),
+        method.to_string(),
+        path.to_string(),
+        body.as_ref().map(Value::to_string),
+        None,
+        if body.is_some() {
+            json!({ "content-type": "application/json" })
+        } else {
+            json!({})
+        },
+    )
+    .await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 32 * 1024 * 1024).await?;
+    let payload: Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+        json!({ "message": String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>() })
+    });
+    if !status.is_success() {
+        let message = payload
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("supervisor bootstrap request failed");
+        bail!("supervisor bootstrap request failed with {status}: {message}");
+    }
+    Ok(payload)
 }
 
 fn relay_api_target_path(rest: &str, uri: &Uri) -> String {
@@ -3713,6 +5126,8 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
             last_heartbeat_at: connected_at.clone(),
         },
     );
+    state.hosted.mark_online(&device_id).await;
+    schedule_hosted_bootstraps(state.clone(), device_id.clone()).await;
     let (mut sink, mut stream) = socket.split();
     let _ = sink
         .send(Message::Text(
@@ -3770,6 +5185,25 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
                                     if let Some(socket) = sockets.get_mut(&device_id) {
                                         if socket.connection_id == connection_id {
                                             socket.last_heartbeat_at = timestamp;
+                                        }
+                                    }
+                                }
+                                Some("relay.activity") => {
+                                    if let Some(payload) = msg.get("payload") {
+                                        if let (Some(thread_id), Some(turn_id), Some(kind)) = (
+                                            payload.get("threadId").and_then(Value::as_str),
+                                            payload.get("turnId").and_then(Value::as_str),
+                                            payload.get("kind").and_then(Value::as_str),
+                                        ) {
+                                            state
+                                                .hosted
+                                                .record_turn_activity(
+                                                    &device_id,
+                                                    thread_id,
+                                                    turn_id,
+                                                    kind,
+                                                )
+                                                .await;
                                         }
                                     }
                                 }
@@ -3845,19 +5279,49 @@ async fn client_ws(
             &query.token_query(),
         )
         .and_then(|user| {
-            effective_access(
+            let access = effective_access(
                 &conn,
                 &user.id,
                 &device_id,
                 query.thread_id.as_deref(),
                 None,
-            )
-            .map(|access| (user, access))
+            )?;
+            if let (Some(sandbox_id), Some(thread_id)) = (
+                hosted_isolation_for_user(&conn, &device_id, &user.id),
+                query.thread_id.as_deref(),
+            ) {
+                let owns = conn
+                    .query_row(
+                        "SELECT 1 FROM relay_hosted_user_threads
+                         WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
+                        params![sandbox_id, user.id, thread_id],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if !owns {
+                    return None;
+                }
+            }
+            Some((user, access))
         })
     };
     let Some((user, access)) = user_and_access else {
         return unauthorized();
     };
+    if state.hosted.wake_for_request(&device_id, false).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "code": "service_unavailable",
+                "message": "Hosted supervisor VM is starting. Retry shortly.",
+                "details": { "reason": "hosted_sandbox_starting" }
+            })),
+        )
+            .into_response();
+    }
     if !state.sockets.read().await.contains_key(&device_id) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -3880,7 +5344,19 @@ async fn client_ws_compat(
     Query(query): Query<ClientWsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let device_ids: Vec<String> = state.sockets.read().await.keys().cloned().collect();
+    let mut device_ids: Vec<String> = state.sockets.read().await.keys().cloned().collect();
+    {
+        let conn = state.store.conn.lock().await;
+        if let Ok(mut stmt) = conn.prepare("SELECT id FROM relay_devices ORDER BY created_at") {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                for id in rows.flatten() {
+                    if !device_ids.contains(&id) {
+                        device_ids.push(id);
+                    }
+                }
+            }
+        };
+    }
     let resolved = {
         let conn = state.store.conn.lock().await;
         authenticated_user(
@@ -3891,14 +5367,45 @@ async fn client_ws_compat(
         )
         .and_then(|user| {
             device_ids.iter().find_map(|device_id| {
-                effective_access(&conn, &user.id, device_id, query.thread_id.as_deref(), None)
-                    .map(|access| (device_id.clone(), user.clone(), access))
+                let access =
+                    effective_access(&conn, &user.id, device_id, query.thread_id.as_deref(), None)?;
+                if let (Some(sandbox_id), Some(thread_id)) = (
+                    hosted_isolation_for_user(&conn, device_id, &user.id),
+                    query.thread_id.as_deref(),
+                ) {
+                    let owns = conn
+                        .query_row(
+                            "SELECT 1 FROM relay_hosted_user_threads
+                             WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
+                            params![sandbox_id, user.id, thread_id],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if !owns {
+                        return None;
+                    }
+                }
+                Some((device_id.clone(), user.clone(), access))
             })
         })
     };
     let Some((device_id, user, access)) = resolved else {
         return unauthorized();
     };
+    if state.hosted.wake_for_request(&device_id, false).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "code": "service_unavailable",
+                "message": "Hosted supervisor VM is starting. Retry shortly.",
+                "details": { "reason": "hosted_sandbox_starting" }
+            })),
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| {
         handle_client_socket(socket, state, device_id, user.id, query.thread_id, access)
     })
@@ -3953,6 +5460,7 @@ async fn handle_client_socket(
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(payload) = serde_json::from_str::<Value>(&text) else { continue; };
+                        let _ = state.hosted.wake_for_request(&device_id, true).await;
                         let message_thread = payload.get("threadId").and_then(Value::as_str);
                         let fresh_access = {
                             let conn = state.store.conn.lock().await;
@@ -4065,28 +5573,44 @@ async fn forward_server_message_to_client(
         return;
     };
     let event_thread = payload.get("threadId").and_then(Value::as_str);
+    let control_event = matches!(
+        payload.get("type").and_then(Value::as_str),
+        Some("supervisor.connected" | "supervisor.pong")
+    );
+    let attached_shell_event = attached_shell
+        .as_deref()
+        .is_some_and(|shell_id| payload.get("shellId").and_then(Value::as_str) == Some(shell_id));
     if let Some(expected) = configured_thread.as_deref() {
-        let control_event = matches!(
-            payload.get("type").and_then(Value::as_str),
-            Some("supervisor.connected" | "supervisor.pong")
-        );
-        let attached_shell_event = attached_shell.as_deref().is_some_and(|shell_id| {
-            payload.get("shellId").and_then(Value::as_str) == Some(shell_id)
-        });
         if !control_event && !attached_shell_event && event_thread != Some(expected) {
             return;
         }
     }
     let authorized = {
         let conn = state.store.conn.lock().await;
-        effective_access(
+        let access = effective_access(
             &conn,
             &user_id,
             device_id,
             configured_thread.as_deref().or(event_thread),
             None,
-        )
-        .is_some()
+        );
+        let isolated = hosted_isolation_for_user(&conn, device_id, &user_id);
+        let isolation_allows = isolated.is_none()
+            || control_event
+            || attached_shell_event
+            || event_thread.is_some_and(|thread_id| {
+                conn.query_row(
+                    "SELECT 1 FROM relay_hosted_user_threads
+                     WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
+                    params![isolated.as_deref().unwrap_or_default(), user_id, thread_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .ok()
+                .flatten()
+                .is_some()
+            });
+        access.is_some() && isolation_allows
     };
     if authorized {
         let _ = tx.send(payload.to_string());
@@ -4149,6 +5673,11 @@ mod tests {
             "test-secret".to_string(),
         )
         .unwrap();
+        let hosted = hosted::HostedService::new(
+            store.conn.clone(),
+            hosted::HostedConfig::disabled_for_test(),
+        )
+        .unwrap();
         (
             Arc::new(AppState {
                 store,
@@ -4157,6 +5686,10 @@ mod tests {
                 pending: StdMutex::new(HashMap::new()),
                 web_dist: None,
                 legacy_supervisor_token: None,
+                oauth: OAuthConfig::default(),
+                oauth_client: reqwest::Client::new(),
+                hosted,
+                hosted_bootstraps: Mutex::new(HashSet::new()),
             }),
             data_dir,
         )
@@ -4360,7 +5893,7 @@ mod tests {
              INSERT INTO relay_settings VALUES ('registrationPassword','top-secret-value');",
         )
         .unwrap();
-        let session = session_json(&conn, None);
+        let session = session_json(&conn, None, &OAuthConfig::default());
         assert_eq!(
             session["registrationSettings"]["registrationPassword"],
             Value::Null
@@ -4370,6 +5903,205 @@ mod tests {
             true
         );
         assert!(!session.to_string().contains("top-secret-value"));
+    }
+
+    #[tokio::test]
+    async fn oauth_identity_registration_approval_and_login_round_trip() {
+        let (state, data_dir) = test_app_state("oauth-identity-round-trip");
+        let (admin_salt, admin_hash) = hash_password("admin-password").unwrap();
+        {
+            let conn = state.store.conn.lock().await;
+            conn.execute(
+                "INSERT INTO relay_users
+                 (id,email,username,role,enabled,last_seen_at,created_at,password_salt,password_hash)
+                 VALUES ('admin','admin@example.test','admin','admin',1,NULL,?1,?2,?3)",
+                params![now_rfc3339(), admin_salt, admin_hash],
+            )
+            .unwrap();
+            set_relay_setting(&conn, "registrationEnabled", "true").unwrap();
+            set_relay_setting(&conn, "registrationApprovalRequired", "true").unwrap();
+            let outcome = authenticate_external_identity(
+                &conn,
+                &state.store.session_secret,
+                &ExternalIdentity {
+                    provider: OAuthProvider::Google,
+                    subject: "google-subject".into(),
+                    email: "oauth@example.test".into(),
+                    username: "oauth-user".into(),
+                },
+            )
+            .unwrap();
+            assert!(matches!(outcome, OAuthOutcome::Pending));
+        }
+        let request_id: String = {
+            let conn = state.store.conn.lock().await;
+            conn.query_row(
+                "SELECT id FROM relay_pending_registrations WHERE provider='google' AND status='pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let admin_token = create_session(&state.store.session_secret, "admin").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {admin_token}").parse().unwrap(),
+        );
+        let response = approve_registration(
+            Path(request_id),
+            headers,
+            Query(TokenQuery::default()),
+            State(state.clone()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        {
+            let conn = state.store.conn.lock().await;
+            let linked_user: String = conn
+                .query_row(
+                    "SELECT user_id FROM relay_user_identities
+                     WHERE provider='google' AND provider_subject='google-subject'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let outcome = authenticate_external_identity(
+                &conn,
+                &state.store.session_secret,
+                &ExternalIdentity {
+                    provider: OAuthProvider::Google,
+                    subject: "google-subject".into(),
+                    email: "oauth@example.test".into(),
+                    username: "ignored".into(),
+                },
+            )
+            .unwrap();
+            let OAuthOutcome::Login(token) = outcome else {
+                panic!("linked identity should log in");
+            };
+            assert_eq!(
+                verify_session(&state.store.session_secret, &token)
+                    .unwrap()
+                    .user_id,
+                linked_user
+            );
+        }
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn hosted_workspace_isolation_filters_lists_and_rejects_foreign_resources() {
+        let (state, data_dir) = test_app_state("hosted-isolation");
+        {
+            let conn = state.store.conn.lock().await;
+            conn.execute_batch(
+                "INSERT INTO relay_users VALUES
+                   ('admin','admin@example.test','admin','admin',1,NULL,'2026-01-01T00:00:00Z','salt','hash'),
+                   ('user-a','a@example.test','user-a','user',1,NULL,'2026-01-01T00:00:00Z','salt','hash'),
+                   ('user-b','b@example.test','user-b','user',1,NULL,'2026-01-01T00:00:00Z','salt','hash');
+                 INSERT INTO relay_devices VALUES
+                   ('device','admin','Hosted','rcd_token','token-hash','rcd_tok...oken','2026-01-01T00:00:00Z');
+                 INSERT INTO relay_hosted_sandboxes(
+                   id,device_id,assigned_user_id,created_by_admin_user_id,provider,
+                   provider_instance_id,image_version,cpu_count,memory_mib,disk_gib,status,
+                   credential_ref,codex_config_json,last_error_code,last_error_message,
+                   active_turn_count,last_user_activity_at,idle_deadline_at,lifecycle_generation,
+                   workspace_isolation_enabled,running_since,created_at,updated_at
+                 ) VALUES (
+                   'sandbox','device','admin','admin','incus',NULL,'ubuntu-24.04-v5',1,1536,10,
+                   'online','credential',NULL,NULL,NULL,0,NULL,NULL,0,1,NULL,
+                   '2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
+                 );
+                 INSERT INTO relay_hosted_sandbox_members VALUES
+                   ('sandbox','user-a',0,'2026-01-01T00:00:00Z'),
+                   ('sandbox','user-b',1,'2026-01-01T00:00:00Z');
+                 INSERT INTO relay_hosted_user_workspaces VALUES
+                   ('sandbox','user-a','workspace-a',1,'2026-01-01T00:00:00Z'),
+                   ('sandbox','user-b','workspace-b',1,'2026-01-01T00:00:00Z');
+                 INSERT INTO relay_hosted_user_threads VALUES
+                   ('sandbox','user-a','thread-a','workspace-a','2026-01-01T00:00:00Z'),
+                   ('sandbox','user-b','thread-b','workspace-b','2026-01-01T00:00:00Z');",
+            )
+            .unwrap();
+            assert!(hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "sandbox",
+                    user_id: "user-a",
+                    thread_id: Some("thread-a"),
+                    workspace_id: None,
+                    method: &Method::GET,
+                    path: "/api/threads/thread-a",
+                    body: &[],
+                }
+            ));
+            assert!(!hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "sandbox",
+                    user_id: "user-a",
+                    thread_id: Some("thread-b"),
+                    workspace_id: None,
+                    method: &Method::GET,
+                    path: "/api/threads/thread-b",
+                    body: &[],
+                }
+            ));
+            assert!(!hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "sandbox",
+                    user_id: "user-a",
+                    thread_id: None,
+                    workspace_id: None,
+                    method: &Method::POST,
+                    path: "/api/threads/import",
+                    body: br#"{}"#,
+                }
+            ));
+            assert!(!hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "sandbox",
+                    user_id: "user-a",
+                    thread_id: None,
+                    workspace_id: None,
+                    method: &Method::POST,
+                    path: "/api/threads/start",
+                    body: br#"{}"#,
+                }
+            ));
+        }
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(
+                json!([
+                    { "id": "workspace-a", "label": "A" },
+                    { "id": "workspace-b", "label": "B" }
+                ])
+                .to_string(),
+            ))
+            .unwrap();
+        let devices = list_user_devices(&state, "user-a").await;
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0]["token"], Value::Null);
+        assert_eq!(devices[0]["hostedStatus"], "online");
+        let response = transform_hosted_response(
+            &state,
+            "sandbox",
+            "user-a",
+            &Method::GET,
+            "/api/workspaces",
+            response,
+        )
+        .await;
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let workspaces: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(workspaces, json!([{ "id": "workspace-a", "label": "A" }]));
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
@@ -4716,7 +6448,7 @@ mod tests {
     }
 
     #[test]
-    fn node_migration_requires_explicit_unsupported_data_override() {
+    fn node_migration_accepts_hosted_and_oauth_but_guards_email_verification() {
         let data_dir = temporary_test_dir("unsupported-node-data");
         std::fs::create_dir_all(&data_dir).unwrap();
         let database_path = data_dir.join("relay-store.sqlite");
@@ -4724,13 +6456,42 @@ mod tests {
         let conn = Connection::open(&database_path).unwrap();
         conn.execute_batch(
             "
-            CREATE TABLE relay_hosted_sandboxes (id TEXT PRIMARY KEY);
-            CREATE TABLE relay_user_identities (id TEXT PRIMARY KEY);
-            CREATE TABLE relay_pending_registrations (id TEXT PRIMARY KEY, status TEXT NOT NULL);
-            INSERT INTO relay_hosted_sandboxes VALUES ('sandbox');
-            INSERT INTO relay_user_identities VALUES ('identity');
-            INSERT INTO relay_pending_registrations VALUES ('registration','pending');
+            INSERT INTO relay_users(
+              id,email,username,role,enabled,last_seen_at,created_at,password_salt,password_hash
+            ) VALUES
+              ('admin','admin@example.test','admin','admin',1,NULL,'2026-01-01T00:00:00Z','salt','hash'),
+              ('user','user@example.test','user','user',1,NULL,'2026-01-01T00:00:00Z','salt','hash');
+            INSERT INTO relay_devices(
+              id,owner_user_id,name,token,token_hash,token_preview,created_at
+            ) VALUES (
+              'device','admin','Hosted','rcd_fixture','fixture-hash','rcd_fix...ture','2026-01-01T00:00:00Z'
+            );
+            INSERT INTO relay_hosted_sandboxes(
+              id,device_id,assigned_user_id,created_by_admin_user_id,provider,
+              provider_instance_id,image_version,cpu_count,memory_mib,disk_gib,status,
+              credential_ref,codex_config_json,last_error_code,last_error_message,
+              active_turn_count,last_user_activity_at,idle_deadline_at,lifecycle_generation,
+              workspace_isolation_enabled,running_since,created_at,updated_at
+            ) VALUES (
+              'sandbox','device','admin','admin','incus',NULL,'ubuntu-24.04-v5',1,1536,10,
+              'stopped','credential',NULL,NULL,NULL,0,NULL,NULL,0,0,NULL,
+              '2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
+            );
+            INSERT INTO relay_hosted_sandbox_members VALUES (
+              'sandbox','user',0,'2026-01-01T00:00:00Z'
+            );
+            INSERT INTO relay_user_identities VALUES (
+              'identity','user','google','subject','user@example.test','2026-01-01T00:00:00Z'
+            );
+            INSERT INTO relay_pending_registrations(
+              id,email,username,password_salt,password_hash,created_at,status,
+              reviewed_at,reviewed_by_user_id,provider,provider_subject
+            ) VALUES (
+              'registration','pending@example.test','pending','salt','hash',
+              '2026-01-01T00:00:00Z','pending',NULL,NULL,'github','pending-subject'
+            );
             INSERT INTO relay_settings(key,value) VALUES ('googleAuthEnabled','true');
+            INSERT INTO relay_settings(key,value) VALUES ('emailVerificationEnabled','true');
             ",
         )
         .unwrap();
@@ -4740,9 +6501,12 @@ mod tests {
         assert_eq!(plan.hosted_sandbox_count, 1);
         assert_eq!(plan.oauth_identity_count, 1);
         assert_eq!(plan.pending_registration_count, 1);
-        assert_eq!(plan.active_unsupported_settings, vec!["googleAuthEnabled"]);
+        assert_eq!(
+            plan.active_unsupported_settings,
+            vec!["emailVerificationEnabled"]
+        );
         let error = migrate_relay_data_dir(&data_dir).unwrap_err();
-        assert!(error.to_string().contains("unsupported active data"));
+        assert!(error.to_string().contains("unsupported active settings"));
         assert!(!plan.backup_path.unwrap().exists());
 
         let report = migrate_relay_data_dir_with_options(

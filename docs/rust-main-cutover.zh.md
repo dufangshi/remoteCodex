@@ -27,7 +27,12 @@ Git 分支、tag、npm 包和容器镜像都只是代码/二进制备份，不�
 - Rust workspace 在 Linux、macOS、Windows 的固定 Rust 1.89 toolchain 通过。
 - 使用真实 `remote-codex@0.11.64` 生成的 supervisor 数据库完成升级、重复启动、新 turn、queued steer 和 Node 降级读取测试。
 - npm 七个平台包齐全，launcher tarball 不包含源码，当前平台完成安装、Web/API、status/stop smoke。
-- relay 数据副本的 dry-run 不报告未支持的 hosted sandbox、OAuth identity、pending registration 或 auth setting 数据。
+- relay 数据副本中的 hosted sandbox、OAuth identity 和 pending registration
+  可直接读取；dry-run 不报告除邮件验证之外的未支持 auth setting。
+- 真实 Incus host-agent capability/inventory、已有 sandbox 启停、临时 sandbox
+  创建/连接/删除和 orphan reconciliation 均通过。
+- Google/GitHub authorization redirect、mock callback exchange、已有 identity
+  登录和 approval transaction 均通过。
 - relay 用户登录、旧 HMAC session、旧密码、device token、REST、二进制 body、client WebSocket 和分享权限测试通过。
 - `Relay Deploy` 仅允许手工触发，并使用受保护的 GitHub Environment。
 
