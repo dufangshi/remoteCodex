@@ -171,15 +171,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/dufangshi/remote-codex-thread-ui.git ../remote-codex-thread-ui
-          git -C ../remote-codex-thread-ui checkout --detach "${THREAD_UI_COMMIT}"
+          git clone https://github.com/dufangshi/remote-codex-thread-ui.git ./remote-codex-thread-ui
+          git -C ./remote-codex-thread-ui checkout --detach "${THREAD_UI_COMMIT}"
 
       - name: Build Web assets
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir ../remote-codex-thread-ui install --frozen-lockfile
-          pnpm --dir ../remote-codex-thread-ui --filter @remote-codex/thread-ui build
+          pnpm --dir ./remote-codex-thread-ui install --frozen-lockfile
+          pnpm --dir ./remote-codex-thread-ui --filter @remote-codex/thread-ui build
           pnpm install --frozen-lockfile
           pnpm --filter @remote-codex/supervisor-web build
 
