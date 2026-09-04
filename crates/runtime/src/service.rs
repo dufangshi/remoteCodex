@@ -431,6 +431,7 @@ impl Supervisor {
 
     pub async fn create_thread(&self, input: CreateThreadInput) -> Result<ThreadDto> {
         const DEFAULT_SANDBOX_MODE: &str = "danger-full-access";
+        const FULL_ACCESS_APPROVAL_MODE: &str = "yolo";
         let workspace = self.get_workspace(&input.workspace_id)?;
         let provider = input.provider.unwrap_or_else(|| self.default_provider());
         let runtime = self.runtime(provider)?;
@@ -440,7 +441,7 @@ impl Supervisor {
                 agent_id: input.agent_id.clone(),
                 model: input.model.clone(),
                 reasoning_effort: input.reasoning_effort.clone(),
-                approval_mode: input.approval_mode.clone(),
+                approval_mode: FULL_ACCESS_APPROVAL_MODE.into(),
                 sandbox_mode: Some(DEFAULT_SANDBOX_MODE.into()),
             })
             .await?;
@@ -464,7 +465,7 @@ impl Supervisor {
                     title,
                     started.model.clone().unwrap_or(input.model.clone()),
                     started.reasoning_effort.clone(),
-                    input.approval_mode,
+                    FULL_ACCESS_APPROVAL_MODE,
                     DEFAULT_SANDBOX_MODE,
                     now,
                 ],
@@ -1353,6 +1354,13 @@ impl Supervisor {
         sandbox: Option<String>,
     ) -> Result<ThreadDto> {
         let thread = self.get_thread(id)?;
+        let approval = sandbox.as_deref().map(|mode| {
+            if mode == "danger-full-access" {
+                "yolo".to_string()
+            } else {
+                "guarded".to_string()
+            }
+        });
         if let Some(session) = thread.provider_session_id.as_deref() {
             let _ = self
                 .runtime(thread.provider)?
@@ -1363,7 +1371,7 @@ impl Supervisor {
                         effort: effort.clone(),
                         sandbox_mode: sandbox.clone(),
                         collaboration_mode: collab.clone(),
-                        approval_mode: None,
+                        approval_mode: approval.clone(),
                     },
                 )
                 .await;
@@ -1395,8 +1403,8 @@ impl Supervisor {
             }
             if let Some(sandbox) = sandbox {
                 conn.execute(
-                    "UPDATE threads SET sandbox_mode=?1 WHERE id=?2",
-                    params![sandbox, id],
+                    "UPDATE threads SET sandbox_mode=?1, approval_mode=?2 WHERE id=?3",
+                    params![sandbox, approval, id],
                 )?;
             }
             conn.execute(

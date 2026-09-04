@@ -1194,7 +1194,7 @@ export interface ThreadActionQuestionDto {
 
 export interface ThreadActionRequestDto {
   id: string;
-  kind: 'requestUserInput' | 'planDecision';
+  kind: 'requestUserInput' | 'permissionRequest' | 'planDecision';
   title: string;
   description: string | null;
   turnId: string | null;

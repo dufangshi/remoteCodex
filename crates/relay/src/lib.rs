@@ -12,6 +12,7 @@ use axum::http::{header, HeaderMap, Method, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router};
+use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{now_rfc3339, ApiError};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1082,24 +1083,59 @@ async fn forward_device(
             .into_response();
     }
     match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
-        Ok(Ok(value)) => {
-            let status = value
-                .get("statusCode")
-                .and_then(Value::as_u64)
-                .unwrap_or(200) as u16;
-            let body = match value.get("body").cloned().unwrap_or(json!({})) {
-                Value::String(raw) => serde_json::from_str(&raw).unwrap_or(Value::String(raw)),
-                other => other,
-            };
-            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-            (status, Json(body)).into_response()
-        }
+        Ok(Ok(value)) => forwarded_device_response(value),
         _ => (
             StatusCode::GATEWAY_TIMEOUT,
             Json(json!({ "code": "timeout", "message": "device did not respond" })),
         )
             .into_response(),
     }
+}
+
+fn forwarded_device_response(value: Value) -> Response {
+    let status = value
+        .get("statusCode")
+        .and_then(Value::as_u64)
+        .and_then(|status| StatusCode::from_u16(status as u16).ok())
+        .unwrap_or(StatusCode::OK);
+    let bytes = if let Some(encoded) = value.get("bodyBase64").and_then(Value::as_str) {
+        match base64::engine::general_purpose::STANDARD.decode(encoded) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "code": "invalid_supervisor_response",
+                        "message": "Supervisor returned an invalid binary response."
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        match value.get("body").cloned().unwrap_or(Value::Null) {
+            Value::String(raw) => raw.into_bytes(),
+            Value::Null => Vec::new(),
+            other => serde_json::to_vec(&other).unwrap_or_default(),
+        }
+    };
+
+    let mut response = Response::builder().status(status);
+    if let Some(headers) = value.get("headers").and_then(Value::as_object) {
+        for name in [
+            "content-type",
+            "content-disposition",
+            "cache-control",
+            "x-content-type-options",
+        ] {
+            if let Some(header_value) = headers.get(name).and_then(Value::as_str) {
+                response = response.header(name, header_value);
+            }
+        }
+    }
+    response
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
 
 async fn list_shares(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -1268,6 +1304,35 @@ fn mime_for(path: &FsPath) -> &'static str {
         "txt" => "text/plain; charset=utf-8",
         "webmanifest" => "application/manifest+json",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn forwarded_device_response_preserves_binary_body_and_headers() {
+        let expected = b"%PDF-1.7\n\0binary";
+        let response = forwarded_device_response(json!({
+            "statusCode": 200,
+            "headers": {
+                "content-type": "application/pdf",
+                "content-disposition": "attachment; filename=\"thread.pdf\""
+            },
+            "bodyBase64": base64::engine::general_purpose::STANDARD.encode(expected)
+        }));
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(
+            response.headers()[header::CONTENT_DISPOSITION],
+            "attachment; filename=\"thread.pdf\""
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), expected);
     }
 }
 

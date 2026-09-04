@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::now_rfc3339;
 use remote_codex_runtime::Supervisor;
@@ -105,11 +106,33 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
     match req.send().await {
         Ok(response) => {
             let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let headers = response
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    matches!(
+                        name.as_str(),
+                        "content-type"
+                            | "content-disposition"
+                            | "cache-control"
+                            | "x-content-type-options"
+                    )
+                    .then(|| {
+                        value.to_str().ok().map(|value| {
+                            (name.as_str().to_string(), Value::String(value.to_string()))
+                        })
+                    })
+                    .flatten()
+                })
+                .collect::<serde_json::Map<String, Value>>();
+            let bytes = response.bytes().await.unwrap_or_default();
+            let body = String::from_utf8(bytes.to_vec()).ok();
+            let body_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
             json!({
                 "statusCode": status,
-                "headers": { "content-type": "application/json" },
-                "body": body
+                "headers": headers,
+                "body": body,
+                "bodyBase64": body_base64
             })
         }
         Err(err) => json!({

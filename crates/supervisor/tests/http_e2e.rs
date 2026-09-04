@@ -147,6 +147,56 @@ async fn terminal_plugin_toggle_updates_persisted_state() {
 }
 
 #[tokio::test]
+async fn full_access_keeps_approval_mode_in_sync() {
+    let (_dir, port, ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let workspace_path = ws_root.join("permission-policy");
+    std::fs::create_dir_all(&workspace_path).unwrap();
+    let workspace = json(
+        &client,
+        client.post(format!("{base}/api/workspaces")).json(&json!({
+            "absPath": workspace_path,
+            "label": "Permission policy"
+        })),
+    )
+    .await;
+    let thread = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/start"))
+            .json(&json!({
+                "workspaceId": workspace["id"],
+                "provider": "codex",
+                "model": "ios-e2e-stream",
+                "approvalMode": "guarded"
+            })),
+    )
+    .await;
+    let thread_id = thread["id"].as_str().unwrap();
+    assert_eq!(thread["sandboxMode"], "danger-full-access");
+    assert_eq!(thread["approvalMode"], "yolo");
+
+    let guarded = json(
+        &client,
+        client
+            .patch(format!("{base}/api/threads/{thread_id}/settings"))
+            .json(&json!({ "sandboxMode": "workspace-write" })),
+    )
+    .await;
+    assert_eq!(guarded["approvalMode"], "guarded");
+
+    let full = json(
+        &client,
+        client
+            .patch(format!("{base}/api/threads/{thread_id}/settings"))
+            .json(&json!({ "sandboxMode": "danger-full-access" })),
+    )
+    .await;
+    assert_eq!(full["approvalMode"], "yolo");
+}
+
+#[tokio::test]
 async fn http_files_prompt_interrupt_export_and_capabilities() {
     let (_dir, port, ws_root) = spawn_supervisor(vec![
         Provider::Codex,
@@ -336,14 +386,31 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
         }
 
         let html = client
-            .get(format!("{base}/api/threads/{thread_id}/exports/html"))
+            .get(format!(
+                "{base}/api/threads/{thread_id}/exports/pdf?format=html&mode=latest&limit=10"
+            ))
             .send()
             .await
             .unwrap();
         assert_eq!(html.status(), 200);
-        assert!(html.text().await.unwrap().contains("hello"));
+        assert_eq!(
+            html.headers().get("content-type").unwrap(),
+            "text/html; charset=utf-8"
+        );
+        assert!(html
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".html\""));
+        let html_body = html.text().await.unwrap();
+        assert!(html_body.starts_with("<!doctype html>"));
+        assert!(html_body.contains("hello"));
         let pdf = client
-            .get(format!("{base}/api/threads/{thread_id}/exports/pdf"))
+            .get(format!(
+                "{base}/api/threads/{thread_id}/exports/pdf?format=pdf&mode=latest&limit=10"
+            ))
             .send()
             .await
             .unwrap();
@@ -352,6 +419,16 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
             pdf.headers().get("content-type").unwrap(),
             "application/pdf"
         );
+        assert!(pdf
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".pdf\""));
+        let pdf_body = pdf.bytes().await.unwrap();
+        assert!(pdf_body.starts_with(b"%PDF-"));
+        assert!(pdf_body.ends_with(b"%%EOF"));
     }
 
     let long = json(

@@ -148,6 +148,29 @@ pub fn permission_title(params: &Value) -> String {
         .to_string()
 }
 
+pub fn permission_description(params: &Value) -> Option<String> {
+    let tool_call = params.get("toolCall")?;
+    let kind = tool_call
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("operation");
+    let raw_input = tool_call.get("rawInput");
+    let detail = raw_input
+        .and_then(|input| input.get("command"))
+        .or_else(|| raw_input.and_then(|input| input.get("path")))
+        .or_else(|| raw_input.and_then(|input| input.get("url")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Some(match detail {
+        Some(detail) => format!("{}: {detail}", kind.replace('_', " ")),
+        None => format!(
+            "Review this {} operation before continuing.",
+            kind.replace('_', " ")
+        ),
+    })
+}
+
 pub fn permission_questions(title: &str, choices: &[PermissionChoice]) -> Vec<Value> {
     vec![json!({
         "id": "permission",
@@ -385,6 +408,16 @@ mod tests {
             ]
         });
         assert_eq!(permission_title(&params), "Escalate sandbox");
+        assert_eq!(
+            permission_description(&json!({
+                "toolCall": {
+                    "kind": "execute",
+                    "rawInput": { "command": "cargo test" }
+                }
+            }))
+            .as_deref(),
+            Some("execute: cargo test")
+        );
         assert_eq!(
             parse_permission_choices(&params)[0].option_id,
             "allow-always"

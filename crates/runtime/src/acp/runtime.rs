@@ -28,9 +28,9 @@ use super::capabilities::{negotiate, NegotiatedCaps};
 use super::catalog::{builtin_agents, classify_availability, parse_command_models, AcpAgentDef};
 use super::mapper::{MappedUpdate, TurnMapper};
 use super::modes::{
-    parse_available_modes, parse_permission_choices, permission_questions, permission_title,
-    resolve_mode, resolve_mode_config_value, select_permission_option, PermissionChoice,
-    ProductSessionPolicy, SessionMode,
+    parse_available_modes, parse_permission_choices, permission_description, permission_questions,
+    permission_title, resolve_mode, resolve_mode_config_value, select_permission_option,
+    PermissionChoice, ProductSessionPolicy, SessionMode,
 };
 use super::prompt::build_prompt_blocks;
 use super::rpc::AcpProcess;
@@ -1114,14 +1114,8 @@ impl AgentRuntime for AcpRuntime {
             .await
             .remove(request_id)
         {
-            let option =
-                select_permission_option(&pending.options, allow, answer).unwrap_or_else(|| {
-                    if allow {
-                        "allow-once".into()
-                    } else {
-                        "cancelled".into()
-                    }
-                });
+            let option = select_permission_option(&pending.options, allow, answer)
+                .unwrap_or_else(|| "cancelled".into());
             let _ = pending.tx.send(option);
         }
         for list in self.inner.pending_dtos.lock().await.values_mut() {
@@ -1491,14 +1485,18 @@ async fn handle_agent_request(
         "session/request_permission" => {
             let choices = parse_permission_choices(&params);
             if policy.auto_approve() {
-                let option = select_permission_option(&choices, true, None)
-                    .unwrap_or_else(|| "allow-once".into());
-                process
-                    .respond(
-                        req_id,
-                        json!({ "outcome": { "outcome": "selected", "optionId": option } }),
-                    )
-                    .await?;
+                if let Some(option) = select_permission_option(&choices, true, None) {
+                    process
+                        .respond(
+                            req_id,
+                            json!({ "outcome": { "outcome": "selected", "optionId": option } }),
+                        )
+                        .await?;
+                } else {
+                    process
+                        .respond(req_id, json!({ "outcome": { "outcome": "cancelled" } }))
+                        .await?;
+                }
                 return Ok(());
             }
             let request_id = format!("perm-{req_id}");
@@ -1514,9 +1512,9 @@ async fn handle_agent_request(
             if let Some((thread_id, turn_id, bus)) = &active {
                 let dto = ThreadActionRequestDto {
                     id: request_id.clone(),
-                    kind: "requestUserInput".into(),
+                    kind: "permissionRequest".into(),
                     title: title.clone(),
-                    description: Some(params.to_string()),
+                    description: permission_description(&params),
                     turn_id: Some(turn_id.clone()),
                     item_id: params
                         .pointer("/toolCall/toolCallId")
@@ -1543,7 +1541,7 @@ async fn handle_agent_request(
                 .await
                 .ok()
                 .and_then(Result::ok);
-            if let Some(option) = selected {
+            if let Some(option) = selected.filter(|option| option != "cancelled") {
                 process
                     .respond(
                         req_id,

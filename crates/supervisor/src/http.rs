@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::multipart::Multipart;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{DefaultBodyLimit, FromRequest, Path, Query, Request, State, WebSocketUpgrade};
@@ -35,6 +36,19 @@ struct PromptAttachmentManifestEntry {
 #[derive(Deserialize)]
 struct UpdatePluginInput {
     enabled: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportTranscriptQuery {
+    format: Option<String>,
+    mode: Option<String>,
+    limit: Option<usize>,
+    turn_ids: Option<String>,
+    profile: Option<String>,
+    include_token_and_price: Option<bool>,
+    include_command_output: Option<bool>,
+    include_absolute_paths: Option<bool>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -1103,30 +1117,116 @@ async fn export_turns(
 
 async fn export_pdf(
     Path(id): Path<String>,
+    Query(query): Query<ExportTranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
-    let bytes = crate::export::pdf_transcript(&detail).map_err(map_err)?;
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/pdf")],
-        bytes,
-    )
-        .into_response())
+    render_transcript_export(&detail, &query, query.format.as_deref().unwrap_or("pdf"))
 }
 
 async fn export_html(
     Path(id): Path<String>,
+    Query(query): Query<ExportTranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
-    let html = crate::export::html_transcript(&detail).map_err(map_err)?;
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        html,
-    )
-        .into_response())
+    render_transcript_export(&detail, &query, "html")
+}
+
+fn render_transcript_export(
+    detail: &remote_codex_protocol::ThreadDetailDto,
+    query: &ExportTranscriptQuery,
+    format: &str,
+) -> Result<Response, ApiErr> {
+    if !matches!(format, "pdf" | "html") {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Export format must be pdf or html.",
+        ));
+    }
+    let mode = query.mode.as_deref().unwrap_or("latest");
+    if !matches!(mode, "latest" | "selected") {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Export mode must be latest or selected.",
+        ));
+    }
+    let profile = query.profile.as_deref().unwrap_or("review");
+    if !matches!(profile, "review" | "technical") {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Export profile must be review or technical.",
+        ));
+    }
+    let turn_ids = query
+        .turn_ids
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let turns = crate::export::select_turns(&detail.turns, mode, query.limit, &turn_ids)
+        .map_err(|error| err(StatusCode::BAD_REQUEST, "bad_request", error.to_string()))?;
+    let options = crate::export::TranscriptExportOptions {
+        profile: profile.into(),
+        include_token_and_price: query.include_token_and_price.unwrap_or(true),
+        include_command_output: query.include_command_output.unwrap_or(false),
+        include_absolute_paths: query.include_absolute_paths.unwrap_or(false),
+    };
+    let (bytes, content_type, extension) = if format == "html" {
+        (
+            crate::export::html_transcript(detail, &turns, &options)
+                .map_err(map_err)?
+                .into_bytes(),
+            "text/html; charset=utf-8",
+            "html",
+        )
+    } else {
+        (
+            crate::export::pdf_transcript(detail, &turns, &options).map_err(map_err)?,
+            "application/pdf",
+            "pdf",
+        )
+    };
+    let stem = safe_export_stem(&detail.thread.title);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"remote-codex-{stem}.{extension}\""),
+        )
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(Body::from(bytes))
+        .map_err(|error| map_err(error.into()))
+}
+
+fn safe_export_stem(title: &str) -> String {
+    let stem = title
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if stem.is_empty() {
+        "thread".into()
+    } else {
+        stem.chars().take(72).collect()
+    }
 }
 
 async fn create_shell(

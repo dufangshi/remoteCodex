@@ -153,7 +153,9 @@ export function isThreadActionRequest(
   const request = value as Partial<ThreadDetailDto['pendingRequests'][number]>;
   return (
     typeof request.id === 'string' &&
-    (request.kind === 'requestUserInput' || request.kind === 'planDecision') &&
+    (request.kind === 'requestUserInput' ||
+      request.kind === 'permissionRequest' ||
+      request.kind === 'planDecision') &&
     typeof request.title === 'string' &&
     typeof request.createdAt === 'string' &&
     Array.isArray(request.questions)
