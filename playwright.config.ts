@@ -27,7 +27,7 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: `VITE_API_PROXY_TARGET=${apiBaseUrl} VITE_WS_PROXY_TARGET=ws://127.0.0.1:${apiPort} pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port ${webPort} --strictPort`,
+      command: `VITE_API_PROXY_TARGET=${apiBaseUrl} VITE_WS_PROXY_TARGET=ws://127.0.0.1:${apiPort} pnpm --filter @remote-codex/supervisor-web exec vite --force --host localhost --port ${webPort} --strictPort`,
       url: webBaseUrl,
       reuseExistingServer: true,
       timeout: 120_000,

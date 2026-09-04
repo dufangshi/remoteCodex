@@ -259,6 +259,55 @@ test.describe('non-thread product UI regressions', () => {
     }
   });
 
+  test('keeps harness and plan controls out of the prompt toolbar', async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'desktop-chromium',
+      'One browser project is sufficient for composer control placement.',
+    );
+
+    const thread = await api<{ id: string }>(apiBaseUrl, '/api/threads/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        workspaceId: workspace.id,
+        provider: 'codex',
+        model: 'ios-e2e-stream',
+        approvalMode: 'guarded',
+        title: 'Composer control placement',
+      }),
+    });
+
+    try {
+      await page.goto(`/threads/${thread.id}`);
+      await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+      const promptToolbar = page.locator(
+        '.thread-composer-toolbar, .thread-graph-composer-toolbar',
+      );
+      await expect(promptToolbar).toBeVisible();
+      await expect(
+        promptToolbar.getByRole('button', { name: /^Agent:/ }),
+      ).toHaveCount(0);
+      await expect(
+        promptToolbar.getByRole('button', { name: 'Plan', exact: true }),
+      ).toHaveCount(0);
+
+      await promptToolbar
+        .getByRole('button', { name: 'Open slash toolbox' })
+        .click();
+      const planToggle = page.getByRole('button', { name: /^\/plan/ });
+      await expect(planToggle).toBeVisible();
+      await expect(planToggle).toHaveAttribute('aria-pressed', 'false');
+      await planToggle.click();
+      await promptToolbar
+        .getByRole('button', { name: 'Open slash toolbox' })
+        .click();
+      await expect(
+        page.getByRole('button', { name: /^\/plan/ }),
+      ).toHaveAttribute('aria-pressed', 'true');
+    } finally {
+      await api(apiBaseUrl, `/api/threads/${thread.id}`, { method: 'DELETE' });
+    }
+  });
+
   test('core product routes reflow across the target width matrix', async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'desktop-chromium',
