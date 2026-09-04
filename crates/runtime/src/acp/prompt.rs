@@ -127,7 +127,12 @@ mod tests {
         assert_eq!(blocks[1]["mimeType"], "image/png");
         let uri = blocks[1]["uri"].as_str().unwrap();
         assert_eq!(
-            url::Url::parse(uri).unwrap().to_file_path().unwrap(),
+            url::Url::parse(uri)
+                .unwrap()
+                .to_file_path()
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
             dir.path().join("red.png").canonicalize().unwrap()
         );
         assert_eq!(
@@ -159,7 +164,12 @@ mod tests {
         let uri = blocks[0]["uri"].as_str().unwrap();
         assert!(uri.contains("notes%20%231%20%25.txt"), "{uri}");
         assert_eq!(
-            url::Url::parse(uri).unwrap().to_file_path().unwrap(),
+            url::Url::parse(uri)
+                .unwrap()
+                .to_file_path()
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
             path.canonicalize().unwrap()
         );
     }

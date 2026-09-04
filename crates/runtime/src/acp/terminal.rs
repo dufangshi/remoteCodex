@@ -266,7 +266,7 @@ mod tests {
                 "/D".into(),
                 "/S".into(),
                 "/C".into(),
-                "ping -n 2 127.0.0.1 >NUL & <NUL set /P =ACP_TERMINAL_OK".into(),
+                "ping -n 2 127.0.0.1 >NUL & set /P \"=ACP_TERMINAL_OK\" <NUL & exit /B 0".into(),
             ],
         )
     }
