@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Self-hosted control plane for coding agents. Rust supervisor, ACP runtimes, React thread UI.",
   "license": "MIT",
   "private": true,
@@ -18,7 +18,7 @@
     "npm:prepare": "node scripts/prepare-npm-release.mjs",
     "npm:pack": "node scripts/pack-npm-release.mjs",
     "npm:publish": "node scripts/publish-npm-release.mjs",
-    "npm:publish:test": "node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs",
+    "npm:publish:test": "node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs scripts/npm-launcher-relay.test.mjs",
     "npm:verify": "node scripts/verify-npm-package.mjs",
     "version:set": "node scripts/set-version.mjs",
     "typecheck": "pnpm --filter @remote-codex/supervisor-web typecheck"

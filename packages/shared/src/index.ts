@@ -181,7 +181,9 @@ export interface CreateRelaySessionShareInput {
   targetIdentifier: string;
   deviceId: string;
   threadId: string;
+  threadTitle?: string | null;
   workspaceId?: string | null;
+  workspaceLabel?: string | null;
   label?: string | null;
   threadAccess: RelayThreadAccessDto;
   workspaceAccess: RelayWorkspaceAccessDto;
@@ -189,7 +191,9 @@ export interface CreateRelaySessionShareInput {
 }
 
 export interface UpdateRelaySessionShareInput {
+  threadTitle?: string | null | undefined;
   workspaceId?: string | null | undefined;
+  workspaceLabel?: string | null | undefined;
   label?: string | null | undefined;
   threadAccess?: RelayThreadAccessDto | undefined;
   workspaceAccess?: RelayWorkspaceAccessDto | undefined;

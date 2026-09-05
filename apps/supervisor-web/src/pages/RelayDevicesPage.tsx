@@ -1265,11 +1265,10 @@ function SharedSessionRow({
   onOpen?: () => void;
 }) {
   const accessHistoryId = `share-access-history-${useId()}`;
-  const shareTitle = shareTitleText(share);
+  const shareTitle = relayShareTitleText(share);
   const threadLabel = shareTitle;
   const shareLabel = share.label?.trim() || null;
-  const workspaceLabel =
-    share.workspaceLabel?.trim() || 'Workspace unavailable';
+  const workspaceLabel = relayShareWorkspaceLabel(share);
   const lastAccessLabel = share.lastAccessedAt
     ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
     : 'Not accessed yet';
@@ -1854,7 +1853,7 @@ function SharePermissionsDialog({
   return (
     <RelayDialog
       busy={busy}
-      description={`${share.targetUsername} can access ${shareTitleText(share)}.`}
+      description={`${share.targetUsername} can access ${relayShareTitleText(share)}.`}
       error={error}
       onClose={onClose}
       title="Shared thread permissions"
@@ -2768,8 +2767,14 @@ function fromDatetimeLocalValue(value: string) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function shareTitleText(share: RelaySessionShareDto) {
-  return stableShareThreadTitle(share) ?? 'Thread unavailable';
+export function relayShareTitleText(share: RelaySessionShareDto) {
+  return stableShareThreadTitle(share) ?? (share.label?.trim() || 'Shared thread');
+}
+
+export function relayShareWorkspaceLabel(share: RelaySessionShareDto) {
+  return share.workspaceAccess === 'none'
+    ? 'No workspace access'
+    : share.workspaceLabel?.trim() || 'Workspace unavailable';
 }
 
 function stableShareThreadTitle(share: RelaySessionShareDto) {
@@ -2802,7 +2807,7 @@ function revokeDescription(
     | { kind: 'share'; share: RelaySessionShareDto },
 ) {
   if (target.kind === 'share') {
-    return `Revoke ${target.share.targetUsername}'s access to thread ${shareTitleText(target.share)}? Their shared link will stop working immediately.`;
+    return `Revoke ${target.share.targetUsername}'s access to thread ${relayShareTitleText(target.share)}? Their shared link will stop working immediately.`;
   }
   const grant = target.grant;
   const range =

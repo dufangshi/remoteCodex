@@ -74,6 +74,7 @@ import {
   type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
   updateThread,
+  updateRelayShare,
   updateShell,
   updateProviderHostFile,
   updateThreadSettings,
@@ -653,12 +654,28 @@ export function ThreadDetailPage() {
     }));
     try {
       const portal = await fetchRelayPortal();
-      const shares = portal.sharedByMe
-        .filter(
+      const ownedShares = portal.sharedByMe.filter(
           (share) =>
             share.deviceId === deviceId &&
             share.threadId === currentDetail.thread.id,
-        )
+        );
+      const threadTitle = currentDetail.thread.title;
+      const workspaceLabel = currentDetail.workspace.label;
+      await Promise.all(
+        ownedShares
+          .filter(
+            (share) =>
+              share.threadTitle !== threadTitle ||
+              (share.workspaceId && share.workspaceLabel !== workspaceLabel),
+          )
+          .map((share) =>
+            updateRelayShare(share.id, {
+              threadTitle,
+              ...(share.workspaceId ? { workspaceLabel } : {}),
+            }),
+          ),
+      );
+      const shares = ownedShares
         .map((share) => ({
           id: share.id,
           targetUsername: share.targetUsername,
@@ -718,7 +735,9 @@ export function ThreadDetailPage() {
           targetIdentifier: input.targetIdentifier,
           deviceId,
           threadId: currentDetail.thread.id,
+          threadTitle: currentDetail.thread.title,
           workspaceId,
+          workspaceLabel: workspaceId ? currentDetail.workspace.label : null,
           label: input.label ?? null,
           threadAccess: input.threadAccess,
           workspaceAccess: input.workspaceAccess,

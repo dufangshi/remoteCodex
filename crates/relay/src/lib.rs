@@ -2572,7 +2572,9 @@ struct CreateShareInput {
     target_identifier: Option<String>,
     device_id: Option<String>,
     thread_id: Option<String>,
+    thread_title: Option<String>,
     workspace_id: Option<String>,
+    workspace_label: Option<String>,
     label: Option<String>,
     thread_access: Option<String>,
     workspace_access: Option<String>,
@@ -2660,7 +2662,7 @@ async fn create_share(
          (id,owner_user_id,owner_username,target_user_id,target_username,device_id,device_name,
           thread_id,thread_title,workspace_id,workspace_label,label,thread_access,workspace_access,
           created_at,revoked_at,expires_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,?9,NULL,?10,?11,?12,?13,NULL,?14)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16)",
             params![
                 id,
                 owner.id,
@@ -2670,7 +2672,9 @@ async fn create_share(
                 device_id,
                 device_name,
                 thread_id,
+                body.thread_title,
                 body.workspace_id,
+                body.workspace_label,
                 body.label,
                 thread_access,
                 workspace_access,
@@ -2695,7 +2699,9 @@ async fn create_share(
         "deviceId": device_id,
         "deviceName": device_name,
         "threadId": thread_id,
+        "threadTitle": body.thread_title,
         "workspaceId": body.workspace_id,
+        "workspaceLabel": body.workspace_label,
         "label": body.label,
         "threadAccess": thread_access,
         "workspaceAccess": workspace_access,
@@ -2709,9 +2715,11 @@ async fn create_share(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateShareInput {
+    thread_title: Option<String>,
     thread_access: Option<String>,
     workspace_access: Option<String>,
     workspace_id: Option<String>,
+    workspace_label: Option<String>,
     label: Option<String>,
     expires_at: Option<String>,
 }
@@ -2745,6 +2753,12 @@ async fn update_share(
         )
             .into_response();
     }
+    if let Some(thread_title) = body.thread_title {
+        let _ = conn.execute(
+            "UPDATE relay_shares SET thread_title=?1 WHERE id=?2 AND owner_user_id=?3 AND revoked_at IS NULL",
+            params![thread_title, share_id, owner.id],
+        );
+    }
     if let Some(access) = body.thread_access {
         let access = normalize_thread_access(Some(&access));
         let _ = conn.execute(
@@ -2763,6 +2777,12 @@ async fn update_share(
         let _ = conn.execute(
             "UPDATE relay_shares SET workspace_id=?1 WHERE id=?2 AND owner_user_id=?3 AND revoked_at IS NULL",
             params![workspace_id, share_id, owner.id],
+        );
+    }
+    if let Some(workspace_label) = body.workspace_label {
+        let _ = conn.execute(
+            "UPDATE relay_shares SET workspace_label=?1 WHERE id=?2 AND owner_user_id=?3 AND revoked_at IS NULL",
+            params![workspace_label, share_id, owner.id],
         );
     }
     if let Some(label) = body.label {
@@ -6205,6 +6225,58 @@ mod tests {
             relay_api_target_path("threads", &uri),
             "/api/threads?workspaceId=workspace-1"
         );
+    }
+
+    #[tokio::test]
+    async fn thread_only_share_preserves_thread_metadata() {
+        let (state, data_dir) = test_app_state("thread-only-share-metadata");
+        {
+            let conn = state.store.conn.lock().await;
+            conn.execute_batch(
+                "INSERT INTO relay_users VALUES
+                   ('owner','owner@example.test','owner','user',1,NULL,'2026-01-01T00:00:00Z','salt','hash'),
+                   ('viewer','viewer@example.test','viewer','user',1,NULL,'2026-01-01T00:00:00Z','salt','hash');
+                 INSERT INTO relay_devices VALUES
+                   ('device','owner','Owner Mac','rcd_token','token-hash','rcd_tok...oken','2026-01-01T00:00:00Z');",
+            )
+            .unwrap();
+        }
+        let token = create_session(&state.store.session_secret, "owner").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        let response = create_share(
+            headers,
+            Query(TokenQuery::default()),
+            State(state.clone()),
+            Json(CreateShareInput {
+                target_identifier: Some("viewer".to_string()),
+                device_id: Some("device".to_string()),
+                thread_id: Some("thread".to_string()),
+                thread_title: Some("Release planning".to_string()),
+                workspace_id: None,
+                workspace_label: None,
+                label: None,
+                thread_access: Some("read".to_string()),
+                workspace_access: Some("none".to_string()),
+                expires_at: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let conn = state.store.conn.lock().await;
+        let shares = relay_shares_for(&conn, "target_user_id", "viewer");
+        assert_eq!(shares.len(), 1);
+        assert_eq!(shares[0]["threadTitle"], "Release planning");
+        assert_eq!(shares[0]["workspaceAccess"], "none");
+        assert_eq!(shares[0]["workspaceLabel"], Value::Null);
+        drop(conn);
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[tokio::test]

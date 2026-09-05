@@ -439,9 +439,13 @@ async function relaySupervisor(action) {
       .map(shellQuote)
       .join(' ');
     const commandText = `${launch} 2>&1 | tee -a ${shellQuote(relayLogPath)}`;
+    // An existing tmux server does not inherit the client's environment.
+    const sessionEnvironment = Object.entries(environment).flatMap(
+      ([name, value]) => ['-e', `${name}=${value}`],
+    );
     const result = spawnSync(
       'tmux',
-      ['new-session', '-d', '-s', relayTmuxSession, commandText],
+      ['new-session', '-d', '-s', relayTmuxSession, ...sessionEnvironment, commandText],
       { cwd: process.cwd(), env: environment, stdio: 'inherit' },
     );
     if (result.status !== 0)
