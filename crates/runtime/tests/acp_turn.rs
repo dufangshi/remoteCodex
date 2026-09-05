@@ -330,6 +330,71 @@ async fn fast_mode_is_applied_and_an_unsupported_request_is_rejected() {
     );
 }
 
+#[tokio::test]
+async fn steering_is_acknowledged_and_processed_before_the_active_turn_finishes() {
+    let dir = tempdir().unwrap();
+    let (runtime, session_id) = start_runtime(dir.path(), &which_python()).await;
+    let runtime = std::sync::Arc::new(runtime);
+    let bus = EventBus::new();
+    let mut events = bus.subscribe();
+    let task = {
+        let runtime = runtime.clone();
+        let session_id = session_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .start_turn(
+                    turn_input(&session_id, "wait-for-steer", "steered-turn"),
+                    bus,
+                    CancellationToken::new(),
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if event.event_type == "thread.output.delta" {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("agent is waiting within the original prompt");
+    assert!(!task.is_finished());
+    assert!(runtime
+        .send_input(&session_id, "wrong-turn", "hello")
+        .await
+        .is_err());
+    for prompt in ["reject-steer", "fail-steer", "unknown-steer"] {
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            runtime.send_input(&session_id, "steered-turn", prompt),
+        )
+        .await
+        .expect("steering response must not wait for turn completion");
+        assert!(result.is_err(), "must not report accepted for {prompt}");
+        assert!(
+            !task.is_finished(),
+            "failed steering must not end the active turn"
+        );
+    }
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        runtime.send_input(&session_id, "steered-turn", "change direction"),
+    )
+    .await
+    .expect("steering must receive its own acknowledgement")
+    .unwrap();
+    let items = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("steering unblocks the original prompt")
+        .unwrap()
+        .unwrap();
+    assert!(items
+        .iter()
+        .any(|item| item.text.contains("handled steer: change direction")));
+}
+
 async fn start_runtime(dir: &std::path::Path, python: &str) -> (AcpRuntime, String) {
     start_runtime_with_args(dir, python, "").await
 }

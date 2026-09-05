@@ -8,6 +8,7 @@ import time
 
 
 fast_enabled = False
+steering_prompt_id = None
 
 
 def config_options():
@@ -37,7 +38,7 @@ def prompt_text(params):
 
 
 def handle(msg):
-    global fast_enabled
+    global fast_enabled, steering_prompt_id
     method = msg.get("method")
     req_id = msg.get("id")
     params = msg.get("params") or {}
@@ -50,6 +51,7 @@ def handle(msg):
                     "protocolVersion": 1,
                     "agentCapabilities": {"promptCapabilities": {}},
                     "agentInfo": {"name": "fake-acp"},
+                    "_meta": {"steering": {"supported": True}},
                 },
             }
         )
@@ -85,9 +87,39 @@ def handle(msg):
                 }
             )
         return
+    if method == "_session/steering":
+        # Match codex-acp: this extension is a request and prompt is ContentBlock[].
+        if req_id is None:
+            return
+        if not isinstance(params.get("prompt"), list):
+            send({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "prompt must be blocks"}})
+            return
+        text = prompt_text(params)
+        if text == "reject-steer":
+            send({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "steer rejected"}})
+            return
+        if text == "fail-steer":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"outcome": "failed"}})
+            return
+        if text == "unknown-steer":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+            return
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "fake-session", "update": {"sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "handled steer: " + text}}}})
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"outcome": "injected"}})
+        send({"jsonrpc": "2.0", "id": steering_prompt_id, "result": {"stopReason": "end_turn"}})
+        steering_prompt_id = None
+        return
     if method == "session/prompt":
         sid = params.get("sessionId") or "fake-session"
         text = prompt_text(params)
+        if text == "wait-for-steer":
+            steering_prompt_id = req_id
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": sid, "update": {"sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "waiting"}}}})
+            return
         if "rpc-error" in text:
             send(
                 {

@@ -1462,35 +1462,40 @@ impl AgentRuntime for AcpRuntime {
         })
     }
 
-    async fn send_input(&self, session_id: &str, _turn_id: &str, prompt: &str) -> Result<()> {
-        let sessions = self.inner.sessions.lock().await;
-        let live = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("ACP session is not running"))?;
-        if !live.negotiated.steer {
-            bail!("this harness does not support steering");
+    async fn send_input(&self, session_id: &str, turn_id: &str, prompt: &str) -> Result<()> {
+        let (process, provider_session_id) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            if !live.negotiated.steer {
+                bail!("this harness does not support steering");
+            }
+            if !live
+                .active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == turn_id)
+            {
+                bail!("conflict: The active turn finished before this prompt could be steered.");
+            }
+            (live.process.clone(), live.session_id.clone())
+        };
+        // Steering is an extension request, not a notification. Only acknowledge
+        // delivery after the harness confirms it; never silently queue a prompt.
+        // Release the sessions lock so updates and cancellation can still progress.
+        let result = process
+            .request(
+                "_session/steering",
+                json!({
+                    "sessionId": provider_session_id,
+                    "prompt": [{ "type": "text", "text": prompt }]
+                }),
+            )
+            .await?;
+        match result.get("outcome").and_then(Value::as_str) {
+            Some("injected" | "startedNewTurn") => Ok(()),
+            _ => bail!("ACP harness did not confirm steering delivery: {result}"),
         }
-        let params = json!({
-            "sessionId": live.session_id,
-            "prompt": prompt
-        });
-        if live
-            .process
-            .notify("_session/steering", params.clone())
-            .await
-            .is_err()
-        {
-            live.process
-                .notify(
-                    "session/prompt",
-                    json!({
-                        "sessionId": live.session_id,
-                        "prompt": [{ "type": "text", "text": prompt }]
-                    }),
-                )
-                .await?;
-        }
-        Ok(())
     }
 
     async fn get_goal(&self, session_id: &str) -> Result<Option<GoalState>> {
