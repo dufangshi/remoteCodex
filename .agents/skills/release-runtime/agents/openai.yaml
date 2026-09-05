@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote Codex 发布与更新"
+  short_description: "固定发布提交、验证安装路径并高效完成 runtime/npm 发布"
+  default_prompt: "使用 $release-runtime 检查更新路径并完成 Remote Codex runtime/npm 发布。"

@@ -12,3 +12,4 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - A versioned runtime release is immutable and includes the supported platform assets at one version. Path-filter PR CI to the affected code, but do not publish a partial replacement of one platform under an existing runtime version.
 - Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.
 - After completing a change and its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
+- For runtime/npm releases or installed-version troubleshooting, follow the project [release-runtime skill](.agents/skills/release-runtime/SKILL.md).

@@ -3,6 +3,10 @@ name: Native npm release
 on:
   workflow_dispatch:
     inputs:
+      thread_ui_sha:
+        description: Full commit SHA from remote-codex-thread-ui-rust to release
+        required: true
+        type: string
       channel:
         description: Package only, publish to next, or promote a stable release
         required: true
@@ -24,7 +28,6 @@ concurrency:
 env:
   RUST_VERSION: 1.89.0
   THREAD_UI_REPO: https://github.com/dufangshi/remote-codex-thread-ui-rust.git
-  THREAD_UI_REF: main
 
 jobs:
   verify:
@@ -37,12 +40,16 @@ jobs:
       - name: Install pinned Rust toolchain
         shell: bash
         run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: release-test
+          cmd-format: rustup run ${{ env.RUST_VERSION }} {0}
+
       - name: Test workspace and migrations
         run: cargo +${{ env.RUST_VERSION }} test --workspace --locked
 
   native:
     name: Native ${{ matrix.key }}
-    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +92,11 @@ jobs:
         run: |
           set -euo pipefail
           rustup toolchain install "${RUST_VERSION}" --profile minimal --target '${{ matrix.cargo_target }}'
+
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: release-${{ matrix.key }}-${{ matrix.target }}-zigbuild-0.23.4-macos-12.0
+          cmd-format: rustup run ${{ env.RUST_VERSION }} {0}
 
       - name: Install Linux Zig linker
         if: matrix.linux
@@ -131,9 +143,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  package:
-    name: Assemble and verify npm packages
-    needs: native
+  web:
+    name: Build Web assets
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -150,10 +161,17 @@ jobs:
 
       - name: Check out thread UI
         shell: bash
+        env:
+          THREAD_UI_SHA: ${{ inputs.thread_ui_sha }}
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch "${THREAD_UI_REF}" "${THREAD_UI_REPO}" ./remote-codex-thread-ui
-          echo "Thread UI: $(git -C ./remote-codex-thread-ui rev-parse HEAD)" >> "${GITHUB_STEP_SUMMARY}"
+          [[ "${THREAD_UI_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full UI commit SHA is required' >&2; exit 1; }
+          git init ./remote-codex-thread-ui
+          git -C ./remote-codex-thread-ui remote add origin "${THREAD_UI_REPO}"
+          git -C ./remote-codex-thread-ui fetch --depth 1 origin "${THREAD_UI_SHA}"
+          git -C ./remote-codex-thread-ui checkout --detach FETCH_HEAD
+          test "$(git -C ./remote-codex-thread-ui rev-parse HEAD)" = "${THREAD_UI_SHA}"
+          echo "Thread UI: ${THREAD_UI_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Build Web assets for the npm launcher
         shell: bash
@@ -164,8 +182,34 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter @remote-codex/supervisor-web build
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: apps/supervisor-web/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Assemble and verify npm packages
+    needs: [verify, native, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
       - uses: actions/download-artifact@v4
         with:
+          name: web
+          path: apps/supervisor-web/dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '{darwin-arm64,linux-arm64-gnu,linux-x64-gnu,win32-x64-msvc}'
           path: artifacts/native
 
       - name: Prepare and pack release
