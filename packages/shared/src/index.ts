@@ -1743,6 +1743,9 @@ export interface ThreadEventPayloadMap {
     turnId: string;
     tokenUsage: ThreadTurnTokenUsageDto;
     priceEstimate: ThreadTurnPriceEstimateDto | null;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffortDto | null;
+    reasoningEffortAvailable?: boolean | null;
   };
   'thread.turn.started': {
     turnId: string;
@@ -1771,6 +1774,7 @@ export interface ThreadEventPayloadMap {
     itemId: string;
     sequence: number;
     delta: string;
+    text?: string;
     createdAt?: string | null;
   };
   'thread.turn.completed': {

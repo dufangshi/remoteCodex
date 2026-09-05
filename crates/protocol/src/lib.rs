@@ -256,6 +256,8 @@ pub struct ThreadTurnDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_estimate: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_deferred_items: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_item_count: Option<u32>,

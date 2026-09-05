@@ -84,6 +84,7 @@ import {
   steerPendingPrompt,
 } from '../lib/api';
 import {
+  appendLiveAgentDeltaToItems,
   appendLatestTurns,
   applyLiveItemTimestampsToTurns,
   createClientRequestId,
@@ -900,38 +901,13 @@ export function ThreadDetailPage() {
       delta: string,
       sequence: number | null,
       createdAt?: string | null,
+      text?: string | null,
     ) => {
-      setLiveItems((current) => {
-        const currentItems =
-          current?.turnId === turnId ? current.items : [];
-        const existing = currentItems.find((item) => item.id === itemId);
-        const nextItem: ThreadHistoryItemDto =
-          existing?.kind === 'agentMessage'
-            ? {
-                ...existing,
-                text: `${existing.text}${delta}`,
-                sequence: sequence ?? existing.sequence ?? null,
-              }
-            : {
-                id: itemId,
-                createdAt: createdAt ?? new Date().toISOString(),
-                kind: 'agentMessage',
-                text: delta,
-                sequence,
-              };
-        const existingIndex = currentItems.findIndex((item) => item.id === itemId);
-        const items =
-          existingIndex >= 0
-            ? currentItems.map((item, index) =>
-                index === existingIndex ? nextItem : item,
-              )
-            : [...currentItems, nextItem];
-        return {
-          turnId,
-          items,
-          updatedAt: new Date().toISOString(),
-        };
-      });
+      setLiveItems((current) => appendLiveAgentDeltaToItems(
+        current,
+        detailRef.current?.turns ?? [],
+        { turnId, itemId, delta, sequence, createdAt: createdAt ?? null, text: text ?? null },
+      ));
     },
     [],
   );
@@ -1589,6 +1565,7 @@ export function ThreadDetailPage() {
             event.payload.delta,
             sequence,
             event.payload.createdAt ?? event.timestamp,
+            event.payload.text,
           );
         } else {
           queueLiveOutputDelta(event.payload.delta);
@@ -1650,6 +1627,17 @@ export function ThreadDetailPage() {
       ) {
         const eventTurnId = event.payload.turnId;
         const tokenUsage = event.payload.tokenUsage as ThreadTurnTokenUsageDto;
+        const metadata = {
+          ...(typeof event.payload.model === 'string'
+            ? { model: event.payload.model }
+            : {}),
+          ...(typeof event.payload.reasoningEffort === 'string'
+            ? { reasoningEffort: event.payload.reasoningEffort as ThreadDto['reasoningEffort'] }
+            : {}),
+          ...(typeof event.payload.reasoningEffortAvailable === 'boolean'
+            ? { reasoningEffortAvailable: event.payload.reasoningEffortAvailable }
+            : {}),
+        };
         const priceEstimate =
           event.payload.priceEstimate &&
           typeof event.payload.priceEstimate === 'object'
@@ -1666,6 +1654,7 @@ export function ThreadDetailPage() {
             eventTurnId,
             tokenUsage,
             priceEstimate,
+            metadata,
           );
 
           return nextTurns === current.turns
@@ -1681,6 +1670,7 @@ export function ThreadDetailPage() {
           (current.serverTurnId === eventTurnId || current.id === eventTurnId)
             ? {
                 ...current,
+                ...metadata,
                 tokenUsage,
                 priceEstimate,
               }

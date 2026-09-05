@@ -28,3 +28,7 @@ pub async fn boot() -> Result<Arc<Supervisor>> {
     }
     Ok(Arc::new(Supervisor::new(config, db, runtimes)))
 }
+
+mod usage;
+
+mod usage_history;

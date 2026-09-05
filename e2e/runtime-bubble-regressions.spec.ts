@@ -884,3 +884,175 @@ test.describe('runtime bubble regressions', () => {
     await expect(page.getByRole('button', { name: 'Open full file change' })).toHaveCount(0);
   });
 });
+
+test.describe('turn usage summary regressions', () => {
+  test('shows live usage updates and keeps completed usage after reload', async ({ page }, testInfo) => {
+    await installFakeWebSocket(page);
+    await page.addInitScript(() => {
+      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'true');
+    });
+    const total = {
+      totalTokens: 3500, inputTokens: 1500, outputTokens: 2000,
+      cachedInputTokens: 500, reasoningOutputTokens: 800,
+    };
+    const usage = { total, last: total, modelContextWindow: 1050000 };
+    const priceEstimate = {
+      pricingModelKey: 'gpt-6-astra', pricingTierKey: 'standard', currency: 'USD',
+      inputUsd: 0.01, cachedInputUsd: 0.0005, outputUsd: 0.1, totalUsd: 0.1105,
+    };
+    let completed = false;
+    let hasUsage = false;
+    await installApiRoutes(page, () => detail('codex', {
+      thread: { status: completed ? 'idle' : 'running', activeTurnId: completed ? null : 'turn-1' },
+      turns: [{
+        id: 'turn-1', status: completed ? 'completed' : 'inProgress',
+        startedAt: now, completedAt: completed ? '2026-04-09T06:02:12.000Z' : null,
+        error: null, model: 'gpt-6-astra', reasoningEffort: 'high',
+        tokenUsage: hasUsage ? usage : null, priceEstimate: hasUsage ? priceEstimate : null,
+        items: [
+          { id: 'user-1', kind: 'userMessage', text: 'Check the streaming usage.' },
+          { id: 'thinking-1', kind: 'reasoning', text: 'Checking the activity.', status: 'completed' },
+          { id: 'command-1', kind: 'commandExecution', text: 'cargo test', status: 'completed' },
+          ...(completed ? [{ id: 'agent-1', kind: 'agentMessage', text: 'Usage is restored.' }] : []),
+        ],
+      }],
+    }));
+    await page.goto('/threads/thread-1');
+    await waitForSocketReady(page);
+    const footer = page.locator('.thread-graph-turn-footer');
+    await expect(footer).toContainText('gpt-6-astra · high');
+    await expect(footer).not.toContainText('3.5k tokens');
+    hasUsage = true;
+    await emitSocketMessage(page, {
+      type: 'thread.turn.token.updated', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1', tokenUsage: usage, priceEstimate, model: 'gpt-6-astra', reasoningEffort: 'high' },
+    });
+    for (const text of ['3.5k tokens', '1.5k in', '2k out', '500 cached', '≈$0.11']) {
+      await expect(footer).toContainText(text);
+    }
+    await page.screenshot({ path: testInfo.outputPath('live-turn-usage.png'), fullPage: true });
+    completed = true;
+    await emitSocketMessage(page, {
+      type: 'thread.turn.completed', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1' },
+    });
+    const summary = page.locator('.thread-graph-worked-summary:visible');
+    await expect(summary).toContainText('Worked for 1m 12s');
+    await expect(summary).toContainText('gpt-6-astra · high');
+    await expect(summary).toContainText('≈$0.11');
+    await page.reload();
+    await expect(summary).toContainText('3.5k tokens');
+    await expect(summary).toContainText('1.5k in');
+    await expect(summary).toContainText('2k out');
+    await expect(summary).toContainText('500 cached');
+    await expect(summary).toContainText('≈$0.11');
+    const overflow = await summary.evaluate((node) => {
+      const viewportWidth = document.documentElement.clientWidth;
+      return Math.max(...[node, ...node.querySelectorAll('[data-testid="turn-usage"] span')].map((element) => element.getBoundingClientRect().right - viewportWidth));
+    });
+    expect(overflow).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath('completed-turn-usage.png'), fullPage: true });
+  });
+});
+
+test.describe('live activity persistence regressions', () => {
+  test.beforeEach(async ({ page }) => {
+    await installFakeWebSocket(page);
+    await page.addInitScript(() => {
+      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'false');
+    });
+  });
+
+  test('keeps expanded activity and command groups open as new socket items arrive', async ({ page }) => {
+    await installApiRoutes(page, () => detail('codex', {
+      thread: { status: 'running', activeTurnId: 'turn-1' },
+      turns: [{
+        id: 'turn-1', status: 'inProgress', startedAt: now, error: null,
+        items: [
+          { id: 'user-1', kind: 'userMessage', text: 'Inspect the current activity.', sequence: 0 },
+          { id: 'reason-1', kind: 'reasoning', text: 'Inspecting the first issue.', sequence: 1 },
+          { id: 'command-1', kind: 'commandExecution', text: 'pwd', status: 'completed', sequence: 2 },
+          { id: 'command-2', kind: 'commandExecution', text: 'git status', status: 'completed', sequence: 3 },
+        ],
+      }],
+    }));
+    await page.goto('/threads/thread-1');
+    await waitForSocketReady(page);
+    await page.getByRole('button', { name: 'Expand 3 operations', exact: true }).click();
+    await page.getByRole('button', { name: 'Expand 2 command entries', exact: true }).click();
+
+    await emitSocketMessage(page, {
+      type: 'thread.item.started', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1', item: {
+        id: 'command-3', kind: 'commandExecution', text: 'pnpm test', status: 'running', sequence: 4,
+      } },
+    });
+    await expect(page.getByRole('button', { name: 'Collapse 4 operations', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Collapse 3 command entries', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open grouped command 3', exact: true })).toContainText('pnpm test');
+    await emitSocketMessage(page, {
+      type: 'thread.item.started', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1', item: {
+        id: 'reason-2', kind: 'reasoning', text: 'Reviewing the streamed results.', sequence: 5,
+      } },
+    });
+    await expect(page.getByText('Reviewing the streamed results.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse 5 operations', exact: true }).click();
+    await emitSocketMessage(page, {
+      type: 'thread.item.started', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1', item: {
+        id: 'reason-3', kind: 'reasoning', text: 'Preparing the next step.', sequence: 6,
+      } },
+    });
+    await expect(page.getByRole('button', { name: 'Expand 6 operations', exact: true })).toBeVisible();
+    await expect(page.getByText('Preparing the next step.', { exact: true })).toHaveCount(0);
+  });
+
+  test('preserves refreshed assistant text through later deltas, stale snapshots and replayed events', async ({ page }) => {
+    let snapshotText = 'The persisted prefix.';
+    let snapshotTitle = 'Streaming text regression';
+    await installApiRoutes(page, () => detail('codex', {
+      thread: { title: snapshotTitle, status: 'running', activeTurnId: 'turn-1' },
+      turns: [{
+        id: 'turn-1', status: 'inProgress', startedAt: now, error: null,
+        items: [
+          { id: 'user-1', kind: 'userMessage', text: 'Keep streaming after reload.', sequence: 0 },
+          { id: 'agent-1', kind: 'agentMessage', text: snapshotText, status: 'running', createdAt: now, sequence: 1 },
+        ],
+      }],
+    }));
+    await page.goto('/threads/thread-1');
+    await expect(page.getByText(snapshotText, { exact: true })).toBeVisible();
+    await page.reload();
+    await waitForSocketReady(page);
+    await expect(page.getByText(snapshotText, { exact: true })).toBeVisible();
+    const fullText = 'The persisted prefix. The next streamed suffix.';
+    const deltaEvent = {
+      type: 'thread.output.delta', threadId: 'thread-1', timestamp: now,
+      payload: { turnId: 'turn-1', itemId: 'agent-1', delta: ' The next streamed suffix.', sequence: 1 },
+    };
+    await emitSocketMessage(page, deltaEvent);
+    await expect(page.getByText(fullText, { exact: true })).toBeVisible();
+
+    snapshotTitle = 'Stale snapshot returned';
+    await emitSocketMessage(page, {
+      type: 'thread.updated', threadId: 'thread-1', timestamp: now, payload: {},
+    });
+    await expect(page.getByRole('heading', { name: snapshotTitle, exact: true })).toBeVisible();
+    await expect(page.getByText(fullText, { exact: true })).toBeVisible();
+
+    snapshotText = fullText;
+    await page.reload();
+    await waitForSocketReady(page);
+    await expect(page.getByText(fullText, { exact: true })).toBeVisible();
+    await emitSocketMessage(page, {
+      ...deltaEvent, payload: { ...deltaEvent.payload, text: fullText },
+    });
+    await expect(page.getByText(fullText, { exact: true })).toBeVisible();
+    await emitSocketMessage(page, {
+      ...deltaEvent,
+      payload: { ...deltaEvent.payload, delta: ' Still streaming.', text: `${fullText} Still streaming.` },
+    });
+    await expect(page.getByText(`${fullText} Still streaming.`, { exact: true })).toBeVisible();
+  });
+});

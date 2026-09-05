@@ -61,6 +61,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             token_usage: None,
+            price_estimate: None,
             has_deferred_items: None,
             deferred_item_count: None,
             items,

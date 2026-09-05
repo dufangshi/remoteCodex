@@ -266,6 +266,7 @@ pub struct Supervisor {
     runtimes: HashMap<Provider, SharedRuntime>,
     live: Mutex<HashMap<String, LiveTurn>>,
     local_session_homes: LocalSessionHomes,
+    usage_history: crate::usage_history::UsageHistoryCache,
 }
 
 impl Supervisor {
@@ -281,6 +282,7 @@ impl Supervisor {
             runtimes: map,
             live: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
+            usage_history: Default::default(),
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
             tracing::warn!(%error, "failed to reconcile stale turns at startup");
@@ -294,36 +296,118 @@ impl Supervisor {
     }
 
     pub fn spawn_live_item_persister(self: &Arc<Self>) {
-        let this = Arc::clone(self);
-        tokio::spawn(async move {
-            let mut events = this.bus.subscribe();
-            loop {
-                match events.recv().await {
-                    Ok(event)
-                        if event.event_type == "thread.item.started"
-                            || event.event_type == "thread.item.completed" =>
-                    {
-                        let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str)
-                        else {
-                            continue;
-                        };
-                        let Some(item) = event.payload.get("item").cloned() else {
-                            continue;
-                        };
-                        let Ok(item) = serde_json::from_value::<ThreadHistoryItemDto>(item) else {
-                            continue;
-                        };
-                        if let Err(err) = this.upsert_history_item(&event.thread_id, turn_id, &item)
-                        {
-                            tracing::warn!(error = %err, "failed to persist live history item");
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    _ => {}
+        // Replace the hook on repeated registration, and avoid keeping the
+        // supervisor alive through its own event bus.
+        let supervisor = Arc::downgrade(self);
+        self.bus.set_persister(Arc::new(move |event| {
+            let Some(supervisor) = supervisor.upgrade() else {
+                return Ok(());
+            };
+            match event.event_type.as_str() {
+                "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                "thread.output.delta" => supervisor.append_history_delta(event),
+                "thread.item.started" | "thread.item.completed" => {
+                    let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str) else {
+                        return Ok(());
+                    };
+                    let Some(item) = event.payload.get("item").cloned() else {
+                        return Ok(());
+                    };
+                    let item = serde_json::from_value::<ThreadHistoryItemDto>(item)?;
+                    supervisor.upsert_history_item(&event.thread_id, turn_id, &item)
                 }
+                _ => Ok(()),
             }
-        });
+        }));
+    }
+
+    fn append_history_delta(
+        &self,
+        event: &mut remote_codex_protocol::ThreadEventEnvelope,
+    ) -> Result<()> {
+        let (Some(turn_id), Some(item_id), Some(delta)) = (
+            event.payload.get("turnId").and_then(Value::as_str),
+            event.payload.get("itemId").and_then(Value::as_str),
+            event.payload.get("delta").and_then(Value::as_str),
+        ) else {
+            return Ok(());
+        };
+        if delta.is_empty() {
+            return Ok(());
+        }
+        let text = self.db.with(|conn| {
+            // Ignore late output once the runtime has saved its complete snapshot;
+            // appending it would duplicate text in the final reply.
+            let running = conn
+                .query_row(
+                    "SELECT status='inProgress' FROM thread_turns WHERE thread_id=?1 AND id=?2",
+                    params![event.thread_id, turn_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !running {
+                return Ok(None);
+            }
+            let existing: Option<String> = conn
+                .query_row(
+                    "SELECT item_json FROM thread_history_items
+                     WHERE thread_id=?1 AND turn_id=?2 AND item_id=?3",
+                    params![event.thread_id, turn_id, item_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let mut item = if let Some(raw) = existing {
+                serde_json::from_str::<ThreadHistoryItemDto>(&raw)?
+            } else {
+                ThreadHistoryItemDto {
+                    id: item_id.into(),
+                    created_at: Some(
+                        event
+                            .payload
+                            .get("createdAt")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&event.timestamp)
+                            .into(),
+                    ),
+                    kind: "agentMessage".into(),
+                    text: String::new(),
+                    preview_text: None,
+                    detail_text: None,
+                    status: Some("running".into()),
+                    sequence: event.payload.get("sequence").and_then(Value::as_i64),
+                    source_turn_id: Some(turn_id.into()),
+                    artifact: None,
+                    extra: Default::default(),
+                }
+            };
+            if matches!(
+                item.status.as_deref(),
+                Some("completed" | "failed" | "interrupted")
+            ) {
+                return Ok(None);
+            }
+            item.text.push_str(delta);
+            conn.execute(
+                "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
+                    item_json=excluded.item_json,
+                    updated_at=excluded.updated_at",
+                params![
+                    Uuid::new_v4().to_string(), event.thread_id, turn_id, item_id,
+                    serde_json::to_string(&item)?, item.created_at, event.timestamp,
+                ],
+            )?;
+            Ok(Some(item.text))
+        })?;
+        if let Some(text) = text {
+            // A refresh can read a snapshot before the corresponding websocket
+            // event arrives. Sending the saved prefix lets the client merge that
+            // event idempotently instead of appending the same delta twice.
+            event.payload["text"] = Value::String(text);
+        }
+        Ok(())
     }
 
     fn upsert_history_item(
@@ -339,7 +423,11 @@ impl Supervisor {
                  VALUES (?1,?2,?3,?4,?5,?6,?6)
                  ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
                     item_json=excluded.item_json,
-                    updated_at=excluded.updated_at",
+                    updated_at=excluded.updated_at
+                 WHERE COALESCE(json_extract(thread_history_items.item_json, '$.status'), '')
+                           NOT IN ('completed', 'failed', 'interrupted')
+                    OR json_extract(excluded.item_json, '$.status')
+                           IN ('completed', 'failed', 'interrupted')",
                 params![
                     Uuid::new_v4().to_string(),
                     thread_id,
@@ -351,6 +439,94 @@ impl Supervisor {
             )?;
             Ok(())
         })
+    }
+
+    pub(crate) fn persist_usage_event(
+        &self,
+        event: &remote_codex_protocol::ThreadEventEnvelope,
+    ) -> Result<()> {
+        let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let Some(raw) = event.payload.get("usage") else {
+            return Ok(());
+        };
+        let Some(mut usage) = crate::usage::normalize_usage(raw) else {
+            return Ok(());
+        };
+        let payload = self.db.with(|conn| {
+            let row = conn.query_row(
+                "SELECT model, reasoning_effort, token_usage_json, pricing_model_key, pricing_tier_key FROM thread_turns WHERE thread_id=?1 AND id=?2",
+                params![event.thread_id, turn_id],
+                |row| Ok((row.get::<_, Option<String>>(0)?,row.get::<_, Option<String>>(1)?,row.get::<_, Option<String>>(2)?,row.get::<_, Option<String>>(3)?,row.get::<_, Option<String>>(4)?)),
+            ).optional()?;
+            let Some((model, effort, previous, pricing_model, tier)) = row else { return Ok(None); };
+            let reported_model = raw.get("model").and_then(Value::as_str).filter(|model| !model.is_empty());
+            let model = reported_model.map(str::to_string).or(model);
+            let effort = raw.get("reasoningEffort").and_then(Value::as_str).map(str::to_string).or(effort);
+            let pricing_model = reported_model.map(str::to_string).or(pricing_model);
+            let tier = raw.get("pricingTierKey").and_then(Value::as_str).filter(|tier| matches!(*tier,"standard" | "fast")).map(str::to_string).or(tier);
+            let previous = previous.and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+            // Local Codex rollouts provide the complete turn; do not replace them with
+            // codex-acp's final-request-only PromptResponse.usage fallback.
+            if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("codexRollout")
+                && raw.get("source").and_then(Value::as_str) != Some("codexRollout") { return Ok(None); }
+            if usage["cumulative"] == true {
+                let baseline = usage.get("baselineTotal").and_then(crate::usage::Tokens::parse)
+                    .or_else(|| previous.as_ref().and_then(|v| v.get("baselineTotal")).and_then(crate::usage::Tokens::parse))
+                    .or_else(|| {
+                        conn.query_row("SELECT token_usage_json FROM thread_turns WHERE thread_id=?1 AND id<>?2 AND token_usage_json IS NOT NULL ORDER BY ordinal DESC LIMIT 1",params![event.thread_id,turn_id],|row| row.get::<_,String>(0)).ok()
+                            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                            .and_then(|v| v.get("cumulativeTotal").and_then(crate::usage::Tokens::parse))
+                    }).unwrap_or_default();
+                let total = crate::usage::Tokens::parse(&usage["total"]).unwrap_or_default();
+                usage["cumulativeTotal"] = json!(total);
+                usage["baselineTotal"] = json!(baseline);
+                usage["total"] = json!(total.subtract(&baseline));
+            }
+            if usage["modelContextWindow"].is_null() {
+                usage["modelContextWindow"] = previous.as_ref().and_then(|v| v.get("modelContextWindow")).cloned().unwrap_or(Value::Null);
+            }
+            if let Some(source) = raw.get("source") { usage["source"] = source.clone(); }
+            let pricing_model = pricing_model.as_deref().or(model.as_deref());
+            let price = crate::usage::estimate_price(&usage, pricing_model, tier.as_deref());
+            // Accumulate request prices, so crossing the long-context threshold later
+            // does not retrospectively change the rates of earlier requests.
+            let price = if let (Some(previous), Some(mut current_price)) = (previous.as_ref(), price.clone()) {
+                if let (Some(previous_total), Some(current_total), Some(previous_price)) = (
+                    previous.get("total").and_then(crate::usage::Tokens::parse),
+                    usage.get("total").and_then(crate::usage::Tokens::parse),
+                    previous.get("priceEstimate").filter(|v| v.is_object()),
+                ) {
+                    if current_total.total_tokens >= previous_total.total_tokens {
+                        let mut delta_usage = usage.clone();
+                        delta_usage["total"] = json!(current_total.subtract(&previous_total));
+                        if let Some(delta_price) = crate::usage::estimate_price(&delta_usage, pricing_model, tier.as_deref()) {
+                            for field in ["inputUsd","cachedInputUsd","cacheWriteInputUsd","outputUsd","totalUsd"] {
+                                current_price[field] = json!(previous_price[field].as_f64().unwrap_or(0.0) + delta_price[field].as_f64().unwrap_or(0.0));
+                            }
+                        }
+                    }
+                }
+                Some(current_price)
+            } else { price };
+            if let Some(price) = &price { usage["priceEstimate"] = price.clone(); }
+            let stored = serde_json::to_string(&usage)?;
+            conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?4,model),reasoning_effort=COALESCE(?5,reasoning_effort),pricing_model_key=COALESCE(?6,pricing_model_key),pricing_tier_key=COALESCE(?7,pricing_tier_key) WHERE thread_id=?2 AND id=?3",params![stored,event.thread_id,turn_id,model,effort,pricing_model,tier])?;
+            if sqlite_table_exists(conn,"thread_turn_metadata")? {
+                conn.execute("UPDATE thread_turn_metadata SET token_usage_json=?1 WHERE thread_id=?2 AND turn_id=?3",params![stored,event.thread_id,turn_id])?;
+            }
+            Ok(Some(json!({"turnId":turn_id,"model":model,"reasoningEffort":effort,"tokenUsage":crate::usage::public_usage(&usage),"priceEstimate":price})))
+        })?;
+        if let Some(payload) = payload {
+            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                event_type: "thread.turn.token.updated".into(),
+                thread_id: event.thread_id.clone(),
+                timestamp: event.timestamp.clone(),
+                payload,
+            });
+        }
+        Ok(())
     }
 
     pub fn runtime(&self, provider: Provider) -> Result<&SharedRuntime> {
@@ -1230,11 +1406,13 @@ impl Supervisor {
     ) -> Result<ThreadDetailDto> {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
-        let (turns, total) = if summary_only {
+        let (mut turns, total) = if summary_only {
             self.load_turn_summaries(id, limit, before_turn_id)?
         } else {
             self.load_turns(id, limit, before_turn_id)?
         };
+        self.hydrate_missing_codex_usage(&thread, &mut turns)
+            .await?;
         let pending_steers = self.load_steers(id)?;
         let present = Path::new(&workspace.abs_path).exists();
         let runtime = self.runtime(thread.provider).ok().cloned();
@@ -1267,6 +1445,79 @@ impl Supervisor {
             activity_notes: Some(vec![]),
             goal,
         })
+    }
+
+    async fn hydrate_missing_codex_usage(
+        &self,
+        thread: &ThreadDto,
+        turns: &mut [ThreadTurnDto],
+    ) -> Result<()> {
+        if (thread.provider != Provider::Codex && thread.agent_id.as_deref() != Some("codex"))
+            || !turns
+                .iter()
+                .any(|turn| turn.status != "inProgress" && turn.token_usage.is_none())
+        {
+            return Ok(());
+        }
+        let Some(session_id) = thread.provider_session_id.as_deref() else {
+            return Ok(());
+        };
+        let Some(history) = self
+            .usage_history
+            .get(&self.local_session_homes.codex_home, session_id)
+            .await
+        else {
+            return Ok(());
+        };
+        let timestamp = |value: Option<&str>| {
+            value
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|t| t.timestamp_millis())
+        };
+        for turn in turns
+            .iter_mut()
+            .filter(|turn| turn.status != "inProgress" && turn.token_usage.is_none())
+        {
+            let source = history
+                .iter()
+                .find(|source| source.id == turn.id)
+                .or_else(|| {
+                    let start = timestamp(turn.started_at.as_deref())?;
+                    let end = timestamp(turn.completed_at.as_deref())?;
+                    let prompt = turn
+                        .items
+                        .iter()
+                        .find(|item| item.kind == "userMessage")
+                        .map(|item| item.text.trim());
+                    let mut candidates = history.iter().filter(|source| {
+                        timestamp(source.started_at.as_deref())
+                            .is_some_and(|t| t >= start.saturating_sub(1000) && t <= end)
+                            && prompt.is_some_and(|prompt| {
+                                source.items.iter().any(|item| {
+                                    item.kind == "userMessage" && item.text.trim() == prompt
+                                })
+                            })
+                    });
+                    let source = candidates.next()?;
+                    candidates.next().is_none().then_some(source)
+                });
+            let Some(source) = source.filter(|source| source.token_usage.is_some()) else {
+                continue;
+            };
+            let usage = source.token_usage.as_ref().unwrap();
+            turn.model = source.model.clone().or(turn.model.take());
+            turn.reasoning_effort = source
+                .reasoning_effort
+                .clone()
+                .or(turn.reasoning_effort.take());
+            turn.price_estimate = source.price_estimate.clone();
+            turn.token_usage = crate::usage::public_usage(usage);
+            self.db.with(|conn| {
+                conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND token_usage_json IS NULL",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
+                Ok(())
+            })?;
+        }
+        Ok(())
     }
 
     fn load_turns(
@@ -1392,13 +1643,18 @@ impl Supervisor {
                 .or_else(|| before_turn_id.map(|_| 10))
                 .unwrap_or(i64::MAX);
             let mut stmt = conn.prepare(
-                "SELECT id, status, error, model, reasoning_effort, token_usage_json, started_at, completed_at
+                "SELECT id, status, error, model, reasoning_effort, token_usage_json, started_at, completed_at, pricing_model_key, pricing_tier_key
                  FROM thread_turns
                  WHERE thread_id=?1 AND (?2 IS NULL OR ordinal < ?2)
                  ORDER BY ordinal DESC, rowid DESC LIMIT ?3",
             )?;
             let mut turns = stmt
                 .query_map(params![thread_id, before_ordinal, page_limit], |row| {
+                    let stored_usage = row.get::<_, Option<String>>(5)?.and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+                    let model = row.get::<_, Option<String>>(3)?;
+                    let pricing_model = row.get::<_, Option<String>>(8)?.or(model.clone());
+                    let tier = row.get::<_, Option<String>>(9)?;
+                    let price_estimate = stored_usage.as_ref().and_then(|usage| crate::usage::estimate_price(usage, pricing_model.as_deref(), tier.as_deref()));
                     Ok(ThreadTurnDto {
                         id: row.get(0)?,
                         started_at: row.get(6)?,
@@ -1407,9 +1663,8 @@ impl Supervisor {
                         error: row.get(2)?,
                         model: row.get(3)?,
                         reasoning_effort: row.get(4)?,
-                        token_usage: row
-                            .get::<_, Option<String>>(5)?
-                            .and_then(|raw| serde_json::from_str(&raw).ok()),
+                        token_usage: stored_usage.as_ref().and_then(crate::usage::public_usage).or(stored_usage),
+                        price_estimate,
                         has_deferred_items: None,
                         deferred_item_count: None,
                         items: Vec::new(),
@@ -1422,7 +1677,7 @@ impl Supervisor {
         })
     }
 
-    pub fn get_thread_turn_detail(&self, id: &str, turn_id: &str) -> Result<ThreadTurnDto> {
+    pub async fn get_thread_turn_detail(&self, id: &str, turn_id: &str) -> Result<ThreadTurnDto> {
         let mut turns = self.load_turns_meta(id)?;
         let mut turn = turns
             .iter_mut()
@@ -1430,6 +1685,8 @@ impl Supervisor {
             .ok_or_else(|| anyhow!("turn not found"))?
             .clone();
         turn.items = self.load_items_for_turn(id, turn_id)?;
+        self.hydrate_missing_codex_usage(&self.get_thread(id)?, std::slice::from_mut(&mut turn))
+            .await?;
         turn.has_deferred_items = Some(false);
         turn.deferred_item_count = Some(0);
         Ok(turn)
@@ -1594,8 +1851,8 @@ impl Supervisor {
             conn.execute(
                 "INSERT INTO thread_turns(
                    id, thread_id, status, model, reasoning_effort,
-                   display_prompt, started_at, ordinal
-                 ) VALUES (?1,?2,'inProgress',?3,?4,?5,?6,?7)",
+                   display_prompt, started_at, ordinal, pricing_model_key, pricing_tier_key
+                 ) VALUES (?1,?2,'inProgress',?3,?4,?5,?6,?7,?3,?8)",
                 params![
                     turn_id,
                     thread.id,
@@ -1603,7 +1860,8 @@ impl Supervisor {
                     turn_reasoning_effort,
                     prompt,
                     now,
-                    ordinal
+                    ordinal,
+                    if thread.fast_mode { "fast" } else { "standard" }
                 ],
             )?;
             let user_item = ThreadHistoryItemDto {

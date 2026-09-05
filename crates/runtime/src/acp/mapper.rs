@@ -201,10 +201,7 @@ impl TurnMapper {
                 mapped.goal = goal_from_update(update).or_else(|| goal_from_update(body));
             }
             "usage_update" => {
-                mapped.usage = body
-                    .get("used")
-                    .cloned()
-                    .or_else(|| body.get("usage").cloned());
+                mapped.usage = Some(body.clone());
             }
             _ => {}
         }

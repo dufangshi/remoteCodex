@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,20 +13,43 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<ThreadEventEnvelope>,
+    persister: Arc<RwLock<Option<Arc<EventPersister>>>>,
 }
+
+type EventPersister = dyn Fn(&mut ThreadEventEnvelope) -> Result<()> + Send + Sync;
 
 impl EventBus {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(2048);
-        Self { tx }
+        Self {
+            tx,
+            persister: Arc::new(RwLock::new(None)),
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ThreadEventEnvelope> {
         self.tx.subscribe()
     }
 
-    pub fn emit(&self, event: ThreadEventEnvelope) {
+    pub fn emit(&self, mut event: ThreadEventEnvelope) {
+        // Persistence must finish before a websocket can expose the update. The
+        // callback may emit a derived event (token usage), so release the lock first.
+        let persister = self.persister.read().unwrap().clone();
+        if let Some(persist) = persister {
+            if let Err(error) = persist(&mut event) {
+                tracing::error!(
+                    %error,
+                    event_type = %event.event_type,
+                    thread_id = %event.thread_id,
+                    "failed to persist runtime event before broadcast"
+                );
+            }
+        }
         let _ = self.tx.send(event);
+    }
+
+    pub(crate) fn set_persister(&self, persister: Arc<EventPersister>) {
+        *self.persister.write().unwrap() = Some(persister);
     }
 }
 

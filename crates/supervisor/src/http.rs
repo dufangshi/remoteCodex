@@ -884,6 +884,7 @@ async fn thread_turn_detail(
         serde_json::to_value(
             state
                 .get_thread_turn_detail(&id, &turn_id)
+                .await
                 .map_err(map_err)?,
         )
         .unwrap(),

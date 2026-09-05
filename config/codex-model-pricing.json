@@ -1,0 +1,270 @@
+{
+  "currency": "USD",
+  "tiers": {
+    "standard": {
+      "multiplier": 1
+    },
+    "fast": {
+      "multiplier": 2
+    }
+  },
+  "models": {
+    "gpt-5.6": {
+      "inputUsdPerMillion": 4,
+      "cachedInputUsdPerMillion": 0.4,
+      "cacheWriteInputUsdPerMillion": 5,
+      "outputUsdPerMillion": 20,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-sol": {
+      "inputUsdPerMillion": 4,
+      "cachedInputUsdPerMillion": 0.4,
+      "cacheWriteInputUsdPerMillion": 5,
+      "outputUsdPerMillion": 20,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-terra": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "cacheWriteInputUsdPerMillion": 2.5,
+      "outputUsdPerMillion": 12,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.6-luna": {
+      "inputUsdPerMillion": 0.2,
+      "cachedInputUsdPerMillion": 0.02,
+      "cacheWriteInputUsdPerMillion": 0.25,
+      "outputUsdPerMillion": 1.2,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    },
+    "gpt-5.5": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 30,
+      "supportsFastMode": true,
+      "fastMultiplier": 2.5,
+      "contextWindowTokens": 272000
+    },
+    "gpt-5.3-codex": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": true
+    },
+    "gpt-5.4": {
+      "inputUsdPerMillion": 2.5,
+      "cachedInputUsdPerMillion": 0.25,
+      "outputUsdPerMillion": 15,
+      "supportsFastMode": true
+    },
+    "gpt-5.2-codex": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": false
+    },
+    "gpt-5.1-codex-max": {
+      "inputUsdPerMillion": 1.25,
+      "cachedInputUsdPerMillion": 0.125,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false
+    },
+    "gpt-5.2": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": false
+    },
+    "gpt-5.1-codex-mini": {
+      "inputUsdPerMillion": 0.25,
+      "cachedInputUsdPerMillion": 0.025,
+      "outputUsdPerMillion": 2,
+      "supportsFastMode": false
+    },
+    "sonnet": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 2.5
+    },
+    "sonnet[1m]": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 2.5
+    },
+    "fable": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 12.5
+    },
+    "opus": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 6.25
+    },
+    "haiku": {
+      "inputUsdPerMillion": 1,
+      "cachedInputUsdPerMillion": 0.1,
+      "outputUsdPerMillion": 5,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 1.25
+    },
+    "claude-fable-5": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 12.5
+    },
+    "claude-mythos-5": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 12.5
+    },
+    "claude-sonnet-5": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 2.5
+    },
+    "claude-sonnet-4-5": {
+      "inputUsdPerMillion": 3,
+      "cachedInputUsdPerMillion": 0.3,
+      "outputUsdPerMillion": 15,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 3.75
+    },
+    "claude-sonnet-4-6": {
+      "inputUsdPerMillion": 3,
+      "cachedInputUsdPerMillion": 0.3,
+      "outputUsdPerMillion": 15,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 3.75
+    },
+    "claude-opus-4-8": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": true,
+      "fastMultiplier": 2,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 6.25
+    },
+    "claude-opus-4-5": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 6.25
+    },
+    "claude-opus-4-6": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": false,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 6.25
+    },
+    "claude-opus-4-7": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
+      "supportsFastMode": true,
+      "fastMultiplier": 6,
+      "contextWindowTokens": 1000000,
+      "cacheWriteInputUsdPerMillion": 6.25
+    },
+    "claude-opus-4-1": {
+      "inputUsdPerMillion": 15,
+      "cachedInputUsdPerMillion": 1.5,
+      "outputUsdPerMillion": 75,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 18.75
+    },
+    "claude-opus-4": {
+      "inputUsdPerMillion": 15,
+      "cachedInputUsdPerMillion": 1.5,
+      "outputUsdPerMillion": 75,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 18.75
+    },
+    "claude-haiku-4-5": {
+      "inputUsdPerMillion": 1,
+      "cachedInputUsdPerMillion": 0.1,
+      "outputUsdPerMillion": 5,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 1.25
+    },
+    "claude-haiku-3-5": {
+      "inputUsdPerMillion": 0.8,
+      "cachedInputUsdPerMillion": 0.08,
+      "outputUsdPerMillion": 4,
+      "supportsFastMode": false,
+      "contextWindowTokens": 200000,
+      "cacheWriteInputUsdPerMillion": 1.0
+    },
+    "gpt-6-astra": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 1,
+      "cacheWriteInputUsdPerMillion": 12.5,
+      "outputUsdPerMillion": 50,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5
+    }
+  },
+  "sources": {
+    "legacy": "legacy/node-0.11:config/codex-model-pricing.json",
+    "updatedAt": "2026-09-05",
+    "models": [
+      "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "https://platform.claude.com/docs/en/about-claude/pricing"
+    ],
+    "cacheWritePolicy": "Claude cache writes use the default 5-minute TTL rate (1.25 times input); ACP does not report the TTL breakdown, so this remains an estimate."
+  }
+}

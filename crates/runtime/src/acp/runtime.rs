@@ -1118,6 +1118,9 @@ impl AgentRuntime for AcpRuntime {
                 bus: bus.clone(),
             });
         }
+        let mut usage_reader =
+            (adapter_id == "codex").then(|| super::usage::CodexUsageReader::new(&session_id));
+        let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
         let prompt_rpc = process.request(
             "session/prompt",
             json!({
@@ -1145,11 +1148,19 @@ impl AgentRuntime for AcpRuntime {
                 }
                 result = &mut prompt_rpc, if !prompt_done => {
                     match result {
-                        Ok(response) if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") => {
-                            cancel.cancel();
-                            break TurnOutcome::Interrupted;
-                        }
-                        Ok(_) => prompt_done = true,
+                        Ok(response) => {
+                            if let Some(reader) = usage_reader.as_mut() {
+                                for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                            }
+                            if let Some(usage) = response.get("usage").filter(|v| v.is_object() && !matches!(adapter_id.as_str(), "codex" | "copilot")) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage.clone(), input.hidden);
+                            }
+                            if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") {
+                                cancel.cancel();
+                                break TurnOutcome::Interrupted;
+                            }
+                            prompt_done = true;
+                        },
                         Err(err) => {
                             tracing::warn!(
                                 error = %err,
@@ -1158,6 +1169,11 @@ impl AgentRuntime for AcpRuntime {
                             );
                             break TurnOutcome::Failed(anyhow!("ACP session/prompt failed: {err}"));
                         }
+                    }
+                }
+                _ = usage_tick.tick(), if usage_reader.is_some() => {
+                    if let Some(reader) = usage_reader.as_mut() {
+                        for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
                     }
                 }
                 recv = updates.recv() => {
@@ -1229,6 +1245,11 @@ impl AgentRuntime for AcpRuntime {
                 .is_some_and(|active| active.turn_id == input.turn_id)
             {
                 live.active = None;
+            }
+        }
+        if let Some(reader) = usage_reader.as_mut() {
+            for usage in reader.poll_final() {
+                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
             }
         }
         let (status, error) = match &outcome {
@@ -2149,6 +2170,9 @@ fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpd
     if hidden {
         return;
     }
+    if let Some(usage) = mapped.usage {
+        emit_usage(bus, thread_id, turn_id, usage, hidden);
+    }
     for (item_id, delta, sequence) in mapped.deltas {
         bus.emit(ThreadEventEnvelope {
             event_type: "thread.output.delta".into(),
@@ -2191,6 +2215,29 @@ fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpd
                     .map(|(step, status)| json!({ "step": step, "status": status }))
                     .collect::<Vec<_>>()
             }),
+        });
+    }
+}
+
+fn emit_usage(bus: &EventBus, thread_id: &str, turn_id: &str, usage: Value, hidden: bool) {
+    if hidden {
+        return;
+    }
+    if let (Some(used), Some(size)) = (
+        usage.get("used").and_then(Value::as_u64),
+        usage
+            .get("size")
+            .and_then(Value::as_u64)
+            .filter(|size| *size > 0),
+    ) {
+        bus.emit(ThreadEventEnvelope { event_type: "thread.context.updated".into(), thread_id: thread_id.into(), timestamp:now_rfc3339(), payload:json!({"contextUsage":{"availability":"available","tokensInContextWindow":used,"modelContextWindow":size,"remainingPercent":(100.0 * size.saturating_sub(used) as f64 / size as f64).round(),"updatedAt":now_rfc3339()}}) });
+    }
+    if crate::usage::normalize_usage(&usage).is_some() {
+        bus.emit(ThreadEventEnvelope {
+            event_type: "runtime.usage.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({"turnId":turn_id,"usage":usage}),
         });
     }
 }

@@ -195,6 +195,11 @@ fn merge_codex_turns(
             turn.started_at = turn.started_at.or(transcript.started_at);
             turn.status = transcript.status;
             turn.error = transcript.error.or(turn.error);
+            turn.completed_at = turn.completed_at.or(transcript.completed_at);
+            turn.model = transcript.model.or(turn.model);
+            turn.reasoning_effort = transcript.reasoning_effort.or(turn.reasoning_effort);
+            turn.token_usage = transcript.token_usage.or(turn.token_usage);
+            turn.price_estimate = transcript.price_estimate.or(turn.price_estimate);
         }
         merged.push(turn);
     }
@@ -321,6 +326,7 @@ fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<Thr
                 model: None,
                 reasoning_effort: None,
                 token_usage: None,
+                price_estimate: None,
                 has_deferred_items: None,
                 deferred_item_count: None,
                 items: items_by_turn.remove(&id).unwrap_or_default(),
@@ -576,7 +582,7 @@ fn normalize_item_status(status: &str) -> String {
     }
 }
 
-fn find_codex_rollout(home: &Path, session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_codex_rollout(home: &Path, session_id: &str) -> Option<PathBuf> {
     let sessions = home.join("sessions");
     if !sessions.is_dir() {
         return None;
@@ -601,6 +607,45 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
+    parse_codex_rollout_entries(entries)
+}
+
+pub(crate) fn read_codex_usage_history(path: &Path) -> Option<Vec<ThreadTurnDto>> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut entries = Vec::new();
+    let mut line = String::new();
+    while reader.read_line(&mut line).ok()? > 0 {
+        // Avoid parsing large tool outputs and assistant transcripts when only
+        // restoring billing metadata. Keep prompts for unambiguous turn matching.
+        if [
+            "session_meta",
+            "turn_context",
+            "task_started",
+            "task_complete",
+            "token_count",
+            "user_message",
+            "turn_aborted",
+            "task_cancelled",
+            "\"user\"",
+        ]
+        .iter()
+        .any(|kind| {
+            line.as_bytes()[..line.len().min(512)]
+                .windows(kind.len())
+                .any(|window| window == kind.as_bytes())
+        }) {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                entries.push(value);
+            }
+        }
+        line.clear();
+    }
+    parse_codex_rollout_entries(entries).map(|session| session.turns)
+}
+
+fn parse_codex_rollout_entries(entries: Vec<Value>) -> Option<ImportSessionMeta> {
     let mut segment_index = -1_i64;
     let indexed_entries: Vec<_> = entries
         .into_iter()
@@ -635,6 +680,9 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
     let mut agent_item_count = 0_usize;
     let mut created_at = None;
     let mut updated_at = None;
+    let mut cumulative_tokens = crate::usage::Tokens::default();
+    let mut turn_baseline = crate::usage::Tokens::default();
+    let mut turn_tier = "standard";
     for (value, segment) in indexed_entries {
         let timestamp = value
             .get("timestamp")
@@ -669,6 +717,28 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
                 .get("model")
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            continue;
+        }
+
+        if kind == "turn_context" {
+            model = payload
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or(model);
+            let turn =
+                ensure_codex_turn(&mut current, &mut fallback_turn_count, timestamp.as_deref());
+            turn.model = model.clone();
+            turn.reasoning_effort = payload
+                .get("effort")
+                .or_else(|| payload.get("reasoning_effort"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            turn_tier = if payload.get("service_tier").and_then(Value::as_str) == Some("fast") {
+                "fast"
+            } else {
+                "standard"
+            };
             continue;
         }
 
@@ -734,8 +804,55 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("local-turn-{fallback_turn_count}"));
                 current = Some(empty_codex_turn(id, timestamp));
+                turn_baseline = cumulative_tokens.clone();
+                turn_tier = "standard";
                 user_item_count = 0;
                 agent_item_count = 0;
+            }
+            "token_count" => {
+                let Some(info) = payload.get("info") else {
+                    continue;
+                };
+                let Some(total) = info
+                    .get("total_token_usage")
+                    .and_then(crate::usage::Tokens::parse)
+                else {
+                    continue;
+                };
+                let last = info
+                    .get("last_token_usage")
+                    .and_then(crate::usage::Tokens::parse)
+                    .unwrap_or_else(|| total.clone());
+                if let Some(turn) = current.as_mut() {
+                    turn.model = turn.model.take().or(model.clone());
+                    let mut usage = serde_json::json!({"total":total.subtract(&turn_baseline),"last":last,"modelContextWindow":info.get("model_context_window"),"baselineTotal":turn_baseline,"cumulativeTotal":total});
+                    let delta = total.subtract(&cumulative_tokens);
+                    let delta_usage = serde_json::json!({"total":delta,"last":last});
+                    if let Some(mut price) = crate::usage::estimate_price(
+                        &delta_usage,
+                        turn.model.as_deref(),
+                        Some(turn_tier),
+                    ) {
+                        if let Some(previous) = &turn.price_estimate {
+                            for field in [
+                                "inputUsd",
+                                "cachedInputUsd",
+                                "cacheWriteInputUsd",
+                                "outputUsd",
+                                "totalUsd",
+                            ] {
+                                price[field] = serde_json::json!(
+                                    price[field].as_f64().unwrap_or_default()
+                                        + previous[field].as_f64().unwrap_or_default()
+                                );
+                            }
+                        }
+                        usage["priceEstimate"] = price.clone();
+                        turn.price_estimate = Some(price);
+                    }
+                    turn.token_usage = Some(usage);
+                }
+                cumulative_tokens = total;
             }
             "user_message" | "agent_message" => {
                 let Some(text) = payload
@@ -821,6 +938,7 @@ fn parse_codex_rollout(path: &Path) -> Option<ImportSessionMeta> {
                     if turn.error.is_none() && turn.status != "interrupted" {
                         turn.status = "completed".into();
                     }
+                    turn.completed_at = timestamp.clone();
                 }
                 finish_codex_turn(&mut current, &mut turns);
             }
@@ -864,6 +982,7 @@ fn empty_codex_turn(id: String, started_at: Option<String>) -> ThreadTurnDto {
         model: None,
         reasoning_effort: None,
         token_usage: None,
+        price_estimate: None,
         has_deferred_items: None,
         deferred_item_count: None,
         items: Vec::new(),
@@ -1003,6 +1122,7 @@ fn parse_grok_history(path: &Path) -> Vec<ThreadTurnDto> {
                     model: None,
                     reasoning_effort: None,
                     token_usage: None,
+                    price_estimate: None,
                     has_deferred_items: None,
                     deferred_item_count: None,
                     items: vec![item(
@@ -1125,6 +1245,7 @@ fn parse_claude_jsonl(path: &Path, with_history: bool) -> Option<ImportSessionMe
                     model: None,
                     reasoning_effort: None,
                     token_usage: None,
+                    price_estimate: None,
                     has_deferred_items: None,
                     deferred_item_count: None,
                     items: vec![item(
@@ -1385,6 +1506,72 @@ mod tests {
     }
 
     #[test]
+    fn codex_rollout_restores_turn_model_effort_tokens_and_request_prices() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rollout.jsonl");
+        let mut rows = vec![
+            serde_json::json!({"type":"session_meta","payload":{"id":"session","cwd":root.path()}}),
+            serde_json::json!({"timestamp":"2026-09-05T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"one"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"high"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"first"}}),
+        ];
+        for (input, output, last) in [
+            (100000, 1000, 100000),
+            (400000, 2000, 300000),
+            (400000, 2000, 300000),
+        ] {
+            rows.push(serde_json::json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":input,"output_tokens":output},"last_token_usage":{"input_tokens":last,"output_tokens":1000},"model_context_window":1050000}}}));
+        }
+        rows.extend([
+            serde_json::json!({"timestamp":"2026-09-05T10:01:00Z","type":"event_msg","payload":{"type":"task_complete"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"two"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"medium"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"second"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":401000,"output_tokens":2100},"last_token_usage":{"input_tokens":1000,"output_tokens":100},"model_context_window":1050000}}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_complete"}}),
+        ]);
+        fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let session = parse_codex_rollout(&path).unwrap();
+        assert_eq!(session.turns.len(), 2);
+        let first = &session.turns[0];
+        assert_eq!(first.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(first.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(first.completed_at.as_deref(), Some("2026-09-05T10:01:00Z"));
+        assert!(
+            (first.price_estimate.as_ref().unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                - 7.125)
+                .abs()
+                < 1e-10
+        );
+        let second = &session.turns[1];
+        assert_eq!(
+            second.token_usage.as_ref().unwrap()["total"]["inputTokens"],
+            1000
+        );
+        assert_eq!(
+            second.token_usage.as_ref().unwrap()["total"]["outputTokens"],
+            100
+        );
+        assert!(
+            (second.price_estimate.as_ref().unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                - 0.00032)
+                .abs()
+                < 1e-10
+        );
+    }
+
+    #[test]
     fn finds_codex_rollout_when_sqlite_is_absent() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("codex");
@@ -1431,6 +1618,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             token_usage: None,
+            price_estimate: None,
             has_deferred_items: None,
             deferred_item_count: None,
             items: vec![
@@ -1452,6 +1640,7 @@ mod tests {
                 model: None,
                 reasoning_effort: None,
                 token_usage: None,
+                price_estimate: None,
                 has_deferred_items: None,
                 deferred_item_count: None,
                 items: vec![
@@ -1472,6 +1661,7 @@ mod tests {
                 model: None,
                 reasoning_effort: None,
                 token_usage: None,
+                price_estimate: None,
                 has_deferred_items: None,
                 deferred_item_count: None,
                 items: vec![],

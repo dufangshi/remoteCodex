@@ -76,6 +76,7 @@ async fn imports_codex_uri_and_requires_resume() {
             model: None,
             reasoning_effort: None,
             token_usage: None,
+            price_estimate: None,
             has_deferred_items: None,
             deferred_item_count: None,
             items: vec![
@@ -187,6 +188,7 @@ async fn imports_grok_session_through_acp_catalog() {
             model: None,
             reasoning_effort: None,
             token_usage: None,
+            price_estimate: None,
             has_deferred_items: None,
             deferred_item_count: None,
             items: vec![item("u1", "userMessage", "hello grok", "g1")],

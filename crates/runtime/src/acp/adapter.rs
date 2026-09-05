@@ -376,6 +376,7 @@ fn apply_negotiated(caps: &mut AgentProviderCapabilitiesDto, negotiated: &Negoti
     }
     caps.controls.permission_requests = true;
     caps.usage.token_usage = true;
+    caps.usage.cost_usd = true;
     caps.usage.context_window = true;
 }
 

@@ -28,7 +28,29 @@ export function appendLatestTurns(
   latest: ThreadDetailDto['turns'],
   activeTurnId: string | null = null,
 ) {
-  return mergeLatestThreadTurns(existing, latest, activeTurnId);
+  const existingById = new Map(existing.map((turn) => [turn.id, turn]));
+  const withLiveUsage = latest.map((turn) => {
+    const previous = existingById.get(turn.id);
+    // A detail request may have started before the latest usage event arrived.
+    // Keep the newer running total, but always accept an authoritative final turn.
+    if (
+      turn.status === 'inProgress' &&
+      previous?.status === 'inProgress' &&
+      previous.tokenUsage &&
+      previous.tokenUsage.total.totalTokens > (turn.tokenUsage?.total.totalTokens ?? -1)
+    ) {
+      return {
+        ...turn,
+        model: previous.model ?? turn.model ?? null,
+        reasoningEffort: previous.reasoningEffort ?? turn.reasoningEffort ?? null,
+        reasoningEffortAvailable: previous.reasoningEffortAvailable ?? turn.reasoningEffortAvailable ?? null,
+        tokenUsage: previous.tokenUsage,
+        priceEstimate: previous.priceEstimate ?? null,
+      };
+    }
+    return turn;
+  });
+  return mergeLatestThreadTurns(existing, withLiveUsage, activeTurnId);
 }
 
 export function applyLiveItemTimestampsToTurns(
@@ -252,19 +274,35 @@ export function reconcileLiveItemsWithDetail(
     item.text.trim().length > 0 &&
     materializedAgentTexts.some((text) => text.includes(item.text.trim()));
 
-  if (!incoming) {
-    const remainingItems = current.items.filter((item) => {
-      const materialized = materializedItemsById.get(item.id);
-      if (!materialized) {
-        return !isCoveredByMaterializedAgentText(item);
-      }
+  const isCoveredByMaterializedItem = (item: ThreadHistoryItemDto) => {
+    const materialized = materializedItemsById.get(item.id);
+    if (!materialized) {
+      return isCoveredByMaterializedAgentText(item);
+    }
+    if (
+      materialized.kind !== item.kind ||
+      (typeof item.sequence === 'number' &&
+        Number.isFinite(item.sequence) &&
+        materialized.sequence !== item.sequence)
+    ) {
+      return false;
+    }
+    // A response fetched before the latest delta can contain the same item ID
+    // while still missing its newest text. Keep that live overlay until caught up.
+    if (item.kind === 'agentMessage' || item.kind === 'reasoning') {
       return (
-        materialized.kind !== item.kind ||
-        (typeof item.sequence === 'number' &&
-          Number.isFinite(item.sequence) &&
-          materialized.sequence !== item.sequence)
+        materialized.text.includes(item.text.trim()) &&
+        (!item.detailText?.trim() ||
+          (materialized.detailText ?? materialized.text).includes(item.detailText.trim()))
       );
-    });
+    }
+    return true;
+  };
+
+  if (!incoming) {
+    const remainingItems = current.items.filter(
+      (item) => !isCoveredByMaterializedItem(item),
+    );
     return remainingItems.length === 0
       ? null
       : {
@@ -290,25 +328,9 @@ export function reconcileLiveItemsWithDetail(
       const incomingItem = incomingItemsById.get(id);
       const currentItem = currentItemsById.get(id);
       if (!incomingItem) {
-        const materialized = materializedItemsById.get(id);
-        if (
-          !materialized &&
-          currentItem &&
-          isCoveredByMaterializedAgentText(currentItem)
-        ) {
-          return null;
-        }
-        if (materialized && materialized.kind === currentItem?.kind) {
-          const shouldKeepSequencedLiveItem =
-            currentItem &&
-            typeof currentItem.sequence === 'number' &&
-            Number.isFinite(currentItem.sequence) &&
-            materialized.sequence !== currentItem.sequence;
-          if (!shouldKeepSequencedLiveItem) {
-            return null;
-          }
-        }
-        return currentItem ?? null;
+        return currentItem && !isCoveredByMaterializedItem(currentItem)
+          ? currentItem
+          : null;
       }
       return mergeLiveHistoryItem(currentItem, incomingItem);
     })
@@ -324,6 +346,55 @@ export function reconcileLiveItemsWithDetail(
             ? incoming.updatedAt
             : current.updatedAt,
       };
+}
+
+export function appendLiveAgentDeltaToItems(
+  current: NonNullable<ThreadDetailDto['liveItems']> | null,
+  turns: ThreadDetailDto['turns'],
+  event: {
+    turnId: string;
+    itemId: string;
+    delta: string;
+    text?: string | null;
+    sequence: number | null;
+    createdAt?: string | null;
+  },
+): NonNullable<ThreadDetailDto['liveItems']> {
+  const { turnId, itemId, delta, sequence, createdAt } = event;
+  const currentItems = current?.turnId === turnId ? current.items : [];
+  const currentItem = currentItems.find((item) => item.id === itemId);
+  const persisted = turns.find((turn) => turn.id === turnId)?.items.find(
+    (item) => item.id === itemId && item.kind === 'agentMessage',
+  );
+  const existing = persisted
+    ? mergeLiveHistoryItem(currentItem, persisted)
+    : currentItem;
+  const updatedAt = new Date().toISOString();
+  const text = typeof event.text === 'string'
+    ? existing?.kind === 'agentMessage' && existing.text.length > event.text.length
+      ? existing.text
+      : event.text
+    : `${existing?.kind === 'agentMessage' ? existing.text : ''}${delta}`;
+  const nextItem: ThreadHistoryItemDto = existing?.kind === 'agentMessage'
+    ? {
+        ...existing,
+        text,
+        sequence: sequence ?? existing.sequence ?? null,
+      }
+    : {
+        id: itemId,
+        kind: 'agentMessage',
+        text,
+        sequence,
+        createdAt: createdAt ?? updatedAt,
+      };
+  return {
+    turnId,
+    items: currentItem
+      ? currentItems.map((item) => item.id === itemId ? nextItem : item)
+      : [...currentItems, nextItem],
+    updatedAt,
+  };
 }
 
 export function mergeThreadIntoList(existing: ThreadDto[], thread: ThreadDto) {
@@ -517,6 +588,7 @@ export function mergeTurnTokenUsage(
   turnId: string,
   tokenUsage: ThreadTurnTokenUsageDto,
   priceEstimate: ThreadTurnPriceEstimateDto | null,
+  metadata: Partial<Pick<ThreadDetailDto['turns'][number], 'model' | 'reasoningEffort' | 'reasoningEffortAvailable'>> = {},
 ) {
   let changed = false;
   const nextTurns = turns.map((turn) => {
@@ -527,6 +599,7 @@ export function mergeTurnTokenUsage(
     changed = true;
     return {
       ...turn,
+      ...metadata,
       tokenUsage,
       priceEstimate,
     };
