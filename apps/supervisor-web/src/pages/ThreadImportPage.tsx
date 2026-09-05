@@ -186,7 +186,7 @@ export function ThreadImportPage() {
     }
     const nextProvider = providerForImportedAgent(
       parsed.agentId,
-      backendOptions.map((backend) => backend.provider),
+      backendOptions.filter(canImportFromBackend).map((backend) => backend.provider),
     );
     if (nextProvider && nextProvider !== provider) {
       setProvider(nextProvider);
@@ -371,7 +371,18 @@ export function ThreadImportPage() {
             id="available-session"
             value={selectedCandidate?.sessionId ?? ''}
             onChange={(event) => {
-              setSessionId(event.target.value);
+              const nextSessionId = event.target.value;
+              const candidate = filteredCandidates.find(
+                (entry) => entry.sessionId === nextSessionId,
+              );
+              setSessionId(nextSessionId);
+              const nextProvider = providerForImportedAgent(
+                candidate?.agentId ?? null,
+                backendOptions.filter(canImportFromBackend).map((backend) => backend.provider),
+              );
+              if (nextProvider && nextProvider !== provider) {
+                setProvider(nextProvider);
+              }
               setError(null);
             }}
             disabled={busy || candidatesLoading || filteredCandidates.length === 0}

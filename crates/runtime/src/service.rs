@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1042,7 +1042,9 @@ impl Supervisor {
             &enabled,
         );
         if let Some(existing) = self.find_thread_by_session(&parsed.raw_id)? {
-            return self.get_thread_detail(&existing.id, None).await;
+            return self
+                .get_thread_detail_page(&existing.id, Some(10), None, true)
+                .await;
         }
 
         let mut session = find_local_session(&self.local_session_homes, &agent_id, &parsed.raw_id);
@@ -1097,7 +1099,8 @@ impl Supervisor {
             Ok(())
         })?;
         self.persist_imported_turns(&thread_id, &session)?;
-        self.get_thread_detail(&thread_id, None).await
+        self.get_thread_detail_page(&thread_id, Some(10), None, true)
+            .await
     }
 
     fn find_thread_by_session(&self, session_id: &str) -> Result<Option<ThreadDto>> {
@@ -1152,6 +1155,7 @@ impl Supervisor {
         }
         let now = now_rfc3339();
         self.db.with(|conn| {
+            let transaction = conn.unchecked_transaction()?;
             for (index, turn) in session.turns.iter().enumerate() {
                 let turn_id = if turn.id.trim().is_empty() {
                     format!("imported-{thread_id}-{}", index + 1)
@@ -1168,7 +1172,7 @@ impl Supervisor {
                     .as_ref()
                     .map(serde_json::to_string)
                     .transpose()?;
-                conn.execute(
+                transaction.execute(
                     "INSERT INTO thread_turns(
                        id, thread_id, status, error, model, reasoning_effort,
                        token_usage_json, display_prompt, started_at, ordinal
@@ -1191,7 +1195,7 @@ impl Supervisor {
                     ],
                 )?;
                 upsert_legacy_turn_metadata(
-                    conn,
+                    &transaction,
                     thread_id,
                     &turn_id,
                     turn.model.as_deref(),
@@ -1201,7 +1205,7 @@ impl Supervisor {
                     &now,
                 )?;
                 for item in &turn.items {
-                    conn.execute(
+                    transaction.execute(
                         "INSERT INTO thread_history_items(id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
                          VALUES (?1,?2,?3,?4,?5,?6,?6)
                          ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
@@ -1218,6 +1222,7 @@ impl Supervisor {
                     )?;
                 }
             }
+            transaction.commit()?;
             Ok(())
         })
     }
@@ -1407,12 +1412,20 @@ impl Supervisor {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
         let (mut turns, total) = if summary_only {
-            self.load_turn_summaries(id, limit, before_turn_id)?
+            self.load_turn_summaries(
+                id,
+                limit,
+                before_turn_id,
+                thread.source == "local_codex_import",
+            )?
         } else {
             self.load_turns(id, limit, before_turn_id)?
         };
         self.hydrate_missing_codex_usage(&thread, &mut turns)
             .await?;
+        if !summary_only && thread.source == "local_codex_import" {
+            normalize_imported_turns(&mut turns);
+        }
         let pending_steers = self.load_steers(id)?;
         let present = Path::new(&workspace.abs_path).exists();
         let runtime = self.runtime(thread.provider).ok().cloned();
@@ -1558,20 +1571,29 @@ impl Supervisor {
         thread_id: &str,
         limit: Option<u32>,
         before_turn_id: Option<&str>,
+        normalize_imported: bool,
     ) -> Result<(Vec<ThreadTurnDto>, u32)> {
         let (mut turns, total_turn_count) =
             self.load_turns_meta_page(thread_id, limit, before_turn_id)?;
         for turn in &mut turns {
             if turn.status == "inProgress" {
                 turn.items = self.load_items_for_turn(thread_id, &turn.id)?;
+                if normalize_imported {
+                    normalize_imported_turns(std::slice::from_mut(turn));
+                }
                 continue;
             }
             let (items, total_item_count) = self.load_turn_conversation(thread_id, &turn.id)?;
-            let summarized = summarize_completed_turn(ThreadTurnDto {
-                items,
-                ..turn.clone()
-            });
-            let deferred = total_item_count.saturating_sub(summarized.items.len());
+            let conversation_item_count = items.len();
+            turn.items = items;
+            if normalize_imported {
+                normalize_imported_turns(std::slice::from_mut(turn));
+            }
+            let removed_item_count = conversation_item_count.saturating_sub(turn.items.len());
+            let summarized = summarize_completed_turn(turn.clone());
+            let deferred = total_item_count
+                .saturating_sub(removed_item_count)
+                .saturating_sub(summarized.items.len());
             turn.items = summarized.items;
             if deferred > 0 {
                 turn.has_deferred_items = Some(true);
@@ -1685,7 +1707,11 @@ impl Supervisor {
             .ok_or_else(|| anyhow!("turn not found"))?
             .clone();
         turn.items = self.load_items_for_turn(id, turn_id)?;
-        self.hydrate_missing_codex_usage(&self.get_thread(id)?, std::slice::from_mut(&mut turn))
+        let thread = self.get_thread(id)?;
+        if thread.source == "local_codex_import" {
+            normalize_imported_turns(std::slice::from_mut(&mut turn));
+        }
+        self.hydrate_missing_codex_usage(&thread, std::slice::from_mut(&mut turn))
             .await?;
         turn.has_deferred_items = Some(false);
         turn.deferred_item_count = Some(0);
@@ -2736,6 +2762,27 @@ impl Supervisor {
         agent_id: Option<&str>,
     ) -> Result<AgentBackendDto> {
         self.runtime(provider)?.install(agent_id).await
+    }
+}
+
+fn normalize_imported_turns(turns: &mut [ThreadTurnDto]) {
+    for turn in turns {
+        let mut seen_messages = HashSet::new();
+        turn.items.retain_mut(|item| {
+            if item.kind == "userMessage" {
+                let Some(text) = crate::local_sessions::sanitize_codex_user_text(&item.text) else {
+                    return false;
+                };
+                item.text = text;
+            }
+            if let Some(key) = crate::local_sessions::message_key(item) {
+                return seen_messages.insert(key);
+            }
+            true
+        });
+        for (sequence, item) in turn.items.iter_mut().enumerate() {
+            item.sequence = Some(sequence as i64);
+        }
     }
 }
 

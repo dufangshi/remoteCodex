@@ -51,7 +51,7 @@ fn item(id: &str, kind: &str, text: &str, turn_id: &str) -> ThreadHistoryItemDto
 }
 
 #[tokio::test]
-async fn imports_codex_uri_and_requires_resume() {
+async fn imports_selected_codex_agent_into_native_provider_and_requires_resume() {
     let dir = tempdir().unwrap();
     let cwd = dir.path().join("imported-project");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -81,7 +81,26 @@ async fn imports_codex_uri_and_requires_resume() {
             deferred_item_count: None,
             items: vec![
                 item("u1", "userMessage", "imported prompt", "turn-imported-1"),
+                item(
+                    "u-injected",
+                    "userMessage",
+                    "<environment_context>hidden</environment_context>",
+                    "turn-imported-1",
+                ),
+                item(
+                    "u-duplicate",
+                    "userMessage",
+                    "<in-app-browser-context>hidden</in-app-browser-context>\n\n## My request:\nimported prompt",
+                    "turn-imported-1",
+                ),
+                item("command-1", "commandExecution", "pwd", "turn-imported-1"),
                 item("a1", "agentMessage", "imported reply", "turn-imported-1"),
+                item(
+                    "a-duplicate",
+                    "agentMessage",
+                    "imported reply",
+                    "turn-imported-1",
+                ),
             ],
         }],
     });
@@ -101,9 +120,9 @@ async fn imports_codex_uri_and_requires_resume() {
 
     let imported = supervisor
         .import_thread(ImportThreadInput {
-            session_id: "  codex://threads/01a0634a-23df-7191-acd2-1fca43a10418  ".into(),
-            provider: Some(Provider::Claude),
-            agent_id: Some("claude".into()),
+            session_id: "01a0634a-23df-7191-acd2-1fca43a10418".into(),
+            provider: Some(Provider::Acp),
+            agent_id: Some("codex".into()),
         })
         .await
         .unwrap();
@@ -115,8 +134,37 @@ async fn imports_codex_uri_and_requires_resume() {
     assert_eq!(imported.thread.source, "local_codex_import");
     assert!(!imported.thread.is_loaded);
     assert_eq!(imported.workspace.label, "imported-project");
+    assert_eq!(imported.turns[0].items.len(), 2);
     assert_eq!(imported.turns[0].items[0].text, "imported prompt");
-    assert_eq!(imported.turns[0].items[1].text, "imported reply");
+    assert_eq!(imported.turns[0].items[1].id, "a1");
+    assert_eq!(imported.turns[0].has_deferred_items, Some(true));
+    assert_eq!(imported.turns[0].deferred_item_count, Some(1));
+    let imported_summary = supervisor
+        .get_thread_detail_view(&imported.thread.id, Some(10), true)
+        .await
+        .unwrap();
+    assert_eq!(imported_summary.turns[0].items.len(), 2);
+    assert_eq!(imported_summary.turns[0].items[0].text, "imported prompt");
+    assert_eq!(imported_summary.turns[0].items[1].id, "a1");
+    assert_eq!(imported_summary.turns[0].deferred_item_count, Some(1));
+    let imported_detail = supervisor
+        .get_thread_detail(&imported.thread.id, None)
+        .await
+        .unwrap();
+    assert_eq!(imported_detail.turns[0].items.len(), 3);
+    assert_eq!(imported_detail.turns[0].items[0].text, "imported prompt");
+    assert_eq!(imported_detail.turns[0].items[1].id, "command-1");
+    assert_eq!(imported_detail.turns[0].items[2].text, "imported reply");
+    let imported_turn = supervisor
+        .get_thread_turn_detail(&imported.thread.id, "turn-imported-1")
+        .await
+        .unwrap();
+    assert_eq!(imported_turn.items.len(), 3);
+    assert_eq!(imported_turn.items[0].text, "imported prompt");
+    assert_eq!(imported_turn.items[1].id, "command-1");
+    assert_eq!(imported_turn.items[2].id, "a1");
+    assert_eq!(imported_turn.has_deferred_items, Some(false));
+    assert_eq!(imported_turn.deferred_item_count, Some(0));
 
     let duplicate = supervisor
         .import_thread(ImportThreadInput {

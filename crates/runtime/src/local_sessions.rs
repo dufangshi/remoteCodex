@@ -185,12 +185,14 @@ fn merge_codex_turns(
     for mut turn in paginated {
         if let Some(transcript) = rollout_by_id.remove(&turn.id) {
             let item_ids: HashSet<_> = turn.items.iter().map(|item| item.id.clone()).collect();
-            turn.items.extend(
-                transcript
-                    .items
-                    .into_iter()
-                    .filter(|item| !item_ids.contains(&item.id)),
-            );
+            let message_keys: HashSet<_> = turn.items.iter().filter_map(message_key).collect();
+            turn.items
+                .extend(transcript.items.into_iter().filter(|item| {
+                    !item_ids.contains(&item.id)
+                        && message_key(item)
+                            .map(|key| !message_keys.contains(&key))
+                            .unwrap_or(true)
+                }));
             turn.items = stable_sort_history_items(turn.items);
             turn.started_at = turn.started_at.or(transcript.started_at);
             turn.status = transcript.status;
@@ -215,6 +217,22 @@ fn merge_codex_turns(
             .then_with(|| left_index.cmp(right_index))
     });
     indexed.into_iter().map(|(_, turn)| turn).collect()
+}
+
+pub(crate) fn message_key(item: &ThreadHistoryItemDto) -> Option<(String, String, bool)> {
+    matches!(item.kind.as_str(), "userMessage" | "agentMessage").then(|| {
+        let phase = item
+            .extra
+            .get("phase")
+            .and_then(Value::as_str)
+            .or(item.status.as_deref());
+        let is_commentary = item.kind == "agentMessage" && phase == Some("commentary");
+        (
+            item.kind.clone(),
+            item.text.trim().to_string(),
+            is_commentary,
+        )
+    })
 }
 
 fn stable_sort_history_items(items: Vec<ThreadHistoryItemDto>) -> Vec<ThreadHistoryItemDto> {
@@ -362,7 +380,13 @@ fn history_item_from_codex_json(
         "collabAgentToolCall" | "collab_agent_tool_call" => "agentToolCall",
         _ => "other",
     };
-    let direct_text = codex_text(value);
+    let direct_text = codex_text(value).and_then(|text| {
+        if kind == "userMessage" {
+            sanitize_codex_user_text(&text)
+        } else {
+            Some(text)
+        }
+    });
     let command = codex_record_text(value, &["command", "cmd", "argv"]);
     let output = codex_record_text(
         value,
@@ -747,7 +771,16 @@ fn parse_codex_rollout_entries(entries: Vec<Value>) -> Option<ImportSessionMeta>
             && payload.get("type").and_then(Value::as_str) == Some("message")
         {
             let role = payload.get("role").and_then(Value::as_str).unwrap_or("");
-            let text = content_text(payload.get("content").unwrap_or(payload)).unwrap_or_default();
+            if role == "user" && !codex_message_is_user_authored(payload) {
+                continue;
+            }
+            let raw_text =
+                content_text(payload.get("content").unwrap_or(payload)).unwrap_or_default();
+            let text = if role == "user" {
+                sanitize_codex_user_text(&raw_text).unwrap_or_default()
+            } else {
+                raw_text
+            };
             if text.trim().is_empty() || !matches!(role, "user" | "assistant") {
                 continue;
             }
@@ -970,6 +1003,39 @@ fn parse_codex_rollout_entries(entries: Vec<Value>) -> Option<ImportSessionMeta>
         model,
         turns,
     })
+}
+
+fn codex_message_is_user_authored(payload: &Value) -> bool {
+    let Some(kinds) = payload
+        .get("internal_chat_message_metadata_passthrough")
+        .and_then(|metadata| metadata.get("content_item_kinds"))
+        .and_then(Value::as_array)
+    else {
+        return true;
+    };
+    kinds
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|kind| kind.starts_with("user."))
+}
+
+pub(crate) fn sanitize_codex_user_text(text: &str) -> Option<String> {
+    const REQUEST_MARKER: &str = "## My request:";
+    let trimmed = text.trim();
+    let has_injected_context = trimmed.starts_with("# AGENTS.md instructions")
+        || trimmed.starts_with("<environment_context>")
+        || trimmed.starts_with("<in-app-browser-context")
+        || trimmed.starts_with("<skills_instructions>")
+        || trimmed.starts_with("# Context from my IDE setup:");
+    let request = has_injected_context
+        .then(|| trimmed.split_once(REQUEST_MARKER))
+        .flatten()
+        .map(|(_, request)| request.trim());
+    let cleaned = request.unwrap_or(trimmed);
+    if cleaned.is_empty() || (has_injected_context && request.is_none()) {
+        return None;
+    }
+    Some(cleaned.to_string())
 }
 
 fn empty_codex_turn(id: String, started_at: Option<String>) -> ThreadTurnDto {
@@ -1583,9 +1649,10 @@ mod tests {
         fs::write(
             sessions.join(format!("rollout-{id}.jsonl")),
             format!(
-                "{}\n{}\n{}\n",
+                "{}\n{}\n{}\n{}\n",
                 serde_json::json!({"type":"session_meta","payload":{"id":id,"cwd":cwd}}),
-                serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"imported prompt"}]}}),
+                serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /tmp/project"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["agents_md.instructions"]}}}),
+                serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<in-app-browser-context>hidden</in-app-browser-context>\n\n## My request:\nimported prompt"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}),
                 serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"imported reply"}]}}),
             ),
         )
@@ -1598,6 +1665,7 @@ mod tests {
         let session =
             find_local_session(&homes, "codex", &format!("codex://threads/{id}")).unwrap();
         assert_eq!(session.cwd, cwd.to_string_lossy());
+        assert_eq!(session.turns[0].items.len(), 2);
         assert_eq!(session.turns[0].items[0].text, "imported prompt");
         assert_eq!(session.turns[0].items[1].text, "imported reply");
     }
@@ -1643,14 +1711,19 @@ mod tests {
                 price_estimate: None,
                 has_deferred_items: None,
                 deferred_item_count: None,
-                items: vec![
-                    history_item("user-rich", "userMessage", "2026-08-31T00:00:02.000Z"),
-                    history_item(
-                        "agent-commentary",
-                        "agentMessage",
-                        "2026-08-31T00:00:03.000Z",
-                    ),
-                ],
+                items: {
+                    let mut duplicate =
+                        history_item("rollout-user-id", "userMessage", "2026-08-31T00:00:02.000Z");
+                    duplicate.text = "user-rich".into();
+                    vec![
+                        duplicate,
+                        history_item(
+                            "agent-commentary",
+                            "agentMessage",
+                            "2026-08-31T00:00:03.000Z",
+                        ),
+                    ]
+                },
             },
             ThreadTurnDto {
                 id: "turn-new".into(),
@@ -1717,5 +1790,61 @@ mod tests {
             assert_eq!(item.created_at.as_deref(), Some("2026-08-31T00:00:03.456Z"));
             assert_eq!(item.sequence, Some(3));
         }
+
+        let user = history_item_from_codex_json(
+            "turn-1",
+            &serde_json::json!({
+                "id": "user-1",
+                "type": "userMessage",
+                "content": [{
+                    "type": "text",
+                    "text": "<in-app-browser-context>hidden</in-app-browser-context>\n\n## My request:\nkeep this"
+                }]
+            }),
+            "userMessage",
+            None,
+            Some(4),
+        )
+        .unwrap();
+        assert_eq!(user.text, "keep this");
+    }
+
+    #[test]
+    fn preserves_request_headings_and_image_markup_in_user_authored_text() {
+        let plain = "Please edit this template.\n\n## My request:\nFirst section\n\n## My request:\nSecond section\n<image name=\"example\">literal markup</image>";
+        assert_eq!(sanitize_codex_user_text(plain).as_deref(), Some(plain));
+
+        let wrapped = format!(
+            "<in-app-browser-context>hidden</in-app-browser-context>\n\n## My request:\n{plain}"
+        );
+        assert_eq!(sanitize_codex_user_text(&wrapped).as_deref(), Some(plain));
+        assert_eq!(
+            sanitize_codex_user_text("<environment_context>hidden</environment_context>"),
+            None
+        );
+    }
+
+    #[test]
+    fn distinguishes_commentary_and_final_messages_during_import_deduplication() {
+        let mut commentary = history_item_from_codex_json(
+            "turn-1",
+            &serde_json::json!({"id":"commentary","type":"agentMessage","text":"Done."}),
+            "agentMessage",
+            None,
+            Some(0),
+        )
+        .unwrap();
+        commentary.status = Some("commentary".into());
+        let mut final_message = commentary.clone();
+        final_message.id = "final".into();
+        final_message.status = Some("final".into());
+        assert_ne!(message_key(&commentary), message_key(&final_message));
+
+        let mut paginated_commentary = commentary.clone();
+        paginated_commentary.status = Some("completed".into());
+        paginated_commentary
+            .extra
+            .insert("phase".into(), serde_json::json!("commentary"));
+        assert_eq!(message_key(&commentary), message_key(&paginated_commentary));
     }
 }

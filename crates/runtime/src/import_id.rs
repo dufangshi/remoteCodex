@@ -93,14 +93,10 @@ pub fn bind_import_target(
     inferred_agent: Option<&str>,
     enabled: &[Provider],
 ) -> (Provider, String) {
-    if inferred_agent.is_none() {
-        let agent = selected_agent
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| default_agent_for_provider(selected_provider))
-            .to_string();
-        return (selected_provider, agent);
-    }
-    let agent = inferred_agent.unwrap().to_string();
+    let agent = inferred_agent
+        .or_else(|| selected_agent.filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| default_agent_for_provider(selected_provider))
+        .to_string();
     let provider = provider_for_agent(&agent, enabled).unwrap_or(selected_provider);
     (provider, agent)
 }
@@ -253,5 +249,22 @@ mod tests {
             bind_import_target(Provider::Acp, Some("grok"), Some("codex"), &enabled);
         assert_eq!(provider, Provider::Codex);
         assert_eq!(agent, "codex");
+    }
+
+    #[test]
+    fn binds_known_selected_agents_to_their_native_provider() {
+        let enabled = [Provider::Codex, Provider::Claude, Provider::Acp];
+
+        let (provider, agent) = bind_import_target(Provider::Acp, Some("codex"), None, &enabled);
+        assert_eq!(provider, Provider::Codex);
+        assert_eq!(agent, "codex");
+
+        let (provider, agent) = bind_import_target(Provider::Acp, Some("claude"), None, &enabled);
+        assert_eq!(provider, Provider::Claude);
+        assert_eq!(agent, "claude");
+
+        let (provider, agent) = bind_import_target(Provider::Acp, Some("grok"), None, &enabled);
+        assert_eq!(provider, Provider::Acp);
+        assert_eq!(agent, "grok");
     }
 }
