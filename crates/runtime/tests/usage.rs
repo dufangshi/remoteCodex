@@ -231,9 +231,11 @@ async fn old_completed_turn_hydrates_usage_from_the_native_rollout() {
         .db
         .with(|conn| {
             conn.execute(
-                "UPDATE thread_turns SET status='completed' WHERE id='live-turn'",
+                "UPDATE thread_turns SET status='completed', completed_at='2026-09-05T10:01:00Z' WHERE id='live-turn'",
                 [],
             )?;
+            conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES ('prompt',?1,'live-turn','prompt',?2,'now','now')",
+                params![thread_id,json!({"id":"prompt","kind":"userMessage","text":"old [PHOTO screenshot.png] prompt"}).to_string()])?;
             Ok(())
         })
         .unwrap();
@@ -246,7 +248,8 @@ async fn old_completed_turn_hydrates_usage_from_the_native_rollout() {
     std::fs::create_dir_all(home.join("sessions")).unwrap();
     let rows = [
         json!({"type":"session_meta","payload":{"id":session_id,"cwd":dir.path()}}),
-        json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"live-turn"}}),
+        json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"output_tokens":10000}}}}),
+        json!({"timestamp":"2026-09-05T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"native-turn"}}),
         json!({"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"high"}}),
         json!({"type":"event_msg","payload":{"type":"user_message","message":"old prompt"}}),
         json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":100},"last_token_usage":{"input_tokens":1000,"output_tokens":100},"model_context_window":1050000}}}),
@@ -296,4 +299,59 @@ async fn old_completed_turn_hydrates_usage_from_the_native_rollout() {
         serde_json::from_str::<Value>(&stored).unwrap()["total"]["inputTokens"],
         1000
     );
+    reopened.db.with(|conn| {
+        conn.execute("UPDATE thread_turns SET token_usage_json=?1 WHERE id='live-turn'",
+            params![json!({"total":{"totalTokens":0,"inputTokens":0,"outputTokens":0},"last":{"totalTokens":1100,"inputTokens":1000,"outputTokens":100}}).to_string()])?;
+        Ok(())
+    }).unwrap();
+    let repaired = reopened
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    assert_eq!(
+        repaired.token_usage.as_ref().unwrap()["total"]["inputTokens"],
+        1000
+    );
+    assert_eq!(repaired.price_estimate.as_ref().unwrap()["totalUsd"], 0.015);
+}
+
+#[tokio::test]
+async fn cumulative_counter_resets_preserve_billable_usage_without_duplicates() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.spawn_live_item_persister();
+    let baseline = json!({"inputTokens":1000000,"outputTokens":10000});
+    for (input, expected) in [
+        (1000, 1000),
+        (2000, 2000),
+        (2000, 2000),
+        (500, 2500),
+        (1500, 3500),
+    ] {
+        emit(
+            &supervisor,
+            &thread_id,
+            "runtime.usage.updated",
+            json!({
+                "turnId":"live-turn", "usage": {
+                    "total":{"inputTokens":input,"outputTokens":10},
+                    "last":{"inputTokens":500,"outputTokens":10},
+                    "baselineTotal":baseline, "cumulative":true, "source":"codexRollout", "model":"gpt-6-astra"
+                }
+            }),
+        );
+        let turn = supervisor
+            .get_thread_turn_detail(&thread_id, "live-turn")
+            .await
+            .unwrap();
+        assert_eq!(
+            turn.token_usage.as_ref().unwrap()["total"]["inputTokens"],
+            expected
+        );
+        assert!(
+            turn.price_estimate.as_ref().unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+    }
 }

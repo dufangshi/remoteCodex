@@ -1056,3 +1056,30 @@ test.describe('live activity persistence regressions', () => {
     await expect(page.getByText(`${fullText} Still streaming.`, { exact: true })).toBeVisible();
   });
 });
+
+test('opens attachment images and closes the preview outside the image', async ({ page }) => {
+  await installApiRoutes(page, () => detail('codex', {
+    turns: [{ id: 'turn-image', status: 'completed', error: null, model: 'gpt-6-astra', reasoningEffort: 'high',
+      items: [{ id: 'photo-prompt', kind: 'userMessage', text: 'Inspect [PHOTO screenshot.png]' }] }],
+  }));
+  await page.route('**/api/threads/thread-1/assets/image**', route => route.fulfill({
+    contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="steelblue"/></svg>',
+  }));
+  await page.goto('/threads/thread-1');
+  const trigger = page.getByRole('button', { name: 'Open image preview: screenshot.png' });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Image preview: screenshot.png' });
+  await expect(dialog).toBeVisible();
+  const full = dialog.getByRole('img');
+  await expect(full).toBeVisible();
+  const smallBox = await trigger.boundingBox();
+  const largeBox = await full.boundingBox();
+  expect(largeBox!.width).toBeGreaterThan(smallBox!.width);
+  await full.click();
+  await expect(dialog).toBeVisible();
+  await dialog.locator('.thread-graph-image-lightbox-viewport').click({ position: { x: 4, y: 4 } });
+  await expect(dialog).toHaveCount(0);
+  await trigger.click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});

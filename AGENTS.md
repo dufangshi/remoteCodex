@@ -13,3 +13,5 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.
 - After completing a change and its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
 - For runtime/npm releases or installed-version troubleshooting, follow the project [release-runtime skill](.agents/skills/release-runtime/SKILL.md).
+
+- Public Web UI for `remote.lnz-study.com` is served by the remote Rust relay, not the device supervisor. After a Web/shared UI change, publish the shared UI commit and dispatch `relay-deploy.yml` from `main` with its full `thread_ui_sha`; restarting a device supervisor alone does not deploy Web changes. `legacy/node-0.11` is a backup branch, not the main deployment target.

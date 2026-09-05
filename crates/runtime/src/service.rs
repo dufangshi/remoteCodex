@@ -482,7 +482,12 @@ impl Supervisor {
                 let total = crate::usage::Tokens::parse(&usage["total"]).unwrap_or_default();
                 usage["cumulativeTotal"] = json!(total);
                 usage["baselineTotal"] = json!(baseline);
-                usage["total"] = json!(total.subtract(&baseline));
+                let turn_total = previous.as_ref().and_then(|previous| {
+                    let previous_counter = crate::usage::Tokens::parse(&previous["cumulativeTotal"])?;
+                    let previous_turn = crate::usage::Tokens::parse(&previous["total"])?;
+                    Some(previous_turn.add(&total.cumulative_delta(&previous_counter)))
+                }).unwrap_or_else(|| total.cumulative_delta(&baseline));
+                usage["total"] = json!(turn_total);
             }
             if usage["modelContextWindow"].is_null() {
                 usage["modelContextWindow"] = previous.as_ref().and_then(|v| v.get("modelContextWindow")).cloned().unwrap_or(Value::Null);
@@ -1468,7 +1473,7 @@ impl Supervisor {
         if (thread.provider != Provider::Codex && thread.agent_id.as_deref() != Some("codex"))
             || !turns
                 .iter()
-                .any(|turn| turn.status != "inProgress" && turn.token_usage.is_none())
+                .any(|turn| turn.status != "inProgress" && usage_needs_hydration(turn))
         {
             return Ok(());
         }
@@ -1489,7 +1494,7 @@ impl Supervisor {
         };
         for turn in turns
             .iter_mut()
-            .filter(|turn| turn.status != "inProgress" && turn.token_usage.is_none())
+            .filter(|turn| turn.status != "inProgress" && usage_needs_hydration(turn))
         {
             let source = history
                 .iter()
@@ -1507,7 +1512,8 @@ impl Supervisor {
                             .is_some_and(|t| t >= start.saturating_sub(1000) && t <= end)
                             && prompt.is_some_and(|prompt| {
                                 source.items.iter().any(|item| {
-                                    item.kind == "userMessage" && item.text.trim() == prompt
+                                    item.kind == "userMessage"
+                                        && usage_prompt_key(&item.text) == usage_prompt_key(prompt)
                                 })
                             })
                     });
@@ -1526,7 +1532,7 @@ impl Supervisor {
             turn.price_estimate = source.price_estimate.clone();
             turn.token_usage = crate::usage::public_usage(usage);
             self.db.with(|conn| {
-                conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND token_usage_json IS NULL",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
+                conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND (token_usage_json IS NULL OR (json_extract(token_usage_json,'$.total.totalTokens')=0 AND json_extract(token_usage_json,'$.last.totalTokens')>0))",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
                 Ok(())
             })?;
         }
@@ -2889,6 +2895,35 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
         last_turn_started_at: row.get(18).unwrap_or(None),
         last_turn_completed_at: row.get(19).unwrap_or(None),
         context_usage: None,
+    }
+}
+
+// Native Codex stores image blocks separately while RemoteCodex keeps PHOTO
+// placeholders in display text. Compare their textual prompt within the same
+// turn time window, still requiring exactly one match.
+fn usage_prompt_key(text: &str) -> String {
+    let mut remaining = text;
+    let mut result = String::new();
+    while let Some(start) = remaining.find("[PHOTO ") {
+        result.push_str(&remaining[..start]);
+        let Some(end) = remaining[start..].find(']') else {
+            result.push_str(&remaining[start..]);
+            remaining = "";
+            break;
+        };
+        remaining = &remaining[start + end + 1..];
+    }
+    result.push_str(remaining);
+    result.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+fn usage_needs_hydration(turn: &ThreadTurnDto) -> bool {
+    match &turn.token_usage {
+        None => true,
+        Some(usage) => {
+            usage["total"]["totalTokens"] == 0
+                && usage["last"]["totalTokens"].as_u64().unwrap_or_default() > 0
+        }
     }
 }
 

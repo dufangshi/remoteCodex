@@ -858,8 +858,13 @@ fn parse_codex_rollout_entries(entries: Vec<Value>) -> Option<ImportSessionMeta>
                     .unwrap_or_else(|| total.clone());
                 if let Some(turn) = current.as_mut() {
                     turn.model = turn.model.take().or(model.clone());
-                    let mut usage = serde_json::json!({"total":total.subtract(&turn_baseline),"last":last,"modelContextWindow":info.get("model_context_window"),"baselineTotal":turn_baseline,"cumulativeTotal":total});
-                    let delta = total.subtract(&cumulative_tokens);
+                    let delta = total.cumulative_delta(&cumulative_tokens);
+                    let previous = turn
+                        .token_usage
+                        .as_ref()
+                        .and_then(|usage| crate::usage::Tokens::parse(&usage["total"]))
+                        .unwrap_or_default();
+                    let mut usage = serde_json::json!({"total":previous.add(&delta),"last":last,"modelContextWindow":info.get("model_context_window"),"baselineTotal":turn_baseline,"cumulativeTotal":total});
                     let delta_usage = serde_json::json!({"total":delta,"last":last});
                     if let Some(mut price) = crate::usage::estimate_price(
                         &delta_usage,
