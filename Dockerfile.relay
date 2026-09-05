@@ -6,6 +6,7 @@ WORKDIR /opt/remote-codex
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY config ./config
 
 RUN --mount=type=cache,id=remote-codex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=remote-codex-cargo-target,target=/opt/remote-codex/target,sharing=locked \
