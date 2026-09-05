@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use remote_codex_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
@@ -151,6 +152,8 @@ impl AcpRuntime {
         load_id: Option<&str>,
         reasoning_effort: Option<&str>,
     ) -> Result<(String, LiveSession)> {
+        let cwd = harness_cwd(cwd);
+        let cwd = cwd.as_ref();
         let yolo = policy.auto_approve();
         let availability = classify_availability(def);
         if availability != "ready" {
@@ -849,10 +852,12 @@ impl AgentRuntime for AcpRuntime {
             }
         }
         if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
-            if let Ok(models) = self.probe_models(&def, cwd).await {
-                if !models.is_empty() {
-                    return Ok(models);
-                }
+            let models = self
+                .probe_models(&def, cwd)
+                .await
+                .with_context(|| format!("probe {} models", def.display_name))?;
+            if !models.is_empty() {
+                return Ok(models);
             }
         }
         let command_models = list_command_models(&def);
@@ -1927,11 +1932,27 @@ fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
         }
     }
     if def.id == "codex" {
-        let codex_path =
-            command_program(&def.base_command).unwrap_or_else(|| def.base_command.clone());
+        let codex_path = codex_path_for(def);
         env.push(("CODEX_PATH", codex_path));
     }
     env
+}
+
+fn codex_path_for(def: &AcpAgentDef) -> String {
+    command_program(&def.base_command).unwrap_or_else(|| def.base_command.clone())
+}
+
+fn harness_cwd(cwd: &str) -> Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        if let Some(path) = cwd.strip_prefix(r"\\?\UNC\") {
+            return Cow::Owned(format!(r"\\{path}"));
+        }
+        if let Some(path) = cwd.strip_prefix(r"\\?\") {
+            return Cow::Borrowed(path);
+        }
+    }
+    Cow::Borrowed(cwd)
 }
 
 fn agent_server_command(def: &AcpAgentDef, auto_approve: bool) -> String {
@@ -1965,15 +1986,25 @@ mod tests {
             install_command: None,
             model_list_command: None,
         };
-        let environment = extra_env_for(&definition);
-        assert_eq!(
-            environment
-                .iter()
-                .find(|(key, _)| *key == "CODEX_PATH")
-                .map(|(_, value)| value.as_str()),
-            executable.to_str()
-        );
+        assert_eq!(codex_path_for(&definition), executable.to_string_lossy());
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn removes_windows_verbatim_prefixes_from_harness_paths() {
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                harness_cwd(r"\\?\C:\Users\win10\proj1"),
+                r"C:\Users\win10\proj1"
+            );
+            assert_eq!(
+                harness_cwd(r"\\?\UNC\server\share\proj1"),
+                r"\\server\share\proj1"
+            );
+        }
+        #[cfg(not(windows))]
+        assert_eq!(harness_cwd("/tmp/proj1"), "/tmp/proj1");
     }
 
     #[test]

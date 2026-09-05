@@ -154,7 +154,7 @@ internal static class SelfTest
                 && parsedBash
                 && bashResult is { RelayUrl: "wss://relay.example.test", DeviceToken: "rcd_self_test_token", SupervisorPort: 45679 }
                 && managedPackages.SequenceEqual([
-                    "remote-codex@0.12.4",
+                    "remote-codex@0.12.5",
                     "@agentclientprotocol/codex-acp@1.9.0",
                     "@openai/codex@0.153.2",
                 ])
