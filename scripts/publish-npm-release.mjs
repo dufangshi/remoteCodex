@@ -42,6 +42,7 @@ export function publishRelease({
   runNpm,
   log = console.log,
   registryRetryDelayMs = 2_000,
+  registryVisibilityAttempts = 31,
 }) {
   if (!['next', 'latest'].includes(channel)) {
     throw new Error('Release channel must be next or latest');
@@ -104,7 +105,11 @@ export function publishRelease({
 
       if (!dryRun) {
         let published = null;
-        for (let attempt = 0; attempt < 6 && !published; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < registryVisibilityAttempts && !published;
+          attempt += 1
+        ) {
           if (attempt > 0) sleepSync(registryRetryDelayMs);
           published = registryIntegrity(spec, runNpm);
         }

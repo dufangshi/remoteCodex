@@ -84,7 +84,7 @@ test('publishes and tags the launcher', () => {
 });
 
 test('retries registry visibility after publishing', () => {
-  const npm = mockNpm({}, { notFoundViews: 2 });
+  const npm = mockNpm({}, { notFoundViews: 8 });
 
   publishRelease({
     channel: 'latest',
@@ -92,6 +92,7 @@ test('retries registry visibility after publishing', () => {
     manifest,
     allowLatest: true,
     registryRetryDelayMs: 0,
+    registryVisibilityAttempts: 10,
     runNpm: npm.run,
     log() {},
   });
