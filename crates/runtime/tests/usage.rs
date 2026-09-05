@@ -381,3 +381,58 @@ async fn restarted_counter_above_baseline_bills_at_least_the_last_request() {
         assert_eq!(turn.token_usage.unwrap()["total"]["totalTokens"], 46282);
     }
 }
+
+#[tokio::test]
+async fn custom_model_rates_match_display_names_survive_reload_and_reprice_history() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor
+        .db
+        .with(|conn| {
+            conn.execute(
+                "UPDATE thread_turns SET model='opaque-harness-id' WHERE id='live-turn'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    supervisor
+        .db
+        .set_kv(
+            "model_display_names",
+            &json!({"opaque-harness-id":"My MODEL"}).to_string(),
+        )
+        .unwrap();
+    supervisor.update_model_pricing(&json!({"id":"my-model","rates":{"inputUsdPerMillion":2,"cachedInputUsdPerMillion":0.2,"outputUsdPerMillion":10,"aliases":["My MODEL"]}})).unwrap();
+    supervisor.spawn_live_item_persister();
+    emit(
+        &supervisor,
+        &thread_id,
+        "runtime.usage.updated",
+        json!({"turnId":"live-turn","usage":{"inputTokens":10000,"cachedInputTokens":8000,"outputTokens":1000}}),
+    );
+    let first = supervisor
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    let price = first.price_estimate.unwrap();
+    assert_eq!(price["inputUsd"], 0.004);
+    assert_eq!(price["cachedInputUsd"], 0.0016);
+    assert_eq!(price["outputUsd"], 0.01);
+    supervisor.update_model_pricing(&json!({"id":"my-model","rates":{"inputUsdPerMillion":4,"cachedInputUsdPerMillion":0.4,"outputUsdPerMillion":20}})).unwrap();
+    let next = supervisor
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    assert_eq!(next.price_estimate.unwrap()["inputUsd"], 0.008);
+    assert!(supervisor
+        .db
+        .get_kv("model_pricing")
+        .unwrap()
+        .unwrap()
+        .contains("my-model"));
+    assert!(supervisor.update_model_pricing(&json!({"id":"invalid","rates":{"inputUsdPerMillion":-1,"cachedInputUsdPerMillion":0,"outputUsdPerMillion":1}})).is_err());
+    supervisor
+        .update_model_pricing(&json!({"id":"my-model","reset":true}))
+        .unwrap();
+    assert!(supervisor.model_pricing()["models"]["my-model"].is_null());
+}

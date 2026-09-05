@@ -1115,6 +1115,10 @@ test('keeps delivered steer bubbles in collapsed and expanded history with tappa
   const price = summary.getByRole('button', { name: 'API cost $0.11. Show token details', exact: true });
   await price.click();
   const tooltip = page.getByRole('tooltip');
+  await expect(tooltip.getByLabel('Input: 1,000 tokens')).toBeVisible();
+  await expect(tooltip.getByLabel('Input cost', {exact:true})).toHaveText('$0.010');
+  await expect(tooltip.getByLabel('Output cost')).toHaveText('$0.060');
+  await expect(tooltip.getByLabel('Reasoning cost')).toHaveText('$0.040');
   await expect(tooltip.getByLabel('Cached input: 500 tokens')).toBeVisible();
   await expect(tooltip.getByLabel('Reasoning: 800 tokens')).toBeVisible();
   await expect(page.locator('.thread-usage-details')).toHaveCSS('background-color', 'rgb(37, 38, 34)');
@@ -1200,4 +1204,58 @@ test('keeps subtle timestamps above messages and reveals touch copy controls', a
   const button = (await codeCopy.boundingBox())!;
   expect(button.y - block.y).toBeLessThan(16);
   expect(block.x+block.width-button.x-button.width).toBeLessThan(16);
+});
+
+test('edits global model prices and custom display aliases', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex'));
+  const models: Record<string, any> = {'gpt-6-astra':{inputUsdPerMillion:10,cachedInputUsdPerMillion:1,outputUsdPerMillion:50}};
+  let saved: any;
+  await page.route('**/api/config/model-pricing',async route=>{
+    if(route.request().method()==='PATCH') {saved=route.request().postDataJSON();models[saved.id]={...saved.rates,custom:true};}
+    await route.fulfill({json:{models}});
+  });
+  await page.goto('/threads/thread-1');
+  if (await page.getByRole('button', {name:'Open rooms', exact:true}).isVisible()) await page.getByRole('button', {name:'Open rooms', exact:true}).click();
+  await page.getByRole('button',{name:'Open settings',exact:true}).click();
+  await page.getByRole('button',{name:'Global',exact:true}).click();
+  const section=page.getByRole('region',{name:'Model pricing'});
+  await expect(section.getByText('gpt-6-astra',{exact:true})).toBeVisible();
+  await section.getByRole('button',{name:'Add model',exact:true}).click();
+  await section.getByLabel('Pricing model ID').fill('my-model');
+  await section.getByLabel('Model aliases').fill('MY Model, GPT-Custom');
+  await section.getByLabel('In price per million',{exact:true}).fill('2');
+  await section.getByLabel('Cached price per million',{exact:true}).fill('0.2');
+  await section.getByLabel('Out price per million',{exact:true}).fill('10');
+  await section.getByRole('button',{name:'Save prices',exact:true}).click();
+  await expect(section.getByRole('status')).toHaveText('Model prices saved.');
+  expect(saved.rates.aliases).toEqual(['MY Model','GPT-Custom']);
+  expect(saved.rates.inputUsdPerMillion).toBe(2);
+  await section.getByLabel('Search model prices').fill('gpt-custom');
+  await expect(section.getByText('my-model',{exact:true})).toBeVisible();
+  await section.getByRole('button',{name:'Edit my-model',exact:true}).click();
+  await section.getByLabel('In price per million',{exact:true}).fill('4');
+  await section.getByRole('button',{name:'Save prices',exact:true}).click();
+  await expect.poll(()=>saved.rates.inputUsdPerMillion).toBe(4);
+  await page.reload();
+  if (await page.getByRole('button', {name:'Open rooms', exact:true}).isVisible()) await page.getByRole('button', {name:'Open rooms', exact:true}).click();
+  await page.getByRole('button',{name:'Open settings',exact:true}).click();
+  await page.getByRole('button',{name:'Global',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Model pricing'}).getByText('my-model',{exact:true})).toBeVisible();
+});
+
+test('shows real OAuth windows above composer for ACP and hides unavailable usage', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex',{thread:{provider:'acp',agentId:'grok'}}));
+  let usage: any={provider:'grok',authKind:'subscription',observedAt:now,stale:false,windows:[{id:'weekly',label:'7d',durationMinutes:10080,usedPercent:21,resetsAt:'2030-01-01T00:00:00Z'}]};
+  let requestAgent: string|null=null;
+  await page.route('**/api/agent-runtimes/acp/subscription-usage*',async route=>{requestAgent=new URL(route.request().url()).searchParams.get('agentId');await route.fulfill({json:{usage}});});
+  await page.goto('/threads/thread-1');
+  const badge=page.getByRole('button',{name:/grok subscription usage/});
+  await expect(badge).toBeVisible();expect(requestAgent).toBe('grok');
+  await expect(badge).toContainText('7d');await expect(badge).not.toContainText('5h');
+  await badge.click();await expect(badge.getByRole('tooltip')).toContainText('79% remaining');await expect(badge.getByRole('tooltip')).toContainText('resets');
+  await page.keyboard.press('Escape');await expect(badge).toHaveAttribute('aria-expanded','false');
+  usage={...usage,authKind:'apiKey'};await page.reload();await expect(page.locator('.thread-subscription-usage')).toHaveCount(0);
+  usage=null;await page.reload();await expect(page.locator('.thread-subscription-usage')).toHaveCount(0);
 });

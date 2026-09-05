@@ -1842,6 +1842,7 @@ dependencies = [
  "futures-util",
  "hostname",
  "remote-codex-protocol",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

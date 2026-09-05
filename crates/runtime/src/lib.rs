@@ -32,3 +32,7 @@ pub async fn boot() -> Result<Arc<Supervisor>> {
 mod usage;
 
 mod usage_history;
+
+mod pricing;
+
+pub mod subscription;

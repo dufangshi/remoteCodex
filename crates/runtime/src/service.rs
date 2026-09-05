@@ -268,6 +268,7 @@ pub struct Supervisor {
     live: Mutex<HashMap<String, LiveTurn>>,
     local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
+    pub subscription_usage: crate::subscription::SubscriptionUsage,
 }
 
 impl Supervisor {
@@ -284,6 +285,7 @@ impl Supervisor {
             live: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
+            subscription_usage: Default::default(),
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
             tracing::warn!(%error, "failed to reconcile stale turns at startup");
@@ -455,6 +457,7 @@ impl Supervisor {
         let Some(mut usage) = crate::usage::normalize_usage(raw) else {
             return Ok(());
         };
+        let catalog = self.model_pricing();
         let payload = self.db.with(|conn| {
             let row = conn.query_row(
                 "SELECT model, reasoning_effort, token_usage_json, pricing_model_key, pricing_tier_key FROM thread_turns WHERE thread_id=?1 AND id=?2",
@@ -495,19 +498,19 @@ impl Supervisor {
             }
             if let Some(source) = raw.get("source") { usage["source"] = source.clone(); }
             let pricing_model = pricing_model.as_deref().or(model.as_deref());
-            let price = crate::usage::estimate_price(&usage, pricing_model, tier.as_deref());
+            let price = crate::usage::estimate_price_with_catalog(&usage, pricing_model, tier.as_deref(), &catalog, Some(&event.timestamp));
             // Accumulate request prices, so crossing the long-context threshold later
             // does not retrospectively change the rates of earlier requests.
             let price = if let (Some(previous), Some(mut current_price)) = (previous.as_ref(), price.clone()) {
                 if let (Some(previous_total), Some(current_total), Some(previous_price)) = (
                     previous.get("total").and_then(crate::usage::Tokens::parse),
                     usage.get("total").and_then(crate::usage::Tokens::parse),
-                    previous.get("priceEstimate").filter(|v| v.is_object()),
+                    previous.get("priceEstimate").filter(|v| v.is_object() && (v["ratesSignature"] == current_price["ratesSignature"] || v.get("ratesSignature").is_none())),
                 ) {
                     if current_total.total_tokens >= previous_total.total_tokens {
                         let mut delta_usage = usage.clone();
                         delta_usage["total"] = json!(current_total.subtract(&previous_total));
-                        if let Some(delta_price) = crate::usage::estimate_price(&delta_usage, pricing_model, tier.as_deref()) {
+                        if let Some(delta_price) = crate::usage::estimate_price_with_catalog(&delta_usage, pricing_model, tier.as_deref(), &catalog, Some(&event.timestamp)) {
                             for field in ["inputUsd","cachedInputUsd","cacheWriteInputUsd","outputUsd","totalUsd"] {
                                 current_price[field] = json!(previous_price[field].as_f64().unwrap_or(0.0) + delta_price[field].as_f64().unwrap_or(0.0));
                             }
@@ -1650,6 +1653,7 @@ impl Supervisor {
         limit: Option<u32>,
         before_turn_id: Option<&str>,
     ) -> Result<(Vec<ThreadTurnDto>, u32)> {
+        let catalog = self.model_pricing();
         self.db.with(|conn| {
             let total: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM thread_turns WHERE thread_id=?1",
@@ -1683,7 +1687,7 @@ impl Supervisor {
                     let model = row.get::<_, Option<String>>(3)?;
                     let pricing_model = row.get::<_, Option<String>>(8)?.or(model.clone());
                     let tier = row.get::<_, Option<String>>(9)?;
-                    let price_estimate = stored_usage.as_ref().and_then(|usage| crate::usage::estimate_price(usage, pricing_model.as_deref(), tier.as_deref()));
+                    let price_estimate = stored_usage.as_ref().and_then(|usage| crate::usage::estimate_price_with_catalog(usage, pricing_model.as_deref(), tier.as_deref(), &catalog, row.get::<_, String>(6).ok().as_deref()));
                     Ok(ThreadTurnDto {
                         id: row.get(0)?,
                         started_at: row.get(6)?,
@@ -2771,7 +2775,18 @@ impl Supervisor {
         agent_id: Option<&str>,
         cwd: Option<&str>,
     ) -> Result<Vec<ModelOptionDto>> {
-        self.runtime(provider)?.list_models(agent_id, cwd).await
+        let models = self.runtime(provider)?.list_models(agent_id, cwd).await?;
+        let mut names: Value = self
+            .db
+            .get_kv("model_display_names")?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(json!({}));
+        for model in &models {
+            names[&model.id] = json!(model.display_name);
+            names[&model.model] = json!(model.display_name);
+        }
+        self.db.set_kv("model_display_names", &names.to_string())?;
+        Ok(models)
     }
 
     pub async fn list_agents(&self, provider: Provider) -> Result<Vec<ModelOptionDto>> {

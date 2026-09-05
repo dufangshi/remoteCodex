@@ -1,3 +1,4 @@
+import { ModelPricingSettings } from './ModelPricingSettings';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
@@ -1085,6 +1086,8 @@ export function AppShellSettingsDialog({
               pluginsManagementNode
             )}
           </section>
+
+          <ModelPricingSettings />
 
           <section className="py-5">
             <div className="flex items-start justify-between gap-3">

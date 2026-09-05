@@ -4809,10 +4809,7 @@ fn shared_runtime_metadata_allowed(method: &str, pathname: &str) -> bool {
     segments.len() == 4
         && segments[0] == "api"
         && segments[1] == "agent-runtimes"
-        && matches!(
-            segments[3],
-            "status" | "models" | "agents" | "subscription-usage"
-        )
+        && matches!(segments[3], "status" | "models" | "agents")
 }
 
 fn shared_thread_path_allowed(

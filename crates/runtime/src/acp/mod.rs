@@ -6,7 +6,7 @@ mod grok;
 mod mapper;
 mod modes;
 mod prompt;
-mod rpc;
+pub(crate) mod rpc;
 mod runtime;
 mod terminal;
 

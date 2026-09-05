@@ -602,7 +602,7 @@ export interface AgentSubscriptionUsageWindowDto {
 }
 
 export interface AgentSubscriptionUsageDto {
-  provider: 'codex' | 'claude';
+  provider: 'codex' | 'claude' | 'grok';
   authKind: 'subscription' | 'apiKey' | 'unknown';
   observedAt: string;
   stale: boolean;

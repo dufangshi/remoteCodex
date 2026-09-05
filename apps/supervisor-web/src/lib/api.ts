@@ -433,7 +433,7 @@ async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
   }
 }
 
-async function request<T>(
+export async function request<T>(
   input: RequestInfo,
   init?: RequestInit,
   options: { auth?: RequestAuthMode } = {},
@@ -1085,9 +1085,9 @@ export function fetchAgentBackendStatus(provider: AgentBackendIdDto) {
   );
 }
 
-export function fetchAgentSubscriptionUsage(provider: AgentBackendIdDto) {
+export function fetchAgentSubscriptionUsage(provider: AgentBackendIdDto, agentId?: string | null) {
   return request<{ usage: AgentSubscriptionUsageDto | null }>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/subscription-usage`,
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/subscription-usage${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`,
     { cache: 'no-store' },
   );
 }

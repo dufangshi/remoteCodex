@@ -1155,14 +1155,15 @@ export function ThreadDetailPage() {
 
   useEffect(() => {
     const provider = detail?.thread.provider;
-    if (!provider || (provider !== 'codex' && provider !== 'claude')) {
+    if (!provider) {
       setSubscriptionUsage(null);
       return;
     }
+    setSubscriptionUsage(null);
     let cancelled = false;
     const refresh = async () => {
       try {
-        const result = await fetchAgentSubscriptionUsage(provider);
+        const result = await fetchAgentSubscriptionUsage(provider, detail?.thread.agentId);
         if (!cancelled) {
           setSubscriptionUsage(
             result.usage?.authKind === 'subscription' &&
@@ -1173,9 +1174,7 @@ export function ThreadDetailPage() {
         }
       } catch {
         if (!cancelled) {
-          setSubscriptionUsage((current) =>
-            current ? { ...current, stale: true } : null,
-          );
+          setSubscriptionUsage(null);
         }
       }
     };
@@ -1188,6 +1187,7 @@ export function ThreadDetailPage() {
   }, [
     detail?.thread.lastTurnCompletedAt,
     detail?.thread.provider,
+    detail?.thread.agentId,
     subscriptionUsageRefreshKey,
   ]);
 
@@ -1326,6 +1326,12 @@ export function ThreadDetailPage() {
     },
     [applyDetailResponse, id, loadPageContext],
   );
+
+  useEffect(() => {
+    const refresh = () => {void loadThreadDetail({showLoading:false,clearError:false});};
+    window.addEventListener('model-pricing-updated', refresh);
+    return () => window.removeEventListener('model-pricing-updated', refresh);
+  }, [loadThreadDetail]);
 
   const runDetailMutation = useCallback(
     <T extends ThreadDetailDto,>(operation: () => Promise<T>) => {

@@ -13,6 +13,7 @@ futures-util.workspace = true
 hostname.workspace = true
 remote-codex-protocol.workspace = true
 rusqlite.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true

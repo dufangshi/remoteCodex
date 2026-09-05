@@ -26,8 +26,45 @@ fn number(value: &Value, names: &[&str]) -> Option<u64> {
 
 impl Tokens {
     pub(crate) fn parse(value: &Value) -> Option<Self> {
-        let mut input = number(value, &["inputTokens", "input_tokens"])?;
-        let output = number(value, &["outputTokens", "output_tokens"])?;
+        let mut input = number(
+            value,
+            &[
+                "inputTokens",
+                "input_tokens",
+                "prompt_tokens",
+                "promptTokenCount",
+            ],
+        )?;
+        let mut output = number(
+            value,
+            &[
+                "outputTokens",
+                "output_tokens",
+                "completion_tokens",
+                "candidatesTokenCount",
+            ],
+        )?;
+        let reasoning = number(
+            value,
+            &[
+                "reasoningOutputTokens",
+                "reasoning_output_tokens",
+                "thoughtTokens",
+                "thought_tokens",
+                "thoughtsTokenCount",
+            ],
+        )
+        .or_else(|| {
+            number(
+                value.get("completion_tokens_details")?,
+                &["reasoning_tokens"],
+            )
+        })
+        .or_else(|| number(value.get("output_tokens_details")?, &["reasoning_tokens"]))
+        .unwrap_or_default();
+        if value.get("candidatesTokenCount").is_some() {
+            output = output.saturating_add(reasoning);
+        }
         let cached = number(
             value,
             &[
@@ -36,9 +73,12 @@ impl Tokens {
                 "cachedReadTokens",
                 "cached_read_tokens",
                 "cache_read_input_tokens",
+                "prompt_cache_hit_tokens",
+                "cachedContentTokenCount",
             ],
         )
         .or_else(|| number(value.get("input_tokens_details")?, &["cached_tokens"]))
+        .or_else(|| number(value.get("prompt_tokens_details")?, &["cached_tokens"]))
         .or_else(|| number(value.get("cache")?, &["read"]))
         .unwrap_or_default();
         let written = number(
@@ -64,22 +104,13 @@ impl Tokens {
             input = input.saturating_add(cached).saturating_add(written);
         }
         Some(Self {
-            total_tokens: number(value, &["totalTokens", "total_tokens"])
+            total_tokens: number(value, &["totalTokens", "total_tokens", "totalTokenCount"])
                 .unwrap_or(input.saturating_add(output)),
             input_tokens: input,
             cached_input_tokens: cached,
             cache_write_input_tokens: written,
             output_tokens: output,
-            reasoning_output_tokens: number(
-                value,
-                &[
-                    "reasoningOutputTokens",
-                    "reasoning_output_tokens",
-                    "thoughtTokens",
-                    "thought_tokens",
-                ],
-            )
-            .unwrap_or_default(),
+            reasoning_output_tokens: reasoning,
         })
     }
 
@@ -140,6 +171,7 @@ impl Tokens {
 pub(crate) fn normalize_usage(raw: &Value) -> Option<Value> {
     let value = raw
         .get("tokenUsage")
+        .or_else(|| raw.get("usageMetadata"))
         .or_else(|| raw.get("usage"))
         .or_else(|| raw.pointer("/_meta/tokenUsage"))
         .or_else(|| raw.pointer("/_meta/usage"))
@@ -170,7 +202,7 @@ pub(crate) fn normalize_usage(raw: &Value) -> Option<Value> {
     }))
 }
 
-fn pricing() -> &'static Value {
+pub(crate) fn pricing() -> &'static Value {
     static CONFIG: OnceLock<Value> = OnceLock::new();
     CONFIG.get_or_init(|| {
         serde_json::from_str(include_str!("../../../config/codex-model-pricing.json"))
@@ -178,55 +210,42 @@ fn pricing() -> &'static Value {
     })
 }
 
-fn pricing_model(model: &str) -> Option<String> {
-    let model = model.trim();
-    for candidate in [
-        model,
-        model.split_once('/').map(|(_, m)| m).unwrap_or(model),
-    ] {
-        if pricing()["models"].get(candidate).is_some() {
-            return Some(candidate.into());
-        }
-        if candidate.len() > 11 {
-            let split = candidate.len() - 11;
-            if let (Some(base), Some(date)) = (candidate.get(..split), candidate.get(split + 1..)) {
-                if candidate.as_bytes()[split] == b'-'
-                    && date.len() == 10
-                    && date.as_bytes()[4] == b'-'
-                    && date.as_bytes()[7] == b'-'
-                    && date
-                        .bytes()
-                        .enumerate()
-                        .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
-                    && pricing()["models"].get(base).is_some()
-                {
-                    return Some(base.into());
-                }
-            }
-        }
-        if let Some((base, date)) = candidate.rsplit_once('-') {
-            if date.len() == 8
-                && date.starts_with("20")
-                && date.bytes().all(|b| b.is_ascii_digit())
-                && pricing()["models"].get(base).is_some()
-            {
-                return Some(base.into());
-            }
-        }
-    }
-    None
-}
-
 pub(crate) fn estimate_price(
     usage: &Value,
     model: Option<&str>,
     tier: Option<&str>,
 ) -> Option<Value> {
-    if let Some(estimate) = usage.get("priceEstimate").filter(|v| v.is_object()) {
-        return Some(estimate.clone());
+    estimate_price_with_catalog(usage, model, tier, pricing(), None)
+}
+
+pub(crate) fn estimate_price_with_catalog(
+    usage: &Value,
+    model: Option<&str>,
+    tier: Option<&str>,
+    catalog: &Value,
+    at: Option<&str>,
+) -> Option<Value> {
+    let model = crate::pricing::match_model(catalog, model?)?;
+    let rates = &catalog["models"][&model];
+    for field in [
+        "inputUsdPerMillion",
+        "cachedInputUsdPerMillion",
+        "outputUsdPerMillion",
+    ] {
+        rates[field].as_f64()?;
     }
-    let model = pricing_model(model?)?;
-    let rates = &pricing()["models"][&model];
+    let mut signature_rates = rates.clone();
+    for field in ["aliases", "sourceUrl", "verifiedAt", "notes", "custom"] {
+        signature_rates.as_object_mut()?.remove(field);
+    }
+    let signature = signature_rates.to_string();
+    if let Some(estimate) = usage.get("priceEstimate").filter(|v| v.is_object()) {
+        if estimate["ratesSignature"] == signature
+            || (estimate.get("ratesSignature").is_none() && rates["custom"] != true)
+        {
+            return Some(estimate.clone());
+        }
+    }
     let tokens = Tokens::parse(usage.get("total")?)?;
     let tier = if tier == Some("fast") && rates["supportsFastMode"] == true {
         "fast"
@@ -250,6 +269,29 @@ pub(crate) fn estimate_price(
         .and_then(Value::as_u64)
         .is_some_and(|threshold| last_input > threshold);
     let rate = |key: &str| rates.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    use chrono::{Datelike, Timelike};
+    let when = at
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .unwrap_or_else(chrono::Utc::now);
+    let peak = when.weekday().num_days_from_monday() < 5
+        && ((1..4).contains(&when.hour()) || (6..10).contains(&when.hour()));
+    let multiplier = multiplier
+        * if !peak {
+            rates["offPeakMultiplier"].as_f64().unwrap_or(1.0)
+        } else {
+            1.0
+        };
+    let multiplier = multiplier
+        * if rates["ratesChangeAt"]
+            .as_str()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .is_some_and(|d| when >= d)
+        {
+            rates["ratesChangeMultiplier"].as_f64().unwrap_or(1.0)
+        } else {
+            1.0
+        };
     let input_multiplier = multiplier
         * if long {
             rate("longContextInputMultiplier").max(1.0)
@@ -280,7 +322,7 @@ pub(crate) fn estimate_price(
     let output_usd =
         tokens.output_tokens as f64 * rate("outputUsdPerMillion") * output_multiplier / 1e6;
     Some(
-        json!({"pricingModelKey":model,"pricingTierKey":tier,"currency":"USD","inputUsd":input_usd,"cachedInputUsd":cached_usd,"cacheWriteInputUsd":written_usd,"outputUsd":output_usd,"totalUsd":input_usd+cached_usd+written_usd+output_usd}),
+        json!({"ratesSignature":signature,"pricingModelKey":model,"pricingTierKey":tier,"currency":"USD","inputUsd":input_usd,"cachedInputUsd":cached_usd,"cacheWriteInputUsd":written_usd,"outputUsd":output_usd,"totalUsd":input_usd+cached_usd+written_usd+output_usd}),
     )
 }
 
@@ -340,5 +382,71 @@ mod tests {
             estimate_price(&usage, Some("gpt-6-astra"), None).unwrap()["totalUsd"],
             10.075
         );
+    }
+}
+
+#[cfg(test)]
+mod multi_provider_tests {
+    use super::*;
+    #[test]
+    fn normalizes_chat_completion_and_gemini_cache_and_reasoning() {
+        let chat=normalize_usage(&json!({"usage":{"prompt_tokens":10000,"completion_tokens":1000,"prompt_cache_hit_tokens":8000,"completion_tokens_details":{"reasoning_tokens":300}}})).unwrap();
+        assert_eq!(chat["total"]["inputTokens"], 10000);
+        assert_eq!(chat["total"]["cachedInputTokens"], 8000);
+        assert_eq!(chat["total"]["reasoningOutputTokens"], 300);
+        let gemini=normalize_usage(&json!({"usageMetadata":{"promptTokenCount":10000,"cachedContentTokenCount":8000,"candidatesTokenCount":700,"thoughtsTokenCount":300}})).unwrap();
+        assert_eq!(gemini["total"], chat["total"]);
+    }
+    #[test]
+    fn prices_aliases_peak_periods_and_context_boundaries() {
+        let usage = normalize_usage(
+            &json!({"inputTokens":10000,"cachedInputTokens":8000,"outputTokens":1000}),
+        )
+        .unwrap();
+        assert!(estimate_price(&usage, Some("GPT-6-Astra"), None).is_some());
+        for model in [
+            "Claude Fable 5.1",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "grok-4.6",
+            "gemini-3.1-pro",
+            "GLM-5.1",
+        ] {
+            assert!(
+                estimate_price(&usage, Some(model), None).is_some(),
+                "{model}"
+            );
+        }
+        let off = estimate_price_with_catalog(
+            &usage,
+            Some("d4-pro"),
+            None,
+            pricing(),
+            Some("2026-09-05T01:00:00Z"),
+        )
+        .unwrap();
+        let peak = estimate_price_with_catalog(
+            &usage,
+            Some("deepseek-v4-pro"),
+            None,
+            pricing(),
+            Some("2026-09-04T01:00:00Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            peak["totalUsd"].as_f64().unwrap(),
+            off["totalUsd"].as_f64().unwrap() * 2.0
+        );
+        let short = normalize_usage(&json!({"inputTokens":199999,"outputTokens":1000})).unwrap();
+        let long = normalize_usage(&json!({"inputTokens":200000,"outputTokens":1000})).unwrap();
+        assert_eq!(
+            estimate_price(&short, Some("grok-4.6"), None).unwrap()["outputUsd"],
+            0.006
+        );
+        assert_eq!(
+            estimate_price(&long, Some("grok-4.6"), None).unwrap()["outputUsd"],
+            0.012
+        );
+        assert!(estimate_price(&usage, Some("glm-5.3"), None).is_none());
     }
 }

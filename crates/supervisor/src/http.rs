@@ -63,6 +63,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/version", get(version))
         .route("/api/config/runtime", get(runtime_config))
         .route(
+            "/api/agent-runtimes/{provider}/subscription-usage",
+            get(subscription_usage),
+        )
+        .route(
+            "/api/config/model-pricing",
+            get(model_pricing).patch(patch_model_pricing),
+        )
+        .route(
             "/api/config/workspace-settings",
             get(workspace_settings).patch(patch_workspace_settings),
         )
@@ -1911,4 +1919,33 @@ async fn update_plugin(
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| crate::socket::websocket_loop(socket, state))
+}
+
+async fn model_pricing(State(state): State<AppState>) -> Json<Value> {
+    Json(state.model_pricing())
+}
+async fn patch_model_pricing(
+    State(state): State<AppState>,
+    Json(input): Json<Value>,
+) -> Result<Json<Value>, ApiErr> {
+    state
+        .update_model_pricing(&input)
+        .map(Json)
+        .map_err(map_err)
+}
+
+async fn subscription_usage(
+    Path(provider): Path<String>,
+    Query(query): Query<AgentQuery>,
+    State(state): State<AppState>,
+) -> Json<Value> {
+    if state.config.fake_runtime {
+        return Json(json!({"usage":null}));
+    }
+    let agent = query.agent_id.as_deref().unwrap_or(if provider == "acp" {
+        "codex"
+    } else {
+        &provider
+    });
+    Json(json!({"usage":state.subscription_usage.read(agent).await}))
 }

@@ -1529,3 +1529,38 @@ async fn import_extracts_codex_uri_and_hydrates_history() {
         .unwrap();
     assert_eq!(blocked.status(), reqwest::StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn global_model_prices_are_editable_and_invalid_prices_rejected() {
+    let (_dir, port, _) = spawn_supervisor(vec![Provider::Codex]).await;
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/config/model-pricing");
+    let catalog: Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(catalog["models"]["claude-opus-5"]["inputUsdPerMillion"], 5);
+    let rates = json!({"inputUsdPerMillion":2,"cachedInputUsdPerMillion":0.2,"outputUsdPerMillion":10,"aliases":["Display Custom"]});
+    let saved = client
+        .patch(&url)
+        .json(&json!({"id":"custom-model","rates":rates}))
+        .send()
+        .await
+        .unwrap();
+    assert!(saved.status().is_success());
+    let catalog: Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(catalog["models"]["custom-model"]["custom"], true);
+    let bad = client
+        .patch(&url)
+        .json(&json!({"id":"invalid","rates":{"inputUsdPerMillion":-2}}))
+        .send()
+        .await
+        .unwrap();
+    assert!(!bad.status().is_success());
+    let reset = client
+        .patch(&url)
+        .json(&json!({"id":"custom-model","reset":true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(reset.status().is_success());
+    let usage:Value=client.get(format!("http://127.0.0.1:{port}/api/agent-runtimes/acp/subscription-usage?agentId=not-installed")).send().await.unwrap().json().await.unwrap();
+    assert!(usage["usage"].is_null());
+}
