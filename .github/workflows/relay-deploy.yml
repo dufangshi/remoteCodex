@@ -7,26 +7,98 @@ on:
         description: Full commit SHA from remote-codex-thread-ui-rust
         required: true
         type: string
+      deploy:
+        description: Replace the public relay after building (disable for a build-only check)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: relay-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  native:
+    if: github.ref == 'refs/heads/main'
+    name: Build relay native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUST_VERSION: 1.89.0
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: relay-ubuntu24-x64-release
+          cmd-format: rustup run ${{ env.RUST_VERSION }} {0}
+      - name: Build and smoke native executable
+        run: |
+          cargo +"${RUST_VERSION}" build --locked --release --package remote-codex
+          target/release/remote-codex version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-native
+          path: target/release/remote-codex
+          if-no-files-found: error
+          retention-days: 3
+
+  web:
+    if: github.ref == 'refs/heads/main'
+    name: Build relay Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check out pinned shared UI
+        uses: actions/checkout@v6
+        with:
+          repository: dufangshi/remote-codex-thread-ui-rust
+          ref: ${{ inputs.thread_ui_sha }}
+          path: remote-codex-thread-ui
+      - name: Validate shared UI revision
+        env:
+          THREAD_UI_SHA: ${{ inputs.thread_ui_sha }}
+        run: |
+          [[ "${THREAD_UI_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C remote-codex-thread-ui rev-parse HEAD)" = "${THREAD_UI_SHA}"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            remote-codex-thread-ui/pnpm-lock.yaml
+      - name: Build Web assets
+        run: |
+          pnpm --dir remote-codex-thread-ui install --frozen-lockfile
+          pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
+          pnpm --filter @remote-codex/supervisor-web... install --frozen-lockfile
+          pnpm --filter @remote-codex/supervisor-web build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-web
+          path: apps/supervisor-web/dist/
+          if-no-files-found: error
+          retention-days: 3
+
   deploy-rust-rewrite:
     if: github.ref == 'refs/heads/main'
+    needs: [native, web]
     name: Deploy Rust relay to remote.lnz-study.com
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: relay-rust-canary
     timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate shared UI revision
         env:
@@ -36,6 +108,7 @@ jobs:
           echo "Runtime: ${GITHUB_SHA}; shared UI: ${THREAD_UI_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Capture deployment boundaries
+        if: inputs.deploy
         id: before
         shell: bash
         run: |
@@ -45,6 +118,7 @@ jobs:
           echo "legacy_asset=${legacy_asset}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Rust relay deployment host
+        if: inputs.deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
@@ -60,39 +134,23 @@ jobs:
             sudo systemctl cat remote-codex-rust-relay.service | grep -Fq 'remote.lnz-study.com'
             sudo systemctl cat remote-codex-rust-relay.service | grep -Fq 'ExecStart=/opt/remote-codex-rust-relay/remote-codex relay'
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Rust relay release image
-        uses: docker/build-push-action@v5
+      - uses: actions/download-artifact@v4
         with:
-          context: .
-          file: Dockerfile.relay
-          platforms: linux/amd64
-          load: true
-          push: false
-          build-args: |
-            REMOTE_CODEX_THREAD_UI_REF=${{ inputs.thread_ui_sha }}
-            REMOTE_CODEX_THREAD_UI_CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=gha,scope=rust-relay
-          cache-to: type=gha,mode=max,scope=rust-relay
-          tags: remote-codex-rust-relay:${{ github.sha }}
+          name: relay-native
+          path: rust-relay-artifact
+      - uses: actions/download-artifact@v4
+        with:
+          name: relay-web
+          path: rust-relay-artifact/web
 
       - name: Package Rust relay artifacts
         id: package
         shell: bash
         run: |
           set -euo pipefail
-          image="remote-codex-rust-relay:${GITHUB_SHA}"
-          container="remote-codex-rust-relay-extract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           artifact_dir="rust-relay-artifact"
           archive="remote-codex-rust-relay-${GITHUB_SHA}.tgz"
 
-          mkdir -p "${artifact_dir}/web"
-          docker create --name "${container}" "${image}" >/dev/null
-          trap 'docker rm -f "${container}" >/dev/null 2>&1 || true' EXIT
-          docker cp "${container}:/usr/local/bin/remote-codex" "${artifact_dir}/remote-codex"
-          docker cp "${container}:/opt/remote-codex/apps/supervisor-web/dist/." "${artifact_dir}/web/"
           chmod 0755 "${artifact_dir}/remote-codex"
           (cd "${artifact_dir}" && sha256sum remote-codex > SHA256SUMS)
           asset_path="$(sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' "${artifact_dir}/web/index.html" | head -n 1)"
@@ -100,7 +158,16 @@ jobs:
           echo "asset_path=${asset_path}" >> "${GITHUB_OUTPUT}"
           tar -czf "${archive}" -C "${artifact_dir}" .
 
+      - name: Preserve build-only package
+        if: ${{ !inputs.deploy }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-package
+          path: remote-codex-rust-relay-${{ github.sha }}.tgz
+          retention-days: 3
+
       - name: Upload Rust relay artifacts
+        if: inputs.deploy
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
@@ -112,6 +179,7 @@ jobs:
           target: /tmp
 
       - name: Replace only the Rust relay service
+        if: inputs.deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.REMOTE_CODEX_RELAY_DEPLOY_HOST }}
@@ -277,6 +345,7 @@ jobs:
             trap - EXIT
 
       - name: Verify the public Rust relay and legacy isolation
+        if: inputs.deploy
         shell: bash
         run: |
           set -euo pipefail
