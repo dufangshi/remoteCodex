@@ -44,6 +44,7 @@ struct PendingSteerRecord {
     id: String,
     turn_id: String,
     submitted_prompt: String,
+    display_prompt: String,
     delivery: String,
 }
 
@@ -2129,7 +2130,7 @@ impl Supervisor {
         self.db.with(|conn| {
             Ok(conn
                 .query_row(
-                    "SELECT id, turn_id, submitted_prompt, delivery
+                    "SELECT id, turn_id, submitted_prompt, delivery, display_prompt
                      FROM thread_pending_steers WHERE thread_id=?1 AND id=?2",
                     params![thread_id, pending_steer_id],
                     |row| {
@@ -2138,6 +2139,7 @@ impl Supervisor {
                             turn_id: row.get(1)?,
                             submitted_prompt: row.get(2)?,
                             delivery: row.get(3)?,
+                            display_prompt: row.get(4)?,
                         })
                     },
                 )
@@ -2200,6 +2202,7 @@ impl Supervisor {
         {
             bail!("conflict: This backend does not support steering an active turn.");
         }
+        let submitted_at = now_rfc3339();
         runtime
             .send_input(
                 provider_session_id,
@@ -2208,12 +2211,33 @@ impl Supervisor {
             )
             .await?;
 
+        // The harness acknowledgement does not echo a user-message event.
+        // Move the delivered prompt into durable history before removing its
+        // temporary queue bubble, including when the turn already completed.
         let now = now_rfc3339();
+        let item = ThreadHistoryItemDto {
+            id: format!("steer:{}", pending.id),
+            kind: "userMessage".into(),
+            text: pending.display_prompt.clone(),
+            created_at: Some(submitted_at.clone()),
+            source_turn_id: Some(active_turn_id.into()),
+            preview_text: None,
+            detail_text: None,
+            status: None,
+            sequence: None,
+            artifact: None,
+            extra: Default::default(),
+        };
         self.db.with(|conn| {
             conn.execute(
-                "UPDATE thread_pending_steers
-                 SET delivery='steer', turn_id=?1, updated_at=?2
-                 WHERE thread_id=?3 AND id=?4",
+                "INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(thread_id,turn_id,item_id) DO NOTHING",
+                params![Uuid::new_v4().to_string(), thread_id, active_turn_id, item.id,
+                    serde_json::to_string(&item)?, submitted_at, now],
+            )?;
+            conn.execute(
+                "UPDATE thread_pending_steers SET delivery='steer',turn_id=?1,updated_at=?2 WHERE thread_id=?3 AND id=?4",
                 params![active_turn_id, now, thread_id, pending.id],
             )?;
             Ok(())

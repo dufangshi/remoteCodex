@@ -338,3 +338,65 @@ async fn queued_live_events_cannot_overwrite_completed_history() {
     assert_eq!(reply.text, "The completed reply.");
     assert_eq!(reply.status.as_deref(), Some("completed"));
 }
+
+#[tokio::test]
+async fn accepted_steer_survives_queue_cleanup_completion_and_reopen() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.db.with(|conn| {
+        conn.execute("INSERT INTO thread_pending_steers(id,thread_id,turn_id,display_prompt,submitted_prompt,delivery,created_at,updated_at) VALUES ('steer-one',?1,'live-turn','Reply 1','Reply 1','continuation','2026-09-05T10:00:02Z','2026-09-05T10:00:02Z')", params![thread_id])?;
+        Ok(())
+    }).unwrap();
+    let detail = supervisor
+        .steer_pending_prompt(&thread_id, "steer-one")
+        .await
+        .unwrap();
+    assert_eq!(detail.pending_steers.len(), 1);
+    assert_eq!(detail.pending_steers[0].delivery, "steer");
+    let turn = supervisor
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    let messages: Vec<_> = turn
+        .items
+        .iter()
+        .filter(|i| i.kind == "userMessage" && i.text == "Reply 1")
+        .collect();
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].created_at.is_some());
+    assert_eq!(messages[0].source_turn_id.as_deref(), Some("live-turn"));
+    supervisor
+        .db
+        .with(|conn| {
+            conn.execute(
+                "UPDATE thread_turns SET status='completed' WHERE id='live-turn'",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE threads SET status='idle' WHERE id=?1",
+                params![thread_id],
+            )?;
+            conn.execute(
+                "DELETE FROM thread_pending_steers WHERE thread_id=?1",
+                params![thread_id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let config = supervisor.config.clone();
+    let reopened = Supervisor::new(
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
+        vec![Arc::new(FakeRuntime::new(Provider::Codex))],
+    );
+    let turn = reopened
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    assert_eq!(
+        turn.items
+            .iter()
+            .filter(|i| i.kind == "userMessage" && i.text == "Reply 1")
+            .count(),
+        1
+    );
+}

@@ -921,13 +921,13 @@ test.describe('turn usage summary regressions', () => {
     await waitForSocketReady(page);
     const footer = page.locator('.thread-graph-turn-footer');
     await expect(footer).toContainText('gpt-6-astra · high');
-    await expect(footer).not.toContainText('3.5k tokens');
+    await expect(footer).not.toContainText('3.5k tok');
     hasUsage = true;
     await emitSocketMessage(page, {
       type: 'thread.turn.token.updated', threadId: 'thread-1', timestamp: now,
       payload: { turnId: 'turn-1', tokenUsage: usage, priceEstimate, model: 'gpt-6-astra', reasoningEffort: 'high' },
     });
-    for (const text of ['3.5k tokens', '1.5k in', '2k out', '500 cached', '≈$0.11']) {
+    for (const text of ['3.5k tok', '1.5k in', '2k out', '500 cached', '$0.11']) {
       await expect(footer).toContainText(text);
     }
     await page.screenshot({ path: testInfo.outputPath('live-turn-usage.png'), fullPage: true });
@@ -939,13 +939,13 @@ test.describe('turn usage summary regressions', () => {
     const summary = page.locator('.thread-graph-worked-summary:visible');
     await expect(summary).toContainText('Worked for 1m 12s');
     await expect(summary).toContainText('gpt-6-astra · high');
-    await expect(summary).toContainText('≈$0.11');
+    await expect(summary).toContainText('$0.11');
     await page.reload();
-    await expect(summary).toContainText('3.5k tokens');
+    await expect(summary).toContainText('3.5k tok');
     await expect(summary).toContainText('1.5k in');
     await expect(summary).toContainText('2k out');
     await expect(summary).toContainText('500 cached');
-    await expect(summary).toContainText('≈$0.11');
+    await expect(summary).toContainText('$0.11');
     const overflow = await summary.evaluate((node) => {
       const viewportWidth = document.documentElement.clientWidth;
       return Math.max(...[node, ...node.querySelectorAll('[data-testid="turn-usage"] span')].map((element) => element.getBoundingClientRect().right - viewportWidth));
@@ -1082,4 +1082,57 @@ test('opens attachment images and closes the preview outside the image', async (
   await trigger.click();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
+});
+
+test('keeps delivered steer bubbles in collapsed and expanded history with tappable usage', async ({ page }, testInfo) => {
+  await installFakeWebSocket(page);
+  await page.addInitScript(() => localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'true'));
+  const total = { totalTokens: 3500, inputTokens: 1500, outputTokens: 2000, cachedInputTokens: 500, reasoningOutputTokens: 800 };
+  await installApiRoutes(page, () => detail('codex', {
+    thread: { status: 'idle', activeTurnId: null },
+    turns: [{
+      id: 'turn-1', status: 'completed', startedAt: now, completedAt: '2026-04-09T06:02:12.000Z',
+      error: null, model: 'gpt-6-astra', reasoningEffort: 'high',
+      tokenUsage: { total, last: total, modelContextWindow: 1050000 },
+      priceEstimate: { pricingModelKey: 'gpt-6-astra', pricingTierKey: 'standard', currency: 'USD', inputUsd: .01, cachedInputUsd: .0005, outputUsd: .1, totalUsd: .1105 },
+      items: [
+        { id: 'user-1', kind: 'userMessage', text: 'INITIAL_REQUEST' },
+        { id: 'command-before', kind: 'commandExecution', text: 'sleep 10', status: 'completed' },
+        { id: 'agent-before', kind: 'agentMessage', text: 'BEFORE_STEER' },
+        { id: 'steer:queued-1', kind: 'userMessage', text: 'STEER_REPLY_ONE' },
+        { id: 'command-after', kind: 'commandExecution', text: 'sleep 10', status: 'completed' },
+        { id: 'agent-after', kind: 'agentMessage', text: 'AFTER_STEER' },
+      ],
+    }],
+  }));
+  await page.goto('/threads/thread-1');
+  const initial = page.getByText('INITIAL_REQUEST', { exact: true });
+  const steer = page.getByText('STEER_REPLY_ONE', { exact: true });
+  const summary = page.locator('.thread-graph-worked-summary:visible');
+  await expect(steer).toBeVisible();
+  expect((await initial.boundingBox())!.y).toBeLessThan((await steer.boundingBox())!.y);
+  expect((await steer.boundingBox())!.y).toBeLessThan((await summary.boundingBox())!.y);
+  const price = summary.getByRole('button', { name: 'API cost $0.11. Show token details', exact: true });
+  await price.click();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText('Cached input: 500 tokens');
+  await expect(tooltip).toContainText('Reasoning: 800 tokens');
+  await expect(page.getByRole('button', {name: /Expand turn 1/})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(tooltip).toHaveCount(0);
+  if (testInfo.project.name === 'mobile-chromium') {
+    await expect(summary.locator('.thread-turn-usage-effort')).toBeHidden();
+    await expect(summary.locator('.thread-turn-usage-tokens > span').nth(1)).toBeHidden();
+    const label = await summary.locator('.thread-graph-worked-label').boundingBox();
+    const amount = await price.boundingBox();
+    expect(Math.abs(label!.y - amount!.y)).toBeLessThan(12);
+    expect(amount!.x + amount!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  }
+  await page.getByRole('button', { name: /Expand turn 1/ }).click();
+  await expect(page.getByText('BEFORE_STEER', {exact:true})).toBeVisible();
+  expect((await page.getByText('BEFORE_STEER', {exact:true}).boundingBox())!.y).toBeLessThan((await steer.boundingBox())!.y);
+  expect((await steer.boundingBox())!.y).toBeLessThan((await page.getByText('AFTER_STEER', {exact:true}).boundingBox())!.y);
+  await page.reload();
+  await expect(steer).toHaveCount(1);
+  await expect(steer).toBeVisible();
 });
