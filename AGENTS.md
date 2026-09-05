@@ -8,3 +8,4 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - After changing `crates/`, run `cargo test --workspace`.
 - Web e2e: `REMOTE_CODEX_E2E_FAKE_RUNTIME=1 pnpm test:e2e`.
 - Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.
+- After completing a change and its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
