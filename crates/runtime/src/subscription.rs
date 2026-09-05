@@ -291,6 +291,17 @@ mod tests {
         assert!(parse_codex(&json!({})).is_none());
     }
     #[test]
+    fn claude_zero_utilization_is_available_and_recovers_after_expired_report() {
+        let expired = json!({"five_hour":{"utilization":0.0,"resets_at":"2020-01-01T00:00:00Z"}});
+        assert!(parse_claude(&expired).is_none());
+        let reset = (Utc::now() + chrono::Duration::hours(5)).to_rfc3339();
+        let live = json!({"five_hour":{"utilization":0.0,"resets_at":reset},"seven_day":{"utilization":0.0,"resets_at":reset}});
+        let usage = parse_claude(&live).unwrap();
+        assert_eq!(usage["windows"].as_array().unwrap().len(), 2);
+        assert_eq!(usage["windows"][0]["usedPercent"], 0.0);
+        assert_eq!(usage["windows"][1]["label"], "7d");
+    }
+    #[test]
     fn grok_weekly_billing_is_not_a_five_hour_limit() {
         let end = (Utc::now() + chrono::Duration::days(3)).to_rfc3339();
         let data = json!({"subscription_tier":"SuperGrok Heavy","config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":end},"creditUsagePercent":21}});

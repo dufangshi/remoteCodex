@@ -1259,3 +1259,23 @@ test('shows real OAuth windows above composer for ACP and hides unavailable usag
   usage={...usage,authKind:'apiKey'};await page.reload();await expect(page.locator('.thread-subscription-usage')).toHaveCount(0);
   usage=null;await page.reload();await expect(page.locator('.thread-subscription-usage')).toHaveCount(0);
 });
+
+for (const provider of ['claude', 'acp'] as const) {
+  test(`shows Claude zero-use OAuth windows through ${provider}`, async ({page}) => {
+    await installFakeWebSocket(page);
+    await installApiRoutes(page, () => detail('claude', {thread:{provider,agentId:'claude'}}));
+    const windows = [{id:'five_hour',label:'5h',durationMinutes:300}, {id:'seven_day',label:'7d',durationMinutes:10080}].map(window=>({...window,usedPercent:0,resetsAt:'2030-01-01T00:00:00Z'}));
+    await page.route(`**/api/agent-runtimes/${provider}/subscription-usage*`, async route => {
+      expect(new URL(route.request().url()).searchParams.get('agentId')).toBe('claude');
+      await route.fulfill({json:{usage:{provider:'claude',authKind:'subscription',observedAt:now,stale:false,windows}}});
+    });
+    await page.goto('/threads/thread-1');
+    const badge = page.getByRole('button',{name:/claude subscription usage/});
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('5h');
+    await expect(badge).toContainText('7d');
+    await badge.click();
+    await expect(badge.getByRole('tooltip')).toContainText('100% remaining');
+    await expect(badge.getByRole('tooltip')).toContainText('resets');
+  });
+}
