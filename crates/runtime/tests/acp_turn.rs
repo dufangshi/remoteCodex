@@ -502,3 +502,110 @@ fn which_python() -> String {
     }
     panic!("python3 is required for ACP turn tests");
 }
+
+#[tokio::test]
+async fn native_and_acp_questions_preserve_all_answers() {
+    for prompt in ["ask-native-questions", "ask-acp-questions"] {
+        let dir = tempdir().unwrap();
+        let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+        let runtime = std::sync::Arc::new(runtime);
+        let bus = EventBus::new();
+        let mut events = bus.subscribe();
+        let runner = runtime.clone();
+        let input = turn_input(&session, prompt, "question-turn");
+        let task = tokio::spawn(async move {
+            runner
+                .start_turn(input, bus, CancellationToken::new())
+                .await
+        });
+        let request = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let event = events.recv().await.unwrap();
+                if event.event_type == "thread.request.created" {
+                    break event.payload["request"].clone();
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(request["kind"], "requestUserInput");
+        assert_eq!(request["questions"].as_array().unwrap().len(), 2);
+        let id = request["id"].as_str().unwrap();
+        assert!(runtime
+            .respond_permission(id, true, Some(r#"{"choice":{"answers":["C"]}}"#))
+            .await
+            .is_err());
+        assert_eq!(runtime.pending_requests("thread-1").await.len(), 1);
+        runtime
+            .respond_permission(
+                id,
+                true,
+                Some(r#"{"choice":{"answers":["C"]},"detail":{"answers":["because"]}}"#),
+            )
+            .await
+            .unwrap();
+        let items = tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let text = items
+            .iter()
+            .find(|item| item.text.starts_with("ANSWERS="))
+            .unwrap()
+            .text
+            .strip_prefix("ANSWERS=")
+            .unwrap();
+        let answer: serde_json::Value = serde_json::from_str(text).unwrap();
+        let expected = if prompt == "ask-native-questions" {
+            serde_json::json!({"answers":{"choice":{"answers":["C"]},"detail":{"answers":["because"]}}})
+        } else {
+            serde_json::json!({"action":"accept","content":{"choice_other":"C","detail":"because"}})
+        };
+        assert_eq!(answer, expected);
+        assert!(runtime.pending_requests("thread-1").await.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn cancelled_question_turn_clears_pending_card() {
+    let dir = tempdir().unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let runtime = std::sync::Arc::new(runtime);
+    let bus = EventBus::new();
+    let mut events = bus.subscribe();
+    let cancel = CancellationToken::new();
+    let runner = runtime.clone();
+    let trigger = cancel.clone();
+    let task = tokio::spawn(async move {
+        runner
+            .start_turn(
+                turn_input(&session, "ask-acp-questions", "cancel-question"),
+                bus,
+                cancel,
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if events.recv().await.unwrap().event_type == "thread.request.created" {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    trigger.cancel();
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !runtime.pending_requests("thread-1").await.is_empty() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+}

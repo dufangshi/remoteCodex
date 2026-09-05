@@ -1332,24 +1332,6 @@ struct RespondBody {
     answers: Option<Value>,
 }
 
-fn selected_request_answer(answers: &Option<Value>) -> Option<String> {
-    let obj = answers.as_ref()?.as_object()?;
-    for value in obj.values() {
-        if let Some(text) = value
-            .get("answers")
-            .and_then(Value::as_array)
-            .and_then(|arr| arr.first())
-            .and_then(Value::as_str)
-        {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
 async fn thread_respond(
     Path((id, request_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -1358,7 +1340,7 @@ async fn thread_respond(
     let (allow, answer) = match body {
         Some(Json(body)) => (
             body.allow.unwrap_or(true),
-            selected_request_answer(&body.answers),
+            body.answers.map(|answers| answers.to_string()),
         ),
         None => (true, None),
     };

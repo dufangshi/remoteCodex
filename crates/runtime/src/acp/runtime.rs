@@ -76,9 +76,16 @@ struct PendingPermission {
     options: Vec<PermissionChoice>,
 }
 
+struct PendingInput {
+    tx: tokio::sync::oneshot::Sender<Value>,
+    params: Value,
+    native: bool,
+}
+
 struct Inner {
     sessions: Mutex<HashMap<String, LiveSession>>,
     pending_permissions: Mutex<HashMap<String, PendingPermission>>,
+    pending_inputs: Mutex<HashMap<String, PendingInput>>,
     pending_dtos: Mutex<HashMap<String, Vec<ThreadActionRequestDto>>>,
     caps_by_agent: Mutex<HashMap<String, AgentProviderCapabilitiesDto>>,
     toolbox_by_agent: Mutex<HashMap<String, Vec<ToolboxItemDto>>>,
@@ -120,6 +127,7 @@ impl AcpRuntime {
             inner: Arc::new(Inner {
                 sessions: Mutex::new(HashMap::new()),
                 pending_permissions: Mutex::new(HashMap::new()),
+                pending_inputs: Mutex::new(HashMap::new()),
                 pending_dtos: Mutex::new(HashMap::new()),
                 caps_by_agent: Mutex::new(HashMap::new()),
                 toolbox_by_agent: Mutex::new(HashMap::new()),
@@ -185,6 +193,7 @@ impl AcpRuntime {
                             "writeTextFile": adapter.fs_write_text_file()
                         },
                         "terminal": true,
+                        "elicitation": {"form": {}},
                         "session": { "compaction": {}, "configOptions": { "boolean": {} } },
                         "plan": {},
                         "_meta": adapter.initialize_client_meta()
@@ -323,6 +332,7 @@ impl AcpRuntime {
                             "writeTextFile": adapter.fs_write_text_file()
                         },
                         "terminal": true,
+                        "elicitation": {"form": {}},
                         "session": { "compaction": {}, "configOptions": { "boolean": {} } },
                         "plan": {},
                         "_meta": adapter.initialize_client_meta()
@@ -1314,6 +1324,29 @@ impl AgentRuntime for AcpRuntime {
         allow: bool,
         answer: Option<&str>,
     ) -> Result<()> {
+        {
+            let mut inputs = self.inner.pending_inputs.lock().await;
+            if let Some(pending) = inputs.get(request_id) {
+                let response =
+                    super::elicitation::response(&pending.params, pending.native, allow, answer)?;
+                if let Some(pending) = inputs.remove(request_id) {
+                    let _ = pending.tx.send(response);
+                }
+                for list in self.inner.pending_dtos.lock().await.values_mut() {
+                    list.retain(|item| item.id != request_id);
+                }
+                return Ok(());
+            }
+        }
+        let structured: Option<Value> = answer.and_then(|text| serde_json::from_str(text).ok());
+        let selected = structured
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|obj| {
+                obj.values()
+                    .find_map(|v| v["answers"].as_array()?.first()?.as_str())
+            });
+        let answer = selected.or(answer);
         if let Some(pending) = self
             .inner
             .pending_permissions
@@ -1681,6 +1714,7 @@ async fn handle_agent_request(
 ) -> Result<()> {
     let raw_session = params
         .get("sessionId")
+        .or_else(|| params.get("threadId"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
@@ -1699,6 +1733,75 @@ async fn handle_agent_request(
         }
     };
     match method {
+        "elicitation/create" | "item/tool/requestUserInput" => {
+            let native = method == "item/tool/requestUserInput";
+            let questions = super::elicitation::questions(&params, native)?;
+            let (thread_id, turn_id, bus) = active
+                .as_ref()
+                .ok_or_else(|| anyhow!("No active turn for user input request"))?;
+            let request_id = format!("input-{}", uuid::Uuid::new_v4());
+            let (tx, mut rx) = tokio::sync::oneshot::channel();
+            inner.pending_inputs.lock().await.insert(
+                request_id.clone(),
+                PendingInput {
+                    tx,
+                    params: params.clone(),
+                    native,
+                },
+            );
+            let dto = ThreadActionRequestDto {
+                id: request_id.clone(),
+                kind: "requestUserInput".into(),
+                title: "Question".into(),
+                description: None,
+                turn_id: Some(turn_id.clone()),
+                item_id: params
+                    .get("toolCallId")
+                    .or_else(|| params.get("itemId"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                created_at: now_rfc3339(),
+                questions,
+            };
+            inner
+                .pending_dtos
+                .lock()
+                .await
+                .entry(thread_id.clone())
+                .or_default()
+                .push(dto.clone());
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.request.created".into(),
+                thread_id: thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({"request":dto}),
+            });
+            let deadline = params
+                .get("autoResolutionMs")
+                .or_else(|| params.pointer("/_meta/codex/autoResolutionMs"))
+                .and_then(Value::as_u64)
+                .and_then(|ms| std::time::Instant::now().checked_add(Duration::from_millis(ms)));
+            let response = loop {
+                tokio::select! {
+                    reply = &mut rx => break reply.unwrap_or_else(|_| if native {json!({"answers":{}})} else {json!({"action":"cancel"})}),
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                        let still_active = inner.sessions.lock().await.values().any(|session|session.active.as_ref().is_some_and(|a|a.thread_id == *thread_id && a.turn_id == *turn_id));
+                        if !still_active || deadline.is_some_and(|end| std::time::Instant::now() >= end) {break if native {json!({"answers":{}})} else {json!({"action":"cancel"})};}
+                    }
+                }
+            };
+            inner.pending_inputs.lock().await.remove(&request_id);
+            if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
+                list.retain(|q| q.id != request_id);
+            }
+            process.respond(req_id, response).await?;
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.request.resolved".into(),
+                thread_id: thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({"requestId":request_id}),
+            });
+        }
         "session/request_permission" => {
             let choices = parse_permission_choices(&params);
             if policy.auto_approve() {

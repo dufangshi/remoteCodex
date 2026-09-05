@@ -1,6 +1,6 @@
 {
   "name": "@dufangshi/remote-codex-native-win32-x64-msvc",
-  "version": "0.12.7",
+  "version": "0.12.8",
   "description": "Remote Codex native binary for Windows x64.",
   "license": "MIT",
   "repository": {

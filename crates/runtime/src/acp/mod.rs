@@ -1,6 +1,7 @@
 mod adapter;
 mod capabilities;
 mod catalog;
+mod elicitation;
 mod grok;
 mod mapper;
 mod modes;

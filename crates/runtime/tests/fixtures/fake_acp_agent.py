@@ -10,6 +10,8 @@ import time
 fast_enabled = False
 steering_prompt_id = None
 reasoning_effort = "medium"
+question_turn = None
+form_capability = False
 
 
 def config_options():
@@ -41,11 +43,18 @@ def prompt_text(params):
 
 
 def handle(msg):
-    global fast_enabled, steering_prompt_id, reasoning_effort
+    global fast_enabled, steering_prompt_id, reasoning_effort, question_turn, form_capability
     method = msg.get("method")
     req_id = msg.get("id")
     params = msg.get("params") or {}
+    if req_id == 900 and "result" in msg:
+        sid, prompt_id = question_turn
+        send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ANSWERS=" + json.dumps(msg["result"], sort_keys=True)}}}})
+        send({"jsonrpc":"2.0","id":prompt_id,"result":{"stopReason":"end_turn"}})
+        question_turn = None
+        return
     if method == "initialize":
+        form_capability = "form" in params.get("clientCapabilities", {}).get("elicitation", {})
         send(
             {
                 "jsonrpc": "2.0",
@@ -121,6 +130,14 @@ def handle(msg):
     if method == "session/prompt":
         sid = params.get("sessionId") or "fake-session"
         text = prompt_text(params)
+        if text in ["ask-native-questions", "ask-acp-questions"]:
+            assert form_capability, "client must advertise form elicitation"
+            question_turn = (sid, req_id)
+            questions = [{"id":"choice","header":"Choice","question":"Choose one","isOther":True,"isSecret":False,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}, {"id":"detail","header":"Detail","question":"Explain","isOther":True,"isSecret":False,"options":None}]
+            native = text == "ask-native-questions"
+            request = {"threadId":sid,"itemId":"ask-tool","questions":questions} if native else {"sessionId":sid,"toolCallId":"ask-tool","mode":"form","message":"Input requested","requestedSchema":{"type":"object","properties":{"choice":{"type":"string","title":"Choice","description":"Choose one","oneOf":[{"const":"A"},{"const":"B"}],"_meta":{"codex":{"isOther":True}}},"detail":{"type":"string","title":"Detail","description":"Explain"},"choice_other":{"type":"string","_meta":{"codex":{"isOtherAnswer":True,"questionId":"choice"}}}},"required":["detail"]}}
+            send({"jsonrpc":"2.0","id":900,"method":"item/tool/requestUserInput" if native else "elicitation/create","params":request})
+            return
         if text == "report-effort":
             text = "effort=" + reasoning_effort
         if text == "wait-for-steer":

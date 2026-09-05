@@ -1115,8 +1115,9 @@ test('keeps delivered steer bubbles in collapsed and expanded history with tappa
   const price = summary.getByRole('button', { name: 'API cost $0.11. Show token details', exact: true });
   await price.click();
   const tooltip = page.getByRole('tooltip');
-  await expect(tooltip).toContainText('Cached input: 500 tokens');
-  await expect(tooltip).toContainText('Reasoning: 800 tokens');
+  await expect(tooltip.getByLabel('Cached input: 500 tokens')).toBeVisible();
+  await expect(tooltip.getByLabel('Reasoning: 800 tokens')).toBeVisible();
+  await expect(page.locator('.thread-usage-details')).toHaveCSS('background-color', 'rgb(37, 38, 34)');
   await expect(page.getByRole('button', {name: /Expand turn 1/})).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(tooltip).toHaveCount(0);
@@ -1135,4 +1136,68 @@ test('keeps delivered steer bubbles in collapsed and expanded history with tappa
   await page.reload();
   await expect(steer).toHaveCount(1);
   await expect(steer).toBeVisible();
+});
+
+test('renders Codex multi-question cards after refresh and submits every answer', async ({ page }) => {
+  await installFakeWebSocket(page);
+  const request = { id: 'ask-codex', kind: 'requestUserInput', title: 'Question', turnId: 'turn-1', createdAt: now, questions: [
+    {id:'choice', header:'Choice', question:'Which option?', isOther:true, options:[{label:'A',description:'First'},{label:'B',description:'Second'}]},
+    {id:'detail', header:'Detail', question:'Why this choice?', isOther:true, options:null},
+  ]};
+  let pending = true;
+  let submitted: unknown;
+  await installApiRoutes(page, () => detail('codex', {pendingRequests: pending ? [request] : []}));
+  await page.route('**/api/threads/thread-1/requests/ask-codex/respond', async route => {
+    submitted = route.request().postDataJSON();
+    pending = false;
+    await route.fulfill({json:detail('codex', {pendingRequests:[]})});
+  });
+  await page.goto('/threads/thread-1');
+  await expect(page.getByText('Which option?', {exact:true})).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', {name:'Not from above',exact:true}).click();
+  await page.getByLabel('Choice custom answer').fill('C');
+  await page.getByLabel('Detail', {exact:true}).fill('because');
+  await page.getByRole('button', {name:'Submit',exact:true}).click();
+  await expect.poll(() => submitted).toEqual({answers:{choice:{answers:['C']},detail:{answers:['because']}}});
+  await expect(page.getByText('Which option?', {exact:true})).toHaveCount(0);
+});
+
+test('keeps subtle timestamps above messages and reveals touch copy controls', async ({page}, testInfo) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex', {
+    thread:{status:'idle',activeTurnId:null},
+    turns:[{id:'turn-1',status:'completed',startedAt:now,completedAt:now,error:null,items:[
+      {id:'user-1',kind:'userMessage',text:'POLISH_PROMPT',createdAt:now},
+      {id:'agent-1',kind:'agentMessage',createdAt:now,text:'对，**原生 Mac 使用 `proxy-env`。**如果继续。\n\n```txt\n**literal code**\n```'},
+    ]}],
+  }));
+  await page.goto('/threads/thread-1');
+  const bubble = page.locator('.thread-graph-message-bubble.is-assistant').last();
+  await expect(bubble.locator('strong')).toHaveText('原生 Mac 使用 proxy-env。');
+  const time = page.locator('.thread-graph-message-time-row').last();
+  await expect(time).toBeVisible();
+  expect((await time.boundingBox())!.height).toBeLessThanOrEqual(13);
+  expect((await time.boundingBox())!.y).toBeLessThan((await bubble.boundingBox())!.y);
+  const copy = bubble.locator('.thread-graph-message-copy-desktop');
+  const code = bubble.locator('.thread-graph-code-block');
+  const codeCopy = code.locator('.thread-graph-code-copy');
+  if (testInfo.project.name === 'mobile-chromium') {
+    await expect(copy).toHaveCSS('opacity','0');
+    await bubble.locator('p').first().tap();
+    await expect(copy).toHaveCSS('opacity','0.6');
+    await expect(codeCopy).toHaveCSS('opacity','0');
+    await code.locator('pre').tap();
+    await expect(codeCopy).toHaveCSS('opacity','0.6');
+  } else {
+    await bubble.hover();
+    await expect(copy).toHaveCSS('opacity','0.6');
+    await code.hover();
+    await expect(codeCopy).toHaveCSS('opacity','0.6');
+  }
+  expect(Math.abs((await copy.boundingBox())!.x - (await bubble.boundingBox())!.x)).toBeLessThan(5);
+  const block = (await code.boundingBox())!;
+  const button = (await codeCopy.boundingBox())!;
+  expect(button.y - block.y).toBeLessThan(16);
+  expect(block.x+block.width-button.x-button.width).toBeLessThan(16);
 });
