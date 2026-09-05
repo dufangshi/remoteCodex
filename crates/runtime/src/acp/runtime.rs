@@ -486,6 +486,9 @@ impl AcpRuntime {
                 if let Some(options) = response.get("configOptions") {
                     live.config_options = options.clone();
                 }
+                if config_id == reasoning_config_id(&live.config_options) {
+                    live.reasoning_effort = Some(value.clone());
+                }
                 if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
                     apply_projection(live, proj);
                 }
@@ -637,7 +640,7 @@ impl AcpRuntime {
                         &live.process.clone(),
                         live,
                         SessionSettingOp::SetConfig {
-                            config_id: "thought-level".into(),
+                            config_id: reasoning_config_id(&live.config_options).into(),
                             value: effort.to_string(),
                         },
                     )
@@ -978,14 +981,16 @@ impl AgentRuntime for AcpRuntime {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
                     let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
                 } else {
-                    let _ = live
-                        .process
-                        .request(
-                            "session/set_config_option",
-                            json!({ "sessionId": live.session_id, "configId": "thought-level", "value": effort }),
-                        )
-                        .await;
-                    live.reasoning_effort = Some(effort.to_string());
+                    let config_id = reasoning_config_id(&live.config_options).to_string();
+                    Self::apply_setting_op(
+                        &live.process.clone(),
+                        &mut live,
+                        SessionSettingOp::SetConfig {
+                            config_id,
+                            value: effort.to_string(),
+                        },
+                    )
+                    .await?;
                 }
             }
         }
@@ -2093,6 +2098,29 @@ fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
             acp_agent: None,
         })
         .collect()
+}
+
+// ACP config IDs are agent-defined; category is the portable semantic key.
+fn reasoning_config_id(options: &Value) -> &str {
+    options
+        .as_array()
+        .and_then(|options| {
+            options
+                .iter()
+                .find(|option| {
+                    option.get("category").and_then(Value::as_str) == Some("thought_level")
+                })
+                .or_else(|| {
+                    options.iter().find(|option| {
+                        matches!(
+                            option.get("id").and_then(Value::as_str),
+                            Some("reasoning_effort" | "thought_level" | "thought-level")
+                        )
+                    })
+                })
+                .and_then(|option| option.get("id").and_then(Value::as_str))
+        })
+        .unwrap_or("thought-level")
 }
 
 fn models_from_config_options(options: &Value) -> Vec<ModelOptionDto> {

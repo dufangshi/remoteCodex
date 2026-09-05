@@ -395,6 +395,42 @@ async fn steering_is_acknowledged_and_processed_before_the_active_turn_finishes(
         .any(|item| item.text.contains("handled steer: change direction")));
 }
 
+#[tokio::test]
+async fn restored_session_applies_advertised_effort_and_recovers_after_settings_failure() {
+    let dir = tempdir().unwrap();
+    let python = which_python();
+    let (_original, session_id) = start_runtime(dir.path(), &python).await;
+    // A fresh runtime has no in-memory session/settings cache, as after restart.
+    let command = format!(
+        r#"{python} "{}""#,
+        dir.path().join("fake_acp_agent.py").display()
+    );
+    let restored = AcpRuntime::catalog(Some(command), 5_000);
+    restored.start().await.unwrap();
+    assert!(!restored.session_loaded(&session_id));
+    restored
+        .resume_session(&session_id, dir.path().to_str())
+        .await
+        .unwrap();
+    for (turn_id, effort) in [("after-restart", "high"), ("retry", "medium")] {
+        let mut input = turn_input(&session_id, "report-effort", turn_id);
+        input.reasoning_effort = Some(effort.into());
+        let items = restored
+            .start_turn(input, EventBus::new(), CancellationToken::new())
+            .await
+            .expect("restored session must accept follow-up prompts");
+        assert!(items
+            .iter()
+            .any(|item| item.text == format!("effort={effort}")));
+        let mut invalid = turn_input(&session_id, "report-effort", "invalid-setting");
+        invalid.reasoning_effort = Some("unsupported-effort".into());
+        assert!(restored
+            .start_turn(invalid, EventBus::new(), CancellationToken::new())
+            .await
+            .is_err());
+    }
+}
+
 async fn start_runtime(dir: &std::path::Path, python: &str) -> (AcpRuntime, String) {
     start_runtime_with_args(dir, python, "").await
 }
