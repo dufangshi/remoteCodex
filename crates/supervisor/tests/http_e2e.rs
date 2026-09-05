@@ -1046,6 +1046,17 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
         .collect();
     assert!(names.contains(&"README.md"));
     assert!(names.contains(&"src"));
+    let subtree = json(
+        &client,
+        client.get(format!(
+            "{base}/api/workspaces/{workspace_id}/files/tree?path=./src"
+        )),
+    )
+    .await;
+    assert_eq!(subtree["name"], "src");
+    assert_eq!(subtree["path"], "./src");
+    assert_eq!(subtree["children"][0]["path"], "./src/main.rs");
+    assert_eq!(subtree["childrenLoaded"], true);
 
     let preview = json(
         &client,

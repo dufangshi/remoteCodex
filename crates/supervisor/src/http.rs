@@ -680,14 +680,15 @@ async fn workspace_tree(
     let nodes = state.workspace_tree(&id, rel).map_err(map_err)?;
     let ws = state.get_workspace(&id).map_err(map_err)?;
     let root = ThreadWorkspaceTreeNodeDto {
-        name: std::path::Path::new(&ws.abs_path)
+        name: std::path::Path::new(rel)
             .file_name()
+            .or_else(|| std::path::Path::new(&ws.abs_path).file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| ".".into()),
         path: rel.replace('\\', "/"),
         kind: "directory".into(),
         size: None,
-        has_children: Some(true),
+        has_children: Some(!nodes.is_empty()),
         children_loaded: Some(true),
         children: Some(nodes),
     };

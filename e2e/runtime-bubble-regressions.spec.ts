@@ -1168,6 +1168,7 @@ test('renders Codex multi-question cards after refresh and submits every answer'
 });
 
 test('keeps subtle timestamps above messages and reveals touch copy controls', async ({page}, testInfo) => {
+  await page.context().grantPermissions(['clipboard-read','clipboard-write']);
   await installFakeWebSocket(page);
   await installApiRoutes(page, () => detail('codex', {
     thread:{status:'idle',activeTurnId:null},
@@ -1199,11 +1200,25 @@ test('keeps subtle timestamps above messages and reveals touch copy controls', a
     await code.hover();
     await expect(codeCopy).toHaveCSS('opacity','0.6');
   }
-  expect(Math.abs((await copy.boundingBox())!.x - (await bubble.boundingBox())!.x)).toBeLessThan(5);
+  const copyBounds = (await copy.boundingBox())!;
+  const bubbleBounds = (await bubble.boundingBox())!;
+  expect(Math.abs(copyBounds.x + copyBounds.width - bubbleBounds.x - bubbleBounds.width)).toBeLessThan(5);
   const block = (await code.boundingBox())!;
   const button = (await codeCopy.boundingBox())!;
   expect(button.y - block.y).toBeLessThan(16);
   expect(block.x+block.width-button.x-button.width).toBeLessThan(16);
+  await bubble.getByRole('button',{name:'Copy agent reply',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toContain('**literal code**');
+  const userBubble = page.locator('.thread-graph-message-bubble.is-user').first();
+  if (testInfo.project.name === 'mobile-chromium') await userBubble.tap(); else await userBubble.hover();
+  const userCopy = userBubble.getByRole('button',{name:'Copy prompt',exact:true});
+  await expect(userBubble.locator('.thread-graph-message-copy-desktop')).toHaveCSS('opacity','0.6');
+  const ub = (await userBubble.boundingBox())!;
+  const cb = (await userCopy.boundingBox())!;
+  expect(Math.abs(cb.x+cb.width-ub.x-ub.width)).toBeLessThan(5);
+  await userCopy.click();
+  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe('POLISH_PROMPT');
+
 });
 
 test('edits global model prices and custom display aliases', async ({page}) => {
