@@ -16,7 +16,7 @@ description: 为 Remote Codex 项目按改动范围选择、编写和精简 Play
 | 文档、skill、注释 | 文件检查、skill 校验；不跑 E2E 或构建应用 |
 | token 计算、分组、状态合并等纯逻辑 | 对应 Rust/Vitest 回归；只有浏览器集成仍有风险时补 E2E |
 | React 交互、布局、焦点、触摸、滚动 | 对应组件测试或相关浏览器用例；选发生问题的设备 |
-| HTTP/WS、刷新恢复、运行中状态串联 | 针对性的 Rust 集成测试 + 一条相关浏览器链路 |
+| HTTP/WS、刷新恢复、运行中状态串联 | 针对性的 API/WS 或 Rust 集成测试；涉及浏览器重连、渲染或交互时补相关浏览器链路 |
 | ACP 协议/adapter、relay 转发 | 对应协议 fixture/集成用例；真实 harness 或 relay 仅在该边界需要验证时运行 |
 
 选择具体用例时按需读 [测试地图与命令](references/test-map.md)。地图是入口；以当前测试源码为准，检查 `test.skip`、环境开关和 fixture。没有现成有效覆盖就补一个小回归，不要启动全量来代替覆盖缺口。
@@ -36,7 +36,7 @@ description: 为 Remote Codex 项目按改动范围选择、编写和精简 Play
 - 根 Playwright 配置始终启动/探测 API 和 Vite，且默认两个 project。只选 mock 用例仍有这层启动成本；不要另起第二套相同服务。
 - `reuseExistingServer: true` 只适合已确认版本、fake 模式和数据目录都正确的测试服务。不要误用正在运行真实任务的开发服务；冲突时配置独立 `E2E_API_PORT` / `E2E_WEB_PORT` 与测试数据目录。
 - 改了 Rust 且本轮确实要跑依赖 supervisor 的 E2E，确保 `target/debug/remote-codex` 是新代码：需要时执行一次 `cargo build -p remote-codex`。仅 `cargo test` 不代表该可执行文件已更新。
-- 改了 `remote-codex-thread-ui/packages/thread-ui/src`，它是独立仓库且 Web 消费其 `dist`：先在该仓库执行一次 `pnpm --filter @remote-codex/thread-ui build`，再在主仓库用 `pnpm install --offline --frozen-lockfile` 刷新本地 file 依赖。已有正确构建无需重做；仅主 Web 源码改动可由 Vite 加载。
+- 共享 UI 是独立仓库，Web 的 JS 消费其 `dist`：改了 `remote-codex-thread-ui/packages/thread-ui` 的 TS/TSX 时，先在该仓库执行一次 `pnpm --filter @remote-codex/thread-ui build`。CSS 直接导出 `src/styles.css`，纯 CSS 修改不必构建 JS。需要时在主仓库执行一次 `pnpm install --offline --frozen-lockfile` 刷新本地 file 依赖，确认消费到新文件。已有正确产物无需重做；仅主 Web 源码改动可由 Vite 加载。
 - 不为普通 UI E2E 执行根 `pnpm build`（包含 Rust release），不无条件重装依赖、清理所有缓存或构建所有包。
 - `REMOTE_CODEX_E2E_FAKE_RUNTIME=1` **不会使所有 spec 都变成 fake**。`harness-acp.spec.ts` 自行启动真实运行时；真实调用前只检查所选 harness 的可用性及凭据配置，不打印密钥。relay spec 也会自行起额外进程，单独处理端口和 fixture。
 
@@ -45,6 +45,7 @@ description: 为 Remote Codex 项目按改动范围选择、编写和精简 Play
 在新写用例或修改相关旧用例时应用这些规则；一次小功能修复不顺便重写整个套件。
 
 - 一条回归围绕一个失败机制：最小 fixture → 必要用户动作/事件 → 可观察结果。保留重现 bug 的时序和边界；例如刷新恢复需覆盖「已有文字 → reload → 新 delta」，不能只断言最终静态文本。
+- 阅读实际断言，不能只凭测试标题认定覆盖。必须到达出错前置状态并验证准确结果；关键断言不可藏在可能不执行的 `if (locator.count())` 中，也不能用「不再 running」冒充成功中断。
 - 状态组合、计费边界和数据排列放 Rust/Vitest；浏览器保留代表性的串联路径。若多个测试证明同一不变量，把组合下沉到便宜层级，删除浏览器重复项前确认独特风险仍有覆盖。
 - 用 API/fixture 准备 workspace、thread 和历史；只有测试创建流程本身时才逐页点击准备数据。复用基础设施，保持数据独立，避免依赖另一个测试留下的会话。
 - 测布局、菜单、activity 时用路由/WS mock 或 fake runtime，显式控制 running/completed/事件顺序，不等真实模型生成长回复。mock 应保留本次关心的边界；测持久化不能 mock 掉待验证的存储路径。
