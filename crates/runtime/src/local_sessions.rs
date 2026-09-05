@@ -858,7 +858,12 @@ fn parse_codex_rollout_entries(entries: Vec<Value>) -> Option<ImportSessionMeta>
                     .unwrap_or_else(|| total.clone());
                 if let Some(turn) = current.as_mut() {
                     turn.model = turn.model.take().or(model.clone());
-                    let delta = total.cumulative_delta(&cumulative_tokens);
+                    let delta = total.cumulative_delta(
+                        &cumulative_tokens,
+                        info.get("last_token_usage")
+                            .and_then(crate::usage::Tokens::parse)
+                            .as_ref(),
+                    );
                     let previous = turn
                         .token_usage
                         .as_ref()

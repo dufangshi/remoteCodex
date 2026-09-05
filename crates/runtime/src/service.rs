@@ -485,8 +485,8 @@ impl Supervisor {
                 let turn_total = previous.as_ref().and_then(|previous| {
                     let previous_counter = crate::usage::Tokens::parse(&previous["cumulativeTotal"])?;
                     let previous_turn = crate::usage::Tokens::parse(&previous["total"])?;
-                    Some(previous_turn.add(&total.cumulative_delta(&previous_counter)))
-                }).unwrap_or_else(|| total.cumulative_delta(&baseline));
+                    Some(previous_turn.add(&total.cumulative_delta(&previous_counter, crate::usage::Tokens::parse(&usage["last"]).as_ref())))
+                }).unwrap_or_else(|| total.cumulative_delta(&baseline, crate::usage::Tokens::parse(&usage["last"]).as_ref()));
                 usage["total"] = json!(turn_total);
             }
             if usage["modelContextWindow"].is_null() {
@@ -1532,7 +1532,7 @@ impl Supervisor {
             turn.price_estimate = source.price_estimate.clone();
             turn.token_usage = crate::usage::public_usage(usage);
             self.db.with(|conn| {
-                conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND (token_usage_json IS NULL OR (json_extract(token_usage_json,'$.total.totalTokens')=0 AND json_extract(token_usage_json,'$.last.totalTokens')>0))",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
+                conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND (token_usage_json IS NULL OR (json_extract(token_usage_json,'$.total.totalTokens')<json_extract(token_usage_json,'$.last.totalTokens')))",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
                 Ok(())
             })?;
         }
@@ -2921,8 +2921,8 @@ fn usage_needs_hydration(turn: &ThreadTurnDto) -> bool {
     match &turn.token_usage {
         None => true,
         Some(usage) => {
-            usage["total"]["totalTokens"] == 0
-                && usage["last"]["totalTokens"].as_u64().unwrap_or_default() > 0
+            usage["total"]["totalTokens"].as_u64().unwrap_or_default()
+                < usage["last"]["totalTokens"].as_u64().unwrap_or_default()
         }
     }
 }

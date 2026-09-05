@@ -85,11 +85,19 @@ impl Tokens {
 
     /// Counters may restart with a new Codex process; the first report then
     /// represents fresh usage rather than a negative increment.
-    pub(crate) fn cumulative_delta(&self, previous: &Self) -> Self {
+    pub(crate) fn cumulative_delta(&self, previous: &Self, last: Option<&Self>) -> Self {
         if self.total_tokens < previous.total_tokens {
             self.clone()
         } else {
-            self.subtract(previous)
+            let delta = self.subtract(previous);
+            // A restarted process can already exceed the old counter. A changed
+            // report still cannot bill fewer tokens than its latest request.
+            if self.total_tokens != previous.total_tokens {
+                if let Some(last) = last.filter(|last| last.total_tokens > delta.total_tokens) {
+                    return last.clone();
+                }
+            }
+            delta
         }
     }
 

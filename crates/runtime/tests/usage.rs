@@ -355,3 +355,29 @@ async fn cumulative_counter_resets_preserve_billable_usage_without_duplicates() 
         );
     }
 }
+
+#[tokio::test]
+async fn restarted_counter_above_baseline_bills_at_least_the_last_request() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.spawn_live_item_persister();
+    for _ in 0..2 {
+        emit(
+            &supervisor,
+            &thread_id,
+            "runtime.usage.updated",
+            json!({
+                "turnId":"live-turn", "usage":{
+                    "total":{"inputTokens":46268,"outputTokens":14},
+                    "last":{"inputTokens":46268,"outputTokens":14},
+                    "baselineTotal":{"inputTokens":46218,"outputTokens":11},
+                    "cumulative":true,"source":"codexRollout","model":"gpt-6-astra"
+                }
+            }),
+        );
+        let turn = supervisor
+            .get_thread_turn_detail(&thread_id, "live-turn")
+            .await
+            .unwrap();
+        assert_eq!(turn.token_usage.unwrap()["total"]["totalTokens"], 46282);
+    }
+}
