@@ -11,14 +11,58 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: platform-compatibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   RUST_VERSION: 1.89.0
   THREAD_UI_REPO: https://github.com/dufangshi/remote-codex-thread-ui-rust.git
   THREAD_UI_REF: main
 
 jobs:
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-24.04
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
+      windows_manager: ${{ steps.filter.outputs.windows_manager }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust:
+              - '.cargo/**'
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+              - 'crates/**'
+              - 'migrations/**'
+            web:
+              - 'apps/supervisor-web/**'
+              - 'e2e/**'
+              - 'npm/**'
+              - 'package.json'
+              - 'packages/**'
+              - 'playwright.config.*'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'scripts/*.mjs'
+              - 'tsconfig*.json'
+            windows_manager:
+              - '.github/workflows/platform-compatibility.yml'
+              - 'apps/windows-device-manager/**'
+              - 'scripts/windows/**'
+
   rust:
     name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -35,41 +79,56 @@ jobs:
         shell: bash
         run: rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt,clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: cargo +${{ env.RUST_VERSION }} fmt --all --check
 
       - name: Test workspace
         run: cargo +${{ env.RUST_VERSION }} test --workspace --locked
 
       - name: Clippy workspace
+        if: runner.os == 'Linux'
         run: cargo +${{ env.RUST_VERSION }} clippy --workspace --all-targets --locked
 
-      - name: Build Windows release executable
-        if: runner.os == 'Windows'
-        run: cargo +${{ env.RUST_VERSION }} build --locked --release --package remote-codex
+  windows-manager:
+    name: Windows Device Manager
+    needs: changes
+    if: needs.changes.outputs.windows_manager == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Smoke Windows release executable
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $metadata = cargo +${{ env.RUST_VERSION }} metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $expected = ($metadata.packages | Where-Object { $_.name -eq 'remote-codex' }).version
-          $version = & target/release/remote-codex.exe version
-          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $expected) {
-            throw "Unexpected remote-codex.exe version: $version"
-          }
-
-      - name: Upload Windows release executable
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-dotnet@v5
         with:
-          name: remote-codex-windows-x64-${{ github.sha }}
-          path: target/release/remote-codex.exe
+          dotnet-version: '8.0.x'
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-device-manager
+          cache-on-failure: true
+
+      - name: Build and verify Device Manager
+        shell: pwsh
+        run: ./scripts/windows/build-device-manager.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-device-manager-${{ github.sha }}
+          path: artifacts/windows-device-manager/win-x64/
           if-no-files-found: error
           retention-days: 14
 
   web:
     name: Web and npm package
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:

@@ -155,8 +155,7 @@ internal sealed class DeviceManagerContext : ApplicationContext
                 _controller.Settings.SupervisorPort);
             await _controller.ConnectAsync(
                 configuration,
-                _controller.Settings.StartWithWindows,
-                _mainForm.ConfirmCodexLoginAsync);
+                _controller.Settings.StartWithWindows);
         }
         catch (OperationCanceledException)
         {

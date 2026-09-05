@@ -403,17 +403,6 @@ internal sealed class MainForm : Form
         };
     }
 
-    public Task<bool> ConfirmCodexLoginAsync()
-    {
-        var result = MessageBox.Show(
-            this,
-            "Codex needs to sign in for this Windows user. Continue in a temporary terminal window?",
-            "Codex sign-in",
-            MessageBoxButtons.OKCancel,
-            MessageBoxIcon.Information);
-        return Task.FromResult(result == DialogResult.OK);
-    }
-
     public async Task ApplyTokenAsync(string token)
     {
         _tokenTextBox.Text = token;
@@ -555,7 +544,7 @@ internal sealed class MainForm : Form
                 _tokenTextBox.Text,
                 _workspaceTextBox.Text,
                 decimal.ToInt32(_portInput.Value));
-            await _controller.ConnectAsync(configuration, _startWithWindowsCheckBox.Checked, ConfirmCodexLoginAsync);
+            await _controller.ConnectAsync(configuration, _startWithWindowsCheckBox.Checked);
             _tokenTextBox.Clear();
         }
         catch (OperationCanceledException)
