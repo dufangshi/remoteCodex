@@ -60,27 +60,6 @@ internal sealed class ProcessRunner(AppLogger logger)
         }
     }
 
-    public async Task<int> RunInteractiveAsync(
-        string command,
-        IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
-    {
-        var commandLine = BuildCmdCommandLine(command, arguments);
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            Arguments = $"/d /s /c \"{commandLine}\"",
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Normal,
-            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException($"Unable to start {Path.GetFileName(command)}.");
-        await process.WaitForExitAsync(cancellationToken);
-        return process.ExitCode;
-    }
-
     private static ProcessStartInfo BuildStartInfo(
         string command,
         IReadOnlyList<string> arguments,

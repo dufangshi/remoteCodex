@@ -36,17 +36,11 @@ internal sealed class RuntimeProvisioner
 
     public async Task<RuntimeState> EnsureAsync(
         IProgress<ProvisioningProgress> progress,
-        Func<Task<bool>> confirmCodexLogin,
         CancellationToken cancellationToken)
     {
         AppPaths.EnsureDirectories();
         var nodePath = await EnsureNodeAsync(progress, cancellationToken);
         var remoteCodex = await EnsureRemoteCodexAsync(nodePath, progress, cancellationToken);
-        await EnsureCodexLoginAsync(
-            remoteCodex.CodexCommandPath,
-            progress,
-            confirmCodexLogin,
-            cancellationToken);
 
         var state = new RuntimeState(
             nodePath,
@@ -195,7 +189,10 @@ internal sealed class RuntimeProvisioner
         {
             candidates.Add(privateNodePath);
         }
-        candidates.AddRange(await LocateCommandsAsync("node.exe", cancellationToken));
+        if (!AppPaths.IsTestEnvironment)
+        {
+            candidates.AddRange(await LocateCommandsAsync("node.exe", cancellationToken));
+        }
 
         foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -299,49 +296,6 @@ internal sealed class RuntimeProvisioner
                 Directory.Delete(stagingRoot, recursive: true);
             }
         }
-    }
-
-    private async Task EnsureCodexLoginAsync(
-        string codexPath,
-        IProgress<ProvisioningProgress> progress,
-        Func<Task<bool>> confirmCodexLogin,
-        CancellationToken cancellationToken)
-    {
-        progress.Report(new("Codex account", "Checking Codex sign-in status...", ProvisioningStepState.Running, 40));
-        var status = await _runner.RunAsync(
-            codexPath,
-            ["login", "status"],
-            TimeSpan.FromSeconds(20),
-            cancellationToken: cancellationToken);
-        if (status.Success)
-        {
-            progress.Report(new("Codex account", "Codex is signed in.", ProvisioningStepState.Complete, 48));
-            return;
-        }
-
-        progress.Report(new("Codex account", "Sign in is required in a temporary terminal window.", ProvisioningStepState.NeedsAction, 42));
-        if (!await confirmCodexLogin())
-        {
-            throw new OperationCanceledException("Codex sign-in was cancelled.", cancellationToken);
-        }
-
-        var exitCode = await _runner.RunInteractiveAsync(codexPath, ["login"], cancellationToken);
-        if (exitCode != 0)
-        {
-            throw new InvalidOperationException("Codex sign-in did not complete successfully.");
-        }
-
-        status = await _runner.RunAsync(
-            codexPath,
-            ["login", "status"],
-            TimeSpan.FromSeconds(20),
-            cancellationToken: cancellationToken);
-        if (!status.Success)
-        {
-            throw new InvalidOperationException("Codex still reports that this Windows user is signed out.");
-        }
-
-        progress.Report(new("Codex account", "Codex sign-in completed.", ProvisioningStepState.Complete, 48));
     }
 
     private async Task<RemoteCodexRuntime> EnsureRemoteCodexAsync(

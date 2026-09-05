@@ -139,6 +139,12 @@ internal static class SelfTest
                 out _);
             var managedPackages = RuntimeProvisioner.ManagedPackageSpecs(
                 ProductManifest.RemoteCodexVersion);
+            var runningSupervisor = RelaySupervisorService.ParseState(
+                new ProcessResult(0, "Relay supervisor: running\r\n", string.Empty));
+            var stoppedSupervisor = RelaySupervisorService.ParseState(
+                new ProcessResult(0, "Relay supervisor: stopped\r\n", string.Empty));
+            var degradedSupervisor = RelaySupervisorService.ParseState(
+                new ProcessResult(0, "Relay supervisor: degraded\r\n", string.Empty));
             var passed = errors.Count == 0
                 && !redacted.Contains("secret", StringComparison.Ordinal)
                 && !redacted.Contains("rcd_self_test", StringComparison.Ordinal)
@@ -148,10 +154,13 @@ internal static class SelfTest
                 && parsedBash
                 && bashResult is { RelayUrl: "wss://relay.example.test", DeviceToken: "rcd_self_test_token", SupervisorPort: 45679 }
                 && managedPackages.SequenceEqual([
-                    "remote-codex@0.12.1",
+                    "remote-codex@0.12.4",
                     "@agentclientprotocol/codex-acp@1.9.0",
                     "@openai/codex@0.153.2",
                 ])
+                && runningSupervisor == SupervisorState.Running
+                && stoppedSupervisor == SupervisorState.Stopped
+                && degradedSupervisor == SupervisorState.Stopped
                 && Path.IsPathFullyQualified(AppPaths.InstalledExecutablePath);
             if (!passed)
             {

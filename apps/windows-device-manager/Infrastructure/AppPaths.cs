@@ -5,6 +5,8 @@ internal static class AppPaths
     private static string? TestRoot { get; } = Environment.GetEnvironmentVariable(
         "REMOTE_CODEX_DEVICE_MANAGER_TEST_ROOT");
 
+    public static bool IsTestEnvironment => TestRoot is { Length: > 0 };
+
     private static string LocalApplicationDataRoot { get; } = TestRoot is { Length: > 0 }
         ? Path.Combine(TestRoot, "local-app-data")
         : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);

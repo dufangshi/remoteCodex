@@ -10,13 +10,35 @@ internal sealed class RelaySupervisorService(ProcessRunner runner, AppLogger log
         try
         {
             var result = await InvokeAsync(runtime, "status", null, TimeSpan.FromSeconds(10), cancellationToken);
-            return result.Success ? SupervisorState.Running : SupervisorState.Stopped;
+            return ParseState(result);
         }
         catch (Exception exception)
         {
             logger.Warning($"Unable to read supervisor state: {exception.Message}");
             return SupervisorState.Unknown;
         }
+    }
+
+    internal static SupervisorState ParseState(ProcessResult result)
+    {
+        if (!result.Success)
+        {
+            return SupervisorState.Stopped;
+        }
+
+        var statusLine = result.CombinedOutput
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.StartsWith("Relay supervisor:", StringComparison.OrdinalIgnoreCase));
+        if (statusLine?.Equals("Relay supervisor: running", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return SupervisorState.Running;
+        }
+        if (statusLine is not null)
+        {
+            return SupervisorState.Stopped;
+        }
+
+        return SupervisorState.Unknown;
     }
 
     public async Task StartAsync(

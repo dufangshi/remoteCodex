@@ -78,7 +78,6 @@ internal sealed class DeviceManagerController
     public async Task ConnectAsync(
         DeviceConfiguration configuration,
         bool startWithWindows,
-        Func<Task<bool>> confirmCodexLogin,
         CancellationToken cancellationToken = default)
     {
         var errors = configuration.Validate(HasSavedToken);
@@ -98,7 +97,6 @@ internal sealed class DeviceManagerController
 
             Runtime = await _provisioner.EnsureAsync(
                 new Progress<ProvisioningProgress>(Report),
-                confirmCodexLogin,
                 cancellationToken);
 
             var currentState = await _supervisor.GetStateAsync(Runtime, cancellationToken);
