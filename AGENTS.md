@@ -7,4 +7,7 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@remote-codex/shared`.
 - After changing `crates/`, run `cargo test --workspace`.
 - Web e2e: `REMOTE_CODEX_E2E_FAKE_RUNTIME=1 pnpm test:e2e`.
+- Treat `apps/windows-device-manager` as a stable, independently released bootstrap. A runtime, HTTP, ACP, model, or harness fix must not by itself bump the Device Manager version, change its bundled seed version, or create a `windows-device-manager-v*` release. Publish the new `remote-codex` runtime/npm version and let existing Device Managers install it through Check/Update.
+- Bump or release Windows Device Manager only when its WinForms UI, installer, tray/startup behavior, self-update path, or other bootstrap-owned behavior changes. Keep the independent Manager release separate from runtime releases.
+- A versioned runtime release is immutable and includes the supported platform assets at one version. Path-filter PR CI to the affected code, but do not publish a partial replacement of one platform under an existing runtime version.
 - Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.
