@@ -50,3 +50,12 @@
 共享 UI 固定提交：`780ad4a2861c29fb76b9df8a70d200967cb9c185`。CSS 也内嵌在共享包 JS 中，因此本次一并重建并核对浏览器计算样式；不能只更新外部 CSS。
 
 本地最终检查：Rust 220 项、launcher/发布脚本 15 项、相关共享 UI 组件 19 项，以及 3 条专项浏览器链路通过（设置分别覆盖手机/桌面，完整 MFA 链路覆盖手机）。浏览器测试使用 `E2E_API_PORT=18787 E2E_WEB_PORT=15173`，避开本机 Docker 占用的默认端口。TypeScript 检查、共享 UI 构建通过。测试不会替换本机实际 Supervisor。
+
+## 发布结果（2026-09-06）
+
+- 本地检查与源码收敛于 15:46:22（America/Toronto）完成，runtime 固定提交 `174a2c6339bf24f72475ee69b4bb5ef94de83d99`；共享 UI 为上述 `780ad4a`。
+- [runtime/npm 发布](https://github.com/dufangshi/remoteCodex/actions/runs/34055961187)成功，总耗时 5m06s。Web 40s、测试 1m；Linux x64 2m08s、Linux arm64 2m10s、macOS arm64 2m29s、Windows x64 3m53s 并行执行；包组装 16s、GitHub 资产发布 11s、npm 发布 31s。
+- [公网 relay 部署](https://github.com/dufangshi/remoteCodex/actions/runs/34055962516)成功，总耗时 2m43s。native 2m04s 与 Web 40s 并行，部署 31s。`remote.lnz-study.com` 已返回新资源，确认管理 API 入口、改密验证、上下文详情、菜单半透明和头像/卡片 CSS 已包含在公网产物中。
+- [main 平台兼容性检查](https://github.com/dufangshi/remoteCodex/actions/runs/34055939668)成功。
+- 15:54 最终核验：npm `latest=0.12.17`；实际下载 launcher tarball，SHA-512 与 npm integrity 一致，含独立更新器和 Web；四平台 native manifest 的 SHA-256 与 GitHub 发布资产一致。[版本页](https://github.com/dufangshi/remoteCodex/releases/tag/v0.12.17)指向固定 runtime 提交。
+- 公网 healthz 为 ok，已有 5 台 Supervisor 连接；匿名安全设置请求返回 401。当前真实设备 Supervisor 未升级、未重启。Windows Device Manager 版本未变。
