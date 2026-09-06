@@ -15,3 +15,13 @@
 发布使用 `npm-release.yml channel=latest` 和公网 `relay-deploy.yml`，均固定上述 UI SHA。实际结果在完成后补记。[迁移与恢复](./relay-security-operations.zh.md)仍适用。
 
 上线连通性核验补充：旧 supervisor 使用 URL 设备 token 握手，新 Origin 中间件曾提前拒绝该原生连接。已仅为 `/supervisor/tunnel` 保留无 Origin 的原生入口，后续设备 token 哈希鉴权仍必需；浏览器 Origin／跨站检查不放宽。新增旧握手成功、无效 token 401、恶意 Origin 403 回归通过，完整 Rust 测试重新通过。首次 npm run 在发布前取消，最终版本从兼容修复后的提交重建，不覆盖已发布资产。
+
+
+## 发布结果
+
+- 最终 runtime 提交：`60a80456733fa72ec09f924db7010e7550c77577`，已合入并推送 main；共享 UI 保持 `4523453e69482d603fdf9dceabfd43407bfc240c`。
+- [npm 正式发布](https://github.com/dufangshi/remoteCodex/actions/runs/34049880695) 成功：四平台、Web、测试、包组装、GitHub 资产和 npm latest 全部通过。Windows 冷构建 11m13s，其他平台约 2 分钟；组装 15s、GitHub 发布 12s、npm 发布 20s。
+- [公网 relay 部署](https://github.com/dufangshi/remoteCodex/actions/runs/34049879222) 成功：Web 41s、native 1m50s、部署 31s。认证配置预检和备份通过，公网新资源生效，旧部署隔离检查通过。
+- 2026-09-06 14:04（America/Toronto）核验：npm `latest=0.12.16`；实际下载 launcher 包并检查版本、Web 文件及四平台 SHA-256 manifest；GitHub 对应四平台资产和 SHA256SUMS 齐全，release 指向最终 runtime 提交。
+- 公网 `/healthz` 正常且 6 台 supervisor 已重新连接；匿名安全设置 API 返回 401。设备端升级到 0.12.16 才启用新的密文协议；旧版设备仍能连接。
+- [版本页与升级说明](https://github.com/dufangshi/remoteCodex/releases/tag/v0.12.16)。此后的文档提交不改变已发布版本内容。

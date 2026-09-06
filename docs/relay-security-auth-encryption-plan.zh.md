@@ -1,6 +1,6 @@
 # Relay 安全、低打扰二步验证与密文转发实施计划
 
-状态：完成。实现、浏览器验收、四平台构建与分支推送均完成；未合并 main、未上线。起点：main `5dd2acc5`，共享 UI main `d3bcbfd`。分支：`security/relay-auth-encryption`（两个仓库）。
+状态：完成。已合并 main 并随 0.12.16 发布；最终合并、兼容修复与上线核验见 [发布记录](./release-0.12.16.zh.md)。起点：main `5dd2acc5`，共享 UI main `d3bcbfd`。分支：`security/relay-auth-encryption`（两个仓库）。
 
 ## 本次边界
 

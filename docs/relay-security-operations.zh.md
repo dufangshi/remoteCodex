@@ -1,6 +1,6 @@
 # Relay 账户安全与密文传输：迁移和恢复
 
-本功能在 `security/relay-auth-encryption` 开发，未随本次工作替换公网部署。实施范围和验收见 [计划](./relay-security-auth-encryption-plan.zh.md)。
+本功能在 `security/relay-auth-encryption` 开发，已合并 main 并随 [0.12.16](./release-0.12.16.zh.md) 上线。实施范围和验收见 [计划](./relay-security-auth-encryption-plan.zh.md)。
 
 ## 登录体验
 
