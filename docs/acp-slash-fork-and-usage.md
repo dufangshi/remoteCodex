@@ -14,6 +14,12 @@ Native slash commands remain ACP prompts; product actions such as fork use their
 structured HTTP action. A command advertised by one session does not enable it
 in another session or in the provider's default capabilities.
 
+Individual `/$skill` invocations are excluded from the toolbox in both the
+adapter and the shared UI (including responses from older supervisors). Skills
+remain callable in prompts. Fork entries also require the host to provide an
+authorized action handler. Fork errors remain visible in the menu for retry,
+and navigating between fork panels cannot clear an in-flight operation lock.
+
 ## Fork support
 
 | Harness | Latest fork | Selected completed turn | Transport |
@@ -64,3 +70,9 @@ isolation, Codex historical boundaries, restart continuation and Grok usage
 backfill. It requires installed/authenticated harnesses and makes small real
 model requests. `FORK_TEST_AGENTS=codex,claude,grok` selects the harnesses and
 `FORK_TEST_PORT` overrides the test port. Evidence is saved under `.local/`.
+
+For the complete browser path, start a real supervisor with its own database on
+`E2E_API_PORT`, then run `RUN_REAL_FORK_UI=1 pnpm test:e2e
+e2e/harness-fork-ui.spec.ts --project=mobile-chromium` with matching port/workspace
+environment variables. This opt-in test makes real model requests and verifies
+both fork buttons, inherited context and the selected historical boundary.

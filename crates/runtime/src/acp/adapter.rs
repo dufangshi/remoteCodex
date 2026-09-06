@@ -96,6 +96,11 @@ pub trait HarnessAdapter: Send + Sync {
     ) -> Vec<ToolboxItemDto> {
         let mut items = toolbox_from_capabilities(caps);
         for command in &negotiated.available_commands {
+            // Codex advertises individual skills as $name commands. Keep them
+            // callable through ACP, without filling the product toolbox.
+            if command.name.starts_with('$') {
+                continue;
+            }
             let slash_command = format!("/{}", command.name);
             if items.iter().any(|item| item.command == slash_command) {
                 continue;
@@ -135,6 +140,9 @@ impl HarnessAdapter for CodexAdapter {
     }
     fn compact_prompt(&self) -> Option<&'static str> {
         Some("/compact")
+    }
+    fn project_session(&self, response: &Value) -> Option<HarnessProjection> {
+        super::codex_models::project_session(response)
     }
     fn patch_capabilities(
         &self,
@@ -520,6 +528,22 @@ mod tests {
         assert!(toolbox
             .iter()
             .any(|item| item.command == "/deep-research" && item.action == "prompt"));
+    }
+
+    #[test]
+    fn skill_invocations_are_not_toolbox_entries() {
+        let negotiated = super::super::capabilities::negotiate(&json!({
+            "_meta": {"availableCommands": [
+                {"name":"/$release-runtime"}, {"name":"$plugin:skill"},
+                {"name":"skills"}, {"name":"status"}
+            ]}
+        }));
+        // Keep the raw ACP catalog intact for capability negotiation.
+        assert_eq!(negotiated.available_commands.len(), 4);
+        let toolbox = CodexAdapter.toolbox_items(&base(), &negotiated);
+        assert!(!toolbox.iter().any(|item| item.command.starts_with("/$")));
+        assert!(toolbox.iter().any(|item| item.command == "/status"));
+        assert!(toolbox.iter().any(|item| item.command == "/skills"));
     }
 
     #[test]

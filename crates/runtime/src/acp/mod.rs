@@ -2,6 +2,7 @@ mod adapter;
 mod capabilities;
 mod catalog;
 mod codex_bridge;
+mod codex_models;
 pub use codex_bridge::run as run_codex_app_server_bridge;
 mod elicitation;
 mod grok;

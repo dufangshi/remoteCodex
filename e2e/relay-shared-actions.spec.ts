@@ -344,6 +344,35 @@ async function installRelayMocks(
   };
 }
 
+test('fork follows relay control access and surfaces backend failures', async ({ page }) => {
+  await installRelayMocks(page);
+  await page.route('**/api/threads/thread-shared/capabilities', route => json(route, {
+    effectiveCapabilities: {
+      sessions: {}, turns: {}, branching: { fork: true, forkAt: true },
+      controls: {}, management: {}, usage: {},
+    },
+    toolboxItems: [{ action: 'fork', command: '/fork', label: 'Fork' }],
+  }));
+  await page.goto('/devices/device-shared/threads/thread-shared');
+  await expect(page.getByText('Shared session is visible.')).toBeVisible();
+  await page.getByRole('button', { name: 'Open slash toolbox' }).click();
+  await expect(page.getByText('No backend tools are available for this thread.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^\/fork(?: |$)/ })).toHaveCount(0);
+
+  await page.route('**/relay/access?**', route => json(route, {
+    kind: 'shared', threadAccess: 'control', workspaceAccess: 'write', workspaceId: sharedWorkspace.id,
+  }));
+  await page.route('**/api/threads/thread-shared/fork', route => json(route, {
+    message: 'This device must update its runtime before forking.', error: 'unsupported',
+  }, 409));
+  await page.reload();
+  await expect(page.getByText('Shared session is visible.')).toBeVisible();
+  await page.getByRole('button', { name: 'Open slash toolbox' }).click();
+  await page.getByRole('button', { name: /^\/fork(?: |$)/ }).click();
+  await page.getByRole('button', { name: 'Fork from latest' }).click();
+  await expect(page.getByRole('alert')).toHaveText('This device must update its runtime before forking.');
+});
+
 test.describe('relay shared session actions', () => {
   test.skip(
     true,
