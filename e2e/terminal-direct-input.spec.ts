@@ -10,6 +10,21 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
   const workspace = await api<any>(apiBase, '/api/workspaces', {method:'POST', body:JSON.stringify({absPath:workspacePath,label:'Terminal test'})});
   const thread = await api<any>(apiBase, '/api/threads/start', {method:'POST',body:JSON.stringify({workspaceId:workspace.id,provider:'codex',model:'default',title:'Terminal input regression',approvalMode:'yolo'})});
   await api(apiBase, `/api/threads/${thread.id}/shell`, {method:'POST', body:'{}'});
+  // Keep the real shell/API, but expose an unloaded harness until the UI
+  // explicitly resumes it. The compatibility /disconnect endpoint is a no-op.
+  let resumeCalls = 0;
+  await page.route('**/api/threads/**', async route => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === `/api/threads/${thread.id}/resume` && request.method() === 'POST') {
+      resumeCalls += 1;
+    } else if (pathname === `/api/threads/${thread.id}` && request.method() === 'GET' && resumeCalls === 0) {
+      const response = await route.fetch();
+      const body = await response.json();
+      return route.fulfill({response, json: {...body, thread: {...body.thread, isLoaded: false}}});
+    }
+    return route.continue();
+  });
   const inputs: Array<{data:string; shellId:string}> = [];
   let output = '';
   page.on('websocket', socket => {
@@ -19,7 +34,9 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
   try {
     await page.goto(`/threads/${thread.id}`);
     await page.reload();
+    await expect(page.getByRole('button',{name:'Connect thread',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Switch to shell',exact:true}).click();
+    await expect.poll(() => resumeCalls).toBe(1);
     const mobile = testInfo.project.name === 'mobile-chromium';
     const controls = page.getByRole('toolbar',{name:'Terminal controls'});
     await expect(page.locator('.shell-pane-active .xterm')).toBeVisible();
@@ -93,15 +110,14 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
     const bounds=(await viewport.boundingBox())!;
     const cdp=await page.context().newCDPSession(page);
     const x=bounds.x+bounds.width/2, y=bounds.y+100;
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
-    // Real timed touch samples establish fling velocity, then native scroll must
-    // continue after release (not merely move while the finger is down).
-    for(let i=1;i<=5;i++) {
-      await page.waitForTimeout(20);
-      await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+i*24}]});
-    }
-    const releasedAt=await viewport.evaluate(el=>el.scrollTop);
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    // Execute the swipe in Chromium so slow host/CDP round trips do not turn it
+    // into a drag. Capture the offset at the real touch-end, before inertia.
+    await viewport.evaluate(el => {
+      el.addEventListener('touchend', () => { (el as HTMLElement).dataset.releasedAt = String(el.scrollTop); }, {once:true});
+    });
+    await cdp.send('Input.synthesizeScrollGesture', {x, y, yDistance:120, speed:1200, gestureSourceType:'touch', preventFling:false});
+    await expect(viewport).toHaveAttribute('data-released-at', /\d+/);
+    const releasedAt=Number(await viewport.getAttribute('data-released-at'));
     await expect.poll(()=>viewport.evaluate(el=>el.scrollTop)).toBeLessThan(releasedAt-10);
     await cdp.detach();
     await viewport.click();

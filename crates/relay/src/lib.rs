@@ -4,6 +4,7 @@ mod hosted;
 mod oauth;
 mod public_links;
 mod security;
+mod share_activity;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -466,6 +467,7 @@ impl RelayStore {
         migrate_legacy_rust_tables(&mut conn)?;
         security::ensure_schema(&conn)?;
         auth_factors::ensure_schema(&conn)?;
+        share_activity::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             session_secret,
@@ -2477,6 +2479,7 @@ fn relay_shares_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
         return Vec::new();
     };
     stmt.query_map(params![user_id, now_rfc3339()], |row| {
+        let activity = share_activity::fields(conn, "share", &row.get::<_, String>(0)?);
         Ok(json!({
             "id": row.get::<_, String>(0)?,
             "ownerUserId": row.get::<_, String>(1)?,
@@ -2495,9 +2498,9 @@ fn relay_shares_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
             "createdAt": row.get::<_, String>(14)?,
             "revokedAt": row.get::<_, Option<String>>(15)?,
             "expiresAt": row.get::<_, Option<String>>(16)?,
-            "lastAccessedAt": Value::Null,
-            "lastAccessedByUsername": Value::Null,
-            "accessEvents": []
+            "lastAccessedAt": activity.0,
+            "lastAccessedByUsername": activity.1,
+            "accessEvents": activity.2
         }))
     })
     .ok()
@@ -2518,6 +2521,7 @@ fn relay_grants_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
     };
     stmt.query_map(params![user_id, now_rfc3339()], |row| {
         let workspace_ids: String = row.get(13)?;
+        let activity = share_activity::fields(conn, "grant", &row.get::<_, String>(0)?);
         Ok(json!({
             "id": row.get::<_, String>(0)?,
             "ownerUserId": row.get::<_, String>(1)?,
@@ -2540,9 +2544,9 @@ fn relay_grants_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
             "createdAt": row.get::<_, String>(18)?,
             "revokedAt": row.get::<_, Option<String>>(19)?,
             "expiresAt": row.get::<_, Option<String>>(20)?,
-            "lastAccessedAt": Value::Null,
-            "lastAccessedByUsername": Value::Null,
-            "accessEvents": []
+            "lastAccessedAt": activity.0,
+            "lastAccessedByUsername": activity.1,
+            "accessEvents": activity.2
         }))
     })
     .ok()
@@ -4318,6 +4322,7 @@ async fn device_api(
         Value::Object(forwarded_headers),
     )
     .await;
+    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status()).await;
     if let Some(sandbox_id) = isolation {
         transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
     } else {
@@ -4459,6 +4464,7 @@ async fn relay_api_compat(
         Value::Object(forwarded_headers),
     )
     .await;
+    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status()).await;
     if let Some(sandbox_id) = isolation {
         transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
     } else {
@@ -6034,6 +6040,50 @@ mod tests {
             attached_shell_id: None,
             session_token: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn successful_shared_reads_reach_portal_history_in_both_relay_routes() {
+        let (state, data_dir) = test_app_state("shared-visits");
+        let (owner_token, guest_token) = {
+            let conn = state.store.conn.lock().await;
+            for (id, username) in [("owner", "owner"), ("guest", "friend")] {
+                conn.execute("INSERT INTO relay_users VALUES (?1,?2,?3,'user',1,NULL,'now','salt','hash')", params![id, format!("{id}@example.test"), username]).unwrap();
+            }
+            conn.execute("INSERT INTO relay_devices VALUES ('device','owner','Laptop',NULL,'hash','preview','now')", []).unwrap();
+            conn.execute("INSERT INTO relay_shares(id,owner_user_id,target_user_id,device_id,thread_id,created_at) VALUES ('share','owner','guest','device','thread','now')", []).unwrap();
+            (create_session(&conn,"test-secret","owner").unwrap(), create_session(&conn,"test-secret","guest").unwrap())
+        };
+        let (socket, mut rx) = device_socket(Uuid::new_v4());
+        state.sockets.write().await.insert("device".into(), socket);
+        for (token, status, compatibility) in [(&owner_token,200,false), (&guest_token,404,false), (&guest_token,200,false), (&guest_token,200,true)] {
+            let responder = state.clone();
+            let response_task = async {
+                let message: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+                let request_id = message["requestId"].as_str().unwrap();
+                let (_, sender) = responder.pending.lock().unwrap().remove(request_id).unwrap();
+                sender.send(json!({"statusCode":status,"headers":{"x-rcd-encrypted":"1"},"body":"opaque encrypted response"})).unwrap();
+            };
+            let mut headers = HeaderMap::new();
+            headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
+            let request = async {
+                if compatibility {
+                    relay_api_compat(Path("threads/thread".into()), Method::GET, "/relay/api/threads/thread?turnLimit=3".parse().unwrap(), Query(TokenQuery::default()), State(state.clone()), headers, Bytes::new()).await.into_response()
+                } else {
+                    device_api(Path(("device".into(),"threads/thread".into())), Method::GET, "/relay/devices/device/api/threads/thread?turnLimit=3".parse().unwrap(), Query(TokenQuery::default()), State(state.clone()), headers, Bytes::new()).await.into_response()
+                }
+            };
+            let (response, _) = tokio::join!(request,response_task);
+            assert_eq!(response.status().as_u16(), status);
+            let conn = state.store.conn.lock().await;
+            let shares = relay_shares_for(&conn,"owner_user_id","owner");
+            let count = shares[0]["accessEvents"].as_array().unwrap().len();
+            assert_eq!(count, if token == &guest_token && status == 200 { 1 } else { 0 });
+            if count > 0 { assert_eq!(shares[0]["lastAccessedByUsername"],"friend"); }
+        }
+        drop(rx);
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ test('workspace, recent threads and import share one compact navigation header',
     method: 'POST',
     body: JSON.stringify({ absPath, label }),
   });
-  await api(base, '/api/threads/start', {
+  const thread = await api<any>(base, '/api/threads/start', {
     method: 'POST',
     body: JSON.stringify({
       workspaceId: workspace.id,
@@ -32,6 +32,9 @@ test('workspace, recent threads and import share one compact navigation header',
   await page.goto('/workspaces');
   const header = page.locator('.product-navigation');
   const initial = (await header.boundingBox())!;
+  const initialMenu = (await header
+    .getByRole('button', { name: 'Open Navigation', exact: true })
+    .boundingBox())!;
   await page.getByRole('button', { name: `Pin ${label}`, exact: true }).click();
   await expect(
     page.getByRole('button', { name: `Unpin ${label}`, exact: true }),
@@ -67,4 +70,18 @@ test('workspace, recent threads and import share one compact navigation header',
   await expect(
     header.getByRole('heading', { name: 'Workspaces', exact: true }),
   ).toBeVisible();
+  await page.goto(`/threads/${thread.id}`);
+  const threadHeader = page.locator('.thread-topbar-surface');
+  await expect(
+    threadHeader.getByRole('button', { name: 'Open rooms', exact: true }),
+  ).toBeVisible();
+  const finalHeader = (await threadHeader.boundingBox())!;
+  const finalMenu = (await threadHeader
+    .getByRole('button', { name: 'Open rooms', exact: true })
+    .boundingBox())!;
+  for (const property of ['x', 'y', 'height', 'width'] as const)
+    expect(finalHeader[property]).toBeCloseTo(initial[property], 0);
+  for (const property of ['x', 'y', 'height', 'width'] as const)
+    expect(finalMenu[property]).toBeCloseTo(initialMenu[property], 0);
+  await page.screenshot({ path: testInfo.outputPath('thread-header.png') });
 });

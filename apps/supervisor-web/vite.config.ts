@@ -105,6 +105,8 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       include: [
+        'xterm',
+        '@xterm/addon-fit',
         '@remote-codex/thread-ui',
         'use-sync-external-store/shim/with-selector',
       ],

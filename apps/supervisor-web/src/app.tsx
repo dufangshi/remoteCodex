@@ -539,7 +539,6 @@ function SupervisorRoutes({
 }) {
   return (
     <Routes>
-      <Route path="/" element={<RootRoute />} />
       <Route
         element={
           <AppShell
@@ -549,6 +548,7 @@ function SupervisorRoutes({
           />
         }
       >
+        <Route path="/" element={<RootRoute />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
         <Route path="/relay-account" element={<RelayAccountPage />} />
@@ -633,7 +633,6 @@ export function App() {
         <DocumentTitleUpdater />
         <RoutePluginProvider>
           <Routes>
-            <Route path="/" element={<RootRoute />} />
             <Route path="/s/:id" element={<PublicThreadPage />} />
             <Route path="/relay-guide" element={<RelayGuidePage />} />
             <Route path="/relay-portal" element={<RelayPortalPage />} />

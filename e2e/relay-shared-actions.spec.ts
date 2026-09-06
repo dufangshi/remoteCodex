@@ -137,6 +137,8 @@ async function installRelayMocks(
     const url = new URL(request.url());
     const path = url.pathname;
 
+    if (path.endsWith('/transport/key')) return json(route, {code:'not_found'}, 404);
+
     if (path === '/relay/auth/session') {
       return json(route, {
         authenticated: true,
@@ -468,4 +470,56 @@ test.describe('relay shared session actions', () => {
       },
     ]);
   });
+});
+
+test('shared access uses profiles, compact actions and stable navigation', async ({ page }, testInfo) => {
+  await installRelayMocks(page, {access:'owner'});
+  await page.route('**/relay/portal', route => json(route, {
+    user: ownerUser, devices: [], sharedWithMe: [], sharedDevicesWithMe: [], sharedThreadsWithMe: [], grantsByMe: [],
+    sharedByMe: [{...sharedSession, threadTitle: sharedThread.title, workspaceLabel: sharedWorkspace.label,
+      lastAccessedAt: now, lastAccessedByUsername: relayUser.username,
+      accessEvents: [{id:'visit',shareId:'share-1',userId:relayUser.id,username:relayUser.username,kind:'open_thread',accessedAt:now}]}],
+  }));
+  await page.goto('/');
+  const homeMenu = (await page.getByRole('button',{name:'Open Navigation',exact:true}).boundingBox())!;
+  await page.goto('/relay-devices');
+  const header = page.locator('.product-navigation');
+  const menuBox = (await header.getByRole('button',{name:'Open Navigation',exact:true}).boundingBox())!;
+  expect(menuBox.x).toBeCloseTo(homeMenu.x,0);
+  expect(menuBox.y).toBeCloseTo(homeMenu.y,0);
+  await header.getByRole('button',{name:'Open Navigation',exact:true}).click();
+  const nav = page.getByRole('navigation',{name:'Supervisor navigation'});
+  await expect(nav.getByRole('button',{name:'Device management',exact:true})).toBeVisible();
+  await expect(nav.getByText('Workspaces',{exact:true})).toHaveCount(0);
+  await expect(nav.getByText('Import Session',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('Supervisor controls',{exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await header.getByRole('button',{name:/Relay account menu/}).click();
+  await expect(page.getByRole('menuitem',{name:'Device management',exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab',{name:/Threads by me/}).click();
+  const card = page.locator('.shared-access-card');
+  await card.getByRole('button',{name:"View friend's profile"}).click();
+  await expect(page.getByRole('dialog',{name:'friend',exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await card.getByRole('button',{name:'Access history',exact:true}).click();
+  await expect(card.getByRole('region',{name:'Recent access'}).getByText('friend',{exact:true})).toBeVisible();
+  await expect(card.getByText('Invalid Date')).toHaveCount(0);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('shared-access.png')});
+  await card.getByRole('button',{name:'Open',exact:true}).click();
+  const topbar=page.locator('.thread-topbar-surface');
+  await expect(topbar.getByRole('button',{name:'Open rooms',exact:true})).toBeVisible();
+  const nextBox=(await topbar.getByRole('button',{name:'Open rooms',exact:true}).boundingBox())!;
+  expect(nextBox.x).toBeCloseTo(menuBox.x,0);
+  expect(nextBox.y).toBeCloseTo(menuBox.y,0);
+  await expect(topbar.getByRole('heading',{name:sharedThread.title,exact:true})).toBeVisible();
+  // This fixture is a legacy supervisor. Exercise its real transport report;
+  // encrypted/changed identity transitions are covered at component level.
+  const indicator=topbar.locator('.device-connection-button:visible');
+  await expect(indicator).toHaveCount(1);
+  await expect(indicator).toHaveAttribute('data-encryption','legacy');
+  await expect(indicator).toHaveAttribute('title',/not end-to-end encrypted/);
+  await indicator.click();
+  await expect(page.getByRole('status').getByText('Connection is not end-to-end encrypted',{exact:true})).toBeVisible();
 });

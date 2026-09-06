@@ -1,10 +1,10 @@
+import { SharedAccessCard } from '../components/SharedAccessCard';
 import { SecurityVerification } from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
 import { request } from '../lib/api';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ProductHeader } from '../components/ProductHeader';
 import {
-  ChevronDown,
   Copy,
   Ellipsis,
   MonitorSmartphone,
@@ -799,7 +799,7 @@ export function RelayDevicesPage() {
           </div>
           <div
             aria-label="Shared access views"
-            className="product-segmented mt-4"
+            className="product-segmented shared-access-tabs mt-4"
             role="tablist"
           >
             {sharedViewTabs.map((tab, index) => {
@@ -1268,144 +1268,12 @@ function SharedSessionRow({
   share: RelaySessionShareDto;
   onOpen?: () => void;
 }) {
-  const accessHistoryId = `share-access-history-${useId()}`;
-  const shareTitle = relayShareTitleText(share);
-  const threadLabel = shareTitle;
-  const shareLabel = share.label?.trim() || null;
-  const workspaceLabel = relayShareWorkspaceLabel(share);
-  const lastAccessLabel = share.lastAccessedAt
-    ? `${share.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(share.lastAccessedAt)}`
-    : 'Not accessed yet';
-
-  return (
-    <article className="px-3 py-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-            {shareTitle}
-          </p>
-          <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
-            <p className="truncate">
-              Workspace:{' '}
-              <span className="text-[var(--theme-fg-soft)]">
-                {workspaceLabel}
-              </span>
-            </p>
-            <p className="truncate">
-              Thread:{' '}
-              <span className="text-[var(--theme-fg-soft)]">{threadLabel}</span>
-            </p>
-            {shareLabel ? (
-              <p className="truncate">
-                Label:{' '}
-                <span className="text-[var(--theme-fg-soft)]">
-                  {shareLabel}
-                </span>
-              </p>
-            ) : null}
-            <p className="truncate">
-              {mode === 'incoming'
-                ? `From ${share.ownerUsername}`
-                : `To ${share.targetUsername}`}
-            </p>
-            <p className="truncate">Device: {share.deviceName}</p>
-          </div>
-          {mode === 'outgoing' ? (
-            <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
-              Last access: {lastAccessLabel}
-            </p>
-          ) : null}
-          <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
-              {share.threadAccess === 'read' ? 'View only' : 'Collaborator'}
-            </span>
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
-              {workspaceAccessLabel(share.workspaceAccess)}
-            </span>
-          </p>
-        </div>
-        {mode === 'incoming' ? (
-          <button
-            className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-            onClick={onOpen}
-            type="button"
-          >
-            Open
-          </button>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              onClick={onOpen}
-              type="button"
-            >
-              Open
-            </button>
-            <button
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              disabled={busy}
-              onClick={onEdit}
-              type="button"
-            >
-              Permissions
-            </button>
-            <button
-              aria-controls={accessHistoryId}
-              aria-expanded={expanded}
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              onClick={onToggleAccess}
-              type="button"
-            >
-              Access history
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
-              />
-            </button>
-            <button
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 text-[var(--status-danger-fg)] sm:min-h-10"
-              disabled={busy}
-              onClick={onRevoke}
-              type="button"
-            >
-              Revoke
-            </button>
-          </div>
-        )}
-      </div>
-      {mode === 'outgoing' && expanded ? (
-        <div
-          className="mt-4 border-t border-[var(--theme-border)] pt-3"
-          id={accessHistoryId}
-        >
-          <p className="mb-2 text-xs font-medium text-[var(--theme-fg-soft)]">
-            Recent access
-          </p>
-          {share.accessEvents.length ? (
-            <ul className="divide-y divide-[var(--theme-border)] text-xs text-[var(--theme-fg-muted)]">
-              {share.accessEvents.map((event) => (
-                <li
-                  className="flex min-h-11 items-center justify-between gap-3 py-2"
-                  key={event.id}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-[var(--theme-fg)]">
-                      {accessEventKindLabel(event.kind)}
-                    </span>
-                    <span className="block truncate">{event.username}</span>
-                  </span>
-                  <span>{formatRelayTimestamp(event.accessedAt)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-[var(--theme-fg-muted)]">
-              This shared thread has not been accessed yet.
-            </p>
-          )}
-        </div>
-      ) : null}
-    </article>
-  );
+  return <SharedAccessCard title={relayShareTitleText(share)}
+    subtitle={`${relayShareWorkspaceLabel(share)} · ${share.deviceName}`}
+    username={mode === 'incoming' ? share.ownerUsername : share.targetUsername} mode={mode}
+    permissions={[share.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(share.workspaceAccess)]}
+    events={share.accessEvents} lastAccessedAt={share.lastAccessedAt} busy={busy} expanded={expanded}
+    onOpen={onOpen} onEdit={onEdit} onRevoke={onRevoke} onToggleAccess={onToggleAccess} />;
 }
 
 function GrantDeviceCard({
@@ -1483,171 +1351,12 @@ function GrantScopeRow({
   onRevoke?: () => void;
   onToggleAccess?: () => void;
 }) {
-  const accessHistoryId = `grant-access-history-${useId()}`;
-  const scopeLabel = grantScopeLabel(grant);
-  const workspaceLabel =
-    grant.workspaceLabel?.trim() || 'Workspace unavailable';
-  const threadLabel = stableGrantThreadTitle(grant) ?? 'Thread unavailable';
-  const label = grant.label?.trim() || null;
-  const lastAccessLabel = grant.lastAccessedAt
-    ? `${grant.lastAccessedByUsername ?? 'unknown'} at ${formatRelayTimestamp(grant.lastAccessedAt)}`
-    : 'Not accessed yet';
-
-  return (
-    <div className="relative py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--theme-fg-muted)]">
-              {scopeLabel}
-            </span>
-          </div>
-          <div className="mt-1 space-y-0.5 text-xs text-[var(--theme-fg-muted)]">
-            {grant.scope === 'device' ? (
-              <p className="truncate">
-                Scope:{' '}
-                <span className="text-[var(--theme-fg-soft)]">
-                  {deviceGrantScopeText(grant)}
-                </span>
-              </p>
-            ) : (
-              <>
-                <p className="truncate">
-                  Workspace:{' '}
-                  <span className="text-[var(--theme-fg-soft)]">
-                    {workspaceLabel}
-                  </span>
-                </p>
-                {grant.scope === 'thread' ? (
-                  <p className="truncate">
-                    Thread:{' '}
-                    <span className="text-[var(--theme-fg-soft)]">
-                      {threadLabel}
-                    </span>
-                  </p>
-                ) : (
-                  <p className="truncate">
-                    Scope:{' '}
-                    <span className="text-[var(--theme-fg-soft)]">
-                      Entire workspace
-                    </span>
-                  </p>
-                )}
-              </>
-            )}
-            {label ? (
-              <p className="truncate">
-                Label:{' '}
-                <span className="text-[var(--theme-fg-soft)]">{label}</span>
-              </p>
-            ) : null}
-            <p className="truncate">
-              {mode === 'incoming'
-                ? `From ${grant.ownerUsername}`
-                : `To ${grant.targetUsername}`}
-            </p>
-          </div>
-          {mode === 'outgoing' ? (
-            <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
-              Last access: {lastAccessLabel}
-            </p>
-          ) : null}
-          <p className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--theme-fg-muted)]">
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
-              {grant.threadAccess === 'read' ? 'View only' : 'Collaborator'}
-            </span>
-            <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
-              {workspaceAccessLabel(grant.workspaceAccess)}
-            </span>
-            {grant.canCreateThreads ? (
-              <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5">
-                Can create threads
-              </span>
-            ) : null}
-          </p>
-        </div>
-        {mode === 'incoming' ? (
-          <button
-            className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-            onClick={onOpen}
-            type="button"
-          >
-            Open
-          </button>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="relay-button-primary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              onClick={onOpen}
-              type="button"
-            >
-              Open
-            </button>
-            <button
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              disabled={busy}
-              onClick={onEdit}
-              type="button"
-            >
-              Permissions
-            </button>
-            <button
-              aria-controls={accessHistoryId}
-              aria-expanded={expanded}
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 sm:min-h-10"
-              onClick={onToggleAccess}
-              type="button"
-            >
-              Access history
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
-              />
-            </button>
-            <button
-              className="relay-button-secondary inline-flex min-h-11 items-center gap-2 text-[var(--status-danger-fg)] sm:min-h-10"
-              disabled={busy}
-              onClick={onRevoke}
-              type="button"
-            >
-              Revoke
-            </button>
-          </div>
-        )}
-      </div>
-      {mode === 'outgoing' && expanded ? (
-        <div
-          className="mt-3 border-t border-[var(--theme-border)] pt-3"
-          id={accessHistoryId}
-        >
-          <p className="mb-2 text-xs font-medium text-[var(--theme-fg-soft)]">
-            Recent access
-          </p>
-          {grant.accessEvents.length ? (
-            <ul className="divide-y divide-[var(--theme-border)] text-xs text-[var(--theme-fg-muted)]">
-              {grant.accessEvents.map((event) => (
-                <li
-                  className="flex min-h-11 items-center justify-between gap-3 py-2"
-                  key={event.id}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-[var(--theme-fg)]">
-                      {accessEventKindLabel(event.kind)}
-                    </span>
-                    <span className="block truncate">{event.username}</span>
-                  </span>
-                  <span>{formatRelayTimestamp(event.accessedAt)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-[var(--theme-fg-muted)]">
-              This shared access has not been used yet.
-            </p>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
+  return <SharedAccessCard title={grant.label?.trim() || (grant.scope === 'thread' ? stableGrantThreadTitle(grant) : grant.scope === 'workspace' ? grant.workspaceLabel : grant.deviceName) || grantScopeLabel(grant)}
+    subtitle={`${grantScopeLabel(grant)} · ${grant.scope === 'device' ? deviceGrantScopeText(grant) : grant.workspaceLabel || grant.deviceName}`}
+    username={mode === 'incoming' ? grant.ownerUsername : grant.targetUsername} mode={mode}
+    permissions={[grant.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(grant.workspaceAccess), ...(grant.canCreateThreads ? ['Can create threads'] : [])]}
+    events={grant.accessEvents} lastAccessedAt={grant.lastAccessedAt} busy={busy} expanded={expanded}
+    onOpen={onOpen} onEdit={onEdit} onRevoke={onRevoke} onToggleAccess={onToggleAccess} />;
 }
 
 const DIALOG_FOCUSABLE_SELECTOR = [
@@ -2876,25 +2585,5 @@ function workspaceAccessLabel(access: RelayWorkspaceAccessDto) {
     case 'none':
     default:
       return 'No workspace';
-  }
-}
-
-function accessEventKindLabel(kind: string | null | undefined) {
-  switch (kind) {
-    case 'open_device':
-      return 'Opened device';
-    case 'open_thread':
-      return 'Opened thread';
-    case 'create_thread':
-      return 'Created thread';
-    case 'send_prompt':
-      return 'Sent prompt';
-    case 'read_workspace_file':
-      return 'Read workspace';
-    case 'write_workspace_file':
-      return 'Wrote workspace';
-    case 'access':
-    default:
-      return 'Access';
   }
 }

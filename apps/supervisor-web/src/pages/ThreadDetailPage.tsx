@@ -223,7 +223,6 @@ type RealtimeConnectionStatus =
   | 'reconnecting'
   | 'offline';
 
-type RealtimeIndicatorStatus = RealtimeConnectionStatus | 'detached';
 
 interface RealtimeConnectionSnapshot {
   status: RealtimeConnectionStatus;
@@ -344,37 +343,6 @@ function CopyIcon() {
       className="h-3.5 w-3.5 fill-current"
     >
       <path d="M5.75 1.75c-.97 0-1.75.78-1.75 1.75v.25H3.5c-.97 0-1.75.78-1.75 1.75v6c0 .97.78 1.75 1.75 1.75h4.75c.97 0 1.75-.78 1.75-1.75v-.25h.5c.97 0 1.75-.78 1.75-1.75v-6c0-.97-.78-1.75-1.75-1.75h-4.75Zm-.5 2V3.5c0-.28.22-.5.5-.5h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H10v-4.5c0-.97-.78-1.75-1.75-1.75h-3Zm-1.75 1.25h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5v-6c0-.28.22-.5.5-.5Z" />
-    </svg>
-  );
-}
-
-function RealtimeConnectionIcon({
-  status,
-}: {
-  status: RealtimeIndicatorStatus;
-}) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4.5 w-4.5 fill-none stroke-current"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
-      <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
-      <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
-      {status === 'connected' ? (
-        <path d="m6.7 13.2.9.9 1.7-2" />
-      ) : status === 'offline' ? (
-        <path d="M3 3l10 10" />
-      ) : status === 'detached' ? null : (
-        <>
-          <path d="M11.8 11.1a2.2 2.2 0 0 1-1.8 2.7" />
-          <path d="m10.7 11.35 1.3-.55-.55-1.3" />
-        </>
-      )}
     </svg>
   );
 }
@@ -3021,16 +2989,13 @@ export function ThreadDetailPage() {
   }
 
   function handleToggleView() {
-    setActiveView((current) => {
-      if (current === 'chat') {
-        if (detail?.thread.isLoaded) {
-          setPendingShellConnectionToggle(true);
-        }
-        return 'shell';
-      }
-
-      return 'chat';
-    });
+    if (activeView === 'shell') {
+      setActiveView('chat');
+      return;
+    }
+    setActiveView('shell');
+    setPendingShellConnectionToggle(true);
+    if (detail && !detail.thread.isLoaded && !busy) void handleThreadConnectionToggle();
   }
 
   async function handleShellCopy() {
@@ -3229,70 +3194,18 @@ export function ThreadDetailPage() {
   );
 
   const threadLoaded = detail?.thread.isLoaded ?? false;
-  const realtimeConnectionIndicatorClassName =
-    !threadLoaded
-      ? 'host-icon-button border shadow-[var(--theme-shadow)]'
-    : realtimeConnection.status === 'connected'
-      ? 'ui-action-success shadow-[var(--theme-shadow)]'
-    : realtimeConnection.status === 'reconnecting'
-        ? 'thread-live-connection-reconnecting ui-status-success shadow-[var(--theme-shadow)]'
-        : realtimeConnection.status === 'offline'
-          ? 'ui-status-danger shadow-[var(--theme-shadow)]'
-          : 'ui-status-warning shadow-[var(--theme-shadow)]';
-  const realtimeConnectionLabel = threadConnectionSummary(
-    threadLoaded,
-    realtimeConnection,
+  const realtimeConnectionLabel = threadConnectionSummary(threadLoaded, realtimeConnection);
+  const sessionConnectionIndicator = (
+    <DeviceEncryptionStatus deviceId={relayRouteDeviceId ?? undefined} connection={{
+      loaded: threadLoaded,
+      busy: busy || !detail,
+      state: realtimeConnection.status,
+      label: realtimeConnectionLabel,
+      onConnect: () => void handleThreadConnectionToggle(),
+    }} />
   );
-  const realtimeConnectionTitle = [
-    realtimeConnectionLabel,
-    !threadLoaded ? 'Tap to connect this thread' : null,
-    realtimeConnection.lastHealthyAt
-      ? `Last healthy ${formatLongTimestamp(realtimeConnection.lastHealthyAt)}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  const mobileSessionConnectionControl = !threadLoaded ? (
-    <button
-      type="button"
-      onClick={() => void handleThreadConnectionToggle()}
-      disabled={busy || !detail}
-      aria-label={busy ? 'Connecting thread' : 'Connect thread'}
-      title={busy ? 'Connecting thread' : realtimeConnectionTitle}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
-    >
-      <RealtimeConnectionIcon status="detached" />
-    </button>
-  ) : (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label={realtimeConnectionLabel}
-      title={realtimeConnectionTitle}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
-    >
-      <RealtimeConnectionIcon status={realtimeConnection.status} />
-    </div>
-  );
-  const desktopSessionConnectionIndicator = !threadLoaded ? (
-    <button
-      type="button"
-      onClick={() => void handleThreadConnectionToggle()}
-      disabled={busy || !detail}
-      title={busy ? 'Connecting thread' : realtimeConnectionTitle}
-      className={`hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
-    >
-      <RealtimeConnectionIcon status="detached" />
-    </button>
-  ) : (
-    <div
-      title={realtimeConnectionTitle}
-      className={`hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
-    >
-      <RealtimeConnectionIcon status={realtimeConnection.status} />
-    </div>
-  );
+  const mobileSessionConnectionControl = sessionConnectionIndicator;
+  const desktopSessionConnectionIndicator = <span className="hidden lg:inline-flex">{sessionConnectionIndicator}</span>;
   const currentGoal = goalState.data ?? detail?.goal ?? null;
   const goalHistory = detail?.goalHistory ?? [];
   const monitorGoals = currentGoal
@@ -3343,7 +3256,6 @@ export function ThreadDetailPage() {
     () => (
       <div className="flex items-center justify-end gap-2">
         {relayAccessBadge}
-        {relayRouteDeviceId && <DeviceEncryptionStatus deviceId={relayRouteDeviceId} />}
         {desktopSessionConnectionIndicator}
       </div>
     ),
@@ -3683,7 +3595,7 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       settingsContent={settingsContent}
       globalSettingsContent={<AppShellSettingsDialog embedded />}
-      mobileHeaderAction={<>{relayRouteDeviceId && <DeviceEncryptionStatus deviceId={relayRouteDeviceId} />}{mobileSessionConnectionButton}</>}
+      mobileHeaderAction={mobileSessionConnectionButton}
       workspaceReturnHref={workspaceReturnHref}
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
       threadActionsButton={threadActionsButton}

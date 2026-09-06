@@ -1,4 +1,4 @@
-import { LogOut, MonitorSmartphone, Settings } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -221,15 +221,7 @@ export function RelayUserMenu({
             <Settings aria-hidden="true" className="h-4 w-4" />
             Account settings
           </Link>
-          <Link
-            className="flex h-11 items-center gap-2 rounded-md px-3 text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
-            onClick={() => setOpen(false)}
-            role="menuitem"
-            to="/relay-devices"
-          >
-            <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />
-            Device management
-          </Link>
+
           <button
             aria-busy={loggingOut}
             aria-disabled={loggingOut}

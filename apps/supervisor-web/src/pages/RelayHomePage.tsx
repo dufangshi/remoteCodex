@@ -1,3 +1,4 @@
+import { ProductHeader } from '../components/ProductHeader';
 import { ArrowRight, BookOpen, MonitorSmartphone, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -50,28 +51,7 @@ export function RelayHomePage() {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-5 text-[var(--app-fg)] sm:px-6 sm:py-6">
       <div className="mx-auto w-full max-w-5xl">
-        <header className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] pb-4">
-          <Link className="flex min-h-11 min-w-0 items-center gap-3" to="/">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-accent-soft)] text-sm font-semibold text-[var(--theme-accent-strong)]">
-              RC
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-[var(--theme-fg)]">
-                Remote Codex Relay
-              </span>
-              <span className="block truncate text-xs text-[var(--theme-fg-muted)]">
-                Private supervisor access
-              </span>
-            </span>
-          </Link>
-          <Link
-            className="relay-button-secondary inline-flex h-11 shrink-0 items-center gap-2"
-            to="/relay-guide"
-          >
-            <BookOpen aria-hidden="true" className="h-4 w-4" />
-            Guide
-          </Link>
-        </header>
+        <ProductHeader title="Remote Codex" actions={<Link className="product-icon-button" to="/relay-guide" aria-label="Guide" title="Guide"><BookOpen size={18} /></Link>} />
 
         <section className="py-10 sm:py-14" aria-busy={loading}>
           <div className="flex items-center gap-2 text-sm text-[var(--theme-fg-muted)]">
