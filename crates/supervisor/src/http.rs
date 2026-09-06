@@ -46,7 +46,6 @@ struct UpdatePluginInput {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportTranscriptQuery {
-    format: Option<String>,
     mode: Option<String>,
     limit: Option<usize>,
     turn_ids: Option<String>,
@@ -159,7 +158,6 @@ pub fn router(state: AppState) -> Router {
             post(steer_pending_prompt),
         )
         .route("/api/threads/{id}/export-turns", get(export_turns))
-        .route("/api/threads/{id}/exports/pdf", get(export_pdf))
         .route("/api/threads/{id}/exports/html", get(export_html))
         .route(
             "/api/threads/{id}/shell",
@@ -1426,36 +1424,19 @@ async fn export_turns(
     ))
 }
 
-async fn export_pdf(
-    Path(id): Path<String>,
-    Query(query): Query<ExportTranscriptQuery>,
-    State(state): State<AppState>,
-) -> Result<Response, ApiErr> {
-    let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
-    render_transcript_export(&detail, &query, query.format.as_deref().unwrap_or("pdf"))
-}
-
 async fn export_html(
     Path(id): Path<String>,
     Query(query): Query<ExportTranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, ApiErr> {
     let detail = state.get_thread_detail(&id, None).await.map_err(map_err)?;
-    render_transcript_export(&detail, &query, "html")
+    render_transcript_export(&detail, &query)
 }
 
 fn render_transcript_export(
     detail: &remote_codex_protocol::ThreadDetailDto,
     query: &ExportTranscriptQuery,
-    format: &str,
 ) -> Result<Response, ApiErr> {
-    if !matches!(format, "pdf" | "html") {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "Export format must be pdf or html.",
-        ));
-    }
     let mode = query.mode.as_deref().unwrap_or("latest");
     if !matches!(mode, "latest" | "selected") {
         return Err(err(
@@ -1489,21 +1470,11 @@ fn render_transcript_export(
         include_command_output: query.include_command_output.unwrap_or(false),
         include_absolute_paths: query.include_absolute_paths.unwrap_or(false),
     };
-    let (bytes, content_type, extension) = if format == "html" {
-        (
-            crate::export::html_transcript(detail, &turns, &options)
-                .map_err(map_err)?
-                .into_bytes(),
-            "text/html; charset=utf-8",
-            "html",
-        )
-    } else {
-        (
-            crate::export::pdf_transcript(detail, &turns, &options).map_err(map_err)?,
-            "application/pdf",
-            "pdf",
-        )
-    };
+    let bytes = crate::export::html_transcript(detail, &turns, &options)
+        .map_err(map_err)?
+        .into_bytes();
+    let content_type = "text/html; charset=utf-8";
+    let extension = "html";
     let stem = safe_export_stem(&detail.thread.title);
     Response::builder()
         .status(StatusCode::OK)

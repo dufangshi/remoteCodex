@@ -13,7 +13,6 @@ futures-util.workspace = true
 hex.workspace = true
 hmac.workspace = true
 portable-pty.workspace = true
-printpdf.workspace = true
 rand.workspace = true
 remote-codex-protocol.workspace = true
 reqwest.workspace = true

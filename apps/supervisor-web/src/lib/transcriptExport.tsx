@@ -5,7 +5,7 @@ import {
   transcriptSnapshot,
   type PublicTranscriptSnapshot,
 } from '@remote-codex/thread-ui';
-import type { ExportThreadPdfInput, ThreadTurnDto } from '@remote-codex/shared';
+import type { ExportThreadTranscriptInput, ThreadTurnDto } from '@remote-codex/shared';
 import { buildThreadImageAssetUrl, fetchThreadDetail } from './api';
 
 const nextFrame = () =>
@@ -26,7 +26,7 @@ const dataUrl = (blob: Blob) =>
 
 export async function loadExportSnapshot(
   id: string,
-  input: ExportThreadPdfInput,
+  input: ExportThreadTranscriptInput,
 ): Promise<PublicTranscriptSnapshot> {
   const selected = input.mode === 'selected' ? new Set(input.turnIds) : null;
   const limit = Math.min(100, Math.max(1, input.limit ?? 10));
@@ -177,30 +177,4 @@ export async function renderStandaloneTranscript(
     root.unmount();
     host.remove();
   }
-}
-
-export function openTranscriptPrintWindow() {
-  // Open in the click handler, before async fetching, so mobile popup blockers
-  // permit the print preview. It contains no account/session data or controls.
-  const preview = window.open('about:blank', '_blank');
-  if (!preview)
-    throw new Error(
-      'Allow the print preview window to save this transcript as PDF.',
-    );
-  preview.document.body.textContent = 'Preparing PDF…';
-  return preview;
-}
-
-export async function printTranscript(preview: Window, html: string) {
-  preview.document.open();
-  preview.document.write(html);
-  preview.document.close();
-  await preview.document.fonts.ready;
-  await Promise.all(
-    Array.from(preview.document.images).map((image) =>
-      image.decode().catch(() => undefined),
-    ),
-  );
-  preview.focus();
-  preview.print();
 }

@@ -33,8 +33,6 @@ import type {
   CreateThreadInput,
   CreateThreadHookInput,
   TrustThreadHookInput,
-  ExportThreadPdfInput,
-  ThreadExportFormatDto,
   ForkThreadInput,
   RelayEffectiveAccessDto,
   CreateWorkspaceInput,
@@ -481,14 +479,7 @@ export async function request<T>(
 }
 
 function fallbackDownloadFilename(input: RequestInfo | URL) {
-  const url = String(input);
-  if (!url.includes('/exports/pdf')) {
-    return 'download';
-  }
-
-  return url.includes('format=html')
-    ? 'remote-codex-transcript.html'
-    : 'remote-codex-transcript.pdf';
+  return String(input).includes('/exports/html') ? 'remote-codex-transcript.html' : 'download';
 }
 
 function parseContentDispositionFilename(value: string | null) {
@@ -1418,64 +1409,6 @@ export function fetchThreadExportTurns(id: string) {
       cache: 'no-store',
     },
   );
-}
-
-export function buildThreadPdfExportUrl(
-  id: string,
-  input: ExportThreadPdfInput,
-) {
-  const params = new URLSearchParams();
-  if (input.format !== undefined) {
-    params.set('format', input.format);
-  }
-  params.set('mode', input.mode);
-  if (input.limit !== undefined) {
-    params.set('limit', String(input.limit));
-  }
-  if (input.turnIds !== undefined) {
-    params.set('turnIds', input.turnIds.join(','));
-  }
-  if (input.profile !== undefined) {
-    params.set('profile', input.profile);
-  }
-  if (input.options?.includeTokenAndPrice !== undefined) {
-    params.set(
-      'includeTokenAndPrice',
-      String(input.options.includeTokenAndPrice),
-    );
-  }
-  if (input.options?.includeCommandOutput !== undefined) {
-    params.set(
-      'includeCommandOutput',
-      String(input.options.includeCommandOutput),
-    );
-  }
-  if (input.options?.includeAbsolutePaths !== undefined) {
-    params.set(
-      'includeAbsolutePaths',
-      String(input.options.includeAbsolutePaths),
-    );
-  }
-
-  return `/api/threads/${encodeURIComponent(id)}/exports/pdf?${params.toString()}`;
-}
-
-export function downloadThreadPdfExport(
-  id: string,
-  input: ExportThreadPdfInput,
-) {
-  return downloadFile(buildThreadPdfExportUrl(id, input), {
-    cache: 'no-store',
-  });
-}
-
-export function downloadThreadTranscriptExport(
-  id: string,
-  input: ExportThreadPdfInput & { format?: ThreadExportFormatDto },
-) {
-  return downloadFile(buildThreadPdfExportUrl(id, input), {
-    cache: 'no-store',
-  });
 }
 
 export function fetchThreadShellState(id: string) {

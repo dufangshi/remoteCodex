@@ -1414,7 +1414,7 @@ test('an expanded long reply stays expanded when the running turn becomes final 
   await expect(page.getByRole('button',{name:'Show more',exact:true})).toHaveCount(0);
 });
 
-test('exports the live thread styling and complete Markdown to offline HTML and printable PDF', async ({page, context}, testInfo) => {
+test('exports the live thread styling and complete Markdown to offline HTML', async ({page, context}, testInfo) => {
   const fs = await import('node:fs/promises');
   const {pathToFileURL} = await import('node:url');
   await page.emulateMedia({colorScheme:testInfo.project.name==='mobile-chromium'?'dark':'light'});
@@ -1465,15 +1465,96 @@ test('exports the live thread styling and complete Markdown to offline HTML and 
   expect(await offline.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await offline.screenshot({path:testInfo.outputPath('offline-transcript.png')});
   await page.getByRole('button',{name:'Thread actions',exact:true}).click();
-  dialog=page.getByRole('dialog',{name:'Thread actions',exact:true});
-  await dialog.getByRole('button',{name:'PDF',exact:true}).click();
-  const popupPromise=page.waitForEvent('popup');
-  await dialog.getByRole('button',{name:'Export PDF',exact:true}).click();
-  const popup=await popupPromise;
-  await expect(popup.locator('html')).toHaveAttribute('data-print-requested','true');
-  await expect(popup.locator('strong').first()).toHaveText('中文加粗');
-  if(testInfo.project.name==='desktop-chromium') {
-    const pdf=await popup.pdf({path:testInfo.outputPath('transcript.pdf'),printBackground:true,preferCSSPageSize:true});
-    expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
-  }
+  await expect(page.getByRole('dialog').getByRole('button',{name:'PDF',exact:true})).toHaveCount(0);
+});
+
+test('file links reveal only the requested nested file and copy workspace-relative paths', async ({page},testInfo) => {
+  await installFakeWebSocket(page);
+  await page.addInitScript(()=>{
+    localStorage.setItem('remote-codex:graphchat:workspace:expanded:workspace-1:thread-1',JSON.stringify({version:2,expandedPaths:['docs'],selectedPath:'docs/WRONG.md'}));
+    Object.defineProperty(navigator,'clipboard',{value:{writeText:async (text:string)=>{(window as any).__copiedPath=text;}},configurable:true});
+  });
+  const target='el-agente-cloud-infrastructure/docs/work-plan/compute-run-runtime-protocol-design.md';
+  await installApiRoutes(page,()=>detail('codex',{thread:{status:'idle',activeTurnId:null},turns:[{id:'turn-1',status:'completed',startedAt:now,items:[{id:'user',kind:'userMessage',text:'Review the design'},{id:'answer',kind:'agentMessage',text:`[Protocol design](/tmp/demo/${target})`}]}]}));
+  const dir=(path:string,children:any[]=[],loaded=false)=>({path,name:path.split('/').at(-1)||'Demo Workspace',kind:'directory',children,childrenLoaded:loaded,hasChildren:true});
+  const file=(path:string)=>({path,name:path.split('/').at(-1),kind:'file',children:[],size:50});
+  const reads:string[]=[];
+  await page.route('**/api/workspaces/workspace-1/files/**',async route=>{
+    const url=new URL(route.request().url());const path=url.searchParams.get('path')??'';
+    if(url.pathname.endsWith('/tree')) {
+      const children=path===''?[dir('docs'),dir('el-agente-cloud-infrastructure'),...Array.from({length:70},(_,i)=>file(`other-${i}.md`))]:path==='docs'?[file('docs/WRONG.md')]:path==='el-agente-cloud-infrastructure'?[dir('el-agente-cloud-infrastructure/docs')]:path.endsWith('/docs')?[dir('el-agente-cloud-infrastructure/docs/work-plan')]:[file(target)];
+      await route.fulfill({json:dir(path,children,true)});
+    } else if(url.pathname.endsWith('/preview')) {
+      reads.push(path);
+      await route.fulfill({json:{path,name:path.split('/').at(-1),content:path===target?'# CORRECT PROTOCOL DOCUMENT':'# WRONG DOCUMENT',language:'markdown',size:50,truncated:false,nextOffset:50}});
+    } else await route.fulfill({status:404});
+  });
+  await page.goto('/threads/thread-1');
+  const link=page.getByRole('link',{name:'Protocol design',exact:true});
+  await expect(link).toHaveAttribute('href',`./${target}`);
+  await expect(link).toHaveAttribute('title',`./${target}`);
+  await link.dispatchEvent('contextmenu',{clientX:100,clientY:100});
+  await page.getByRole('menuitem',{name:'Copy link address',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__copiedPath)).toBe(`./${target}`);
+  await link.click();
+  await expect(page.getByRole('heading',{name:'CORRECT PROTOCOL DOCUMENT'})).toBeVisible();
+  expect(reads).toEqual([target]);
+  const row=page.getByRole('treeitem').filter({hasText:'compute-run-runtime-protocol-design.md'});
+  await expect(row).toHaveAttribute('aria-selected','true');
+  await expect(row).toBeVisible();
+  await row.hover();
+  await row.getByRole('button',{name:'Copy path for compute-run-runtime-protocol-design.md',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__copiedPath)).toBe(`./${target}`);
+  await expect(page.getByRole('heading',{name:'WRONG DOCUMENT'})).toHaveCount(0);
+  await page.screenshot({path:testInfo.outputPath('correct-workspace-link.png')});
+});
+
+test('running operation batches stay after earlier replies and show a live timestamp range', async ({page},testInfo) => {
+  await installFakeWebSocket(page);
+  const at=(seconds:number)=>new Date(Date.parse(now)+seconds*1000).toISOString();
+  let finished=false;
+  const items=[
+    {id:'u',kind:'userMessage',text:'Build the protocol',createdAt:now},
+    {id:'r1',kind:'reasoning',text:'Before checkpoint',createdAt:at(1)},
+    {id:'c1',kind:'commandExecution',text:'echo first',status:'completed',createdAt:at(5)},
+    {id:'checkpoint',kind:'agentMessage',phase:'commentary',text:'Start implementing Slice 1',createdAt:at(10)},
+    {id:'r2',kind:'reasoning',text:'After checkpoint',createdAt:at(11)},
+    {id:'c2',kind:'commandExecution',text:'echo latest',status:'completed',createdAt:at(25)},
+  ];
+  await installApiRoutes(page,()=>detail('codex',{thread:{status:finished?'idle':'running',activeTurnId:finished?null:'turn-1'},turns:[{id:'turn-1',status:finished?'completed':'inProgress',startedAt:now,items:finished?[...items,{id:'final',kind:'agentMessage',text:'All done',createdAt:at(30)}]:items}]}));
+  await page.goto('/threads/thread-1');
+  const expand=page.getByRole('button',{name:/Expand turn 1/});
+  await expand.click();
+  const checkpoint=page.getByText('Start implementing Slice 1',{exact:true});
+  const batch=page.locator('.thread-graph-history-group-activity').last();
+  await expect(checkpoint).toBeVisible();
+  await expect(batch).toHaveClass(/is-running-batch/);
+  expect((await checkpoint.boundingBox())!.y).toBeLessThan((await batch.boundingBox())!.y);
+  await expect(batch.locator('.thread-graph-relative-time').first()).toHaveText('11s – 25s');
+  expect(await batch.locator('.thread-graph-history-group-verb').evaluate(el=>getComputedStyle(el).animationName)).toBe('thread-operation-sheen');
+  await page.screenshot({path:testInfo.outputPath('ordered-live-batches.png')});
+  finished=true;
+  await page.reload();
+  await expect(page.getByText('All done',{exact:true})).toBeVisible();
+  await expect(page.locator('.is-running-batch')).toHaveCount(0);
+});
+
+test('completed commands stop running immediately and survive stale snapshots', async ({page}) => {
+  await installFakeWebSocket(page);
+  const command={id:'cmd',kind:'commandExecution',text:'grep source',detailText:'Long incremental output from the command',status:'running',createdAt:now};
+  await installApiRoutes(page,()=>detail('codex',{thread:{status:'running',activeTurnId:'turn-1'},turns:[{id:'turn-1',status:'inProgress',startedAt:now,items:[{id:'user',kind:'userMessage',text:'Check command completion'},command]}]}));
+  await page.goto('/threads/thread-1');
+  await waitForSocketReady(page);
+  await page.getByRole('button',{name:/Expand turn 1/}).click();
+  // Started payload contains more text than the terminal status update.
+  const emit=async (item:typeof command,type:string)=>emitSocketMessage(page,{type,threadId:'thread-1',timestamp:now,payload:{turnId:'turn-1',item}});
+  await emit(command,'thread.item.started');
+  await expect(page.getByText('running',{exact:true}).first()).toBeVisible();
+  await emit({...command,detailText:'',status:'completed'},'thread.item.completed');
+  await expect(page.getByText('running',{exact:true})).toHaveCount(0);
+  await emit(command,'thread.item.started');
+  await expect(page.getByText('running',{exact:true})).toHaveCount(0);
+  await emitSocketMessage(page,{type:'thread.updated',threadId:'thread-1',timestamp:now,payload:{status:'running'}});
+  await expect(page.getByText('running',{exact:true})).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer .animate-pulse').first()).toBeVisible();
 });

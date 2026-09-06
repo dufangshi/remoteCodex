@@ -1200,7 +1200,7 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
 
         let html = client
             .get(format!(
-                "{base}/api/threads/{thread_id}/exports/pdf?format=html&mode=latest&limit=10"
+                "{base}/api/threads/{thread_id}/exports/html?format=html&mode=latest&limit=10"
             ))
             .send()
             .await
@@ -1227,21 +1227,7 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
             .send()
             .await
             .unwrap();
-        assert_eq!(pdf.status(), 200);
-        assert_eq!(
-            pdf.headers().get("content-type").unwrap(),
-            "application/pdf"
-        );
-        assert!(pdf
-            .headers()
-            .get("content-disposition")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .ends_with(".pdf\""));
-        let pdf_body = pdf.bytes().await.unwrap();
-        assert!(pdf_body.starts_with(b"%PDF-"));
-        assert!(pdf_body.ends_with(b"%%EOF"));
+        assert_eq!(pdf.status(), 404);
     }
 
     let long = json(

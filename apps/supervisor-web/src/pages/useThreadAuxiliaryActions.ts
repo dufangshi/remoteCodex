@@ -19,7 +19,6 @@ import type {
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
-  buildThreadPdfExportUrl,
   clearThreadGoal,
   createThreadHook,
   fetchThreadExportTurns,
@@ -34,7 +33,7 @@ import {
   updateThreadGoal,
   updateThreadHook,
 } from '../lib/api';
-import { loadExportSnapshot, renderStandaloneTranscript, openTranscriptPrintWindow, printTranscript } from '../lib/transcriptExport';
+import { loadExportSnapshot, renderStandaloneTranscript } from '../lib/transcriptExport';
 import { currentThreadHref } from '../lib/relayRoutes';
 import { mergeGoalHistory, mergeThreadIntoList } from './threadDetailModel';
 
@@ -137,7 +136,7 @@ export function useThreadAuxiliaryActions({
   }, [id]);
 
   async function handleExportTranscript(
-    input: Parameters<typeof buildThreadPdfExportUrl>[1],
+    input: import('@remote-codex/shared').ExportThreadTranscriptInput,
   ) {
     if (!id) {
       return;
@@ -146,16 +145,9 @@ export function useThreadAuxiliaryActions({
     setError(null);
     setExportBusy(true);
 
-    let preview: Window | null = null;
     try {
-      if (input.format !== 'html') preview = openTranscriptPrintWindow();
       const snapshot = await loadExportSnapshot(id, input);
       const html = await renderStandaloneTranscript(snapshot);
-      if (preview) {
-        await printTranscript(preview, html);
-        setExportDialogOpen(false);
-        return;
-      }
       const filename = `remote-codex-${snapshot.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'thread'}.html`;
       const href = URL.createObjectURL(
         new Blob([html], { type: 'text/html;charset=utf-8' }),
@@ -169,7 +161,6 @@ export function useThreadAuxiliaryActions({
       window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
       setExportDialogOpen(false);
     } catch (requestError) {
-      preview?.close();
       const message =
         requestError instanceof ApiError
           ? requestError.payload.message

@@ -1,5 +1,6 @@
 import {
   mergeLatestThreadTurns,
+  mergeThreadHistoryItem,
   prependEarlierThreadTurns,
   type ModelOptionDto,
   type ThreadDetailDto,
@@ -228,23 +229,7 @@ export function mergeLiveHistoryItem(
     return nextItem;
   };
 
-  if (current.kind === 'agentMessage' && incoming.kind === 'agentMessage') {
-    return mergeOrderingHints(
-      current.text.length > incoming.text.length
-        ? {
-            ...incoming,
-            text: current.text,
-            sequence: incoming.sequence ?? current.sequence ?? null,
-          }
-        : incoming,
-    );
-  }
-
-  const currentText = current.detailText?.trim() || current.text.trim();
-  const incomingText = incoming.detailText?.trim() || incoming.text.trim();
-  return mergeOrderingHints(
-    currentText.length > incomingText.length ? current : incoming,
-  );
+  return mergeOrderingHints(mergeThreadHistoryItem(current, incoming));
 }
 
 export function reconcileLiveItemsWithDetail(
@@ -285,6 +270,9 @@ export function reconcileLiveItemsWithDetail(
         Number.isFinite(item.sequence) &&
         materialized.sequence !== item.sequence)
     ) {
+      return false;
+    }
+    if (mergeThreadHistoryItem(item, materialized).status !== materialized.status) {
       return false;
     }
     // A response fetched before the latest delta can contain the same item ID

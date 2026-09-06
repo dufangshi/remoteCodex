@@ -150,10 +150,7 @@ test('owner manages member permissions and immutable public links survive device
     ).toBeVisible();
     const portal = await api<any>(relayBase, '/relay/portal', { headers });
     expect(portal.sharedByMe[0].workspaceAccess).toBe('write');
-    await dialog.getByRole('button', { name: 'PDF', exact: true }).click();
-    await expect(
-      dialog.getByRole('button', { name: 'Export PDF', exact: true }),
-    ).toBeVisible();
+    await expect(dialog.getByRole('button', {name:'PDF',exact:true})).toHaveCount(0);
     await dialog.getByRole('button', { name: 'HTML', exact: true }).click();
     await expect(
       dialog.getByRole('button', { name: 'Export HTML', exact: true }),

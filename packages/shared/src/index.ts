@@ -1542,9 +1542,9 @@ export interface ThreadExportTurnOptionsDto {
 
 export type ThreadExportPdfModeDto = 'latest' | 'selected';
 export type ThreadExportPdfProfileDto = 'review' | 'technical';
-export type ThreadExportFormatDto = 'pdf' | 'html';
+export type ThreadExportFormatDto = 'html';
 
-export interface ExportThreadPdfInput {
+export interface ExportThreadTranscriptInput {
   format?: ThreadExportFormatDto;
   mode: ThreadExportPdfModeDto;
   limit?: number;
@@ -1896,3 +1896,30 @@ export type SupervisorSocketClientEnvelope =
       shellId: string;
       viewerId: string;
     };
+
+
+/** Text can arrive as a shorter summary; operation lifecycle must still advance. */
+export function mergeThreadHistoryItem(
+  current: ThreadHistoryItemDto | undefined,
+  incoming: ThreadHistoryItemDto,
+): ThreadHistoryItemDto {
+  if (!current || current.kind !== incoming.kind) return incoming;
+  const terminal = (status: string | null | undefined) =>
+    ['completed', 'failed', 'interrupted', 'cancelled', 'canceled'].includes(status?.toLowerCase() ?? '');
+  const richer = (previous: string | null | undefined, next: string | null | undefined) =>
+    (previous?.length ?? 0) > (next?.length ?? 0) ? previous : next ?? previous;
+  return {
+    ...current,
+    ...incoming,
+    text: richer(current.text, incoming.text) ?? '',
+    ...(current.detailText != null || incoming.detailText != null
+      ? { detailText: richer(current.detailText, incoming.detailText) ?? '' } : {}),
+    ...(current.previewText != null || incoming.previewText != null
+      ? { previewText: richer(current.previewText, incoming.previewText) ?? '' } : {}),
+    ...(current.status != null || incoming.status != null
+      ? { status: terminal(current.status) && !terminal(incoming.status)
+        ? current.status : incoming.status ?? current.status } : {}),
+    ...(current.sequence != null || incoming.sequence != null
+      ? { sequence: incoming.sequence ?? current.sequence } : {}),
+  };
+}

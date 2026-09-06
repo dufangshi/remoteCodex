@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ThreadDetailDto, ThreadHistoryItemDto, ThreadTurnDto } from '@remote-codex/shared';
-import { resolveThreadContextUsage, appendLatestTurns, appendLiveAgentDeltaToItems, reconcileLiveItemsWithDetail } from './threadDetailModel';
+import { mergeLiveHistoryItem, resolveThreadContextUsage, appendLatestTurns, appendLiveAgentDeltaToItems, reconcileLiveItemsWithDetail } from './threadDetailModel';
 
 const startedAt = '2026-09-05T00:00:00.000Z';
 
@@ -171,5 +171,22 @@ describe('context compatibility', () => {
     expect(resolveThreadContextUsage(detail)).toMatchObject({tokensInContextWindow:120000,remainingPercent:88});
     detail.turns[0]!.tokenUsage!.modelContextWindow = null;
     expect(resolveThreadContextUsage(detail)).toBeUndefined();
+  });
+});
+
+
+describe('command lifecycle reconciliation', () => {
+  it('accepts completion independently of output length and ignores a delayed start', () => {
+    const running: ThreadHistoryItemDto = {id:'cmd',kind:'commandExecution',text:'grep source',detailText:'long incremental output',status:'running'};
+    const completed = mergeLiveHistoryItem(running, {...running, detailText:'', status:'completed'});
+    expect(completed.status).toBe('completed');
+    expect(completed.detailText).toBe(running.detailText);
+    expect(mergeLiveHistoryItem(completed, running).status).toBe('completed');
+    expect(mergeLiveHistoryItem(running, {...running, detailText:'', status:'failed'}).status).toBe('failed');
+  });
+  it('keeps a completed live item until an older persisted running snapshot catches up', () => {
+    const completed: ThreadHistoryItemDto = {id:'cmd',kind:'commandExecution',text:'grep source',status:'completed'};
+    expect(reconcileLiveItemsWithDetail(live([completed]), null, [turn([{...completed,status:'running'}])])?.items[0]?.status).toBe('completed');
+    expect(reconcileLiveItemsWithDetail(live([completed]), null, [turn([completed])])).toBeNull();
   });
 });
