@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
+use crate::bounded_channel as mpsc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{now_rfc3339, SupervisorConnectedEnvelope};
 use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub(crate) struct SocketSession {
-    input: mpsc::UnboundedSender<Value>,
+    input: mpsc::Sender<Value>,
     task: tokio::task::JoinHandle<()>,
 }
 
 impl SocketSession {
-    pub(crate) fn spawn(state: Arc<Supervisor>, output: mpsc::UnboundedSender<Value>) -> Self {
-        let (input, incoming) = mpsc::unbounded_channel();
+    pub(crate) fn spawn(state: Arc<Supervisor>, output: mpsc::Sender<Value>) -> Self {
+        let (input, incoming) = mpsc::channel();
         let task = tokio::spawn(run_socket_session(state, incoming, output));
         Self { input, task }
     }
@@ -32,7 +32,7 @@ impl Drop for SocketSession {
 }
 
 pub(crate) async fn websocket_loop(socket: WebSocket, state: Arc<Supervisor>) {
-    let (output, mut outgoing) = mpsc::unbounded_channel();
+    let (output, mut outgoing) = mpsc::channel();
     let session = SocketSession::spawn(state, output);
     let (mut sink, mut stream) = socket.split();
 
@@ -66,8 +66,8 @@ pub(crate) async fn websocket_loop(socket: WebSocket, state: Arc<Supervisor>) {
 
 async fn run_socket_session(
     state: Arc<Supervisor>,
-    mut incoming: mpsc::UnboundedReceiver<Value>,
-    output: mpsc::UnboundedSender<Value>,
+    mut incoming: mpsc::Receiver<Value>,
+    output: mpsc::Sender<Value>,
 ) {
     let mut client_state = SocketClientState::default();
     let mut events = state.bus.subscribe();
@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn channel_session_matches_websocket_ping_and_event_behavior() {
         let (_directory, state) = state();
-        let (output, mut outgoing) = mpsc::unbounded_channel();
+        let (output, mut outgoing) = mpsc::channel();
         let session = SocketSession::spawn(state.clone(), output);
 
         let connected = outgoing.recv().await.unwrap();

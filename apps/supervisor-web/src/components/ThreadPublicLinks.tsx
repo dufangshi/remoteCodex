@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, Link2, Trash2, Check } from 'lucide-react';
 import { request } from '../lib/api';
+import { loadExportSnapshot } from '../lib/transcriptExport';
 interface SnapshotLink {
   id: string;
   createdAt: string;
@@ -35,11 +36,13 @@ export function ThreadPublicLinks({
     setBusy(true);
     setError('');
     try {
+      const snapshot = await loadExportSnapshot(threadId, { mode: 'latest', limit: 100 }, true);
       const link = await request<SnapshotLink>('/relay/thread-links', {
         method: 'POST',
         body: JSON.stringify({
           deviceId,
           threadId,
+          snapshot,
           theme:
             document.documentElement.getAttribute('data-theme-effective') ===
             'light'

@@ -1,0 +1,310 @@
+//! Authentication state is server-owned. Signed tokens without a live session
+//! record (including legacy sessions) intentionally require a new login.
+use anyhow::{bail, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::{rngs::OsRng, RngCore};
+use rusqlite::{params, Connection};
+use sha2::{Digest, Sha256};
+use std::{fs::OpenOptions, io::Write, path::Path};
+
+pub(crate) fn random_token() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+pub(crate) fn token_hash(token: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes()))
+}
+
+pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS relay_security_events (id INTEGER PRIMARY KEY, user_id TEXT, event TEXT NOT NULL, resource_id TEXT, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS relay_auth_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        strong_auth_at INTEGER,
+        environment TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS relay_oauth_challenges (
+        state_hash TEXT PRIMARY KEY, browser_hash TEXT NOT NULL, verifier TEXT NOT NULL,
+        callback TEXT NOT NULL, expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS relay_auth_sessions_user ON relay_auth_sessions(user_id);
+    CREATE TRIGGER IF NOT EXISTS relay_password_revoke_sessions AFTER UPDATE OF password_hash ON relay_users
+    BEGIN DELETE FROM relay_auth_sessions WHERE user_id=NEW.id; END;
+    CREATE TRIGGER IF NOT EXISTS relay_disabled_revoke_sessions AFTER UPDATE OF enabled ON relay_users
+    WHEN NEW.enabled=0 BEGIN DELETE FROM relay_auth_sessions WHERE user_id=NEW.id; END;
+    UPDATE relay_devices SET token=NULL WHERE token IS NOT NULL;")?;
+    if conn
+        .prepare("SELECT trusted_browser_id FROM relay_auth_sessions LIMIT 0")
+        .is_err()
+    {
+        conn.execute(
+            "ALTER TABLE relay_auth_sessions ADD COLUMN trusted_browser_id TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn revoke_session(conn: &Connection, token: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM relay_auth_sessions WHERE token_hash=?1",
+        params![token_hash(token)],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn session_secret(data_dir: &Path) -> Result<String> {
+    if let Ok(secret) = std::env::var("REMOTE_CODEX_RELAY_SESSION_SECRET") {
+        if secret.len() < 32 {
+            bail!("REMOTE_CODEX_RELAY_SESSION_SECRET must contain at least 32 characters");
+        }
+        return Ok(secret);
+    }
+    std::fs::create_dir_all(data_dir)?;
+    let path = data_dir.join("session-secret");
+    if path.exists() {
+        let secret = std::fs::read_to_string(path)?.trim().to_owned();
+        if secret.len() < 32 {
+            bail!("Persisted relay session-secret is invalid; restore its backup");
+        }
+        return Ok(secret);
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    let secret = random_token();
+    file.write_all(secret.as_bytes())?;
+    file.sync_all()?;
+    Ok(secret)
+}
+
+pub(crate) fn origin_allowed(headers: &axum::http::HeaderMap, public_base: Option<&str>) -> bool {
+    let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let Ok(origin) = url::Url::parse(origin) else {
+        return false;
+    };
+    if !matches!(origin.scheme(), "http" | "https") || origin.host_str().is_none() {
+        return false;
+    }
+    if let Some(base) = public_base {
+        return url::Url::parse(base).is_ok_and(|base| base.origin() == origin.origin());
+    }
+    let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    // Host is the requested server authority. Never use arbitrary forwarded-host.
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    url::Url::parse(&format!("{scheme}://{host}"))
+        .is_ok_and(|base| base.origin() == origin.origin())
+}
+
+pub(crate) async fn browser_security(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<super::AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::{
+        http::{header, Method, StatusCode},
+        response::IntoResponse,
+    };
+    let headers = request.headers();
+    if request.uri().path().starts_with("/relay/auth/") && request.method() != Method::GET {
+        let peer = request
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|p| p.0.ip().to_string())
+            .unwrap_or_else(|| "unknown".into());
+        if !state.admission.allow(format!("auth-ip:{peer}"), 120, 60) {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+    }
+    let websocket = headers
+        .get("upgrade")
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+    let mutation = !matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
+    let has_origin = headers.contains_key("origin");
+    let authenticated_native = super::bearer_token(headers).is_some();
+    let cross_site = headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| v == "cross-site");
+    if (mutation || websocket)
+        && ((has_origin && !origin_allowed(headers, state.oauth.public_base_url.as_deref()))
+            || cross_site
+            || (websocket && !has_origin && !authenticated_native))
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(
+                serde_json::json!({"code":"forbidden","message":"Request origin is not allowed"}),
+            ),
+        )
+            .into_response();
+    }
+    // A cookie-authenticated mutation must prove same-origin, even for requests
+    // which avoid CORS preflight. Explicit native bearer clients have no cookies.
+    if mutation
+        && (super::relay_cookie(headers).is_some()
+            || cookie(headers, "remote_codex_relay_admin_session").is_some())
+        && !authenticated_native
+        && !has_origin
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let transport_worker = request
+        .uri()
+        .path()
+        .starts_with("/assets/relayServiceWorker-");
+    let mut response = next.run(request).await;
+    let h = response.headers_mut();
+    if transport_worker {
+        h.insert("service-worker-allowed", "/".parse().unwrap());
+    }
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    h.insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+    h.insert(header::X_FRAME_OPTIONS, "DENY".parse().unwrap());
+    let bootstrap = super::RELAY_BOOTSTRAP
+        .trim_start_matches("<script>")
+        .trim_end_matches("</script>");
+    let bootstrap_hash =
+        base64::engine::general_purpose::STANDARD.encode(Sha256::digest(bootstrap.as_bytes()));
+    h.entry(header::CONTENT_SECURITY_POLICY).or_insert(format!("default-src 'self'; script-src 'self' 'sha256-{bootstrap_hash}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'").parse().unwrap());
+    if h.contains_key(header::SET_COOKIE) {
+        h.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    }
+    if state
+        .oauth
+        .public_base_url
+        .as_deref()
+        .is_some_and(|u| u.starts_with("https://"))
+    {
+        h.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            "max-age=31536000".parse().unwrap(),
+        );
+    }
+    response
+}
+
+pub(crate) fn cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get("cookie")?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|part| {
+            let (key, value) = part.trim().split_once('=')?;
+            (key == name && !value.is_empty()).then(|| value.to_string())
+        })
+}
+
+pub(crate) fn start_oauth(
+    conn: &Connection,
+    state: &str,
+    callback: &str,
+) -> Result<(String, String)> {
+    let browser = random_token();
+    let verifier = random_token();
+    let now = chrono::Utc::now().timestamp_millis();
+    conn.execute(
+        "DELETE FROM relay_oauth_challenges WHERE expires_at<=?1",
+        params![now],
+    )?;
+    let count: i64 = conn.query_row("SELECT count(*) FROM relay_oauth_challenges", [], |r| {
+        r.get(0)
+    })?;
+    if count >= 4096 {
+        bail!("Too many pending OAuth logins");
+    }
+    conn.execute("INSERT INTO relay_oauth_challenges(state_hash,browser_hash,verifier,callback,expires_at) VALUES (?1,?2,?3,?4,?5)",
+        params![token_hash(state), token_hash(&browser), verifier, callback, now + 600_000])?;
+    Ok((browser, verifier))
+}
+
+pub(crate) fn consume_oauth(
+    conn: &Connection,
+    state: &str,
+    browser: &str,
+) -> Option<(String, String)> {
+    conn.query_row("DELETE FROM relay_oauth_challenges WHERE state_hash=?1 AND browser_hash=?2 AND expires_at>?3 RETURNING verifier,callback",
+        params![token_hash(state), token_hash(browser), chrono::Utc::now().timestamp_millis()],
+        |r| Ok((r.get(0)?, r.get(1)?))).ok()
+}
+
+/// Process-local admission bounds supplement the durable per-challenge limits.
+/// Peer addresses come from the listener, never untrusted forwarding headers.
+#[derive(Default)]
+pub(crate) struct Admission {
+    buckets: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>,
+}
+impl Admission {
+    pub fn allow(&self, key: String, limit: u32, seconds: u64) -> bool {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        buckets.retain(|_, (start, _)| now.duration_since(*start).as_secs() < 600);
+        if buckets.len() >= 8192 && !buckets.contains_key(&key) {
+            return false;
+        }
+        let (start, count) = buckets.entry(key).or_insert((now, 0));
+        if now.duration_since(*start).as_secs() >= seconds {
+            *start = now;
+            *count = 0;
+        }
+        if *count >= limit {
+            return false;
+        }
+        *count += 1;
+        true
+    }
+}
+
+// Deliberately no passwords, tokens, OTPs, request bodies, or raw user agents.
+pub(crate) fn audit(conn: &Connection, user: Option<&str>, event: &str, resource: Option<&str>) {
+    let now = chrono::Utc::now().timestamp_millis();
+    if conn.execute("INSERT INTO relay_security_events(user_id,event,resource_id,created_at) VALUES (?1,?2,?3,?4)",params![user,event,resource,now]).is_err() {tracing::warn!(event,"Security audit write failed");}
+    let _=conn.execute("DELETE FROM relay_security_events WHERE id IN (SELECT id FROM relay_security_events ORDER BY id DESC LIMIT -1 OFFSET 10000)",[]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn oauth_requires_original_browser_and_is_single_use() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE relay_oauth_challenges(state_hash TEXT PRIMARY KEY,browser_hash TEXT,verifier TEXT,callback TEXT,expires_at INTEGER)").unwrap();
+        let (browser, verifier) =
+            start_oauth(&conn, "state", "https://relay.example/callback").unwrap();
+        assert!(consume_oauth(&conn, "state", "another browser").is_none());
+        let result = consume_oauth(&conn, "state", &browser).unwrap();
+        assert_eq!(result, (verifier, "https://relay.example/callback".into()));
+        assert!(consume_oauth(&conn, "state", &browser).is_none());
+    }
+    #[test]
+    fn configured_origin_is_not_overridden_by_proxy_headers() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("host", "attacker.example".parse().unwrap());
+        headers.insert("x-forwarded-host", "relay.example".parse().unwrap());
+        headers.insert("origin", "https://attacker.example".parse().unwrap());
+        assert!(!origin_allowed(&headers, Some("https://relay.example")));
+        headers.insert("origin", "https://relay.example".parse().unwrap());
+        assert!(origin_allowed(&headers, Some("https://relay.example")));
+        headers.insert("origin", "null".parse().unwrap());
+        assert!(!origin_allowed(&headers, Some("https://relay.example")));
+    }
+}

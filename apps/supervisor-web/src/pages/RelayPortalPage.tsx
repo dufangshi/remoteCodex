@@ -1,3 +1,4 @@
+import { LoginVerification, usePendingLogin } from '../components/RelaySecurity';
 import { ArrowLeft, BookOpen, Eye, EyeOff } from 'lucide-react';
 import {
   FormEvent,
@@ -224,6 +225,7 @@ function RelayAuthPanel({
   const registerTabId = useId();
   const panelId = useId();
   const [mode, setMode] = useState<AuthMode>('login');
+  const [challenge, setChallenge] = usePendingLogin();
   const [identifier, setIdentifier] = useState('');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -281,7 +283,12 @@ function RelayAuthPanel({
     setNotice(null);
     try {
       if (mode === 'login') {
-        await relayLogin({ identifier, password });
+        const result = await relayLogin({ identifier, password });
+        setPassword('');
+        if (result.challengeRequired) {
+          setChallenge({ challengeRequired: true, authenticator: Boolean(result.authenticator), passkey: Boolean(result.passkey) });
+          return;
+        }
       } else {
         if (password.length < 8) {
           setError('Password must be at least 8 characters.');
@@ -313,6 +320,8 @@ function RelayAuthPanel({
       setSubmitting(false);
     }
   }
+
+  if (challenge) return <LoginVerification challenge={challenge} onSuccess={onAuthenticated} onBack={() => setChallenge(null)} />;
 
   return (
     <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">

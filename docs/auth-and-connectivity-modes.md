@@ -87,7 +87,7 @@ On the public server, run the relay server:
 npm install -g remote-codex
 REMOTE_CODEX_ADMIN_USERNAME=admin
 REMOTE_CODEX_ADMIN_PASSWORD=change-me-now
-REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters
+REMOTE_CODEX_RELAY_SESSION_SECRET=replace-with-at-least-32-random-characters
 REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay
 REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true
 HOST=0.0.0.0
@@ -272,3 +272,5 @@ Those capabilities should be added on top of the same outbound tunnel rather tha
 - Do not reuse the admin password as `REMOTE_CODEX_SESSION_SECRET`.
 - Keep destructive actions behind existing confirmation flows even after login.
 - For mobile apps, store tokens in Keychain or Android Keystore.
+
+Relay MFA, trusted browsers, device fingerprints, encrypted transport, and upgrade recovery are described in the [security operations guide](./relay-security-operations.zh.md). Persist the relay session secret alongside a secure database backup: it also derives the key protecting authenticator secrets.

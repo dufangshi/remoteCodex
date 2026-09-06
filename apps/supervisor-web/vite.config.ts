@@ -79,6 +79,7 @@ export default defineConfig(({ mode }) => {
   });
 
   return {
+    worker: { format: 'es' },
     plugins: [
       react(),
       tailwindcss(),

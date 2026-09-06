@@ -1,3 +1,4 @@
+import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -3342,10 +3343,11 @@ export function ThreadDetailPage() {
     () => (
       <div className="flex items-center justify-end gap-2">
         {relayAccessBadge}
+        {relayRouteDeviceId && <DeviceEncryptionStatus deviceId={relayRouteDeviceId} />}
         {desktopSessionConnectionIndicator}
       </div>
     ),
-    [desktopSessionConnectionIndicator, relayAccessBadge],
+    [desktopSessionConnectionIndicator, relayAccessBadge, relayRouteDeviceId],
   );
   const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
     () => ({
@@ -3681,7 +3683,7 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       settingsContent={settingsContent}
       globalSettingsContent={<AppShellSettingsDialog embedded />}
-      mobileHeaderAction={mobileSessionConnectionButton}
+      mobileHeaderAction={<>{relayRouteDeviceId && <DeviceEncryptionStatus deviceId={relayRouteDeviceId} />}{mobileSessionConnectionButton}</>}
       workspaceReturnHref={workspaceReturnHref}
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
       threadActionsButton={threadActionsButton}

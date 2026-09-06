@@ -24,11 +24,16 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tower-http.workspace = true
+tower = { version = "0.5", features = ["util"] }
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+hpke = { version = "0.13", default-features = false, features = ["std", "p256"] }
+aes-gcm = "0.10"
+p256 = { version = "0.13", features = ["ecdsa"] }
 
 [dev-dependencies]
+rand09 = { package = "rand", version = "0.9" }
 tempfile = "3"
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
 zip.workspace = true

@@ -1,3 +1,4 @@
+import { LoginVerification, RelaySecurityPanel, usePendingLogin } from '../components/RelaySecurity';
 import {
   FormEvent,
   useEffect,
@@ -77,7 +78,8 @@ type AdminTab =
   | 'devices'
   | 'hosted'
   | 'shares'
-  | 'settings';
+  | 'settings'
+  | 'security';
 const adminTabs: AdminTab[] = [
   'overview',
   'users',
@@ -85,6 +87,7 @@ const adminTabs: AdminTab[] = [
   'hosted',
   'shares',
   'settings',
+  'security',
 ];
 type SortDirection = 'asc' | 'desc';
 type UserSortKey =
@@ -136,6 +139,7 @@ export function RelayAdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [unsupportedStatus, setUnsupportedStatus] = useState<number | null>(null);
+  const [challenge,setChallenge]=usePendingLogin();
   const [loginRequired, setLoginRequired] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>(() =>
@@ -440,6 +444,7 @@ export function RelayAdminPage() {
     password: string;
   }) {
     const result = await relayAdminLogin(input);
+    if(result.challengeRequired){setChallenge({challengeRequired:true,authenticator:Boolean(result.authenticator),passkey:Boolean(result.passkey)});return;}
     if (!result.session.authenticated || result.session.user?.role !== 'admin') {
       throw new Error('This account does not have relay admin access.');
     }
@@ -482,6 +487,8 @@ export function RelayAdminPage() {
       document.getElementById(`relay-admin-tab-${nextTab}`)?.focus();
     });
   }
+
+  if (challenge) return <main className="flex min-h-screen items-center justify-center p-4"><LoginVerification challenge={challenge} onBack={()=>setChallenge(null)} onSuccess={async()=>{setChallenge(null);setAdminSession(await fetchRelayAdminSession());await load(days);}}/></main>;
 
   if (loginRequired) {
     return (
@@ -682,6 +689,7 @@ export function RelayAdminPage() {
                   users={summary.users}
                 />
               ) : null}
+              {tab === 'security' ? <RelaySecurityPanel realm="relay-admin" /> : null}
               {tab === 'shares' ? <SharesTable shares={summary.shares} /> : null}
               {tab === 'settings' && settingsDraft ? (
                 <SettingsPanel
@@ -3134,6 +3142,7 @@ function replaceAdminUser(
 }
 
 function tabLabel(tab: AdminTab) {
+  if(tab==='security')return 'Security';
   switch (tab) {
     case 'overview':
       return 'Overview';

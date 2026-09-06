@@ -196,6 +196,7 @@ impl OAuthConfig {
         provider: OAuthProvider,
         callback_url: &str,
         state: &str,
+        verifier: &str,
     ) -> Result<String> {
         let credentials = self.credentials(provider).ok_or_else(|| {
             anyhow!(
@@ -214,6 +215,8 @@ impl OAuthConfig {
             query.append_pair("redirect_uri", callback_url);
             query.append_pair("response_type", "code");
             query.append_pair("state", state);
+            query.append_pair("code_challenge", &crate::security::token_hash(verifier));
+            query.append_pair("code_challenge_method", "S256");
             query.append_pair(
                 "scope",
                 match provider {
@@ -234,10 +237,17 @@ impl OAuthConfig {
         provider: OAuthProvider,
         code: &str,
         callback_url: &str,
+        verifier: &str,
     ) -> Result<ExternalIdentity> {
         match provider {
-            OAuthProvider::Google => self.fetch_google(client, code, callback_url).await,
-            OAuthProvider::Github => self.fetch_github(client, code, callback_url).await,
+            OAuthProvider::Google => {
+                self.fetch_google(client, code, callback_url, verifier)
+                    .await
+            }
+            OAuthProvider::Github => {
+                self.fetch_github(client, code, callback_url, verifier)
+                    .await
+            }
         }
     }
 
@@ -246,6 +256,7 @@ impl OAuthConfig {
         client: &Client,
         code: &str,
         callback_url: &str,
+        verifier: &str,
     ) -> Result<ExternalIdentity> {
         let credentials = self
             .google
@@ -253,6 +264,7 @@ impl OAuthConfig {
             .ok_or_else(|| anyhow!("Google OAuth credentials are not configured"))?;
         let body = form_body(&[
             ("code", code),
+            ("code_verifier", verifier),
             ("client_id", &credentials.client_id),
             ("client_secret", &credentials.client_secret),
             ("redirect_uri", callback_url),
@@ -304,6 +316,7 @@ impl OAuthConfig {
         client: &Client,
         code: &str,
         callback_url: &str,
+        verifier: &str,
     ) -> Result<ExternalIdentity> {
         let credentials = self
             .github
@@ -311,6 +324,7 @@ impl OAuthConfig {
             .ok_or_else(|| anyhow!("GitHub OAuth credentials are not configured"))?;
         let body = form_body(&[
             ("code", code),
+            ("code_verifier", verifier),
             ("client_id", &credentials.client_id),
             ("client_secret", &credentials.client_secret),
             ("redirect_uri", callback_url),
@@ -589,6 +603,7 @@ mod tests {
                 OAuthProvider::Google,
                 "code",
                 "https://relay.example.test/relay/auth/oauth/google/callback",
+                "test-verifier",
             )
             .await
             .unwrap();
@@ -602,6 +617,7 @@ mod tests {
                 OAuthProvider::Github,
                 "code",
                 "https://relay.example.test/relay/auth/oauth/github/callback",
+                "test-verifier",
             )
             .await
             .unwrap();

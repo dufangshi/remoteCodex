@@ -1,3 +1,4 @@
+import { encryptedBrowserFetch, encryptedRelaySocket } from './relayTransport';
 import type {
   ApplyProviderHostConfigArchiveResultDto,
   AgentBackendDto,
@@ -159,47 +160,20 @@ export function setStoredAuthToken(token: string | null) {
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 }
 
-function readStoredRelayToken() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  return window.localStorage.getItem(RELAY_TOKEN_STORAGE_KEY);
+// Relay credentials live only in HttpOnly cookies. Clear legacy bearer copies
+// during migration; never place long-lived credentials in storage or asset URLs.
+function readStoredRelayToken(): null {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(RELAY_TOKEN_STORAGE_KEY);
+  return null;
 }
 
-function readStoredRelayAdminToken() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  return window.localStorage.getItem(RELAY_ADMIN_TOKEN_STORAGE_KEY);
+function readStoredRelayAdminToken(): null {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(RELAY_ADMIN_TOKEN_STORAGE_KEY);
+  return null;
 }
 
-export function setStoredRelayToken(token: string | null) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (token) {
-    window.localStorage.setItem(RELAY_TOKEN_STORAGE_KEY, token);
-    return;
-  }
-
-  window.localStorage.removeItem(RELAY_TOKEN_STORAGE_KEY);
-}
-
-export function setStoredRelayAdminToken(token: string | null) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (token) {
-    window.localStorage.setItem(RELAY_ADMIN_TOKEN_STORAGE_KEY, token);
-    return;
-  }
-
-  window.localStorage.removeItem(RELAY_ADMIN_TOKEN_STORAGE_KEY);
-}
+export function setStoredRelayToken(_token: string | null) { readStoredRelayToken(); }
+export function setStoredRelayAdminToken(_token: string | null) { readStoredRelayAdminToken(); }
 
 function relayModeEnabled() {
   if (typeof window === 'undefined') {
@@ -434,6 +408,11 @@ async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
   }
 }
 
+function fetchApi(path: string, init: RequestInit) {
+  const url = apiPath(path);
+  return /^\/relay\/devices\/[^/]+\/api\//.test(url) ? encryptedBrowserFetch(url, init) : fetch(url, init);
+}
+
 export async function request<T>(
   input: RequestInfo,
   init?: RequestInit,
@@ -457,7 +436,7 @@ export async function request<T>(
   );
   let wakeAttempt = 0;
   while (true) {
-    const response = await fetch(apiPath(String(input)), requestInit);
+    const response = await fetchApi(String(input), requestInit);
     if (response.ok) {
       if (wakeAttempt > 0) {
         emitHostedVmWake({ state: 'connected', attempt: wakeAttempt });
@@ -509,7 +488,7 @@ async function downloadFile(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<FileDownloadResult> {
-  const response = await fetch(apiPath(String(input)), withAuthInit(init));
+  const response = await fetchApi(String(input), withAuthInit(init));
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -535,6 +514,7 @@ function withAuthInit(
   const relayMode = relayModeEnabled();
   if (authMode !== 'none' && !headers.has('Authorization')) {
     if (authMode === 'relay-admin') {
+      headers.set('X-Remote-Codex-Auth-Realm', 'admin');
       const relayAdminToken = readStoredRelayAdminToken();
       if (relayAdminToken) {
         headers.set('Authorization', `Bearer ${relayAdminToken}`);
@@ -552,10 +532,7 @@ function withAuthInit(
 
   return {
     ...init,
-    credentials:
-      authMode === 'relay-admin'
-        ? 'omit'
-        : (init.credentials ?? 'same-origin'),
+    credentials: init.credentials ?? 'same-origin',
     headers,
   };
 }
@@ -629,7 +606,7 @@ export async function relayLogin(input: {
     },
     { auth: 'none' },
   );
-  setStoredRelayToken(result.token);
+  setStoredRelayToken(result.token ?? null);
   return result;
 }
 
@@ -653,7 +630,6 @@ export async function relayAdminLogin(input: {
     '/relay/auth/login',
     {
       method: 'POST',
-      credentials: 'omit',
       body: JSON.stringify({
         identifier: input.username,
         password: input.password,
@@ -661,13 +637,14 @@ export async function relayAdminLogin(input: {
     },
     { auth: 'none' },
   );
-  setStoredRelayAdminToken(result.token);
+  setStoredRelayAdminToken(result.token ?? null);
   return result;
 }
 
 export async function relayAdminLogout() {
+  const result = await request<RelaySessionDto>('/relay/auth/logout', { method: 'POST' }, { auth: 'relay-admin' });
   setStoredRelayAdminToken(null);
-  return fetchRelayAdminSession();
+  return result;
 }
 
 export async function relayRegister(input: {
@@ -1754,7 +1731,7 @@ export function connectSupervisorEvents(
   onEvent: (event: ThreadEventEnvelope) => void,
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(buildSocketUrl(protocol));
+  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol)) : new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -1779,7 +1756,7 @@ export function connectShellSocket(
   } = {},
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(buildSocketUrl(protocol));
+  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol)) : new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {

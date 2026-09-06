@@ -1,6 +1,9 @@
+mod auth_api;
+mod auth_factors;
 mod hosted;
 mod oauth;
 mod public_links;
+mod security;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -461,6 +464,8 @@ impl RelayStore {
         )?;
         hosted::ensure_schema(&conn)?;
         migrate_legacy_rust_tables(&mut conn)?;
+        security::ensure_schema(&conn)?;
+        auth_factors::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             session_secret,
@@ -624,32 +629,34 @@ fn migrate_legacy_rust_tables(conn: &mut Connection) -> Result<()> {
 }
 
 struct DeviceSocket {
-    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: tokio::sync::mpsc::Sender<String>,
     connection_id: Uuid,
     connected_at: String,
     last_heartbeat_at: String,
 }
 
 struct ClientSocket {
-    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: tokio::sync::mpsc::Sender<String>,
     device_id: String,
     supervisor_connection_id: Uuid,
     user_id: String,
     thread_id: Option<String>,
     attached_shell_id: Option<String>,
+    session_token: String,
 }
 
 struct AppState {
     store: RelayStore,
     sockets: RwLock<HashMap<String, DeviceSocket>>,
     clients: RwLock<HashMap<String, ClientSocket>>,
-    pending: StdMutex<HashMap<String, tokio::sync::oneshot::Sender<Value>>>,
+    pending: StdMutex<HashMap<String, (String, tokio::sync::oneshot::Sender<Value>)>>,
     web_dist: Option<PathBuf>,
     legacy_supervisor_token: Option<String>,
     oauth: OAuthConfig,
     oauth_client: reqwest::Client,
     hosted: Arc<hosted::HostedService>,
     hosted_bootstraps: Mutex<HashSet<String>>,
+    admission: security::Admission,
 }
 
 pub async fn serve() -> Result<()> {
@@ -673,8 +680,7 @@ pub async fn serve() -> Result<()> {
     if !admin_email.contains('@') {
         bail!("REMOTE_CODEX_ADMIN_EMAIL must be a valid email address");
     }
-    let session_secret = std::env::var("REMOTE_CODEX_RELAY_SESSION_SECRET")
-        .unwrap_or_else(|_| admin_password.clone());
+    let session_secret = security::session_secret(FsPath::new(&data_dir))?;
     let auto_migrate = std::env::var("REMOTE_CODEX_RELAY_AUTO_MIGRATE")
         .ok()
         .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
@@ -779,9 +785,11 @@ pub async fn serve() -> Result<()> {
             .build()?,
         hosted,
         hosted_bootstraps: Mutex::new(HashSet::new()),
+        admission: security::Admission::default(),
     });
     state.hosted.start_background().await;
     let app = Router::new()
+        .merge(auth_api::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
@@ -902,6 +910,10 @@ pub async fn serve() -> Result<()> {
         .route("/relay/ws", get(client_ws_compat))
         .fallback(spa_fallback)
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            security::browser_security,
+        ))
         .with_state(state);
     let host = std::env::var("REMOTE_CODEX_RELAY_HOST")
         .ok()
@@ -920,7 +932,11 @@ pub async fn serve() -> Result<()> {
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
     tracing::info!("relay listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -978,7 +994,7 @@ struct SessionPayload {
     nonce: String,
 }
 
-fn create_session(session_secret: &str, user_id: &str) -> Result<String> {
+fn create_session(conn: &Connection, session_secret: &str, user_id: &str) -> Result<String> {
     let mut nonce = [0_u8; 16];
     OsRng.fill_bytes(&mut nonce);
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
@@ -993,7 +1009,14 @@ fn create_session(session_secret: &str, user_id: &str) -> Result<String> {
     mac.update(payload.as_bytes());
     let signature =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    Ok(format!("{payload}.{signature}"))
+    let token = format!("{payload}.{signature}");
+    conn.execute(
+        "DELETE FROM relay_auth_sessions WHERE expires_at<=?1",
+        params![now],
+    )?;
+    conn.execute("INSERT INTO relay_auth_sessions(token_hash,user_id,created_at,expires_at) VALUES (?1,?2,?3,?4)",
+        params![security::token_hash(&token), user_id, now, now + 14 * 24 * 60 * 60 * 1000])?;
+    Ok(token)
 }
 
 fn verify_session(session_secret: &str, token: &str) -> Option<SessionPayload> {
@@ -1140,7 +1163,16 @@ fn relay_cookie(headers: &HeaderMap) -> Option<String> {
 fn extract_session_token(headers: &HeaderMap, query: &TokenQuery) -> Option<String> {
     bearer_token(headers)
         .or_else(|| query.session_token())
-        .or_else(|| relay_cookie(headers))
+        .or_else(|| {
+            if headers
+                .get("x-remote-codex-auth-realm")
+                .is_some_and(|v| v == "admin")
+            {
+                security::cookie(headers, "remote_codex_relay_admin_session")
+            } else {
+                relay_cookie(headers)
+            }
+        })
 }
 
 fn load_user_by_id(conn: &Connection, user_id: &str) -> Option<UserRow> {
@@ -1164,25 +1196,15 @@ fn load_user_by_id(conn: &Connection, user_id: &str) -> Option<UserRow> {
 }
 
 fn load_user_by_session(conn: &Connection, session_secret: &str, token: &str) -> Option<UserRow> {
-    if let Some(payload) = verify_session(session_secret, token) {
-        return load_user_by_id(conn, &payload.user_id).filter(|user| user.enabled == 1);
-    }
-
-    // Old Rust builds persisted opaque session UUIDs. Keep them usable while
-    // migrating, but all newly issued sessions use Node's signed token format.
-    if !table_exists(conn, "sessions") {
-        return None;
-    }
-    conn.query_row(
-        "SELECT user_id FROM sessions WHERE token=?1",
-        params![token],
-        |row| row.get::<_, String>(0),
-    )
-    .optional()
-    .ok()
-    .flatten()
-    .and_then(|user_id| load_user_by_id(conn, &user_id))
-    .filter(|user| user.enabled == 1)
+    let payload = verify_session(session_secret, token)?;
+    let live: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM relay_auth_sessions WHERE token_hash=?1 AND user_id=?2 AND expires_at>?3)",
+        params![security::token_hash(token), payload.user_id, chrono::Utc::now().timestamp_millis()],
+        |row| row.get(0),
+    ).ok()?;
+    live.then(|| load_user_by_id(conn, &payload.user_id))
+        .flatten()
+        .filter(|user| user.enabled == 1)
 }
 
 fn authenticated_user(
@@ -1207,9 +1229,10 @@ fn authenticated_admin_user(
     conn: &Connection,
     session_secret: &str,
     headers: &HeaderMap,
-    query: &TokenQuery,
+    _query: &TokenQuery,
 ) -> Option<UserRow> {
-    let user = extract_session_token(headers, query)
+    let user = bearer_token(headers)
+        .or_else(|| security::cookie(headers, "remote_codex_relay_admin_session"))
         .and_then(|token| load_user_by_session(conn, session_secret, &token))
         .filter(|user| user.role == "admin");
     if let Some(user) = user.as_ref() {
@@ -1231,7 +1254,7 @@ fn unauthorized() -> Response {
 
 fn with_session_cookie(mut response: Response, token: &str) -> Response {
     let value = format!(
-        "remote_codex_relay_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}",
+        "remote_codex_relay_session={token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age={}",
         14 * 24 * 60 * 60
     );
     if let Ok(value) = value.parse() {
@@ -1242,7 +1265,7 @@ fn with_session_cookie(mut response: Response, token: &str) -> Response {
 
 fn with_cleared_session_cookie(mut response: Response) -> Response {
     if let Ok(value) =
-        "remote_codex_relay_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0".parse()
+        "remote_codex_relay_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0".parse()
     {
         response.headers_mut().insert(header::SET_COOKIE, value);
     }
@@ -1398,7 +1421,7 @@ async fn register(
         ],
     ) {
         Ok(_) => {
-            let token = match create_session(&state.store.session_secret, &id) {
+            let token = match create_session(&conn, &state.store.session_secret, &id) {
                 Ok(token) => token,
                 Err(_) => {
                     return (
@@ -1504,9 +1527,24 @@ struct LoginInput {
 
 async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<LoginInput>,
 ) -> impl IntoResponse {
     let ident = body.identifier.or(body.username).unwrap_or_default();
+    if body.password.len() > 1024
+        || ident.len() > 320
+        || !state.admission.allow(
+            format!("login:{}", ident.trim().to_ascii_lowercase()),
+            30,
+            300,
+        )
+    {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    static PASSWORD_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let Ok(_permit) = PASSWORD_WORK.try_acquire() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
     let conn = state.store.conn.lock().await;
     let row: Option<(String, String, String, i64)> = conn
         .query_row(
@@ -1518,38 +1556,39 @@ async fn login(
         .optional()
         .ok()
         .flatten();
-    match row {
-        Some((id, salt, hash, enabled))
-            if verify_password(&body.password, &salt, &hash) && enabled == 1 =>
+    drop(conn);
+    let verified = tokio::task::spawn_blocking(move || {
+        row.filter(|(_, salt, hash, enabled)| {
+            *enabled == 1 && verify_password(&body.password, salt, hash)
+        })
+        .map(|(id, salt, hash, _)| {
+            let upgraded = (salt == LEGACY_SHA256_SALT)
+                .then(|| hash_password(&body.password).ok())
+                .flatten();
+            (id, salt, hash, upgraded)
+        })
+    })
+    .await
+    .ok()
+    .flatten();
+    let conn = state.store.conn.lock().await;
+    match verified {
+        Some((id, salt, hash, upgraded)) if conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM relay_users WHERE id=?1 AND password_salt=?2 AND password_hash=?3 AND enabled=1)",
+            params![id, salt, hash], |r| r.get::<_, bool>(0)).unwrap_or(false) =>
         {
-            if salt == LEGACY_SHA256_SALT {
-                if let Ok((new_salt, new_hash)) = hash_password(&body.password) {
+            if let Some((new_salt, new_hash)) = upgraded {
                     let _ = conn.execute(
                         "UPDATE relay_users SET password_salt=?1,password_hash=?2 WHERE id=?3",
                         params![new_salt, new_hash, id],
                     );
-                }
             }
-            let token = match create_session(&state.store.session_secret, &id) {
-                Ok(token) => token,
-                Err(_) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiError::new("internal", "Failed to create session")),
-                    )
-                        .into_response();
-                }
-            };
-            let user = load_user_by_id(&conn, &id);
-            let response = (
-                StatusCode::OK,
-                Json(json!({
-                    "token": &token,
-                    "session": session_json(&conn, user.as_ref(), &state.oauth)
-                })),
-            )
-                .into_response();
-            with_session_cookie(response, &token)
+            let Some(user) = load_user_by_id(&conn,&id) else { return unauthorized(); };
+            let has_factors = auth_factors::has_factors(&conn,&id);
+            if has_factors && !auth_factors::trusted(&conn,&id,&headers) {
+                return auth_api::challenge_response(&conn,&user,&headers).unwrap_or_else(IntoResponse::into_response);
+            }
+            auth_api::login_response(&conn,&state,&user,&headers,!has_factors,false).unwrap_or_else(IntoResponse::into_response)
         }
         _ => (
             StatusCode::UNAUTHORIZED,
@@ -1559,9 +1598,31 @@ async fn login(
     }
 }
 
-async fn logout(State(state): State<Arc<AppState>>) -> Response {
+async fn logout(
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     let conn = state.store.conn.lock().await;
-    with_cleared_session_cookie(Json(session_json(&conn, None, &state.oauth)).into_response())
+    if let Some(token) = extract_session_token(&headers, &query) {
+        if security::revoke_session(&conn, &token).is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    let mut response =
+        with_cleared_session_cookie(Json(session_json(&conn, None, &state.oauth)).into_response());
+    if headers
+        .get("x-remote-codex-auth-realm")
+        .is_some_and(|v| v == "admin")
+    {
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            "remote_codex_relay_admin_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+                .parse()
+                .unwrap(),
+        );
+    }
+    response
 }
 
 async fn session(
@@ -1611,14 +1672,23 @@ async fn oauth_start(
             .into_response();
     }
     let callback = state.oauth.callback_url(&headers, provider);
-    let target = oauth::sign_state(provider, &state.store.session_secret)
-        .and_then(|signed| state.oauth.authorization_url(provider, &callback, &signed));
-    match target {
-        Ok(target) => Redirect::temporary(&target).into_response(),
-        Err(error) => {
-            tracing::error!(error = %error, "failed to build OAuth authorization URL");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    let result = {
+        let conn = state.store.conn.lock().await;
+        oauth::sign_state(provider, &state.store.session_secret).and_then(|signed| {
+            let (browser, verifier) = security::start_oauth(&conn, &signed, &callback)?;
+            let target = state
+                .oauth
+                .authorization_url(provider, &callback, &signed, &verifier)?;
+            Ok((target, browser))
+        })
+    };
+    match result {
+        Ok((target, browser)) => {
+            let mut response = Redirect::temporary(&target).into_response();
+            response.headers_mut().append(header::SET_COOKIE, format!("remote_codex_oauth={browser}; HttpOnly; Secure; SameSite=Lax; Path=/relay/auth/oauth; Max-Age=600").parse().unwrap());
+            response
         }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -1644,10 +1714,23 @@ async fn oauth_callback(
         )
         .into_response();
     }
-    let callback = state.oauth.callback_url(&headers, provider);
+    let pending = {
+        let conn = state.store.conn.lock().await;
+        security::cookie(&headers, "remote_codex_oauth")
+            .and_then(|browser| security::consume_oauth(&conn, &query.state, &browser))
+    };
+    let Some((verifier, callback)) = pending else {
+        return oauth_error_redirect("OAuth request expired or belongs to another browser.");
+    };
     let identity = match state
         .oauth
-        .fetch_identity(&state.oauth_client, provider, &query.code, &callback)
+        .fetch_identity(
+            &state.oauth_client,
+            provider,
+            &query.code,
+            &callback,
+            &verifier,
+        )
         .await
     {
         Ok(identity) => identity,
@@ -1665,7 +1748,30 @@ async fn oauth_callback(
             Redirect::temporary("/relay-portal?oauthPending=1").into_response()
         }
         Ok(OAuthOutcome::Login(token)) => {
-            with_session_cookie(Redirect::temporary("/relay-portal").into_response(), &token)
+            let conn = state.store.conn.lock().await;
+            let Some(user) = load_user_by_session(&conn, &state.store.session_secret, &token)
+            else {
+                return unauthorized();
+            };
+            if security::revoke_session(&conn, &token).is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            let has_factors = auth_factors::has_factors(&conn, &user.id);
+            let result = if has_factors && !auth_factors::trusted(&conn, &user.id, &headers) {
+                auth_api::challenge_response(&conn, &user, &headers)
+            } else {
+                auth_api::login_response(&conn, &state, &user, &headers, !has_factors, false)
+            };
+            let mut response = match result {
+                Ok(r) => r,
+                Err(e) => return e.into_response(),
+            };
+            *response.status_mut() = StatusCode::SEE_OTHER;
+            response
+                .headers_mut()
+                .insert(header::LOCATION, "/relay-portal".parse().unwrap());
+            *response.body_mut() = Body::empty();
+            response
         }
         Err(message) => oauth_error_redirect(&message),
     }
@@ -1702,7 +1808,7 @@ fn authenticate_external_identity(
         if enabled != Some(1) {
             return Err("This relay account is disabled.".into());
         }
-        let token = create_session(session_secret, &user_id)
+        let token = create_session(conn, session_secret, &user_id)
             .map_err(|_| "OAuth session creation failed.".to_string())?;
         let _ = conn.execute(
             "UPDATE relay_users SET last_seen_at=?1 WHERE id=?2",
@@ -1784,7 +1890,7 @@ fn authenticate_external_identity(
     .map_err(|_| "OAuth identity creation failed.".to_string())?;
     tx.commit()
         .map_err(|_| "OAuth account creation failed.".to_string())?;
-    let token = create_session(session_secret, &user_id)
+    let token = create_session(conn, session_secret, &user_id)
         .map_err(|_| "OAuth session creation failed.".to_string())?;
     Ok(OAuthOutcome::Login(token))
 }
@@ -1891,6 +1997,10 @@ async fn update_account_password(
     else {
         return unauthorized();
     };
+    let current_token = extract_session_token(&headers, &query).unwrap_or_default();
+    if auth_factors::has_factors(&conn, &user.id) && !auth_factors::recent(&conn, &current_token) {
+        return (StatusCode::FORBIDDEN,Json(json!({"code":"reauthentication_required","message":"Verify your identity before changing your password"}))).into_response();
+    }
     if body.new_password.len() < 8 {
         return (
             StatusCode::BAD_REQUEST,
@@ -1932,7 +2042,13 @@ async fn update_account_password(
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    Json(user_json(&user)).into_response()
+    let Ok(token) = create_session(&conn, &state.store.session_secret, &user.id) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if auth_factors::mark_strong(&conn, &token).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    with_session_cookie(Json(user_json(&user)).into_response(), &token)
 }
 
 async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
@@ -1955,7 +2071,7 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
         let owner: String = row.get(1)?;
         let name: String = row.get(2)?;
         let created_at: String = row.get(3)?;
-        let token: Option<String> = row.get(4)?;
+        let _token: Option<String> = row.get(4)?;
         let token_preview: Option<String> = row.get(5)?;
         let hosted: Option<(String, i64, Option<String>)> = conn
             .query_row(
@@ -1977,11 +2093,7 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
             last_heartbeat_at: connected
                 .get(&id)
                 .map(|socket| socket.last_heartbeat_at.as_str()),
-            token: if hosted.is_none() {
-                token.as_deref()
-            } else {
-                None
-            },
+            token: None,
             token_preview: token_preview.as_deref(),
         });
         if let Some((status, active_turns, idle_deadline)) = hosted {
@@ -2087,6 +2199,9 @@ fn effective_access(
     thread_id: Option<&str>,
     workspace_id: Option<&str>,
 ) -> Option<EffectiveAccess> {
+    if !load_user_by_id(conn, user_id).is_some_and(|user| user.enabled == 1) {
+        return None;
+    }
     let owned = conn
         .query_row(
             "SELECT 1 FROM relay_devices WHERE id=?1 AND owner_user_id=?2",
@@ -2519,7 +2634,7 @@ async fn create_device(
                     id,
                     user.id,
                     name,
-                    token.clone(),
+                    Option::<String>::None,
                     token_hash,
                     token_preview.clone(),
                     created_at
@@ -4111,6 +4226,14 @@ async fn device_api(
         )
             .into_response();
     }
+    let resource_body = if headers.contains_key("x-rcd-key") {
+        headers
+            .get("x-rcd-resource")
+            .map(|v| v.as_bytes())
+            .unwrap_or(&body)
+    } else {
+        &body
+    };
     if let Some(sandbox_id) = isolation.as_deref() {
         let allowed = {
             let conn = state.store.conn.lock().await;
@@ -4123,7 +4246,7 @@ async fn device_api(
                     workspace_id: workspace_id.as_deref(),
                     method: &method,
                     path: &path,
-                    body: &body,
+                    body: resource_body,
                 },
             )
         };
@@ -4150,15 +4273,32 @@ async fn device_api(
         )
             .into_response();
     }
-    let forwarded_headers = [header::CONTENT_TYPE, header::ACCEPT]
-        .into_iter()
-        .filter_map(|name| {
-            headers
-                .get(&name)
-                .and_then(|value| value.to_str().ok())
-                .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
-        })
-        .collect::<serde_json::Map<String, Value>>();
+    let mut forwarded_headers = [
+        header::CONTENT_TYPE,
+        header::ACCEPT,
+        header::RANGE,
+        "x-rcd-key".parse().unwrap(),
+        "x-rcd-request".parse().unwrap(),
+        "x-rcd-enc".parse().unwrap(),
+        "x-rcd-sealed".parse().unwrap(),
+        "x-rcd-resource".parse().unwrap(),
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        headers
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
+    })
+    .collect::<serde_json::Map<String, Value>>();
+    if let Some(sandbox_id) = isolation.as_deref() {
+        let conn = state.store.conn.lock().await;
+        let owned = hosted_workspace_ids(&conn, sandbox_id, &user_id);
+        forwarded_headers.insert(
+            "x-rcd-hosted-workspaces".into(),
+            json!(serde_json::to_string(&owned).unwrap_or_default()),
+        );
+    }
     let (body, body_encoding) = encode_relay_request_body(&body);
     let response = forward_device(
         state.clone(),
@@ -4282,15 +4422,24 @@ async fn relay_api_compat(
         )
             .into_response();
     }
-    let forwarded_headers = [header::CONTENT_TYPE, header::ACCEPT]
-        .into_iter()
-        .filter_map(|name| {
-            headers
-                .get(&name)
-                .and_then(|value| value.to_str().ok())
-                .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
-        })
-        .collect::<serde_json::Map<String, Value>>();
+    let forwarded_headers = [
+        header::CONTENT_TYPE,
+        header::ACCEPT,
+        header::RANGE,
+        "x-rcd-key".parse().unwrap(),
+        "x-rcd-request".parse().unwrap(),
+        "x-rcd-enc".parse().unwrap(),
+        "x-rcd-sealed".parse().unwrap(),
+        "x-rcd-resource".parse().unwrap(),
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        headers
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
+    })
+    .collect::<serde_json::Map<String, Value>>();
     let (body, body_encoding) = encode_relay_request_body(&body);
     let response = forward_device(
         state.clone(),
@@ -4411,6 +4560,32 @@ async fn transform_hosted_response(
         && matches!(pathname, "/api/workspaces" | "/api/threads"))
         || (method == Method::POST && matches!(pathname, "/api/workspaces" | "/api/threads/start"));
     if !transforms {
+        return response;
+    }
+    if response.headers().get("x-rcd-encrypted").is_some() {
+        let mut response = response;
+        let resources = response
+            .headers()
+            .get("x-rcd-result-resource")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| serde_json::from_str::<Value>(v).ok());
+        let conn = state.store.conn.lock().await;
+        if let Some(values) = resources.as_ref().and_then(Value::as_array) {
+            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
+            for value in values {
+                if let Some(id) = value["id"].as_str() {
+                    if method == Method::POST && pathname == "/api/workspaces" {
+                        let _ = record_hosted_workspace(&conn, sandbox_id, user_id, id, false);
+                    } else if let Some(workspace_id) = value["workspaceId"]
+                        .as_str()
+                        .filter(|id| owned.contains(*id))
+                    {
+                        let _ = record_hosted_thread(&conn, sandbox_id, user_id, id, workspace_id);
+                    }
+                }
+            }
+        }
+        response.headers_mut().remove("x-rcd-result-resource");
         return response;
     }
     let (parts, body) = response.into_parts();
@@ -4843,10 +5018,14 @@ fn shared_thread_path_allowed(
     if !suffix.is_empty() && !suffix.starts_with('/') {
         return false;
     }
+    if method == "GET" && suffix.starts_with("/transport/stream/") {
+        return true;
+    }
     if method == "GET" {
         if matches!(
             suffix,
-            "" | "/export-turns"
+            "" | "/transport/key"
+                | "/export-turns"
                 | "/exports/pdf"
                 | "/assets/image"
                 | "/goal"
@@ -4861,6 +5040,9 @@ fn shared_thread_path_allowed(
             return true;
         }
         return control && matches!(suffix, "/fork-turns" | "/capabilities");
+    }
+    if method == "POST" && suffix == "/transport/session" {
+        return true;
     }
     if !control {
         return false;
@@ -4904,10 +5086,18 @@ fn shared_workspace_path_allowed(
     if !suffix.is_empty() && !suffix.starts_with('/') {
         return false;
     }
+    if method == "GET" && suffix.starts_with("/transport/stream/") {
+        return true;
+    }
     if method == "GET" {
         if matches!(
             suffix,
-            "" | "/files/tree" | "/files/preview" | "/files/raw" | "/files/download" | "/artifacts"
+            "" | "/transport/key"
+                | "/files/tree"
+                | "/files/preview"
+                | "/files/raw"
+                | "/files/download"
+                | "/artifacts"
         ) {
             return true;
         }
@@ -4943,7 +5133,7 @@ async fn forward_device(
 }
 
 struct PendingRequestGuard<'a> {
-    pending: &'a StdMutex<HashMap<String, tokio::sync::oneshot::Sender<Value>>>,
+    pending: &'a StdMutex<HashMap<String, (String, tokio::sync::oneshot::Sender<Value>)>>,
     request_id: &'a str,
 }
 
@@ -4969,11 +5159,13 @@ async fn forward_device_with_timeout(
 ) -> axum::response::Response {
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    state
-        .pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(request_id.clone(), tx);
+    {
+        let mut pending = state.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.len() >= 256 {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+        pending.insert(request_id.clone(), (device_id.clone(), tx));
+    }
     let _pending_guard = PendingRequestGuard {
         pending: &state.pending,
         request_id: &request_id,
@@ -4998,7 +5190,7 @@ async fn forward_device_with_timeout(
     let sent = {
         let sockets = state.sockets.read().await;
         if let Some(socket) = sockets.get(&device_id) {
-            socket.tx.send(payload).is_ok()
+            socket.tx.try_send(payload).is_ok()
         } else {
             false
         }
@@ -5060,6 +5252,10 @@ fn forwarded_device_response(value: Value) -> Response {
             "content-disposition",
             "cache-control",
             "x-content-type-options",
+            "content-security-policy",
+            "referrer-policy",
+            "x-rcd-encrypted",
+            "x-rcd-result-resource",
         ] {
             if let Some(header_value) = headers.get(name).and_then(Value::as_str) {
                 response = response.header(name, header_value);
@@ -5151,7 +5347,7 @@ fn device_id_for_supervisor_token(
 async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: String) {
     let connection_id = Uuid::new_v4();
     let connected_at = now_rfc3339();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     state.sockets.write().await.insert(
         device_id.clone(),
         DeviceSocket {
@@ -5180,19 +5376,24 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
             incoming = stream.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
+                        if !state.sockets.read().await.get(&device_id).is_some_and(|socket|socket.connection_id==connection_id) {break;}
                         if let Ok(msg) = serde_json::from_str::<Value>(&text) {
                             match msg.get("type").and_then(Value::as_str) {
                                 Some("relay.response") => {
                                     if let Some(request_id) = msg.get("requestId").and_then(Value::as_str) {
-                                        if let Some(pending) = state
-                                            .pending
-                                            .lock()
-                                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                            .remove(request_id)
-                                        {
-                                            let payload = msg.get("payload").cloned().unwrap_or(json!({}));
-                                            let _ = pending.send(payload);
+                                        let mut pending=state.pending.lock().unwrap_or_else(|p|p.into_inner());
+                                        if pending.get(request_id).is_some_and(|(owner,_)|owner==&device_id) {
+                                            if let Some((_,sender))=pending.remove(request_id) {
+                                                let payload=msg.get("payload").cloned().unwrap_or(json!({}));
+                                                let _=sender.send(payload);
+                                            }
                                         }
+                                    }
+                                }
+                                Some("relay.client.close") => {
+                                    if let Some(id)=msg.get("clientId").and_then(Value::as_str) {
+                                        let mut clients=state.clients.write().await;
+                                        if clients.get(id).is_some_and(|c|c.device_id==device_id && c.supervisor_connection_id==connection_id) { clients.remove(id); }
                                     }
                                 }
                                 Some("relay.server.message") => {
@@ -5254,7 +5455,7 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(text) => {
-                        if sink.send(Message::Text(text.into())).await.is_err() {
+                        if !matches!(tokio::time::timeout(Duration::from_secs(10),sink.send(Message::Text(text.into()))).await,Ok(Ok(()))) {
                             break;
                         }
                     }
@@ -5286,6 +5487,8 @@ struct ClientWsQuery {
     token: Option<String>,
     relay_session: Option<String>,
     thread_id: Option<String>,
+    #[serde(rename = "channelId")]
+    channel_id: Option<String>,
 }
 
 impl ClientWsQuery {
@@ -5367,8 +5570,18 @@ async fn client_ws(
         )
             .into_response();
     }
+    let token = extract_session_token(&headers, &query.token_query()).unwrap_or_default();
     ws.on_upgrade(move |socket| {
-        handle_client_socket(socket, state, device_id, user.id, query.thread_id, access)
+        handle_client_socket(
+            socket,
+            state,
+            device_id,
+            user.id,
+            query.thread_id,
+            access,
+            token,
+            query.channel_id,
+        )
     })
     .into_response()
 }
@@ -5441,8 +5654,18 @@ async fn client_ws_compat(
         )
             .into_response();
     }
+    let token = extract_session_token(&headers, &query.token_query()).unwrap_or_default();
     ws.on_upgrade(move |socket| {
-        handle_client_socket(socket, state, device_id, user.id, query.thread_id, access)
+        handle_client_socket(
+            socket,
+            state,
+            device_id,
+            user.id,
+            query.thread_id,
+            access,
+            token,
+            query.channel_id,
+        )
     })
     .into_response()
 }
@@ -5454,9 +5677,11 @@ async fn handle_client_socket(
     user_id: String,
     thread_id: Option<String>,
     _initial_access: EffectiveAccess,
+    session_token: String,
+    secure_channel_id: Option<String>,
 ) {
     let client_id = Uuid::new_v4().to_string();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     let supervisor_connection_id = {
         let sockets = state.sockets.read().await;
         let Some(supervisor) = sockets.get(&device_id) else {
@@ -5472,6 +5697,7 @@ async fn handle_client_socket(
                 user_id: user_id.clone(),
                 thread_id: thread_id.clone(),
                 attached_shell_id: None,
+                session_token: session_token.clone(),
             },
         );
         supervisor_connection_id
@@ -5483,22 +5709,33 @@ async fn handle_client_socket(
         json!({
             "type": "relay.client.connected",
             "timestamp": now_rfc3339(),
+            "secureChannelId": secure_channel_id,
             "clientId": client_id
         }),
     )
     .await;
 
     let (mut sink, mut stream) = socket.split();
+    let mut auth_tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
+            _ = auth_tick.tick() => {
+                let conn = state.store.conn.lock().await;
+                if load_user_by_session(&conn, &state.store.session_secret, &session_token).is_none()
+                    || effective_access(&conn, &user_id, &device_id, thread_id.as_deref(), None).is_none() { break; }
+            }
             incoming = stream.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(payload) = serde_json::from_str::<Value>(&text) else { continue; };
                         let _ = state.hosted.wake_for_request(&device_id, true).await;
                         let message_thread = payload.get("threadId").and_then(Value::as_str);
+                        if thread_id.as_deref().zip(message_thread).is_some_and(|(a,b)| a != b) { break; }
+                        let kind = payload.get("type").and_then(Value::as_str).unwrap_or_default();
+                        if !matches!(kind, "supervisor.ping" | "shell.attach" | "shell.detach" | "shell.input" | "shell.resize" | "shell.clear") { break; }
                         let fresh_access = {
                             let conn = state.store.conn.lock().await;
+                            if load_user_by_session(&conn, &state.store.session_secret, &session_token).is_none() { break; }
                             effective_access(
                                 &conn,
                                 &user_id,
@@ -5510,8 +5747,20 @@ async fn handle_client_socket(
                         let Some(fresh_access) = fresh_access else {
                             break;
                         };
-                        if fresh_access.kind == "shared" && fresh_access.thread_access != "control" {
+                        if kind != "supervisor.ping" && fresh_access.kind == "shared" && fresh_access.thread_access != "control" {
                             break;
+                        }
+                        if kind.starts_with("shell.") {
+                            let Some(shell_id) = payload.get("shellId").and_then(Value::as_str) else { break; };
+                            if kind == "shell.attach" && fresh_access.kind == "shared" {
+                                let Some(scope) = thread_id.as_deref().or(message_thread) else { break; };
+                                if scope.contains(['/', '?', '#']) { break; }
+                                let Ok(shells) = internal_forward_json(&state, &device_id, "GET", &format!("/api/threads/{scope}/transport/shell-scope"), None).await else { break; };
+                                if !shells.get("shells").and_then(Value::as_array).is_some_and(|items| items.iter().any(|s| s.get("id").and_then(Value::as_str) == Some(shell_id))) { break; }
+                            } else if kind != "shell.attach" {
+                                let clients = state.clients.read().await;
+                                if !clients.get(&client_id).is_some_and(|c| c.attached_shell_id.as_deref() == Some(shell_id)) { break; }
+                            }
                         }
                         match payload.get("type").and_then(Value::as_str) {
                             Some("shell.attach") => {
@@ -5547,7 +5796,9 @@ async fn handle_client_socket(
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(text) => {
-                        if sink.send(Message::Text(text.into())).await.is_err() {
+                        let valid = { let conn = state.store.conn.lock().await;
+                            load_user_by_session(&conn, &state.store.session_secret, &session_token).is_some() };
+                        if !valid || !matches!(tokio::time::timeout(Duration::from_secs(10),sink.send(Message::Text(text.into()))).await,Ok(Ok(()))) {
                             break;
                         }
                     }
@@ -5576,10 +5827,29 @@ async fn send_to_supervisor_connection(
     connection_id: Uuid,
     message: Value,
 ) {
-    if let Some(supervisor) = state.sockets.read().await.get(device_id) {
-        if supervisor.connection_id == connection_id {
-            let _ = supervisor.tx.send(message.to_string());
+    let overflow = state
+        .sockets
+        .read()
+        .await
+        .get(device_id)
+        .is_some_and(|supervisor| {
+            supervisor.connection_id == connection_id
+                && supervisor.tx.try_send(message.to_string()).is_err()
+        });
+    if overflow {
+        let mut sockets = state.sockets.write().await;
+        if sockets
+            .get(device_id)
+            .is_some_and(|s| s.connection_id == connection_id)
+        {
+            sockets.remove(device_id);
         }
+        drop(sockets);
+        state
+            .clients
+            .write()
+            .await
+            .retain(|_, c| c.device_id != device_id || c.supervisor_connection_id != connection_id);
     }
 }
 
@@ -5600,11 +5870,12 @@ async fn forward_server_message_to_client(
                         client.user_id.clone(),
                         client.thread_id.clone(),
                         client.attached_shell_id.clone(),
+                        client.session_token.clone(),
                     )
                 })
         })
     };
-    let Some((tx, user_id, configured_thread, attached_shell)) = client else {
+    let Some((tx, user_id, configured_thread, attached_shell, session_token)) = client else {
         return;
     };
     let event_thread = payload.get("threadId").and_then(Value::as_str);
@@ -5645,11 +5916,11 @@ async fn forward_server_message_to_client(
                 .flatten()
                 .is_some()
             });
-        access.is_some() && isolation_allows
+        access.is_some()
+            && isolation_allows
+            && load_user_by_session(&conn, &state.store.session_secret, &session_token).is_some()
     };
-    if authorized {
-        let _ = tx.send(payload.to_string());
-    } else {
+    if !authorized || tx.try_send(payload.to_string()).is_err() {
         state.clients.write().await.remove(client_id);
     }
 }
@@ -5725,15 +5996,14 @@ mod tests {
                 oauth_client: reqwest::Client::new(),
                 hosted,
                 hosted_bootstraps: Mutex::new(HashSet::new()),
+                admission: security::Admission::default(),
             }),
             data_dir,
         )
     }
 
-    fn device_socket(
-        connection_id: Uuid,
-    ) -> (DeviceSocket, tokio::sync::mpsc::UnboundedReceiver<String>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    fn device_socket(connection_id: Uuid) -> (DeviceSocket, tokio::sync::mpsc::Receiver<String>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
         (
             DeviceSocket {
                 tx,
@@ -5746,7 +6016,7 @@ mod tests {
     }
 
     fn client_socket(device_id: &str, supervisor_connection_id: Uuid) -> ClientSocket {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
         ClientSocket {
             tx,
             device_id: device_id.to_string(),
@@ -5754,6 +6024,7 @@ mod tests {
             user_id: "user".to_string(),
             thread_id: None,
             attached_shell_id: None,
+            session_token: String::new(),
         }
     }
 
@@ -5977,7 +6248,10 @@ mod tests {
             )
             .unwrap()
         };
-        let admin_token = create_session(&state.store.session_secret, "admin").unwrap();
+        let admin_token = {
+            let conn = state.store.conn.lock().await;
+            create_session(&conn, &state.store.session_secret, "admin").unwrap()
+        };
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -6160,12 +6434,16 @@ mod tests {
 
     #[test]
     fn signed_sessions_round_trip_and_reject_tampering() {
-        let token = create_session("session-secret", "user-1").unwrap();
+        let dir = temporary_test_dir("signed-sessions");
+        let store = RelayStore::open(dir.join("db"), "session-secret".into()).unwrap();
+        let conn = store.conn.try_lock().unwrap();
+        conn.execute("INSERT INTO relay_users VALUES ('owner','o@example.test','owner','user',1,NULL,'now','salt','hash')", []).unwrap();
+        let token = create_session(&conn, "session-secret", "owner").unwrap();
         assert_eq!(
             verify_session("session-secret", &token)
                 .expect("new session must verify")
                 .user_id,
-            "user-1"
+            "owner"
         );
         let mut tampered = token.into_bytes();
         let last = tampered.last_mut().expect("session is non-empty");
@@ -6256,7 +6534,10 @@ mod tests {
             )
             .unwrap();
         }
-        let token = create_session(&state.store.session_secret, "owner").unwrap();
+        let token = {
+            let conn = state.store.conn.lock().await;
+            create_session(&conn, &state.store.session_secret, "owner").unwrap()
+        };
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,

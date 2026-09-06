@@ -27,6 +27,7 @@ const dataUrl = (blob: Blob) =>
 export async function loadExportSnapshot(
   id: string,
   input: ExportThreadTranscriptInput,
+  all = false,
 ): Promise<PublicTranscriptSnapshot> {
   const selected = input.mode === 'selected' ? new Set(input.turnIds) : null;
   const limit = Math.min(100, Math.max(1, input.limit ?? 10));
@@ -38,7 +39,7 @@ export async function loadExportSnapshot(
   const seen = new Set<string>();
   do {
     const page = await fetchThreadDetail(id, {
-      limit: selected ? 100 : limit,
+      limit: selected || all ? 100 : limit,
       ...(cursor ? { beforeTurnId: cursor } : {}),
     });
     title = page.thread.title;
@@ -50,9 +51,10 @@ export async function loadExportSnapshot(
       ...turns,
     ];
     cursor = fresh[0]?.id;
+    if (turns.length > 10000) throw new Error('The transcript is too large to share. Export selected turns instead.');
     if (
-      !selected ||
-      turns.length === selected.size ||
+      (!selected && !all) ||
+      (selected && turns.length === selected.size) ||
       seen.size >= (page.totalTurnCount ?? seen.size)
     )
       break;
@@ -80,13 +82,17 @@ export async function loadExportSnapshot(
     ),
   );
   snapshot.images = {};
+  let imageBytes = 0;
   for (const path of paths) {
     const response = await fetch(buildThreadImageAssetUrl(id, { path }));
     if (!response.ok)
       throw new Error(
         'An attachment could not be included. Reconnect the device and retry.',
       );
-    snapshot.images[path] = await dataUrl(await response.blob());
+    const blob = await response.blob();
+    imageBytes += blob.size;
+    if (imageBytes > 10 * 1024 * 1024) throw new Error('Attachments exceed the 10 MB public snapshot limit.');
+    snapshot.images[path] = await dataUrl(blob);
   }
   return snapshot;
 }

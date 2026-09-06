@@ -1,3 +1,5 @@
+import { RelaySecurityPanel, SecurityVerification } from '../components/RelaySecurity';
+import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
 import { ArrowLeft, RefreshCw, Save } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -33,6 +35,7 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [verification, setVerification] = useState<SecurityStatus | null>(null);
 
   async function load() {
     setLoading(true);
@@ -73,8 +76,8 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
     }
   }
 
-  async function savePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function savePassword(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
     setSavingPassword(true);
     setPasswordError(null);
     setPasswordMessage(null);
@@ -89,7 +92,9 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
       setConfirmPassword('');
       setPasswordMessage('Password changed.');
     } catch (caught) {
-      setPasswordError(errorMessage(caught, 'Unable to change your password.'));
+      if (caught instanceof ApiError && caught.payload.code === 'reauthentication_required') {
+        setVerification(await securityRequest<SecurityStatus>(''));
+      } else setPasswordError(errorMessage(caught, 'Unable to change your password.'));
     } finally {
       setSavingPassword(false);
     }
@@ -252,6 +257,8 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
           </button>
         </form>
       </section>
+      <RelaySecurityPanel />
+      {verification && <SecurityVerification status={verification} onCancel={() => setVerification(null)} onVerified={async () => { setVerification(null); await savePassword(); }} />}
     </div>
   );
 }

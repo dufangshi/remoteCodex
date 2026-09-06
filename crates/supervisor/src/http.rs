@@ -325,7 +325,23 @@ async fn spa_fallback(State(state): State<AppState>, request: Request) -> Respon
     };
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(
+            header::CONTENT_TYPE,
+            if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("js" | "mjs" | "cjs")
+            ) {
+                "text/plain; charset=utf-8"
+            } else {
+                static_content_type(&path)
+            },
+        )
+        // Raw workspace documents are untrusted, even when opened directly in a tab.
+        .header(
+            "content-security-policy",
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:",
+        )
+        .header("referrer-policy", "no-referrer")
         .header(header::CACHE_CONTROL, cache_control)
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(if request.method() == Method::HEAD {
@@ -723,13 +739,46 @@ async fn workspace_raw(
     let path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    let (path, bytes) = state.workspace_read_bytes(&id, &path).map_err(map_err)?;
+    let workspace = state.get_workspace(&id).map_err(map_err)?;
+    let path = remote_codex_runtime::files::assert_within(
+        std::path::Path::new(&workspace.abs_path),
+        std::path::Path::new(&path),
+    )
+    .map_err(map_err)?;
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| map_err(e.into()))?;
+    let metadata = file.metadata().await.map_err(|e| map_err(e.into()))?;
+    if !metadata.is_file() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Path must point to a file",
+        ));
+    }
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, static_content_type(&path))
+        .header(header::CONTENT_LENGTH, metadata.len())
+        .header(
+            header::CONTENT_TYPE,
+            if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("js" | "mjs" | "cjs")
+            ) {
+                "text/plain; charset=utf-8"
+            } else {
+                static_content_type(&path)
+            },
+        )
+        // Raw workspace documents are untrusted, even when opened directly in a tab.
+        .header(
+            "content-security-policy",
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:",
+        )
+        .header("referrer-policy", "no-referrer")
         .header(header::CACHE_CONTROL, "private, no-store")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .body(Body::from(bytes))
+        .body(stream_file(file, ()))
         .map_err(|error| map_err(error.into()))
 }
 
@@ -937,6 +986,11 @@ async fn thread_image(
         [
             (header::CONTENT_TYPE, mime),
             (header::CACHE_CONTROL, "private, max-age=60"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "sandbox; default-src 'none'",
+            ),
         ],
         bytes,
     )
@@ -1600,7 +1654,7 @@ async fn workspace_download(
             .map_err(|error| map_err(error.into()))?
             .map_err(map_err)?;
     match download {
-        WorkspaceDownload::File { path, bytes } => {
+        WorkspaceDownload::File { path, file } => {
             let filename = path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -1608,8 +1662,8 @@ async fn workspace_download(
             download_response(
                 filename,
                 static_content_type(&path),
-                bytes.len() as u64,
-                Body::from(bytes),
+                file.metadata().map_err(|e| map_err(e.into()))?.len(),
+                stream_file(tokio::fs::File::from_std(file), ()),
             )
         }
         WorkspaceDownload::DirectoryArchive { filename, archive } => {
@@ -1620,29 +1674,31 @@ async fn workspace_download(
                 .len();
             let file =
                 tokio::fs::File::from_std(archive.reopen().map_err(|error| map_err(error.into()))?);
-            let stream = futures_util::stream::try_unfold(
-                (file, archive),
-                |(mut file, archive)| async move {
-                    let mut buffer = vec![0u8; 64 * 1024];
-                    let read = file.read(&mut buffer).await?;
-                    if read == 0 {
-                        Ok::<_, std::io::Error>(None)
-                    } else {
-                        buffer.truncate(read);
-                        Ok::<_, std::io::Error>(Some((Bytes::from(buffer), (file, archive))))
-                    }
-                },
-            );
             download_response(
                 &filename,
                 "application/zip",
                 content_length,
-                Body::from_stream(stream),
+                stream_file(file, archive),
             )
         }
     }
 }
 
+fn stream_file<G: Send + 'static>(file: tokio::fs::File, guard: G) -> Body {
+    Body::from_stream(futures_util::stream::try_unfold(
+        (file, guard),
+        |(mut file, guard)| async move {
+            let mut bytes = vec![0u8; 64 * 1024];
+            let read = file.read(&mut bytes).await?;
+            if read == 0 {
+                Ok::<_, std::io::Error>(None)
+            } else {
+                bytes.truncate(read);
+                Ok(Some((Bytes::from(bytes), (file, guard))))
+            }
+        },
+    ))
+}
 fn download_response(
     filename: &str,
     content_type: &str,

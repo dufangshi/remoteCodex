@@ -1844,8 +1844,7 @@ impl Supervisor {
     pub fn thread_image(&self, id: &str, rel: &str) -> Result<(Vec<u8>, &'static str)> {
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
-        let (path, bytes) = files::read_bytes(Path::new(&workspace.abs_path), rel)?;
-        Ok((bytes, files::image_mime(&path)))
+        files::read_thread_image(Path::new(&workspace.abs_path), id, rel)
     }
 
     fn load_steers(&self, thread_id: &str) -> Result<Vec<ThreadPendingSteerDto>> {

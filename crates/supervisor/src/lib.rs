@@ -1,6 +1,8 @@
 mod auth;
+mod bounded_channel;
 mod export;
 mod http;
+mod secure_transport;
 mod shells;
 mod socket;
 mod tunnel;
@@ -31,4 +33,9 @@ pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
     }
     axum::serve(listener, router(state)).await?;
     Ok(())
+}
+
+/// Read the public fingerprint without booting a runtime or opening a network listener.
+pub fn relay_device_fingerprint(database: &std::path::Path) -> anyhow::Result<String> {
+    secure_transport::fingerprint(database)
 }

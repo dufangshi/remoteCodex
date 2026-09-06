@@ -16,7 +16,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 const AUTH_COOKIE_NAME: &str = "remote_codex_session";
-const RELAY_FORWARD_HEADER: &str = "x-remote-codex-relay-forwarded";
+// Only the authenticated tunnel can construct this extension; HTTP headers cannot.
+#[derive(Clone)]
+pub(crate) struct TrustedRelayForward;
 const DEFAULT_SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -75,11 +77,7 @@ pub async fn require_auth(
         return next.run(request).await;
     }
     if state.config.mode == Mode::Relay
-        && request
-            .headers()
-            .get(RELAY_FORWARD_HEADER)
-            .and_then(|value| value.to_str().ok())
-            == Some("1")
+        && request.extensions().get::<TrustedRelayForward>().is_some()
     {
         return next.run(request).await;
     }

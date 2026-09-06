@@ -1179,9 +1179,12 @@ async fn http_files_prompt_interrupt_export_and_capabilities() {
             .await;
             assert_eq!(turn_detail["id"], turn_id);
             assert_eq!(turn_detail["hasDeferredItems"], false);
+            let attachment_dir = proj.join(".temp/threads").join(&thread_id);
+            std::fs::create_dir_all(&attachment_dir).unwrap();
+            std::fs::copy(proj.join("dot.png"), attachment_dir.join("dot.png")).unwrap();
             let image = client
                 .get(format!(
-                    "{base}/api/threads/{thread_id}/assets/image?path=dot.png"
+                    "{base}/api/threads/{thread_id}/assets/image?path=./.temp/threads/{thread_id}/dot.png"
                 ))
                 .send()
                 .await

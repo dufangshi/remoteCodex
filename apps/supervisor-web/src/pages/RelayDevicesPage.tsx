@@ -1,3 +1,7 @@
+import { SecurityVerification } from '../components/RelaySecurity';
+import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
+import { request } from '../lib/api';
+import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ProductHeader } from '../components/ProductHeader';
 import {
   ChevronDown,
@@ -178,6 +182,16 @@ export function RelayDevicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
+  const [rotatingDevice, setRotatingDevice] = useState<RelayDeviceDto | null>(null);
+  const [rotationVerification,setRotationVerification] = useState<SecurityStatus | null>(null);
+  async function rotateDevice(verified=false) {
+    if (!rotatingDevice) return;
+    try {
+      if (!verified) {const status=await securityRequest<SecurityStatus>(''); if (!status.recentlyVerified) {setRotationVerification(status);return;}}
+      const result=await request<RelayCreateDeviceResultDto>(`/relay/devices/${rotatingDevice.id}/token`,{method:'POST'});
+      setCreatedDevice(result);setAddDeviceOpen(true);setRotatingDevice(null);setRotationVerification(null);await load({showLoading:false});
+    } catch(e) {setError(errorMessage(e,'Token rotation failed.'));}
+  }
   const [deviceName, setDeviceName] = useState('');
   const [createdDevice, setCreatedDevice] =
     useState<RelayCreateDeviceResultDto | null>(null);
@@ -745,6 +759,7 @@ export function RelayDevicesPage() {
                     }
                     device={device}
                     key={device.id}
+                    onRotate={() => setRotatingDevice(device)}
                     onConnect={() => connectDevice(device)}
                     onCopySetup={(platform) =>
                       void copySupervisorSetup(device, platform)
@@ -965,6 +980,8 @@ export function RelayDevicesPage() {
           onShare={(input) => void createDeviceGrant(sharingDevice, input)}
         />
       ) : null}
+      <ConfirmDialog open={Boolean(rotatingDevice) && !rotationVerification} title="Replace device token?" description="The current connection will close. Update the device setup with the new token to reconnect. Existing workspaces and threads are kept." confirmLabel="Replace token" onConfirm={() => void rotateDevice()} onCancel={() => setRotatingDevice(null)} />
+      {rotationVerification && <SecurityVerification status={rotationVerification} onCancel={()=> {setRotationVerification(null);setRotatingDevice(null);}} onVerified={()=>rotateDevice(true)} />}
       <ConfirmDialog
         open={deletingDevice !== null}
         title="Delete relay device"
@@ -2226,6 +2243,7 @@ function DeviceRow({
   copyError,
   onConnect,
   onCopySetup,
+  onRotate,
   onDelete,
   onShare,
   setupTokenAvailable,
@@ -2236,6 +2254,7 @@ function DeviceRow({
   copyError: string | null;
   onConnect: () => void;
   onCopySetup: (platform: SupervisorPlatform) => void;
+  onRotate: () => void;
   onDelete: () => void;
   onShare: () => void;
   setupTokenAvailable: boolean;
@@ -2373,9 +2392,10 @@ function DeviceRow({
       </div>
       <div className="min-w-0 text-xs text-[var(--theme-fg-muted)]">
         <p>{activityText}</p>
+        <DeviceEncryptionStatus deviceId={device.id} />
         {!setupTokenAvailable && !hostedStatus ? (
           <p className="mt-1 text-[var(--theme-fg-soft)]">
-            Setup token unavailable. Recreate this device to copy a command.
+            Tokens are only shown once. Replace the token for a new setup command.
           </p>
         ) : null}
         {copiedSetup ? (
@@ -2465,6 +2485,7 @@ function DeviceRow({
                 <Share2 className="h-4 w-4" />
                 Share device
               </button>
+              {!hostedStatus && <button className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--theme-hover)]" role="menuitem" onClick={()=>{setActionsMenuOpen(false);onRotate();}}>Replace device token</button>}
               <div className="mt-1 border-t border-[var(--theme-border)] pt-1">
                 <button
                   className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"

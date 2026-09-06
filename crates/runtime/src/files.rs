@@ -17,7 +17,7 @@ pub const DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE: u64 = 1_000_000_000;
 pub enum WorkspaceDownload {
     File {
         path: PathBuf,
-        bytes: Vec<u8>,
+        file: File,
     },
     DirectoryArchive {
         filename: String,
@@ -147,8 +147,8 @@ pub fn read_bytes(root: &Path, rel: &str) -> Result<(PathBuf, Vec<u8>)> {
 pub fn prepare_download(root: &Path, rel: &str) -> Result<WorkspaceDownload> {
     let path = assert_within(root, Path::new(rel))?;
     if path.is_file() {
-        let bytes = std::fs::read(&path)?;
-        return Ok(WorkspaceDownload::File { path, bytes });
+        let file = File::open(&path)?;
+        return Ok(WorkspaceDownload::File { path, file });
     }
     if !path.is_dir() {
         bail!("Workspace download path must point to a file or directory.");
@@ -226,23 +226,62 @@ pub fn prepare_download(root: &Path, rel: &str) -> Result<WorkspaceDownload> {
     })
 }
 
-pub fn image_mime(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
+/// Only raster signatures are accepted. Extensions and user-provided MIME types
+/// are not proof that an attachment is safe to serve from the application origin.
+pub fn raster_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else if bytes.get(4..8) == Some(b"ftyp")
+        && matches!(
+            bytes.get(8..12),
+            Some(b"heic" | b"heix" | b"hevc" | b"hevx")
+        )
     {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "heic" => "image/heic",
-        "heif" => "image/heif",
-        _ => "application/octet-stream",
+        Some("image/heic")
+    } else if bytes.get(4..8) == Some(b"ftyp")
+        && matches!(bytes.get(8..12), Some(b"mif1" | b"msf1"))
+    {
+        Some("image/heif")
+    } else {
+        None
     }
+}
+
+pub fn read_thread_image(
+    root: &Path,
+    thread_id: &str,
+    rel: &str,
+) -> Result<(Vec<u8>, &'static str)> {
+    let path = assert_within(root, Path::new(rel))?;
+    // Historical uploads already use this per-thread namespace. Resolve symlinks
+    // before checking ownership, so a link to another thread/private file fails.
+    let attachment_root = root.canonicalize()?.join(".temp/threads").join(thread_id);
+    if assert_within(root, &attachment_root)? != attachment_root {
+        bail!("attachment directory must not be a symbolic link");
+    }
+    if !path.starts_with(&attachment_root) || path == attachment_root {
+        bail!("image is not an attachment of this thread");
+    }
+    let mut file = File::open(path)?;
+    if file.metadata()?.len() > 25 * 1024 * 1024 {
+        bail!("image attachment is too large");
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(25 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 25 * 1024 * 1024 {
+        bail!("image attachment is too large");
+    }
+    let mime = raster_image_mime(&bytes)
+        .ok_or_else(|| anyhow::anyhow!("attachment is not a supported raster image"))?;
+    Ok((bytes, mime))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,15 +2,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::bounded_channel as mpsc;
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
 use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tower::ServiceExt;
 use url::Url;
 
 const RELAY_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -21,11 +22,18 @@ const RELAY_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 struct RelayClientSession {
     socket: crate::socket::SocketSession,
     bridge: tokio::task::JoinHandle<()>,
+    crypto: Option<(
+        Arc<crate::secure_transport::Transport>,
+        Arc<crate::secure_transport::Session>,
+    )>,
 }
 
 impl Drop for RelayClientSession {
     fn drop(&mut self) {
         self.bridge.abort();
+        if let Some((transport, session)) = &self.crypto {
+            transport.remove_session(session.id());
+        }
     }
 }
 
@@ -40,12 +48,15 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
         .relay_agent_token
         .as_deref()
         .ok_or_else(|| anyhow!("REMOTE_CODEX_RELAY_AGENT_TOKEN is required"))?;
-    let tunnel_url = relay_tunnel_url(server_url, token)?;
+    let tunnel_url = relay_tunnel_url(server_url)?;
     let mut reconnect_delay = RELAY_RECONNECT_INITIAL_DELAY;
 
     loop {
-        match tokio::time::timeout(RELAY_CONNECT_TIMEOUT, connect_async(tunnel_url.as_str())).await
-        {
+        let mut handshake = tunnel_url.as_str().into_client_request()?;
+        handshake
+            .headers_mut()
+            .insert("authorization", format!("Bearer {token}").parse()?);
+        match tokio::time::timeout(RELAY_CONNECT_TIMEOUT, connect_async(handshake)).await {
             Ok(Ok((socket, _))) => {
                 tracing::info!(relay_origin = %tunnel_url.origin().ascii_serialization(), "relay tunnel connected");
                 reconnect_delay = RELAY_RECONNECT_INITIAL_DELAY;
@@ -70,7 +81,7 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
     }
 }
 
-fn relay_tunnel_url(server_url: &str, token: &str) -> Result<Url> {
+fn relay_tunnel_url(server_url: &str) -> Result<Url> {
     let mut url = Url::parse(server_url)?;
     match url.scheme() {
         "http" => url
@@ -84,11 +95,6 @@ fn relay_tunnel_url(server_url: &str, token: &str) -> Result<Url> {
     }
     url.set_path("/supervisor/tunnel");
     url.set_query(None);
-    {
-        let mut query = url.query_pairs_mut();
-        query.append_pair("token", token);
-        query.append_pair("deviceToken", token);
-    }
     Ok(url)
 }
 
@@ -99,7 +105,7 @@ async fn run_connected_tunnel(
     >,
 ) -> Result<()> {
     let (mut sink, mut stream) = socket.split();
-    let (outgoing, mut outbound) = mpsc::unbounded_channel::<Value>();
+    let (outgoing, mut outbound) = mpsc::channel::<Value>();
     let mut clients = HashMap::<String, RelayClientSession>::new();
     let mut heartbeat = tokio::time::interval(RELAY_HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -118,7 +124,7 @@ async fn run_connected_tunnel(
                 let Some(message) = message else {
                     return Err(anyhow!("relay tunnel writer closed"));
                 };
-                sink.send(Message::Text(message.to_string().into())).await?;
+                tokio::time::timeout(Duration::from_secs(10),sink.send(Message::Text(message.to_string().into()))).await??;
             }
             incoming = stream.next() => {
                 match incoming {
@@ -172,7 +178,7 @@ async fn run_connected_tunnel(
 fn handle_relay_message(
     state: Arc<Supervisor>,
     clients: &mut HashMap<String, RelayClientSession>,
-    outgoing: &mpsc::UnboundedSender<Value>,
+    outgoing: &mpsc::Sender<Value>,
     message: Value,
 ) {
     match message.get("type").and_then(Value::as_str) {
@@ -186,8 +192,19 @@ fn handle_relay_message(
                 return;
             };
             let payload = message.get("payload").cloned().unwrap_or_else(|| json!({}));
+            static REQUESTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+                std::sync::OnceLock::new();
+            let permit = REQUESTS
+                .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(32)))
+                .clone()
+                .try_acquire_owned();
+            let Ok(permit) = permit else {
+                let _=outgoing.send(json!({"type":"relay.response","requestId":request_id,"payload":relay_error_response(429,"Device is busy; retry shortly")}));
+                return;
+            };
             let outgoing = outgoing.clone();
             tokio::spawn(async move {
+                let _permit = permit;
                 let payload = forward_local(&state, payload).await;
                 let _ = outgoing.send(json!({
                     "type": "relay.response",
@@ -203,7 +220,13 @@ fn handle_relay_message(
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
             {
-                connect_relay_client(state, clients, outgoing, client_id.to_string());
+                connect_relay_client(
+                    state,
+                    clients,
+                    outgoing,
+                    client_id.to_string(),
+                    message.get("secureChannelId").and_then(Value::as_str),
+                );
             }
         }
         Some("relay.client.message") => {
@@ -212,7 +235,26 @@ fn handle_relay_message(
                 message.get("payload"),
             ) {
                 if let Some(client) = clients.get(client_id) {
-                    let _ = client.socket.send(payload.clone());
+                    let clear = match &client.crypto {
+                        Some((_, crypto)) => crypto.open(payload),
+                        None if payload.get("encrypted").is_none() => Ok(payload.clone()),
+                        None => Err(anyhow!("encrypted channel unavailable")),
+                    };
+                    match clear {
+                        Ok(payload) => {
+                            if !client.socket.send(payload) {
+                                let _ = outgoing.send(
+                                    json!({"type":"relay.client.close","clientId":client_id}),
+                                );
+                                clients.remove(client_id);
+                            }
+                        }
+                        Err(_) => {
+                            let _ = outgoing
+                                .send(json!({"type":"relay.client.close","clientId":client_id}));
+                            clients.remove(client_id);
+                        }
+                    }
                 }
             }
         }
@@ -228,16 +270,46 @@ fn handle_relay_message(
 fn connect_relay_client(
     state: Arc<Supervisor>,
     clients: &mut HashMap<String, RelayClientSession>,
-    outgoing: &mpsc::UnboundedSender<Value>,
+    outgoing: &mpsc::Sender<Value>,
     client_id: String,
+    secure_channel_id: Option<&str>,
 ) {
     clients.remove(&client_id);
-    let (session_output, mut output) = mpsc::unbounded_channel::<Value>();
+    if clients.len() >= 128 {
+        let _ = outgoing.send(json!({"type":"relay.client.close","clientId":client_id}));
+        return;
+    }
+    let crypto = if let Some(id) = secure_channel_id {
+        let Ok(transport) = crate::secure_transport::transport(&state) else {
+            return;
+        };
+        let Some(session) = transport.session(id) else {
+            let _ = outgoing.send(json!({"type":"relay.client.close","clientId":client_id}));
+            return;
+        };
+        Some((transport, session))
+    } else {
+        None
+    };
+    let output_crypto = crypto.as_ref().map(|(_, session)| session.clone());
+    let (session_output, mut output) = mpsc::channel::<Value>();
     let socket = crate::socket::SocketSession::spawn(state, session_output);
     let relay_output = outgoing.clone();
     let output_client_id = client_id.clone();
     let bridge = tokio::spawn(async move {
         while let Some(payload) = output.recv().await {
+            let payload = if let Some(crypto) = &output_crypto {
+                match crypto.seal(&payload) {
+                    Ok(payload) => payload,
+                    Err(_) => {
+                        let _ = relay_output
+                            .send(json!({"type":"relay.client.close","clientId":output_client_id}));
+                        break;
+                    }
+                }
+            } else {
+                payload
+            };
             if relay_output
                 .send(json!({
                     "type": "relay.server.message",
@@ -251,7 +323,14 @@ fn connect_relay_client(
             }
         }
     });
-    clients.insert(client_id, RelayClientSession { socket, bridge });
+    clients.insert(
+        client_id,
+        RelayClientSession {
+            socket,
+            bridge,
+            crypto,
+        },
+    );
 }
 
 fn relay_activity(event: &ThreadEventEnvelope) -> Option<Value> {
@@ -273,22 +352,178 @@ fn relay_activity(event: &ThreadEventEnvelope) -> Option<Value> {
 }
 
 async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
+    let path = payload["path"]
+        .as_str()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("");
+    if path.ends_with("/transport/shell-scope") && payload["method"] == "GET" {
+        let thread = path
+            .strip_prefix("/api/threads/")
+            .and_then(|p| p.strip_suffix("/transport/shell-scope"));
+        return match thread.and_then(|id| state.get_thread(id).ok()) {
+            Some(thread) => json_response(
+                json!({"shells":crate::shells::hub().list_for_thread(&thread.id).iter().map(|shell|json!({"id":shell["id"]})).collect::<Vec<_>>() }),
+            ),
+            None => relay_error_response(404, "Thread not found"),
+        };
+    }
+    let key_path = path.ends_with("/transport/key");
+    let session_path = path.ends_with("/transport/session");
+    let encrypted = payload["headers"]["x-rcd-key"].is_string();
+    if key_path || encrypted || session_path {
+        let transport = match crate::secure_transport::transport(state) {
+            Ok(t) => t,
+            Err(_) => return relay_error_response(503, "Device encryption is unavailable"),
+        };
+        if key_path && payload["method"] == "GET" {
+            let query = payload["path"]
+                .as_str()
+                .unwrap_or("")
+                .split_once('?')
+                .map(|(_, q)| q)
+                .unwrap_or("");
+            let challenge = url::form_urlencoded::parse(query.as_bytes())
+                .find(|(key, _)| key == "challenge")
+                .map(|(_, v)| v.into_owned())
+                .unwrap_or_default();
+            if challenge.len() > 128
+                || !challenge
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            {
+                return relay_error_response(400, "Invalid key challenge");
+            }
+            return match transport.descriptor(&challenge) {
+                Ok(value) => json_response(value),
+                Err(_) => relay_error_response(503, "Device encryption is unavailable"),
+            };
+        }
+        if !encrypted {
+            return relay_error_response(400, "An encrypted request is required");
+        }
+        if !transport.has_key(payload["headers"]["x-rcd-key"].as_str().unwrap_or("")) {
+            return json!({"statusCode":409,"headers":{"content-type":"application/json","cache-control":"no-store"},"body":json!({"code":"transport_reconnect_required","message":"The device reconnected. Retry this action to use its new encryption key."}).to_string()});
+        }
+        let opened =
+            match transport.open(&payload) {
+                Ok(o) => o,
+                Err(_) => return relay_error_response(
+                    400,
+                    "Encrypted request is invalid, expired, or replayed. Reconnect to the device.",
+                ),
+            };
+        let response = if path.contains("/transport/stream/") {
+            match transport
+                .streams
+                .read(opened.request["path"].as_str().unwrap_or(""))
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => relay_error_response(410, "Download expired; start it again"),
+            }
+        } else if session_path {
+            match transport.create_session(&opened) {
+                Ok(value) => json_response(value),
+                Err(_) => relay_error_response(429, "Too many encrypted connections"),
+            }
+        } else if payload["headers"]["x-rcd-hosted-workspaces"].is_string()
+            && matches!(
+                path,
+                "/api/workspaces" | "/api/threads" | "/api/threads/start"
+            )
+        {
+            dispatch_local(state, opened.request.clone()).await
+        } else {
+            dispatch_streaming(state, opened.request.clone(), &transport).await
+        };
+        let (response, resources) = filter_hosted_response(&payload, response);
+        let mut sealed = opened
+            .response(response)
+            .unwrap_or_else(|_| relay_error_response(502, "Device response encryption failed"));
+        if let Some(resources) = resources {
+            sealed["headers"]["x-rcd-result-resource"] = json!(resources.to_string());
+        }
+        return sealed;
+    }
+    dispatch_local(state, payload).await
+}
+// Policy is inserted by the relay after authentication, never copied from client headers.
+fn filter_hosted_response(request: &Value, mut response: Value) -> (Value, Option<Value>) {
+    let Some(policy) = request["headers"]["x-rcd-hosted-workspaces"].as_str() else {
+        return (response, None);
+    };
+    let Ok(owned) = serde_json::from_str::<std::collections::HashSet<String>>(policy) else {
+        return (relay_error_response(403, "Invalid hosted policy"), None);
+    };
+    let path = request["path"]
+        .as_str()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("");
+    let method = request["method"].as_str().unwrap_or("");
+    if !matches!(
+        (method, path),
+        ("GET", "/api/workspaces" | "/api/threads")
+            | ("POST", "/api/workspaces" | "/api/threads/start")
+    ) || response["statusCode"].as_u64().unwrap_or(500) >= 300
+    {
+        return (response, None);
+    }
+    let Ok(mut data) = serde_json::from_str::<Value>(response["body"].as_str().unwrap_or(""))
+    else {
+        return (relay_error_response(502, "Invalid hosted response"), None);
+    };
+    if method == "GET" {
+        let Some(rows) = data.as_array_mut() else {
+            return (relay_error_response(502, "Invalid hosted list"), None);
+        };
+        rows.retain(|row| {
+            row[if path == "/api/workspaces" {
+                "id"
+            } else {
+                "workspaceId"
+            }]
+            .as_str()
+            .is_some_and(|id| owned.contains(id))
+        });
+    }
+    let rows = if let Some(rows) = data.as_array() {
+        rows.clone()
+    } else {
+        vec![data.clone()]
+    };
+    let resources = rows
+        .iter()
+        .map(|row| json!({"id":row["id"],"workspaceId":row["workspaceId"]}))
+        .collect::<Vec<_>>();
+    response["body"] = json!(data.to_string());
+    (response, Some(json!(resources)))
+}
+fn json_response(value: Value) -> Value {
+    json!({"statusCode":200,"headers":{"content-type":"application/json","cache-control":"no-store"},"body":value.to_string()})
+}
+async fn dispatch_raw(
+    state: &Arc<Supervisor>,
+    payload: Value,
+) -> Result<axum::response::Response, Value> {
     let method = payload
         .get("method")
         .and_then(Value::as_str)
         .unwrap_or("GET");
     let path = payload.get("path").and_then(Value::as_str).unwrap_or("/");
     if !path.starts_with('/') || !(path == "/healthz" || path.starts_with("/api/")) {
-        return relay_error_response(403, "This relay path is not allowed.");
+        return Err(relay_error_response(403, "This relay path is not allowed."));
     }
     let Ok(method) = reqwest::Method::from_bytes(method.as_bytes()) else {
-        return relay_error_response(400, "Invalid relay request method.");
+        return Err(relay_error_response(400, "Invalid relay request method."));
     };
-    let url = format!("http://127.0.0.1:{}{path}", state.config.port);
-    let client = reqwest::Client::new();
-    let mut request = client
-        .request(method, &url)
-        .header("x-remote-codex-relay-forwarded", "1");
+    let mut request = axum::http::Request::builder()
+        .method(method)
+        .uri(path)
+        .extension(crate::auth::TrustedRelayForward);
     if let Some(headers) = payload.get("headers").and_then(Value::as_object) {
         for name in ["content-type", "accept", "if-none-match", "range"] {
             if let Some(value) = headers.get(name).and_then(Value::as_str) {
@@ -298,13 +533,57 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
     }
     let body = match decode_relay_request_body(&payload) {
         Ok(body) => body,
-        Err(message) => return relay_error_response(400, message),
+        Err(message) => return Err(relay_error_response(400, message)),
     };
-    if let Some(bytes) = body {
-        request = request.body(bytes);
+    let request = match request.body(axum::body::Body::from(body.unwrap_or_default())) {
+        Ok(request) => request,
+        Err(_) => return Err(relay_error_response(400, "Invalid relay request headers.")),
+    };
+    // In-process dispatch avoids both a forgeable authorization header and a loopback hop.
+    crate::http::router(state.clone())
+        .oneshot(request)
+        .await
+        .map_err(|_| relay_error_response(502, "Device request failed"))
+}
+async fn dispatch_streaming(
+    state: &Arc<Supervisor>,
+    payload: Value,
+    transport: &crate::secure_transport::Transport,
+) -> Value {
+    let path = payload["path"].as_str().unwrap_or("").to_string();
+    let response = match dispatch_raw(state, payload).await {
+        Ok(response) => response,
+        Err(error) => return error,
+    };
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "content-type"
+                    | "content-length"
+                    | "content-disposition"
+                    | "content-range"
+                    | "accept-ranges"
+                    | "cache-control"
+                    | "content-security-policy"
+                    | "referrer-policy"
+                    | "x-content-type-options"
+            )
+        })
+        .filter_map(|(key, value)| value.to_str().ok().map(|v| (key.to_string(), json!(v))))
+        .collect::<serde_json::Map<_, _>>();
+    match transport.streams.begin(&path, response.into_body()).await {
+        Ok((bytes, next)) => {
+            json!({"statusCode":status,"headers":headers,"body":base64::engine::general_purpose::STANDARD.encode(bytes),"bodyEncoding":"base64","streamNext":next})
+        }
+        Err(_) => relay_error_response(502, "Device download could not continue"),
     }
-
-    match request.send().await {
+}
+async fn dispatch_local(state: &Arc<Supervisor>, payload: Value) -> Value {
+    match dispatch_raw(state, payload).await {
         Ok(response) => {
             let status = response.status().as_u16();
             let headers = response
@@ -317,6 +596,8 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
                             | "content-disposition"
                             | "cache-control"
                             | "x-content-type-options"
+                            | "content-security-policy"
+                            | "referrer-policy"
                     )
                     .then(|| {
                         value.to_str().ok().map(|value| {
@@ -331,7 +612,12 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            let bytes = response.bytes().await.unwrap_or_default();
+            let bytes = match axum::body::to_bytes(response.into_body(), 64 * 1024 * 1024).await {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return relay_error_response(502, "Relay response exceeds the size limit.")
+                }
+            };
             let text_response = content_type.starts_with("text/")
                 || content_type.contains("application/json")
                 || content_type.contains("+json")
@@ -354,11 +640,11 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
                 })
             }
         }
-        Err(error) => relay_error_response(502, &format!("Local supervisor unavailable: {error}")),
+        Err(error) => error,
     }
 }
 
-fn decode_relay_request_body(payload: &Value) -> Result<Option<Vec<u8>>, &'static str> {
+pub(crate) fn decode_relay_request_body(payload: &Value) -> Result<Option<Vec<u8>>, &'static str> {
     let Some(body) = payload.get("body") else {
         return Ok(None);
     };
@@ -434,19 +720,31 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn forged_forward_header_is_denied_but_tunnel_dispatch_is_authorized() {
+        let (_dir, state) = state_with_relay_url("http://localhost:8788");
+        let response = crate::http::router(state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/workspaces")
+                    .header("x-remote-codex-relay-forwarded", "1")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 401);
+        let forwarded =
+            forward_local(&state, json!({"method":"GET","path":"/api/workspaces"})).await;
+        assert_eq!(forwarded["statusCode"], 200);
+    }
+
     #[test]
     fn builds_node_compatible_tunnel_url() {
-        let url =
-            relay_tunnel_url("https://relay.example.test/base?old=1", "agent token/+").unwrap();
+        let url = relay_tunnel_url("https://relay.example.test/base?old=1").unwrap();
         assert_eq!(url.scheme(), "wss");
         assert_eq!(url.path(), "/supervisor/tunnel");
-        assert_eq!(
-            url.query_pairs().collect::<Vec<_>>(),
-            vec![
-                ("token".into(), "agent token/+".into()),
-                ("deviceToken".into(), "agent token/+".into())
-            ]
-        );
+        assert!(url.query().is_none());
     }
 
     #[test]
@@ -470,7 +768,7 @@ mod tests {
     #[tokio::test]
     async fn relay_client_envelopes_use_the_shared_socket_session() {
         let (_directory, state) = state();
-        let (outgoing, mut output) = mpsc::unbounded_channel();
+        let (outgoing, mut output) = mpsc::channel();
         let mut clients = HashMap::new();
         handle_relay_message(
             state.clone(),

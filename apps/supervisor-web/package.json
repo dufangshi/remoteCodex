@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "3dmol": "^2.5.2",
+    "@hpke/core": "^1.9.0",
     "@remote-codex/plugin-runtime": "workspace:*",
     "@remote-codex/plugin-terminal": "workspace:*",
     "@remote-codex/shared": "workspace:*",
@@ -23,7 +24,7 @@
     "lucide-react": "^0.544.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.5.1",
+    "react-router-dom": "^7.18.3",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",

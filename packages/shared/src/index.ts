@@ -13,6 +13,8 @@ export type {
 } from './agent-providers';
 
 export type ApiErrorCode =
+  | 'reauthentication_required'
+  | 'rate_limited'
   | 'bad_request'
   | 'unauthorized'
   | 'not_found'
@@ -323,7 +325,10 @@ export interface RelaySessionDto {
 }
 
 export interface RelayLoginResultDto {
-  token: string;
+  token?: string;
+  challengeRequired?: boolean;
+  authenticator?: boolean;
+  passkey?: boolean;
   session: RelaySessionDto;
 }
 

@@ -25,6 +25,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "concurrently": "^9.1.2"
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.1.2",
+    "ws": "^8.21.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "mermaid@>=11.0.0 <11.16.1": "11.16.1"
+    }
   }
 }

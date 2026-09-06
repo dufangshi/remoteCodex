@@ -25,3 +25,9 @@ tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+totp-rs = { version = "5.7", features = ["otpauth", "gen_secret", "serde_support"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation"] }
+qrcodegen = "1.8"
+openssl = { version = "0.10.81", features = ["vendored"] }

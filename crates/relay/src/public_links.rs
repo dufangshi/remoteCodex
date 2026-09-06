@@ -6,7 +6,8 @@ use super::*;
 pub(super) struct Scope {
     device_id: String,
     thread_id: String,
-    theme: Option<String>,
+    #[serde(default)]
+    snapshot: Option<Value>,
 }
 
 fn owns(conn: &Connection, owner: &str, scope: &Scope) -> bool {
@@ -25,6 +26,7 @@ fn owns(conn: &Connection, owner: &str, scope: &Scope) -> bool {
 
 // Strict projection: command output, reasoning, internal paths/IDs and future
 // DTO fields cannot leak into the public response, even if the UI changes.
+#[cfg(test)]
 fn messages(turn: &Value) -> Vec<Value> {
     let Some(items) = turn["items"].as_array() else {
         return vec![];
@@ -43,6 +45,19 @@ fn messages(turn: &Value) -> Vec<Value> {
     }).collect()
 }
 
+fn numeric_fields(source: &Value, fields: &[&str]) -> Value {
+    Value::Object(
+        fields
+            .iter()
+            .filter_map(|key| {
+                source[*key]
+                    .as_f64()
+                    .filter(|v| *v >= 0.0)
+                    .map(|n| (key.to_string(), json!(n)))
+            })
+            .collect(),
+    )
+}
 pub(super) async fn create(
     headers: HeaderMap,
     Query(query): Query<TokenQuery>,
@@ -61,144 +76,102 @@ pub(super) async fn create(
         user.id
     };
     let created_at = now_rfc3339();
-    let mut turns = Vec::new();
-    let mut before = None::<String>;
-    let mut title = String::new();
-    let mut total = None;
-    let mut seen = HashSet::new();
-    loop {
-        let mut path = format!("/api/threads/{}?view=summary&limit=100", scope.thread_id);
-        if let Some(cursor) = &before {
-            path.push_str(&format!("&beforeTurnId={cursor}"));
-        }
-        let response = forward_device(
-            state.clone(),
-            scope.device_id.clone(),
-            "GET".into(),
-            path,
-            None,
-            None,
-            json!({}),
+    // The browser decrypts and projects the transcript before explicitly publishing it.
+    // Never fetch private transcript data through an unencrypted relay side channel.
+    let Some(input) = scope.snapshot.as_ref() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "A public transcript snapshot is required",
         )
-        .await;
-        if !response.status().is_success() {
-            return response;
-        }
-        let Ok(bytes) = to_bytes(response.into_body(), 32 * 1024 * 1024).await else {
-            return StatusCode::BAD_GATEWAY.into_response();
-        };
-        let Ok(detail) = serde_json::from_slice::<Value>(&bytes) else {
-            return StatusCode::BAD_GATEWAY.into_response();
-        };
-        if total.is_none() {
-            title = detail["thread"]["title"]
-                .as_str()
-                .unwrap_or("Shared thread")
-                .into();
-            total = detail["totalTurnCount"].as_u64();
-        }
-        let Some(page) = detail["turns"].as_array() else {
-            return StatusCode::BAD_GATEWAY.into_response();
-        };
-        if page.is_empty() {
-            break;
-        }
-        let cursor = page[0]["id"].as_str().unwrap_or_default().to_string();
-        if cursor.is_empty() || before.as_ref() == Some(&cursor) {
-            return StatusCode::BAD_GATEWAY.into_response();
-        }
-        let mut projected = Vec::new();
-        for turn in page {
-            if seen.insert(turn["id"].as_str().unwrap_or_default().to_string()) {
-                projected.push(json!({
-                    "messages": messages(turn),
-                    "startedAt": turn["startedAt"], "completedAt": turn["completedAt"],
-                    "model": turn["model"], "reasoningEffort": turn["reasoningEffort"],
-                    "tokenUsage": turn["tokenUsage"], "priceEstimate": turn["priceEstimate"],
-                }));
-            }
-        }
-        projected.append(&mut turns);
-        turns = projected;
-        if turns.len() >= total.unwrap_or(page.len() as u64) as usize || page.len() < 100 {
-            break;
-        }
-        // Refuse huge snapshots rather than silently publishing a partial history.
-        if turns.len() >= 10_000 {
-            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-        }
-        before = Some(cursor);
-    }
+            .into_response();
+    };
+    let Some(source_turns) = input["turns"].as_array().filter(|v| v.len() <= 10_000) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let mut turns = Vec::new();
     let mut paths = HashSet::new();
-    for turn in &turns {
-        for message in turn["messages"].as_array().into_iter().flatten() {
-            for tail in message["text"]
-                .as_str()
-                .unwrap_or("")
-                .split("[PHOTO ")
-                .skip(1)
-            {
+    for source in source_turns {
+        let Some(items) = source["messages"].as_array() else {
+            return StatusCode::BAD_REQUEST.into_response();
+        };
+        let mut messages = Vec::new();
+        for item in items {
+            if !matches!(item["role"].as_str(), Some("user" | "assistant")) {
+                continue;
+            }
+            let text = item["text"].as_str().unwrap_or("");
+            for tail in text.split("[PHOTO ").skip(1) {
                 if let Some((path, _)) = tail.split_once(']') {
                     paths.insert(path.trim().to_string());
                 }
             }
+            messages.push(
+                json!({"role":item["role"],"text":text,"createdAt":item["createdAt"].as_str()}),
+            );
         }
+        let mut turn = json!({"messages":messages,"startedAt":source["startedAt"].as_str(),"completedAt":source["completedAt"].as_str(),"model":source["model"].as_str(),"reasoningEffort":source["reasoningEffort"].as_str()});
+        if source["tokenUsage"].is_object() {
+            let fields = [
+                "totalTokens",
+                "inputTokens",
+                "cachedInputTokens",
+                "cacheWriteInputTokens",
+                "outputTokens",
+                "reasoningOutputTokens",
+            ];
+            turn["tokenUsage"] = json!({"total":numeric_fields(&source["tokenUsage"]["total"],&fields),"last":numeric_fields(&source["tokenUsage"]["last"],&fields),"modelContextWindow":source["tokenUsage"]["modelContextWindow"].as_u64()});
+        }
+        if source["priceEstimate"].is_object() {
+            let mut price = numeric_fields(
+                &source["priceEstimate"],
+                &[
+                    "inputUsd",
+                    "cachedInputUsd",
+                    "cacheWriteInputUsd",
+                    "outputUsd",
+                    "totalUsd",
+                ],
+            );
+            for key in ["pricingModelKey", "pricingTierKey", "currency"] {
+                price[key] = json!(source["priceEstimate"][key].as_str());
+            }
+            turn["priceEstimate"] = price;
+        }
+        turns.push(turn);
     }
     let mut images = serde_json::Map::new();
     let mut image_bytes = 0;
     for path in paths {
-        let query = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("path", &path)
-            .finish();
-        let response = forward_device(
-            state.clone(),
-            scope.device_id.clone(),
-            "GET".into(),
-            format!("/api/threads/{}/assets/image?{query}", scope.thread_id),
-            None,
-            None,
-            json!({}),
-        )
-        .await;
-        if !response.status().is_success() {
+        let Some(data) = input["images"][&path].as_str() else {
             continue;
-        }
-        let mime = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        };
+        let Some((prefix, encoded)) = data.split_once(",") else {
+            return StatusCode::BAD_REQUEST.into_response();
+        };
         if !matches!(
-            mime.as_str(),
-            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+            prefix,
+            "data:image/png;base64"
+                | "data:image/jpeg;base64"
+                | "data:image/webp;base64"
+                | "data:image/gif;base64"
         ) {
-            continue;
+            return StatusCode::BAD_REQUEST.into_response();
         }
-        let Ok(bytes) = to_bytes(response.into_body(), 8 * 1024 * 1024).await else {
-            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+            return StatusCode::BAD_REQUEST.into_response();
         };
         image_bytes += bytes.len();
         if image_bytes > 10 * 1024 * 1024 {
             return StatusCode::PAYLOAD_TOO_LARGE.into_response();
         }
-        images.insert(
-            path,
-            json!(format!(
-                "data:{mime};base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(bytes)
-            )),
-        );
+        images.insert(path, json!(data));
     }
-    let theme = if scope.theme.as_deref() == Some("light") {
+    let theme = if input["theme"] == "light" {
         "light"
     } else {
         "dark"
     };
-    let snapshot = json!({"title": title, "createdAt": created_at, "turnCount": turns.len(), "turns": turns, "theme":theme, "images":images});
+    let snapshot = json!({"title":input["title"].as_str().unwrap_or("Shared thread"),"createdAt":created_at,"turnCount":turns.len(),"turns":turns,"theme":theme,"images":images});
     let serialized = snapshot.to_string();
     if serialized.len() > 16 * 1024 * 1024 {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();

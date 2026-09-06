@@ -40,6 +40,12 @@ enum Commands {
     },
     /// Run a supervisor that connects out to a relay.
     RelaySupervisor,
+    /// Show the device encryption fingerprint for independent browser verification.
+    RelayFingerprint {
+        /// Supervisor database path; defaults to relay-mode configuration.
+        #[arg(long, env = "DATABASE_URL")]
+        database: Option<std::path::PathBuf>,
+    },
     /// Print version.
     Version,
 }
@@ -94,6 +100,15 @@ async fn main() -> Result<()> {
             std::env::set_var("REMOTE_CODEX_MODE", "relay");
             let state = remote_codex_runtime::boot().await?;
             remote_codex_supervisor::serve(state).await?;
+        }
+        Commands::RelayFingerprint { database } => {
+            std::env::set_var("REMOTE_CODEX_MODE", "relay");
+            let database = database
+                .unwrap_or_else(|| remote_codex_runtime::RuntimeConfig::from_env().database_url);
+            println!(
+                "SHA-256 {}",
+                remote_codex_supervisor::relay_device_fingerprint(&database)?
+            );
         }
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

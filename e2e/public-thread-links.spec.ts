@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import {writeFile} from 'node:fs/promises';
+import {mkdir,writeFile} from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import {
   api,
@@ -22,6 +22,8 @@ test('owner manages member permissions and immutable public links survive device
     PORT: '18921',
     HOST: '127.0.0.1',
     REMOTE_CODEX_RELAY_DATA_DIR: dataDir,
+    REMOTE_CODEX_RELAY_WEB_DIST_DIR: path.resolve('apps/supervisor-web/dist'),
+    REMOTE_CODEX_PUBLIC_BASE_URL: relayBase,
     REMOTE_CODEX_ADMIN_USERNAME: 'admin',
     REMOTE_CODEX_ADMIN_PASSWORD: password,
     REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true',
@@ -94,8 +96,9 @@ test('owner manages member permissions and immutable public links survive device
         approvalMode: 'yolo',
       }),
     });
-    const imagePath = path.join(absPath, 'snapshot.png');
-    await writeFile(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=', 'base64'));
+    const attachmentDir=path.join(absPath,'.temp/threads',thread.id);await mkdir(attachmentDir,{recursive:true});
+    const imagePath = `./.temp/threads/${thread.id}/snapshot.png`;
+    await writeFile(path.join(absPath,imagePath), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=', 'base64'));
     const prompt = `hello, reply me with hello [PHOTO ${imagePath}]`;
     await call(`/threads/${thread.id}/prompt`, {
       method: 'POST',
@@ -116,18 +119,8 @@ test('owner manages member permissions and immutable public links survive device
         workspaceAccess: 'none',
       }),
     });
-    await page.addInitScript((token) => {
-      localStorage.setItem('remote-codex-relay-mode', 'true');
-      localStorage.setItem('remote-codex-relay-token', token);
-    }, login.token);
-    await page.route('**/relay/**', async (route) => {
-      const url = new URL(route.request().url());
-      const response = await route.fetch({
-        url: relayBase + url.pathname + url.search,
-      });
-      await route.fulfill({ response });
-    });
-    await page.goto(`/devices/${deviceId}/threads/${thread.id}`);
+    await page.context().addCookies([{name:'remote_codex_relay_session',value:login.token,url:relayBase}]);
+    await page.goto(`${relayBase}/devices/${deviceId}/threads/${thread.id}`);
     await expect(page.getByLabel('1 people shared')).toBeVisible();
     await page
       .getByRole('button', { name: 'Thread actions', exact: true })
@@ -206,7 +199,7 @@ test('owner manages member permissions and immutable public links survive device
     await page.screenshot({ path: testInfo.outputPath('share-links.png') });
     await stopProc(supervisor);
     supervisor = undefined;
-    await page.goto(`/s/${linkId}`);
+    await page.goto(`${relayBase}/s/${linkId}`);
     await expect(
       page.getByRole('heading', { name: 'Public snapshot regression' }),
     ).toBeVisible();
