@@ -37,7 +37,15 @@ export function ThreadPublicLinks({
     try {
       const link = await request<SnapshotLink>('/relay/thread-links', {
         method: 'POST',
-        body: JSON.stringify({ deviceId, threadId }),
+        body: JSON.stringify({
+          deviceId,
+          threadId,
+          theme:
+            document.documentElement.getAttribute('data-theme-effective') ===
+            'light'
+              ? 'light'
+              : 'dark',
+        }),
       });
       setLinks((current) => [link, ...current]);
     } catch (e) {

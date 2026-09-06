@@ -346,54 +346,6 @@ test.describe('non-thread product UI regressions', () => {
     }
   });
 
-  test('downloads valid PDF and standalone HTML thread exports', async ({ page }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'desktop-chromium',
-      'One browser project is sufficient for binary download validation.',
-    );
-    const thread = await api<{ id: string }>(apiBaseUrl, '/api/threads/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        workspaceId: workspace.id,
-        provider: 'codex',
-        model: 'ios-e2e-stream',
-        approvalMode: 'guarded',
-        title: 'Unicode export 测试',
-      }),
-    });
-
-    try {
-      await page.goto(`/threads/${thread.id}`);
-      await page.getByRole('button', { name: 'Thread actions' }).click();
-      let dialog = page.getByRole('dialog', { name: 'Thread actions' });
-      const pdfDownloadPromise = page.waitForEvent('download');
-      await dialog.getByRole('button', { name: 'Export PDF' }).click();
-      const pdfDownload = await pdfDownloadPromise;
-      expect(pdfDownload.suggestedFilename()).toMatch(/\.pdf$/);
-      const pdfPath = await pdfDownload.path();
-      expect(pdfPath).not.toBeNull();
-      const pdf = await fs.readFile(pdfPath!);
-      expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
-      expect(pdf.subarray(-5).toString('ascii')).toBe('%%EOF');
-
-      await page.getByRole('button', { name: 'Thread actions' }).click();
-      dialog = page.getByRole('dialog', { name: 'Thread actions' });
-      await dialog.getByRole('button', { name: 'HTML', exact: true }).click();
-      const htmlDownloadPromise = page.waitForEvent('download');
-      await dialog.getByRole('button', { name: 'Export HTML' }).click();
-      const htmlDownload = await htmlDownloadPromise;
-      expect(htmlDownload.suggestedFilename()).toMatch(/\.html$/);
-      const htmlPath = await htmlDownload.path();
-      expect(htmlPath).not.toBeNull();
-      const html = await fs.readFile(htmlPath!, 'utf8');
-      expect(html).toMatch(/^<!doctype html>/);
-      expect(html).toContain('Unicode export 测试');
-      expect(html).not.toContain('%PDF-');
-    } finally {
-      await api(apiBaseUrl, `/api/threads/${thread.id}`, { method: 'DELETE' });
-    }
-  });
-
   test('core product routes reflow across the target width matrix', async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'desktop-chromium',

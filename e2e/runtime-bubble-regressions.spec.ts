@@ -1413,3 +1413,67 @@ test('an expanded long reply stays expanded when the running turn becomes final 
   await expect(page.getByRole('button',{name:'Show less',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Show more',exact:true})).toHaveCount(0);
 });
+
+test('exports the live thread styling and complete Markdown to offline HTML and printable PDF', async ({page, context}, testInfo) => {
+  const fs = await import('node:fs/promises');
+  const {pathToFileURL} = await import('node:url');
+  await page.emulateMedia({colorScheme:testInfo.project.name==='mobile-chromium'?'dark':'light'});
+  await installFakeWebSocket(page);
+  await context.addInitScript(() => { window.print = () => { document.documentElement.dataset.printRequested = 'true'; }; });
+  const answer = '# 导出样式验证\n\n**中文加粗** and *emphasis* with `inline code`.\n\n| 模型 | Tokens |\n| --- | --- |\n| Codex | 8k |\n\n- 第一项\n- Second item\n\n```typescript\nconst greeting = "你好";\nconsole.log(greeting);\n```\n\nMath: $E=mc^2$.\n\n![Markdown attachment](https://example.test/image.png)\n\n' + ('完整段落，长回复不能截断。\n\n'.repeat(1000)) + 'END_OF_COMPLETE_REPLY';
+  const total = {totalTokens:3500,inputTokens:1500,outputTokens:2000,cachedInputTokens:500,reasoningOutputTokens:800};
+  const fixture = detail('codex', {thread:{status:'idle',activeTurnId:null,title:'Styled transcript 中文'},totalTurnCount:1,turns:[{
+    id:'turn-1',status:'completed',startedAt:now,completedAt:'2026-04-09T06:02:12.000Z',error:null,model:'gpt-6-astra',reasoningEffort:'high',tokenUsage:{total,last:total},
+    priceEstimate:{pricingModelKey:'gpt-6-astra',pricingTierKey:'standard',currency:'USD',inputUsd:.01,cachedInputUsd:.0005,outputUsd:.1,totalUsd:.1105},
+    items:[{id:'u',kind:'userMessage',text:'Please export this conversation. [PHOTO screenshot.png]',createdAt:now},{id:'op',kind:'commandExecution',text:'PRIVATE_OPERATION'},{id:'a',kind:'agentMessage',text:answer,previewText:'TRUNCATED_PREVIEW',phase:'final',createdAt:'2026-04-09T06:02:12.000Z'}],
+  }]});
+  await installApiRoutes(page,()=>fixture);
+  await page.route('**/assets/image?*',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=','base64')}));
+  await page.route('https://example.test/image.png',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=','base64')}));
+  await page.goto('/threads/thread-1');
+  const userBubble = page.locator('[data-role="user"] .thread-graph-message-bubble');
+  await expect(userBubble).toBeVisible();
+  const appearance = await userBubble.evaluate(el=>{const s=getComputedStyle(el);return {background:s.backgroundColor,radius:s.borderRadius,font:s.fontSize};});
+  await page.getByRole('button',{name:'Thread actions',exact:true}).click();
+  let dialog = page.getByRole('dialog',{name:'Thread actions',exact:true});
+  await dialog.getByRole('button',{name:'HTML',exact:true}).click();
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByRole('button',{name:'Export HTML',exact:true}).click();
+  const download = await downloadPromise;
+  const htmlPath = testInfo.outputPath('transcript.html');
+  await download.saveAs(htmlPath);
+  const html = await fs.readFile(htmlPath,'utf8');
+  expect(html).toContain('<strong>中文加粗</strong>');
+  expect(html).toContain('END_OF_COMPLETE_REPLY');
+  expect(html).not.toContain('TRUNCATED_PREVIEW');
+  expect(html).not.toContain('PRIVATE_OPERATION');
+  expect(html).not.toContain('<script');
+  expect(html).not.toContain('token=');
+  const offline = await context.newPage();
+  await offline.route('http**/*',route=>route.abort());
+  await offline.goto(pathToFileURL(htmlPath).href);
+  await expect(offline.locator('table')).toBeVisible();
+  await expect(offline.locator('.katex').first()).toBeVisible();
+  await expect(offline.locator('pre code')).toContainText('const greeting');
+  await expect(offline.locator('pre code span[style]').first()).toBeAttached();
+  await expect(offline.locator('img')).toHaveCount(2);
+  expect(await offline.locator('img').evaluateAll(images=>images.every(image=>(image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth>0))).toBe(true);
+  const exportedAppearance = await offline.locator('[data-role="user"] .thread-graph-message-bubble').evaluate(el=>{const s=getComputedStyle(el);return {background:s.backgroundColor,radius:s.borderRadius,font:s.fontSize};});
+  expect(exportedAppearance).toEqual(appearance);
+  await expect(offline.locator('button')).toHaveCount(0);
+  await expect(offline.locator('.thread-graph-worked-summary')).toContainText('Worked for 1m 12s');
+  expect(await offline.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await offline.screenshot({path:testInfo.outputPath('offline-transcript.png')});
+  await page.getByRole('button',{name:'Thread actions',exact:true}).click();
+  dialog=page.getByRole('dialog',{name:'Thread actions',exact:true});
+  await dialog.getByRole('button',{name:'PDF',exact:true}).click();
+  const popupPromise=page.waitForEvent('popup');
+  await dialog.getByRole('button',{name:'Export PDF',exact:true}).click();
+  const popup=await popupPromise;
+  await expect(popup.locator('html')).toHaveAttribute('data-print-requested','true');
+  await expect(popup.locator('strong').first()).toHaveText('中文加粗');
+  if(testInfo.project.name==='desktop-chromium') {
+    const pdf=await popup.pdf({path:testInfo.outputPath('transcript.pdf'),printBackground:true,preferCSSPageSize:true});
+    expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
+  }
+});

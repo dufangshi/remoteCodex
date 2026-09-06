@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import {writeFile} from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import {
   api,
@@ -93,9 +94,12 @@ test('owner manages member permissions and immutable public links survive device
         approvalMode: 'yolo',
       }),
     });
+    const imagePath = path.join(absPath, 'snapshot.png');
+    await writeFile(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=', 'base64'));
+    const prompt = `hello, reply me with hello [PHOTO ${imagePath}]`;
     await call(`/threads/${thread.id}/prompt`, {
       method: 'POST',
-      body: JSON.stringify({ prompt: 'hello, reply me with hello' }),
+      body: JSON.stringify({ prompt }),
     });
     await expect
       .poll(async () => (await call(`/threads/${thread.id}`)).thread.status)
@@ -165,8 +169,13 @@ test('owner manages member permissions and immutable public links survive device
     const linkId = (await linkInput.inputValue()).split('/').at(-1)!;
     const original = await api<any>(relayBase, `/relay/public-links/${linkId}`);
     expect(original.turnCount).toBe(1);
+    expect(original.images[imagePath]).toMatch(/^data:image\/png;base64,/);
+    expect(['dark', 'light']).toContain(original.theme);
+    expect(original.turns[0].startedAt).toBeTruthy();
+    expect(original.turns[0].completedAt).toBeTruthy();
+    expect(original.turns[0].model).toBeTruthy();
     expect(original.turns[0].messages.map((m: any) => m.text)).toEqual([
-      'hello, reply me with hello',
+      prompt,
       'hello',
     ]);
     expect(JSON.stringify(original)).not.toContain('workspaceId');
@@ -204,7 +213,17 @@ test('owner manages member permissions and immutable public links survive device
     await expect(
       page.getByRole('heading', { name: 'Public snapshot regression' }),
     ).toBeVisible();
-    await expect(page.locator('[data-role="assistant"]')).toHaveText('hello');
+    await expect(
+      page.locator('[data-role="assistant"] .thread-graph-message-content'),
+    ).toHaveText('hello');
+    await expect(page.locator('img')).toHaveCount(1);
+    expect(await page.locator('img').evaluate((image: HTMLImageElement)=>image.complete && image.naturalWidth>0)).toBe(true);
+    await expect(page.locator('.thread-graph-worked-summary')).toContainText(
+      'Worked for',
+    );
+    await expect(page.getByRole('button', { name: /Expand turn/ })).toHaveCount(
+      0,
+    );
     await expect(
       page.getByRole('textbox', { name: 'Prompt', exact: true }),
     ).toHaveCount(0);

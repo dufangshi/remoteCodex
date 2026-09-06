@@ -42,6 +42,21 @@ export function PublicThreadPage() {
       robots.remove();
     };
   }, [id]);
+  useEffect(() => {
+    if (!snapshot) return;
+    const previous = document.documentElement.getAttribute(
+      'data-theme-effective',
+    );
+    document.documentElement.setAttribute(
+      'data-theme-effective',
+      snapshot.theme ?? 'dark',
+    );
+    return () => {
+      if (previous)
+        document.documentElement.setAttribute('data-theme-effective', previous);
+      else document.documentElement.removeAttribute('data-theme-effective');
+    };
+  }, [snapshot]);
   return (
     <div className="thread-ui-shell public-thread-page min-h-screen bg-[var(--theme-bg)] text-[var(--theme-fg)]">
       {snapshot ? (

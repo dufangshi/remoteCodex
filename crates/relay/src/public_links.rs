@@ -6,6 +6,7 @@ use super::*;
 pub(super) struct Scope {
     device_id: String,
     thread_id: String,
+    theme: Option<String>,
 }
 
 fn owns(conn: &Connection, owner: &str, scope: &Scope) -> bool {
@@ -109,7 +110,12 @@ pub(super) async fn create(
         let mut projected = Vec::new();
         for turn in page {
             if seen.insert(turn["id"].as_str().unwrap_or_default().to_string()) {
-                projected.push(json!({"messages": messages(turn)}));
+                projected.push(json!({
+                    "messages": messages(turn),
+                    "startedAt": turn["startedAt"], "completedAt": turn["completedAt"],
+                    "model": turn["model"], "reasoningEffort": turn["reasoningEffort"],
+                    "tokenUsage": turn["tokenUsage"], "priceEstimate": turn["priceEstimate"],
+                }));
             }
         }
         projected.append(&mut turns);
@@ -123,8 +129,76 @@ pub(super) async fn create(
         }
         before = Some(cursor);
     }
-    let snapshot =
-        json!({"title": title, "createdAt": created_at, "turnCount": turns.len(), "turns": turns});
+    let mut paths = HashSet::new();
+    for turn in &turns {
+        for message in turn["messages"].as_array().into_iter().flatten() {
+            for tail in message["text"]
+                .as_str()
+                .unwrap_or("")
+                .split("[PHOTO ")
+                .skip(1)
+            {
+                if let Some((path, _)) = tail.split_once(']') {
+                    paths.insert(path.trim().to_string());
+                }
+            }
+        }
+    }
+    let mut images = serde_json::Map::new();
+    let mut image_bytes = 0;
+    for path in paths {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", &path)
+            .finish();
+        let response = forward_device(
+            state.clone(),
+            scope.device_id.clone(),
+            "GET".into(),
+            format!("/api/threads/{}/assets/image?{query}", scope.thread_id),
+            None,
+            None,
+            json!({}),
+        )
+        .await;
+        if !response.status().is_success() {
+            continue;
+        }
+        let mime = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if !matches!(
+            mime.as_str(),
+            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+        ) {
+            continue;
+        }
+        let Ok(bytes) = to_bytes(response.into_body(), 8 * 1024 * 1024).await else {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        };
+        image_bytes += bytes.len();
+        if image_bytes > 10 * 1024 * 1024 {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+        images.insert(
+            path,
+            json!(format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )),
+        );
+    }
+    let theme = if scope.theme.as_deref() == Some("light") {
+        "light"
+    } else {
+        "dark"
+    };
+    let snapshot = json!({"title": title, "createdAt": created_at, "turnCount": turns.len(), "turns": turns, "theme":theme, "images":images});
     let serialized = snapshot.to_string();
     if serialized.len() > 16 * 1024 * 1024 {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
