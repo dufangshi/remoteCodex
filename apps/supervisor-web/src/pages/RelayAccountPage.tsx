@@ -1,6 +1,10 @@
-import { RelaySecurityPanel, SecurityVerification } from '../components/RelaySecurity';
+import {
+  RelaySecurityPanel,
+  SecurityVerification,
+} from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
-import { ArrowLeft, RefreshCw, Save } from 'lucide-react';
+import { FormDialog } from '../components/FormDialog';
+import { ArrowLeft, RefreshCw, Save, KeyRound } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -21,7 +25,11 @@ function errorMessage(caught: unknown, fallback: string) {
       : fallback;
 }
 
-export function RelayAccountSettingsPanel({ className = '' }: { className?: string }) {
+export function RelayAccountSettingsPanel({
+  className = '',
+}: {
+  className?: string;
+}) {
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [username, setUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -35,6 +43,7 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [verification, setVerification] = useState<SecurityStatus | null>(null);
 
   async function load() {
@@ -76,7 +85,10 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
     }
   }
 
-  async function savePassword(event?: FormEvent<HTMLFormElement>) {
+  async function savePassword(
+    event?: FormEvent<HTMLFormElement>,
+    verificationToken?: string,
+  ) {
     event?.preventDefault();
     setSavingPassword(true);
     setPasswordError(null);
@@ -86,15 +98,26 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
         setPasswordError('New passwords do not match.');
         return;
       }
-      await updateRelayPassword({ currentPassword, newPassword });
+      await updateRelayPassword({
+        currentPassword,
+        newPassword,
+        ...(verificationToken ? { verificationToken } : {}),
+      });
+      setPasswordOpen(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setPasswordMessage('Password changed.');
     } catch (caught) {
-      if (caught instanceof ApiError && caught.payload.code === 'reauthentication_required') {
+      if (
+        caught instanceof ApiError &&
+        caught.payload.code === 'reauthentication_required'
+      ) {
         setVerification(await securityRequest<SecurityStatus>(''));
-      } else setPasswordError(errorMessage(caught, 'Unable to change your password.'));
+      } else
+        setPasswordError(
+          errorMessage(caught, 'Unable to change your password.'),
+        );
     } finally {
       setSavingPassword(false);
     }
@@ -102,11 +125,24 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
 
   if (loading) {
     return (
-      <div aria-live="polite" className={`space-y-4 ${className}`.trim()} role="status">
+      <div
+        aria-live="polite"
+        className={`space-y-4 ${className}`.trim()}
+        role="status"
+      >
         <span className="sr-only">Loading account...</span>
-        <div className="h-4 w-28 animate-pulse rounded bg-[var(--theme-muted)]" aria-hidden="true" />
-        <div className="h-11 w-full max-w-md animate-pulse rounded-lg bg-[var(--theme-muted)]" aria-hidden="true" />
-        <div className="h-11 w-full max-w-md animate-pulse rounded-lg bg-[var(--theme-muted)]" aria-hidden="true" />
+        <div
+          className="h-4 w-28 animate-pulse rounded bg-[var(--theme-muted)]"
+          aria-hidden="true"
+        />
+        <div
+          className="h-11 w-full max-w-md animate-pulse rounded-lg bg-[var(--theme-muted)]"
+          aria-hidden="true"
+        />
+        <div
+          className="h-11 w-full max-w-md animate-pulse rounded-lg bg-[var(--theme-muted)]"
+          aria-hidden="true"
+        />
       </div>
     );
   }
@@ -131,7 +167,9 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
   if (!session?.authenticated) {
     return (
       <div className={className}>
-        <h2 className="text-base font-semibold text-[var(--theme-fg)]">Sign in required</h2>
+        <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+          Sign in required
+        </h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
           Your relay session has ended. Sign in again to manage this account.
         </p>
@@ -148,10 +186,14 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
   const profileDirty = username.trim() !== (session.user?.username ?? '');
 
   return (
-    <div className={`divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)] ${className}`.trim()}>
+    <div
+      className={`divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)] ${className}`.trim()}
+    >
       <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
         <header>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Profile</h2>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">
+            Profile
+          </h2>
           <p className="mt-1 text-sm leading-5 text-[var(--theme-fg-muted)]">
             Your relay identity.
           </p>
@@ -180,8 +222,12 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
                 value={username}
               />
             </label>
-            {profileError ? <Notice tone="danger">{profileError}</Notice> : null}
-            {profileMessage ? <Notice tone="success">{profileMessage}</Notice> : null}
+            {profileError ? (
+              <Notice tone="danger">{profileError}</Notice>
+            ) : null}
+            {profileMessage ? (
+              <Notice tone="success">{profileMessage}</Notice>
+            ) : null}
             <button
               className="relay-button-primary inline-flex h-11 items-center gap-2"
               disabled={savingProfile || !username.trim() || !profileDirty}
@@ -194,71 +240,111 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
         </div>
       </section>
 
-      <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
-        <header>
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Password</h2>
-          <p className="mt-1 text-sm leading-5 text-[var(--theme-fg-muted)]">
-            Use at least 8 characters.
-          </p>
-        </header>
-        <form className="min-w-0 max-w-md space-y-4" onSubmit={savePassword}>
-          <PasswordInput
-            autoComplete="current-password"
-            disabled={savingPassword}
-            label="Current password"
-            name="currentPassword"
-            onChange={(value) => {
-              setCurrentPassword(value);
-              setPasswordError(null);
-              setPasswordMessage(null);
-            }}
-            value={currentPassword}
-          />
-          <PasswordInput
-            autoComplete="new-password"
-            disabled={savingPassword}
-            label="New password"
-            minLength={8}
-            name="newPassword"
-            onChange={(value) => {
-              setNewPassword(value);
-              setPasswordError(null);
-              setPasswordMessage(null);
-            }}
-            value={newPassword}
-          />
-          <PasswordInput
-            autoComplete="new-password"
-            disabled={savingPassword}
-            label="Confirm new password"
-            minLength={8}
-            name="confirmPassword"
-            onChange={(value) => {
-              setConfirmPassword(value);
-              setPasswordError(null);
-              setPasswordMessage(null);
-            }}
-            value={confirmPassword}
-          />
-          {passwordError ? <Notice tone="danger">{passwordError}</Notice> : null}
-          {passwordMessage ? <Notice tone="success">{passwordMessage}</Notice> : null}
-          <button
-            className="relay-button-primary inline-flex h-11 items-center gap-2"
-            disabled={
-              savingPassword ||
-              !currentPassword ||
-              newPassword.length < 8 ||
-              !confirmPassword
-            }
-            type="submit"
-          >
-            <Save aria-hidden="true" className="h-4 w-4" />
-            {savingPassword ? 'Changing...' : 'Change password'}
-          </button>
-        </form>
+      <section className="flex items-center justify-between gap-3 py-4">
+        <h2 className="text-sm font-semibold">Password</h2>
+        <button
+          type="button"
+          aria-label="Change password"
+          title="Change password"
+          className="host-icon-button inline-flex h-10 w-10 items-center justify-center rounded-md"
+          onClick={() => {
+            setPasswordError(null);
+            setPasswordMessage(null);
+            setPasswordOpen(true);
+          }}
+        >
+          <KeyRound size={18} />
+        </button>
       </section>
+      {passwordMessage && <Notice tone="success">{passwordMessage}</Notice>}
+      {passwordOpen && (
+        <FormDialog
+          title="Change password"
+          busy={savingPassword || Boolean(verification)}
+          onClose={() => {
+            setPasswordOpen(false);
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+          }}
+        >
+          <header>
+            <p className="mt-1 text-sm leading-5 text-[var(--theme-fg-muted)]">
+              Use at least 8 characters.
+            </p>
+          </header>
+          <form className="min-w-0 max-w-md space-y-4" onSubmit={savePassword}>
+            <PasswordInput
+              autoComplete="current-password"
+              disabled={savingPassword}
+              label="Current password"
+              name="currentPassword"
+              onChange={(value) => {
+                setCurrentPassword(value);
+                setPasswordError(null);
+                setPasswordMessage(null);
+              }}
+              value={currentPassword}
+            />
+            <PasswordInput
+              autoComplete="new-password"
+              disabled={savingPassword}
+              label="New password"
+              minLength={8}
+              name="newPassword"
+              onChange={(value) => {
+                setNewPassword(value);
+                setPasswordError(null);
+                setPasswordMessage(null);
+              }}
+              value={newPassword}
+            />
+            <PasswordInput
+              autoComplete="new-password"
+              disabled={savingPassword}
+              label="Confirm new password"
+              minLength={8}
+              name="confirmPassword"
+              onChange={(value) => {
+                setConfirmPassword(value);
+                setPasswordError(null);
+                setPasswordMessage(null);
+              }}
+              value={confirmPassword}
+            />
+            {passwordError ? (
+              <Notice tone="danger">{passwordError}</Notice>
+            ) : null}
+            {passwordMessage ? (
+              <Notice tone="success">{passwordMessage}</Notice>
+            ) : null}
+            <button
+              className="relay-button-primary inline-flex h-11 items-center gap-2"
+              disabled={
+                savingPassword ||
+                !currentPassword ||
+                newPassword.length < 8 ||
+                !confirmPassword
+              }
+              type="submit"
+            >
+              <Save aria-hidden="true" className="h-4 w-4" />
+              {savingPassword ? 'Changing...' : 'Change password'}
+            </button>
+          </form>
+        </FormDialog>
+      )}
       <RelaySecurityPanel />
-      {verification && <SecurityVerification status={verification} onCancel={() => setVerification(null)} onVerified={async () => { setVerification(null); await savePassword(); }} />}
+      {verification && (
+        <SecurityVerification
+          status={verification}
+          onCancel={() => setVerification(null)}
+          onVerified={async (token) => {
+            setVerification(null);
+            await savePassword(undefined, token);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -266,20 +352,27 @@ export function RelayAccountSettingsPanel({ className = '' }: { className?: stri
 export function RelayAccountPage() {
   return (
     <div className="product-page !max-w-3xl">
-        <header className="border-b border-[var(--theme-border)] pb-6">
-          <Link className="relay-button-secondary inline-flex h-11 items-center gap-2" to="/relay-devices">
-            <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-            Devices
-          </Link>
-          <p className="mt-6 text-sm font-medium text-[var(--theme-accent-strong)]">Relay account</p>
-          <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">Account settings</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-            Manage the identity and password used to access this relay.
-          </p>
-        </header>
-        <div className="py-2">
-          <RelayAccountSettingsPanel />
-        </div>
+      <header className="border-b border-[var(--theme-border)] pb-6">
+        <Link
+          className="relay-button-secondary inline-flex h-11 items-center gap-2"
+          to="/relay-devices"
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+          Devices
+        </Link>
+        <p className="mt-6 text-sm font-medium text-[var(--theme-accent-strong)]">
+          Relay account
+        </p>
+        <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
+          Account settings
+        </h1>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
+          Manage the identity and password used to access this relay.
+        </p>
+      </header>
+      <div className="py-2">
+        <RelayAccountSettingsPanel />
+      </div>
     </div>
   );
 }

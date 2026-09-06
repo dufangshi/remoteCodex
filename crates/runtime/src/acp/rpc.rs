@@ -110,6 +110,18 @@ fn resolves_to_windows_batch_script(program: &str) -> bool {
 }
 
 impl AcpProcess {
+    pub async fn shutdown(&self) -> Result<()> {
+        close_rpc_state(&self.state, "Harness restarted".into()).await;
+        let mut child = self.child.lock().await;
+        if child.try_wait()?.is_none() {
+            terminate_tree(&child);
+            if child.try_wait()?.is_none() {
+                child.kill().await?;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn spawn(
         command: &str,
         cwd: &str,
@@ -121,6 +133,8 @@ impl AcpProcess {
     )> {
         let parsed = parse_spawn_command(command)?;
         let mut cmd = Command::new(&parsed.program);
+        #[cfg(unix)]
+        cmd.process_group(0);
         crate::child_process::hide_tokio(&mut cmd);
         cmd.args(&parsed.args)
             .current_dir(cwd)
@@ -395,14 +409,37 @@ fn spawn_exit_monitor(child: Arc<Mutex<Child>>, state: Arc<Mutex<RpcState>>) {
     });
 }
 
+fn terminate_tree(child: &Child) {
+    let Some(pid) = child.id() else { return };
+    #[cfg(unix)]
+    // Each ACP process is started in its own process group. This also closes
+    // an adapter-owned app-server; no other harness or desktop app is targeted.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGTERM);
+    }
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("taskkill.exe");
+        crate::child_process::hide_std(&mut cmd);
+        let _ = cmd
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 impl Drop for AcpProcess {
     fn drop(&mut self) {
         if let Ok(mut child) = self.child.try_lock() {
+            terminate_tree(&child);
             let _ = child.start_kill();
         } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let child = self.child.clone();
             handle.spawn(async move {
-                let _ = child.lock().await.start_kill();
+                let mut child = child.lock().await;
+                terminate_tree(&child);
+                let _ = child.start_kill();
             });
         }
     }

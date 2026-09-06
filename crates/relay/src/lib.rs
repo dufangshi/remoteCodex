@@ -1984,6 +1984,7 @@ async fn update_account(
 struct UpdatePasswordInput {
     current_password: String,
     new_password: String,
+    verification_token: Option<String>,
 }
 
 async fn update_account_password(
@@ -1998,9 +1999,6 @@ async fn update_account_password(
         return unauthorized();
     };
     let current_token = extract_session_token(&headers, &query).unwrap_or_default();
-    if auth_factors::has_factors(&conn, &user.id) && !auth_factors::recent(&conn, &current_token) {
-        return (StatusCode::FORBIDDEN,Json(json!({"code":"reauthentication_required","message":"Verify your identity before changing your password"}))).into_response();
-    }
     if body.new_password.len() < 8 {
         return (
             StatusCode::BAD_REQUEST,
@@ -2029,6 +2027,16 @@ async fn update_account_password(
             Json(ApiError::new("forbidden", "Current password is incorrect")),
         )
             .into_response();
+    }
+    if auth_factors::has_factors(&conn, &user.id)
+        && !auth_factors::consume_password_grant(
+            &conn,
+            &user.id,
+            &current_token,
+            body.verification_token.as_deref().unwrap_or_default(),
+        )
+    {
+        return (StatusCode::FORBIDDEN,Json(json!({"code":"reauthentication_required","message":"Verify your identity before changing your password"}))).into_response();
     }
     let Ok((salt, hash)) = hash_password(&body.new_password) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -6501,6 +6509,15 @@ mod tests {
             "/api/threads/thread-1/prompt"
         ));
         access.thread_access = "control".to_string();
+        for route in [
+            "/api/management/harnesses",
+            "/api/management/supervisor",
+            "/api/management/harnesses/codex",
+            "/api/management/supervisor/update",
+        ] {
+            assert!(!access_allows(&access, &Method::GET, route));
+            assert!(!access_allows(&access, &Method::POST, route));
+        }
         assert!(access_allows(
             &access,
             &Method::POST,

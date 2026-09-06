@@ -14,7 +14,7 @@ const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 test('relay start overrides stale tmux server configuration', {
   skip: process.platform === 'win32' || !tmux,
-}, () => {
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-tmux-test-'));
   const socket = path.join(root, 'socket');
   const config = path.join(root, 'config.json');
@@ -66,6 +66,11 @@ setInterval(() => {}, 1000);
       env: environment, cwd: root, encoding: 'utf8', timeout: 15000,
     });
     assert.equal(result.status, 0, result.stderr);
+    // Detached tmux startup can outlive the launcher's acknowledgement.
+    for (let attempt = 0; attempt < 100 && !fs.existsSync(output); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.ok(fs.existsSync(output), 'The isolated tmux fixture did not start');
     assert.deepEqual(JSON.parse(fs.readFileSync(output, 'utf8')), expected);
     const saved = JSON.parse(fs.readFileSync(config, 'utf8'));
     assert.equal(saved.REMOTE_CODEX_RELAY_SERVER_URL, expected.url);

@@ -331,8 +331,9 @@ async fn reauth(
         }
     }
     factors::mark_strong(&conn, &token).map_err(internal)?;
+    let proof = factors::password_grant(&conn, &user.id, &token, &headers).map_err(internal)?;
     security::audit(&conn, Some(&user.id), "security.reauthenticated", None);
-    Ok(Json(json!({"ok":true})))
+    Ok(Json(json!({"ok":true,"verificationToken":proof})))
 }
 async fn enroll(State(state): State<Arc<AppState>>, headers: HeaderMap) -> ApiResult {
     let conn = state.store.conn.lock().await;

@@ -1,3 +1,4 @@
+import { RuntimeManagement } from './RuntimeManagement';
 import { ModelPricingSettings } from './ModelPricingSettings';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
@@ -12,15 +13,12 @@ import { defaultAgentBackendId } from '../../../../packages/shared/src/index';
 import {
   ApiError,
   applyProviderHostConfigArchive,
-  buildAndRestartService,
   createProviderHostConfigArchive,
   fetchAgentBackends,
   fetchProviderHostFile,
   fetchProviderHostConfigArchives,
   fetchWorkspaceSettings,
-  installOrUpdateAgentBackend,
   renameProviderHostConfigArchive,
-  restartAgentBackend,
   updateProviderHostFile,
   updateWorkspaceSettings,
 } from '../lib/api';
@@ -85,18 +83,9 @@ export function AppShellSettingsDialog({
     >
   >({});
   const selectedFile = selectedFileName ? files[selectedFileName] : null;
-  const [restartState, setRestartState] = useState<{
-    busy: boolean;
-    message: string | null;
-    error: string | null;
-  }>({
-    busy: false,
-    message: null,
-    error: null,
-  });
   const [archives, setArchives] = useState<ProviderHostConfigArchiveDto[]>([]);
   const [backends, setBackends] = useState<AgentBackendDto[]>(fallbackBackends);
-  const [backendState, setBackendState] = useState<{
+  const [, setBackendState] = useState<{
     loading: boolean;
     saving: boolean;
     error: string | null;
@@ -508,130 +497,6 @@ export function AppShellSettingsDialog({
     settingsVisible,
   ]);
 
-  async function handleRestartAppServer() {
-    if (restartState.busy || backendState.saving) {
-      return;
-    }
-
-    setRestartState({
-      busy: true,
-      message: null,
-      error: null,
-    });
-
-    try {
-      const runtime = await restartAgentBackend(activeBackend.provider);
-      const normalizedRuntime = normalizeBackendDescriptor(runtime);
-      setRestartState({
-        busy: false,
-        message:
-          normalizedRuntime.status.state === 'ready'
-            ? `${normalizedRuntime.displayName} backend restarted.`
-            : `${normalizedRuntime.displayName} backend state: ${normalizedRuntime.status.state}`,
-        error: null,
-      });
-      setBackends((current) =>
-        current.map((backend) =>
-          backend.provider === normalizedRuntime.provider
-            ? normalizedRuntime
-            : backend,
-        ),
-      );
-    } catch (error) {
-      setRestartState({
-        busy: false,
-        message: null,
-        error:
-          error instanceof ApiError
-            ? error.message
-            : 'Unable to restart the app server.',
-      });
-    }
-  }
-
-  async function handleInstallOrUpdateBackend(
-    provider: AgentBackendIdDto,
-    action: 'install' | 'update',
-  ) {
-    if (restartState.busy || backendState.saving) {
-      return;
-    }
-
-    const backend = backends.find((entry) => entry.provider === provider);
-    setBackendState((current) => ({
-      ...current,
-      saving: true,
-      operatingProvider: provider,
-      operatingAction: action,
-      message: null,
-      error: null,
-    }));
-
-    try {
-      const runtime = await installOrUpdateAgentBackend(provider, action);
-      const normalizedRuntime = normalizeBackendDescriptor(runtime);
-      setBackends((current) =>
-        current.map((entry) =>
-          entry.provider === normalizedRuntime.provider
-            ? normalizedRuntime
-            : entry,
-        ),
-      );
-      setBackendState((current) => ({
-        ...current,
-        saving: false,
-        operatingProvider: null,
-        operatingAction: null,
-        message: normalizedRuntime.installation.lastError
-          ? `${normalizedRuntime.displayName} ${action === 'install' ? 'installed' : 'updated'}, but requires attention:\n${normalizedRuntime.installation.lastError}`
-          : `${normalizedRuntime.displayName} ${action === 'install' ? 'installed' : 'updated'}.`,
-        error: null,
-      }));
-    } catch (error) {
-      setBackendState((current) => ({
-        ...current,
-        saving: false,
-        operatingProvider: null,
-        operatingAction: null,
-        message: null,
-        error:
-          error instanceof ApiError
-            ? apiErrorMessage(error)
-            : `Unable to ${action} ${backend?.displayName ?? provider}.`,
-      }));
-    }
-  }
-
-  async function handleBuildAndRestartService() {
-    if (restartState.busy || backendState.saving) {
-      return;
-    }
-
-    setRestartState({
-      busy: true,
-      message: null,
-      error: null,
-    });
-
-    try {
-      await buildAndRestartService();
-      setRestartState({
-        busy: false,
-        message: 'Build and restart launched. The page may disconnect briefly.',
-        error: null,
-      });
-    } catch (error) {
-      setRestartState({
-        busy: false,
-        message: null,
-        error:
-          error instanceof ApiError
-            ? error.message
-            : 'Unable to launch build and restart.',
-      });
-    }
-  }
-
   async function handleSaveWorkspaceSettings() {
     const devHome = workspaceSettingsState.devHomeDraft.trim();
     if (!devHome || workspaceSettingsState.saving) {
@@ -987,7 +852,7 @@ export function AppShellSettingsDialog({
         </div>
       ) : null}
       <div
-        className={`min-h-0 flex-1 overflow-y-auto ${embedded ? 'p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
+        className={`min-h-0 flex-1 overflow-y-auto ${embedded ? '!overflow-visible !flex-none p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
       >
         <div className="divide-y divide-[var(--theme-border)]">
           {!embedded ? (
@@ -1167,141 +1032,7 @@ export function AppShellSettingsDialog({
             ) : null}
           </section>
 
-          <section className="py-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                  Runtime controls
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                  Inspect installed backend versions, install optional runtimes,
-                  or restart the selected backend.
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => void handleRestartAppServer()}
-                  disabled={restartState.busy || backendState.saving}
-                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {restartState.busy ? 'Restarting...' : 'Restart'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleBuildAndRestartService()}
-                  disabled={restartState.busy || backendState.saving}
-                  className="min-h-11 rounded-md border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-3 text-xs font-medium text-[var(--status-warning-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {restartState.busy ? 'Working...' : 'Build and restart'}
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
-              {backends.map((backend) => {
-                const installation = backend.installation;
-                const canInstall =
-                  !installation.installed &&
-                  Boolean(installation.installCommand);
-                const canUpdate =
-                  installation.installed && Boolean(installation.updateCommand);
-                const operationInProgress =
-                  backendState.saving &&
-                  backendState.operatingProvider === backend.provider;
-                const operationLabel = canInstall ? 'Install' : 'Update';
-                return (
-                  <div key={backend.provider} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--theme-fg)]">
-                          {backend.displayName}
-                        </span>
-                        <span
-                          className={`text-[11px] font-medium ${
-                            backend.enabled
-                              ? 'text-[var(--status-success-fg)]'
-                              : 'text-[var(--theme-fg-muted)]'
-                          }`}
-                        >
-                          {backend.enabled
-                            ? backend.provider === 'acp' && backend.status.state !== 'ready'
-                              ? 'Needs agent'
-                              : 'Ready'
-                            : installation.installed
-                              ? backend.status.state
-                              : 'Not installed'}
-                        </span>
-                      </div>
-                      <p className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
-                        Version:{' '}
-                        {installation.installedVersion ??
-                          (installation.installed
-                            ? 'Installed'
-                            : 'Unavailable')}
-                        {installation.latestVersion
-                          ? ` · Latest: ${installation.latestVersion}`
-                          : ''}
-                      </p>
-                      {installation.lastError ? (
-                        <p className="mt-1 line-clamp-2 text-xs text-[var(--status-danger-fg)]">
-                          {installation.lastError}
-                        </p>
-                      ) : null}
-                    </div>
-                    {canInstall || canUpdate ? (
-                      <button
-                        type="button"
-                        aria-label={`${canInstall ? 'Install' : 'Update'} ${backend.displayName}`}
-                        onClick={() =>
-                          void handleInstallOrUpdateBackend(
-                            backend.provider,
-                            canInstall ? 'install' : 'update',
-                          )
-                        }
-                        disabled={
-                          restartState.busy ||
-                          backendState.saving ||
-                          (!canInstall && !canUpdate)
-                        }
-                        className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {operationInProgress
-                          ? backendState.operatingAction === 'install'
-                            ? 'Installing...'
-                            : 'Updating...'
-                          : operationLabel}
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-            {backendState.loading ? (
-              <p className="mt-3 text-xs text-[var(--theme-fg-muted)]" role="status">Refreshing backend status...</p>
-            ) : null}
-            {restartState.error ? (
-              <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">{restartState.error}</p>
-            ) : restartState.message ? (
-              <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
-                {restartState.message}
-              </p>
-            ) : backendState.message ? (
-              <p
-                className={`mt-3 whitespace-pre-line rounded-md px-3 py-2 text-xs ${
-                  backendState.message.includes('requires attention')
-                    ? 'bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]'
-                    : 'bg-[var(--status-success-bg)] text-[var(--status-success-fg)]'
-                }`}
-                role="status"
-              >
-                {backendState.message}
-              </p>
-            ) : backendState.error ? (
-              <p className="host-error mt-3 whitespace-pre-line rounded-md border px-3 py-2 text-xs" role="alert">
-                {backendState.error}
-              </p>
-            ) : null}
-          </section>
+          <RuntimeManagement />
 
           <section className="py-5">
             <div className="flex items-start justify-between gap-3">
@@ -1553,7 +1284,7 @@ export function AppShellSettingsDialog({
 
   if (embedded) {
     return (
-      <div className="flex min-h-0 flex-col overflow-hidden">
+      <div className="min-w-0">
         {settingsContentNode}
         {pluginsPanelOpen ? (
           <div className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4">

@@ -44,6 +44,9 @@ export function useDialogLifecycle({
     }, 0);
 
     function handleKeyDown(event: KeyboardEvent) {
+      const focusedDialog = document.activeElement?.closest('[role="dialog"]');
+      if (focusedDialog && focusedDialog !== containerRef.current && !containerRef.current?.contains(focusedDialog)) return;
+
       if (event.key === 'Escape' && !busyRef.current) {
         event.preventDefault();
         onCloseRef.current();

@@ -723,6 +723,7 @@ export function updateRelayAccount(input: { username?: string }) {
 export function updateRelayPassword(input: {
   currentPassword: string;
   newPassword: string;
+  verificationToken?: string;
 }) {
   return request<RelayUserDto>('/relay/account/password', {
     method: 'PATCH',

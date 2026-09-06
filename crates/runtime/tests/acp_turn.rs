@@ -662,3 +662,35 @@ async fn commands_before_session_response_survive_and_dynamic_updates_replace_th
         "session commands must not leak to agent-wide defaults"
     );
 }
+
+#[tokio::test]
+async fn restarting_harness_reloads_config_and_preserves_resumable_session() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("restart-config.txt"), "before").unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let first = runtime
+        .start_turn(
+            turn_input(&session, "read-startup-config", "a"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(first.iter().any(|item| item.text == "before"));
+    std::fs::write(dir.path().join("restart-config.txt"), "after").unwrap();
+    assert_eq!(runtime.restart("custom").await.unwrap(), 1);
+    assert!(!runtime.session_loaded(&session));
+    runtime
+        .resume_session(&session, dir.path().to_str())
+        .await
+        .unwrap();
+    let second = runtime
+        .start_turn(
+            turn_input(&session, "read-startup-config", "b"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(second.iter().any(|item| item.text == "after"));
+}

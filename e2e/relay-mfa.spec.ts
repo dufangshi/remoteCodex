@@ -41,6 +41,8 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
   browser,
   context,
 }) => {
+  // Includes several real password KDFs in a debug Rust build, plus both factor enrollment flows.
+  test.setTimeout(180_000);
   const root = await mkdtemp(resolve('.local/mfa-regression-'));
   const port = await new Promise<number>((done) => {
     const server = createServer();
@@ -69,14 +71,29 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
       REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
       REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true',
     },
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let startupError = '';
+  proc.stderr?.on('data', (chunk) => {
+    startupError += chunk.toString();
+  });
+  proc.stdout?.on('data', (chunk) => {
+    startupError += chunk.toString();
   });
   try {
     await expect
       .poll(() =>
-        fetch(`${base}/healthz`)
+        (proc.exitCode !== null
+          ? Promise.reject(
+              new Error(startupError || `relay exited ${proc.exitCode}`),
+            )
+          : fetch(`http://127.0.0.1:${port}/healthz`)
+        )
           .then((r) => r.status)
-          .catch(() => 0),
+          .catch((error) => {
+            if (proc.exitCode !== null) throw error;
+            return 0;
+          }),
       )
       .toBe(200);
     const registered = await fetch(`${base}/relay/auth/register`, {
@@ -332,6 +349,56 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
     expect(
       (await json(page, '/relay/account/security')).data.recoveryCodesRemaining,
     ).toBe(10);
+    // Recent login/enrollment must not bypass a fresh password-change verification.
+    const changedPassword = `${password}-changed`;
+    expect(
+      (
+        await json(page, '/relay/account/password', 'PATCH', {
+          currentPassword: password,
+          newPassword: changedPassword,
+        })
+      ).status,
+    ).toBe(403);
+    await expect(
+      page.getByLabel('Current password', { exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole('button', { name: 'Change password', exact: true })
+      .click();
+    const passwordDialog = page.getByRole('dialog', {
+      name: 'Change password',
+      exact: true,
+    });
+    await passwordDialog
+      .getByLabel('Current password', { exact: true })
+      .fill(password);
+    await passwordDialog
+      .getByLabel('New password', { exact: true })
+      .fill(changedPassword);
+    await passwordDialog
+      .getByLabel('Confirm new password', { exact: true })
+      .fill(changedPassword);
+    await passwordDialog
+      .getByRole('button', { name: 'Change password', exact: true })
+      .click();
+    const verification = page.getByRole('dialog', {
+      name: 'Verify your identity',
+      exact: true,
+    });
+    await expect(verification).toBeVisible();
+    await verification.getByRole('button', { name: 'Use a passkey' }).click();
+    await expect(
+      page.getByText('Password changed.', { exact: true }),
+    ).toBeVisible();
+    await expect(passwordDialog).toHaveCount(0);
+    expect(
+      (
+        await json(page, '/relay/account/password', 'PATCH', {
+          currentPassword: changedPassword,
+          newPassword: `${changedPassword}-again`,
+        })
+      ).status,
+    ).toBe(403);
     await page
       .getByRole('button', { name: 'Remove My phone', exact: true })
       .click();
@@ -366,6 +433,11 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
     ).toBeVisible();
     expect((await json(page, '/relay/account/security')).status).toBe(401);
   } finally {
+    if (test.info().status !== test.info().expectedStatus)
+      console.error(
+        'Isolated relay startup:',
+        startupError.replaceAll(password, '[redacted]'),
+      );
     await context.close();
     await new Promise<void>((done) => {
       if (proc.exitCode !== null) return done();

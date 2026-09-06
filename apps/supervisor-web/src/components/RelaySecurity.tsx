@@ -1,3 +1,4 @@
+import { FormDialog } from './FormDialog';
 import { useDialogLifecycle } from './useDialogLifecycle';
 import { request } from '../lib/api';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -193,108 +194,86 @@ export function SecurityVerification({
 }: {
   realm?: SecurityRealm;
   status: Pick<SecurityStatus, 'authenticatorEnabled' | 'passkeys'>;
-  onVerified: () => Promise<void>;
+  onVerified: (verificationToken?: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  useDialogLifecycle({
-    busy,
-    containerRef: dialogRef,
-    onClose: onCancel,
-    open: true,
-  });
   const factor = status.authenticatorEnabled || status.passkeys.length > 0;
   async function verify(passkey = false) {
     setBusy(true);
     setError(null);
     try {
-      if (passkey) await authenticatePasskey('reauth', false, realm);
-      else
-        await securityRequest(
-          '/reauth',
-          'POST',
-          factor ? { code: value } : { password: value },
-          realm,
-        );
-      await onVerified();
+      const result = passkey
+        ? await authenticatePasskey('reauth', false, realm)
+        : await securityRequest<{ verificationToken?: string }>(
+            '/reauth',
+            'POST',
+            factor ? { code: value } : { password: value },
+            realm,
+          );
+      await onVerified(result.verificationToken);
     } catch (e) {
       setError(securityError(e));
     } finally {
       setBusy(false);
     }
   }
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[120] grid place-items-center bg-black/55 p-4"
-      onClick={() => {
-        if (!busy) onCancel();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Verify your identity"
-        className="w-full max-w-sm space-y-4 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold">Verify your identity</h2>
-        <p className="text-sm text-[var(--theme-fg-muted)]">
-          Confirm this security change. Verification lasts 10 minutes.
-        </p>
-        {status.passkeys.length > 0 && (
-          <button
-            className={`${secondary} w-full`}
-            disabled={busy}
-            onClick={() => void verify(true)}
-          >
-            <Fingerprint size={16} /> Use a passkey
-          </button>
-        )}
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void verify();
-          }}
+  return (
+    <FormDialog title="Verify your identity" onClose={onCancel} busy={busy}>
+      <p className="text-sm text-[var(--theme-fg-muted)]">
+        Confirm this security change with your authenticator, recovery code or
+        passkey.
+      </p>
+      {status.passkeys.length > 0 && (
+        <button
+          className={`${secondary} w-full`}
+          disabled={busy}
+          onClick={() => void verify(true)}
         >
-          <label className="block text-sm">
-            {factor ? 'Authenticator or recovery code' : 'Password'}
-            <input
-              autoFocus
-              className={`${input} mt-2`}
-              type={factor ? 'text' : 'password'}
-              autoComplete={factor ? 'one-time-code' : 'current-password'}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              disabled={busy}
-              required
-            />
-          </label>
-          <ErrorText error={error} />
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className={secondary}
-              disabled={busy}
-              onClick={onCancel}
-            >
-              Cancel
-            </button>
-            <button
-              className="relay-button-primary min-h-10 px-4"
-              disabled={busy || !value}
-            >
-              {busy ? 'Verifying…' : 'Verify'}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>,
-    document.body,
+          <Fingerprint size={16} /> Use a passkey
+        </button>
+      )}
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void verify();
+        }}
+      >
+        <label className="block text-sm">
+          {factor ? 'Authenticator or recovery code' : 'Password'}
+          <input
+            autoFocus
+            className={`${input} mt-2`}
+            type={factor ? 'text' : 'password'}
+            autoComplete={factor ? 'one-time-code' : 'current-password'}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={busy}
+            required
+          />
+        </label>
+        <ErrorText error={error} />
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className={secondary}
+            disabled={busy}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="relay-button-primary min-h-10 px-4"
+            disabled={busy || !value}
+          >
+            {busy ? 'Verifying…' : 'Verify'}
+          </button>
+        </div>
+      </form>
+    </FormDialog>
   );
 }
 

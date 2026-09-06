@@ -266,6 +266,9 @@ pub struct Supervisor {
     pub bus: EventBus,
     runtimes: HashMap<Provider, SharedRuntime>,
     live: Mutex<HashMap<String, LiveTurn>>,
+    pub harness_gates: std::sync::Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
+    pub maintenance_gate: Arc<tokio::sync::RwLock<()>>,
+    pub management_jobs: std::sync::Mutex<HashMap<String, Value>>,
     steer_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
@@ -273,6 +276,22 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    pub fn harness_gate(&self, id: &str) -> Arc<tokio::sync::RwLock<()>> {
+        self.harness_gates
+            .lock()
+            .unwrap()
+            .entry(id.into())
+            .or_default()
+            .clone()
+    }
+    pub async fn restart_harness(&self, id: &str) -> Result<usize> {
+        let mut count = 0;
+        for runtime in self.runtimes.values() {
+            count += runtime.restart(id).await?;
+        }
+        Ok(count)
+    }
+
     pub fn new(config: RuntimeConfig, db: Database, runtimes: Vec<SharedRuntime>) -> Self {
         let map = runtimes
             .into_iter()
@@ -284,6 +303,9 @@ impl Supervisor {
             bus: EventBus::new(),
             runtimes: map,
             live: Mutex::new(HashMap::new()),
+            harness_gates: Default::default(),
+            management_jobs: Default::default(),
+            maintenance_gate: Default::default(),
             steer_locks: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
@@ -962,6 +984,20 @@ impl Supervisor {
         };
         let workspace = self.get_workspace(&input.workspace_id)?;
         let provider = input.provider.unwrap_or_else(|| self.default_provider());
+        let _maintenance = self
+            .maintenance_gate
+            .try_read()
+            .map_err(|_| anyhow!("conflict: Supervisor update in progress"))?;
+        let gate = self.harness_gate(input.agent_id.as_deref().unwrap_or(
+            if provider == Provider::Acp {
+                "codex"
+            } else {
+                provider.as_str()
+            },
+        ));
+        let _guard = gate
+            .try_read()
+            .map_err(|_| anyhow!("conflict: Harness maintenance in progress"))?;
         let runtime = self.runtime(provider)?;
         let started = runtime
             .start_session(StartSessionInput {
@@ -1938,6 +1974,20 @@ impl Supervisor {
         images: Vec<PromptImage>,
     ) -> Result<()> {
         let provider = thread.provider;
+        let _maintenance = self
+            .maintenance_gate
+            .try_read()
+            .map_err(|_| anyhow!("conflict: Supervisor update in progress"))?;
+        let gate = self.harness_gate(thread.agent_id.as_deref().unwrap_or(
+            if provider == Provider::Acp {
+                "codex"
+            } else {
+                provider.as_str()
+            },
+        ));
+        let _guard = gate
+            .try_read()
+            .map_err(|_| anyhow!("conflict: Harness maintenance in progress"))?;
         let runtime = self.runtime(provider)?.clone();
         let session_id = thread
             .provider_session_id

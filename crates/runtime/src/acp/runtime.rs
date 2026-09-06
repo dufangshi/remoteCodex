@@ -887,6 +887,47 @@ impl AgentRuntime for AcpRuntime {
             .unwrap_or_else(|| toolbox_from_capabilities(&self.negotiated_caps(Some(&id))))
     }
 
+    async fn restart(&self, agent_id: &str) -> Result<usize> {
+        if self.bound_agent.as_deref().is_some_and(|id| id != agent_id) {
+            return Ok(0);
+        }
+        self.agent_def(Some(agent_id))?;
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let mut sessions = self.inner.sessions.lock().await;
+        let keys: Vec<_> = sessions
+            .iter()
+            .filter(|(_, live)| live.adapter_id == agent_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut guards = Vec::new();
+        for key in &keys {
+            let live = &sessions[key];
+            if live.active.is_some() {
+                bail!("conflict: Harness is running a turn. Stop it or wait before restarting.");
+            }
+            guards.push(
+                live.operation
+                    .clone()
+                    .try_lock_owned()
+                    .map_err(|_| anyhow!("conflict: Harness is busy"))?,
+            );
+        }
+        for key in &keys {
+            if let Some(live) = sessions.remove(key) {
+                live.process.shutdown().await?;
+            }
+        }
+        self.inner
+            .commands
+            .lock()
+            .await
+            .retain(|(agent, _), _| agent != agent_id);
+        self.inner.caps_by_agent.lock().await.remove(agent_id);
+        self.inner.toolbox_by_agent.lock().await.remove(agent_id);
+        *self.started_at.lock().await = Some(now_rfc3339());
+        Ok(keys.len())
+    }
+
     async fn start(&self) -> Result<()> {
         *self.started_at.lock().await = Some(now_rfc3339());
         Ok(())
@@ -1031,6 +1072,7 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn start_session(&self, input: StartSessionInput) -> Result<StartSessionResult> {
+        let _lifecycle = self.inner.lifecycle.lock().await;
         let def = self.agent_def(input.agent_id.as_deref())?;
         let (scoped, mut live) = self
             .spawn_session(

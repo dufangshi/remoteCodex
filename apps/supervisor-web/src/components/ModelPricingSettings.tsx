@@ -1,3 +1,5 @@
+import { Plus, Pencil } from 'lucide-react';
+import { FormDialog } from './FormDialog';
 import { useEffect, useState } from 'react';
 import {
   fetchModelPricing,
@@ -71,7 +73,9 @@ export function ModelPricingSettings() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Model pricing</h3>
         <button
-          className="host-secondary-button rounded-md border px-3 py-1.5 text-xs"
+          aria-label="Add model"
+          title="Add model"
+          className="host-icon-button inline-flex h-9 w-9 items-center justify-center rounded-md"
           onClick={() => {
             setError('');
             setDraft({
@@ -86,7 +90,7 @@ export function ModelPricingSettings() {
             });
           }}
         >
-          Add model
+          <Plus size={18} />
         </button>
       </div>
       <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
@@ -151,7 +155,7 @@ export function ModelPricingSettings() {
                         });
                       }}
                     >
-                      Edit
+                      <Pencil size={14} />
                     </button>
                   </td>
                 </tr>
@@ -160,117 +164,133 @@ export function ModelPricingSettings() {
         </table>
       </div>
       {draft && (
-        <form
-          className="mt-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void save();
-          }}
+        <FormDialog
+          title={draft.isNew ? 'Add model' : 'Edit model prices'}
+          description="USD per 1M tokens"
+          busy={busy}
+          onClose={() => setDraft(null)}
         >
-          <label className="block text-xs">
-            Model ID
-            <input
-              required
-              aria-label="Pricing model ID"
-              className={`${inputClass} mt-1`}
-              disabled={!draft.isNew || busy}
-              value={draft.id}
-              onChange={(e) => setDraft({ ...draft, id: e.target.value })}
-            />
-          </label>
-          <label className="mt-2 block text-xs">
-            Display names / aliases (comma separated)
-            <input
-              aria-label="Model aliases"
-              className={`${inputClass} mt-1`}
-              value={draft.aliases}
-              disabled={busy}
-              onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
-            />
-          </label>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {fields.map(([key, label]) => (
-              <label className="text-xs" key={key}>
-                {label} $/1M
-                <input
-                  aria-label={`${label} price per million`}
-                  className={`${inputClass} mt-1`}
-                  type="number"
-                  min="0"
-                  max="1000000"
-                  step="any"
-                  required={key !== 'cacheWriteInputUsdPerMillion'}
-                  disabled={busy}
-                  value={draft.rates[key] ?? ''}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      rates: {
-                        ...draft.rates,
-                        [key]:
-                          e.target.value === ''
-                            ? undefined
-                            : Number(e.target.value),
-                      },
-                    })
-                  }
-                />
-              </label>
-            ))}
-          </div>
-          {draft.rates.notes && (
-            <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-              {draft.rates.notes}
-            </p>
-          )}
-          {draft.rates.longContextThresholdTokens != null && (
-            <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-              Long context: above{' '}
-              {Number(draft.rates.longContextThresholdTokens).toLocaleString()}{' '}
-              input tok · In/cache ×{draft.rates.longContextInputMultiplier} ·
-              Out ×{draft.rates.longContextOutputMultiplier}
-            </p>
-          )}
-          {draft.rates.sourceUrl && (
-            <a
-              className="mt-2 block text-xs underline"
-              href={draft.rates.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Official pricing · checked {draft.rates.verifiedAt}
-            </a>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              disabled={busy}
-              type="submit"
-              className="host-secondary-button rounded border px-3 py-2 text-xs"
-            >
-              {busy ? 'Saving…' : 'Save prices'}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setDraft(null)}
-              className="host-secondary-button rounded border px-3 py-2 text-xs"
-            >
-              Cancel
-            </button>
-            {!draft.isNew && draft.rates.custom && (
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <label className="block text-xs">
+              Model ID
+              <input
+                required
+                aria-label="Pricing model ID"
+                className={`${inputClass} mt-1`}
+                disabled={!draft.isNew || busy}
+                value={draft.id}
+                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+              />
+            </label>
+            <label className="mt-2 block text-xs">
+              Display names / aliases (comma separated)
+              <input
+                aria-label="Model aliases"
+                className={`${inputClass} mt-1`}
+                value={draft.aliases}
+                disabled={busy}
+                onChange={(e) =>
+                  setDraft({ ...draft, aliases: e.target.value })
+                }
+              />
+            </label>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {fields.map(([key, label]) => (
+                <label className="text-xs" key={key}>
+                  {label} $/1M
+                  <input
+                    aria-label={`${label} price per million`}
+                    className={`${inputClass} mt-1`}
+                    type="number"
+                    min="0"
+                    max="1000000"
+                    step="any"
+                    required={key !== 'cacheWriteInputUsdPerMillion'}
+                    disabled={busy}
+                    value={draft.rates[key] ?? ''}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        rates: {
+                          ...draft.rates,
+                          [key]:
+                            e.target.value === ''
+                              ? undefined
+                              : Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            {draft.rates.notes && (
+              <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
+                {draft.rates.notes}
+              </p>
+            )}
+            {draft.rates.longContextThresholdTokens != null && (
+              <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
+                Long context: above{' '}
+                {Number(
+                  draft.rates.longContextThresholdTokens,
+                ).toLocaleString()}{' '}
+                input tok · In/cache ×{draft.rates.longContextInputMultiplier} ·
+                Out ×{draft.rates.longContextOutputMultiplier}
+              </p>
+            )}
+            {draft.rates.sourceUrl && (
+              <a
+                className="mt-2 block text-xs underline"
+                href={draft.rates.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Official pricing · checked {draft.rates.verifiedAt}
+              </a>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                disabled={busy}
+                type="submit"
+                className="host-secondary-button rounded border px-3 py-2 text-xs"
+              >
+                {busy ? 'Saving…' : 'Save prices'}
+              </button>
               <button
                 type="button"
                 disabled={busy}
+                onClick={() => setDraft(null)}
                 className="host-secondary-button rounded border px-3 py-2 text-xs"
-                onClick={() => void save(true)}
               >
-                Reset / remove custom
+                Cancel
               </button>
+              {!draft.isNew && draft.rates.custom && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="host-secondary-button rounded border px-3 py-2 text-xs"
+                  onClick={() => void save(true)}
+                >
+                  Reset / remove custom
+                </button>
+              )}
+            </div>
+            {error && (
+              <p role="alert" className="host-error mt-2 text-xs">
+                {error}
+              </p>
             )}
-          </div>
-        </form>
+          </form>
+        </FormDialog>
       )}
-      {error && (
+      {error && !draft && (
         <p role="alert" className="host-error mt-2 rounded border p-2 text-xs">
           {error}
         </p>

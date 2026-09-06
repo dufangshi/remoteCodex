@@ -2,6 +2,7 @@ mod auth;
 mod bounded_channel;
 mod export;
 mod http;
+mod management;
 mod secure_transport;
 mod shells;
 mod socket;

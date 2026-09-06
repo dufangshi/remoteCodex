@@ -257,7 +257,8 @@ async fn authenticate_finish(
     }
     if let Some(token) = session {
         factors::mark_strong(&conn, &token).map_err(internal)?;
-        Ok(Json(json!({"ok":true})).into_response())
+        let proof = factors::password_grant(&conn, &user, &token, &headers).map_err(internal)?;
+        Ok(Json(json!({"ok":true,"verificationToken":proof})).into_response())
     } else {
         conn.execute(
             "DELETE FROM relay_factor_challenges WHERE id_hash=?1",

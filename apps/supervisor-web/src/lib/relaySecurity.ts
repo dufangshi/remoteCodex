@@ -169,7 +169,7 @@ export async function authenticatePasskey(
     },
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error('Passkey verification was cancelled.');
-  return request(
+  return request<{ verificationToken?: string }>(
     '/relay/auth/passkey/finish',
     {
       method: 'POST',

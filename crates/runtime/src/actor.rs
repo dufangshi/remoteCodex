@@ -128,6 +128,10 @@ pub trait AgentRuntime: Send + Sync {
     fn provider(&self) -> Provider;
     fn descriptor(&self) -> AgentBackendDto;
     async fn start(&self) -> Result<()>;
+    async fn restart(&self, _agent_id: &str) -> Result<usize> {
+        self.start().await?;
+        Ok(0)
+    }
     async fn list_models(
         &self,
         agent_id: Option<&str>,

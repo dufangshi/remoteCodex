@@ -331,6 +331,35 @@ pub(crate) fn mark_strong(conn: &Connection, token: &str) -> Result<()> {
     )?;
     Ok(())
 }
+// Password changes require an explicit, single-use step-up, even after a recent login.
+pub(crate) fn password_grant(
+    conn: &Connection,
+    user: &str,
+    token: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<String> {
+    conn.execute(
+        "DELETE FROM relay_factor_challenges WHERE purpose='password-change' AND session_hash=?1",
+        params![token_hash(token)],
+    )?;
+    challenge(
+        conn,
+        user,
+        "password-change",
+        headers,
+        Some(token),
+        serde_json::json!({}),
+    )
+}
+pub(crate) fn consume_password_grant(
+    conn: &Connection,
+    user: &str,
+    session: &str,
+    proof: &str,
+) -> bool {
+    conn.execute("DELETE FROM relay_factor_challenges WHERE id_hash=?1 AND user_id=?2 AND session_hash=?3 AND purpose='password-change' AND expires_at>?4", params![token_hash(proof), user, token_hash(session), now()]).is_ok_and(|count| count == 1)
+}
+
 pub(crate) fn recent(conn: &Connection, token: &str) -> bool {
     conn.query_row("SELECT EXISTS(SELECT 1 FROM relay_auth_sessions WHERE token_hash=?1 AND strong_auth_at>?2 AND expires_at>?3)", params![token_hash(token),now()-600_000,now()], |r|r.get(0)).unwrap_or(false)
 }
@@ -350,6 +379,20 @@ mod tests {
         super::super::security::ensure_schema(&conn).unwrap();
         ensure_schema(&conn).unwrap();
         conn
+    }
+    #[test]
+    fn password_proofs_are_single_use_session_bound_and_expire() {
+        let conn = db();
+        let headers = axum::http::HeaderMap::new();
+        let proof = password_grant(&conn, "u", "session", &headers).unwrap();
+        assert!(!consume_password_grant(&conn, "other", "session", &proof));
+        assert!(!consume_password_grant(&conn, "u", "other-session", &proof));
+        assert!(consume_password_grant(&conn, "u", "session", &proof));
+        assert!(!consume_password_grant(&conn, "u", "session", &proof));
+        let proof = password_grant(&conn, "u", "session", &headers).unwrap();
+        conn.execute("UPDATE relay_factor_challenges SET expires_at=0", [])
+            .unwrap();
+        assert!(!consume_password_grant(&conn, "u", "session", &proof));
     }
     #[test]
     fn authenticator_enrollment_is_verified_encrypted_and_replay_resistant() {

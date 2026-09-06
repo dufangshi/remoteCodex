@@ -7,6 +7,7 @@ import sys
 import time
 
 
+startup_config = open("restart-config.txt").read() if os.path.exists("restart-config.txt") else "unset"
 fast_enabled = False
 steering_prompt_id = None
 reasoning_effort = "medium"
@@ -112,6 +113,10 @@ def handle(msg):
             send({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "prompt must be blocks"}})
             return
         text = prompt_text(params)
+        if text == "read-startup-config":
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":params["sessionId"],"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":startup_config}}}})
+            send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"end_turn"}})
+            return
         if text == "reject-steer":
             send({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "steer rejected"}})
             return
@@ -135,6 +140,10 @@ def handle(msg):
     if method == "session/prompt":
         sid = params.get("sessionId") or "fake-session"
         text = prompt_text(params)
+        if text == "read-startup-config":
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":params["sessionId"],"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":startup_config}}}})
+            send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"end_turn"}})
+            return
         if text in ["ask-native-questions", "ask-acp-questions"]:
             assert form_capability, "client must advertise form elicitation"
             question_turn = (sid, req_id)

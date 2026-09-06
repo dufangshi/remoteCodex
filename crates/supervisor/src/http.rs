@@ -13,9 +13,9 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use remote_codex_protocol::{
     now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput,
-    ForkThreadInput, HealthDto, ImportThreadInput, PlatformCapabilitiesDto, Provider,
-    RuntimeConfigDto, SendThreadPromptInput, ThreadWorkspaceTreeNodeDto,
-    UpdateWorkspaceSettingsInput, VersionDto, APP_NAME, APP_VERSION,
+    ForkThreadInput, ImportThreadInput, PlatformCapabilitiesDto, Provider, RuntimeConfigDto,
+    SendThreadPromptInput, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput, VersionDto,
+    APP_NAME, APP_VERSION,
 };
 use remote_codex_runtime::files::WorkspaceDownload;
 use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
@@ -60,6 +60,27 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
+        .route(
+            "/api/management/harnesses",
+            get(crate::management::harnesses),
+        )
+        .route("/api/management/jobs", get(crate::management::jobs))
+        .route(
+            "/api/management/harnesses/{id}",
+            post(crate::management::harness_action),
+        )
+        .route(
+            "/api/management/supervisor",
+            get(crate::management::supervisor_status),
+        )
+        .route(
+            "/api/management/supervisor/check",
+            post(crate::management::supervisor_check),
+        )
+        .route(
+            "/api/management/supervisor/update",
+            post(crate::management::supervisor_update),
+        )
         .route("/api/config/runtime", get(runtime_config))
         .route(
             "/api/agent-runtimes/{provider}/subscription-usage",
@@ -381,12 +402,10 @@ fn map_err(e: anyhow::Error) -> ApiErr {
     }
 }
 
-async fn healthz(State(state): State<AppState>) -> Json<HealthDto> {
-    Json(HealthDto {
-        status: "ok".into(),
-        timestamp: now_rfc3339(),
-        active_turn_count: state.active_turn_count(),
-    })
+async fn healthz(State(state): State<AppState>) -> Json<Value> {
+    Json(
+        json!({"status":"ok", "timestamp":now_rfc3339(), "activeTurnCount":state.active_turn_count(), "runningVersion":APP_VERSION, "processId":std::process::id()}),
+    )
 }
 
 async fn version() -> Json<VersionDto> {
@@ -594,16 +613,31 @@ async fn agent_install(
 }
 
 async fn agent_restart(
+    Query(query): Query<AgentQuery>,
     Path(provider): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
     let provider = parse_provider(&provider)?;
-    state
-        .runtime(provider)
-        .map_err(map_err)?
-        .start()
-        .await
-        .map_err(map_err)?;
+    let id = query
+        .agent_id
+        .as_deref()
+        .unwrap_or(if provider == Provider::Acp {
+            "codex"
+        } else {
+            provider.as_str()
+        });
+    let _maintenance = state.maintenance_gate.try_read().map_err(|_| {
+        err(
+            StatusCode::CONFLICT,
+            "conflict",
+            "Supervisor update in progress",
+        )
+    })?;
+    let _guard = state
+        .harness_gate(id)
+        .try_write_owned()
+        .map_err(|_| err(StatusCode::CONFLICT, "conflict", "Harness is busy"))?;
+    state.restart_harness(id).await.map_err(map_err)?;
     let backend = state
         .backends()
         .into_iter()

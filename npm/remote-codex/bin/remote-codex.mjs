@@ -83,6 +83,8 @@ try {
     command === 'version'
   ) {
     console.log(packageVersion);
+  } else if (command === 'native-path') {
+    console.log(await resolveNativeBinary());
   } else if (command === '--help' || command === '-h' || command === 'help') {
     printHelp();
   } else if (command === 'start') {
@@ -227,6 +229,8 @@ function nativeEnvironment(extra = {}) {
       process.env.REMOTE_CODEX_PACKAGE_ROOT ?? packageRoot,
     REMOTE_CODEX_WEB_DIST_DIR: process.env.REMOTE_CODEX_WEB_DIST_DIR ?? webDist,
     ...extra,
+    REMOTE_CODEX_LAUNCHER_PATH: launcherPath,
+    REMOTE_CODEX_LAUNCHER_NODE: process.execPath,
   };
   return environment;
 }
