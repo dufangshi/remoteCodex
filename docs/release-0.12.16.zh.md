@@ -13,3 +13,5 @@
 - relay-deploy 增加切换服务前的 session secret 长度／HTTPS origin 预检，以及停止写入后的一致性 SQLite 和 secret/config root-only 备份。actionlint 通过。
 
 发布使用 `npm-release.yml channel=latest` 和公网 `relay-deploy.yml`，均固定上述 UI SHA。实际结果在完成后补记。[迁移与恢复](./relay-security-operations.zh.md)仍适用。
+
+上线连通性核验补充：旧 supervisor 使用 URL 设备 token 握手，新 Origin 中间件曾提前拒绝该原生连接。已仅为 `/supervisor/tunnel` 保留无 Origin 的原生入口，后续设备 token 哈希鉴权仍必需；浏览器 Origin／跨站检查不放宽。新增旧握手成功、无效 token 401、恶意 Origin 403 回归通过，完整 Rust 测试重新通过。首次 npm run 在发布前取消，最终版本从兼容修复后的提交重建，不覆盖已发布资产。

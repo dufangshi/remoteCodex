@@ -141,13 +141,16 @@ pub(crate) async fn browser_security(
     );
     let has_origin = headers.contains_key("origin");
     let authenticated_native = super::bearer_token(headers).is_some();
+    // Older supervisors authenticate this native-only endpoint with a query token.
+    // Its handler still validates the device-token hash; browser Origin checks apply.
+    let native_device_tunnel = request.uri().path() == "/supervisor/tunnel";
     let cross_site = headers
         .get("sec-fetch-site")
         .is_some_and(|v| v == "cross-site");
     if (mutation || websocket)
         && ((has_origin && !origin_allowed(headers, state.oauth.public_base_url.as_deref()))
             || cross_site
-            || (websocket && !has_origin && !authenticated_native))
+            || (websocket && !has_origin && !authenticated_native && !native_device_tunnel))
     {
         return (
             StatusCode::FORBIDDEN,

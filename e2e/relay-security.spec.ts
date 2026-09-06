@@ -229,9 +229,20 @@ test('relay enforces attachment, websocket, browser-origin and revocable-session
         owner,
       ),
     );
-    const tunnel = await open(`${wsBase}/supervisor/tunnel`, {
-      Authorization: `Bearer ${inert.token}`,
-    });
+    // Pre-0.12.16 devices have no Origin and send their device token in the URL.
+    await expect(
+      open(`${wsBase}/supervisor/tunnel?token=invalid-device-token`, {}),
+    ).rejects.toThrow('401');
+    await expect(
+      open(
+        `${wsBase}/supervisor/tunnel?token=${encodeURIComponent(inert.token)}`,
+        { Origin: 'https://attacker.example' },
+      ),
+    ).rejects.toThrow('403');
+    const tunnel = await open(
+      `${wsBase}/supervisor/tunnel?token=${encodeURIComponent(inert.token)}`,
+      {},
+    );
     const frames: any[] = [];
     tunnel.on('message', (data) => frames.push(JSON.parse(data.toString())));
     ok(
