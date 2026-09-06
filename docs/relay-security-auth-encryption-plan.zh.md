@@ -103,3 +103,5 @@ Service Worker 覆盖图片、原始文件、下载等浏览器直接请求；�
 - 优化构建本机基准：1 MiB 相同文件，交替运行并预热后各 6 次，桌面 Chromium 中位数明文 3.9 ms、密文 13.1 ms（增加 9.2 ms）。3 MiB＋17 字节下载验证全部字节一致；WS 验证 terminal 明文未出现在 relay 帧中。不能将本机延迟外推为公网吞吐保证。
 - 实现、迁移、备份、恢复、旧版本兼容及尚存的 relay 信任边界见 [运维说明](./relay-security-operations.zh.md)。隔离测试／性能／审计原始结果位于本地忽略目录 `.local/security-audit/`，不提交真实凭据或用户数据。
 - 共享 UI 固定 SHA：`d3bcbfd1b8f984922aba637fbbee8878ba11d604`，无本次代码变化。root runtime/npm 版本保持 0.12.14，尚未发新版，不覆盖已发布资产。
+
+- 四平台 dry-run 首轮发现 Windows Git Bash 的 Perl 缺少 OpenSSL 构建模块；已指定 runner 预装的原生 Strawberry Perl，并在编译前验证 IPC::Cmd。此修复只影响 runtime 构建，不变更 Device Manager。
