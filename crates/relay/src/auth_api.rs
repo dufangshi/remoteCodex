@@ -63,6 +63,7 @@ fn recent(conn: &Connection, token: &str) -> Result<(), Failure> {
 }
 pub(crate) fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/relay/devices/{id}/setup-token", post(device_setup_token))
         .merge(passkeys::routes())
         .route("/relay/devices/{id}/token", post(rotate_device_token))
         .route("/relay/account/security", get(summary))
@@ -467,6 +468,36 @@ async fn cancel_challenge(State(state): State<Arc<AppState>>, headers: HeaderMap
     }
     ([ (header::SET_COOKIE,"remote_codex_factor_challenge=; HttpOnly; Secure; SameSite=Lax; Path=/relay/auth; Max-Age=0") ],Json(json!({"ok":true}))).into_response()
 }
+async fn device_setup_token(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, Failure> {
+    let conn = state.store.conn.lock().await;
+    let (user, _) = auth(&conn, &state, &headers)?;
+    let owned: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM relay_devices WHERE id=?1 AND owner_user_id=?2)",
+            params![id, user.id],
+            |r| r.get(0),
+        )
+        .map_err(internal)?;
+    if !owned {
+        return Err(failure(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Device not found",
+        ));
+    }
+    let token = super::device_tokens::get_or_create(&conn, &state.store.session_secret, &id)
+        .map_err(internal)?;
+    security::audit(&conn, Some(&user.id), "device.setup_copied", Some(&id));
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"token":token})),
+    )
+        .into_response())
+}
 async fn rotate_device_token(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -492,11 +523,17 @@ async fn rotate_device_token(
     };
     let token = format!("rcd_{}", security::random_token());
     let preview = super::preview_token(&token);
-    conn.execute(
-        "UPDATE relay_devices SET token=NULL,token_hash=?2,token_preview=?3 WHERE id=?1",
-        params![id, super::hash_device_token(&token), preview],
-    )
-    .map_err(internal)?;
+    {
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
+            "UPDATE relay_devices SET token=NULL,token_hash=?2,token_preview=?3 WHERE id=?1",
+            params![id, super::hash_device_token(&token), preview],
+        )
+        .map_err(internal)?;
+        super::device_tokens::save(&tx, &state.store.session_secret, &id, &token)
+            .map_err(internal)?;
+        tx.commit().map_err(internal)?;
+    }
     security::audit(&conn, Some(&user.id), "device.token_rotated", Some(&id));
     drop(conn);
     state.sockets.write().await.remove(&id);

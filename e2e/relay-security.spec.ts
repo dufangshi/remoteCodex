@@ -65,6 +65,8 @@ test('relay enforces attachment, websocket, browser-origin and revocable-session
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(10000),
+    }).catch((cause) => {
+      throw new Error(`${method} ${new URL(url).pathname} failed`, { cause });
     });
     const text = await response.text();
     let data: any;
@@ -219,6 +221,14 @@ test('relay enforces attachment, websocket, browser-origin and revocable-session
         ok(await request(`${base}/relay/devices`, 'GET', undefined, owner)),
       ),
     ).not.toContain(device.token);
+
+    const setupUrl = `${base}/relay/devices/${device.device.id}/setup-token`;
+    expect((await request(setupUrl, 'POST')).status).toBe(401);
+    expect((await request(setupUrl, 'POST', undefined, guest)).status).toBe(404);
+    const setup = await request(setupUrl, 'POST', undefined, owner);
+    expect(ok(setup).token).toBe(device.token);
+    expect(setup.headers.get('cache-control')).toBe('no-store');
+    expect(ok(await request(setupUrl, 'POST', undefined, owner)).token).toBe(device.token);
 
     // An inert second device makes attempted unauthorized forwarding observable.
     const inert = ok(

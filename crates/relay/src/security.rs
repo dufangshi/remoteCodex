@@ -35,8 +35,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     CREATE TRIGGER IF NOT EXISTS relay_password_revoke_sessions AFTER UPDATE OF password_hash ON relay_users
     BEGIN DELETE FROM relay_auth_sessions WHERE user_id=NEW.id; END;
     CREATE TRIGGER IF NOT EXISTS relay_disabled_revoke_sessions AFTER UPDATE OF enabled ON relay_users
-    WHEN NEW.enabled=0 BEGIN DELETE FROM relay_auth_sessions WHERE user_id=NEW.id; END;
-    UPDATE relay_devices SET token=NULL WHERE token IS NOT NULL;")?;
+    WHEN NEW.enabled=0 BEGIN DELETE FROM relay_auth_sessions WHERE user_id=NEW.id; END;")?;
     if conn
         .prepare("SELECT trusted_browser_id FROM relay_auth_sessions LIMIT 0")
         .is_err()

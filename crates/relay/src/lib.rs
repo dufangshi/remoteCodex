@@ -1,5 +1,6 @@
 mod auth_api;
 mod auth_factors;
+mod device_tokens;
 mod hosted;
 mod oauth;
 mod public_links;
@@ -465,6 +466,7 @@ impl RelayStore {
         hosted::ensure_schema(&conn)?;
         migrate_legacy_rust_tables(&mut conn)?;
         security::ensure_schema(&conn)?;
+        device_tokens::migrate(&conn, &session_secret)?;
         auth_factors::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -771,7 +773,11 @@ pub async fn serve() -> Result<()> {
             [],
         )?;
     }
-    let hosted = hosted::HostedService::new(store.conn.clone(), hosted::HostedConfig::from_env())?;
+    let hosted = hosted::HostedService::new(
+        store.conn.clone(),
+        hosted::HostedConfig::from_env(),
+        store.session_secret.clone(),
+    )?;
     let state = Arc::new(AppState {
         store,
         sockets: RwLock::new(HashMap::new()),
@@ -2633,7 +2639,10 @@ async fn create_device(
     let token_hash = hash_device_token(&token);
     {
         let conn = state.store.conn.lock().await;
-        if conn
+        let Ok(tx) = conn.unchecked_transaction() else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
+        if tx
             .execute(
                 "INSERT INTO relay_devices
                  (id,owner_user_id,name,token,token_hash,token_preview,created_at)
@@ -2648,6 +2657,9 @@ async fn create_device(
                     created_at
                 ],
             )
+            .map_err(anyhow::Error::from)
+            .and_then(|_| device_tokens::save(&tx, &state.store.session_secret, &id, &token))
+            .and_then(|_| tx.commit().map_err(anyhow::Error::from))
             .is_err()
         {
             return (
@@ -4170,7 +4182,15 @@ async fn device_healthz(
     if !allowed {
         return unauthorized();
     }
-    if state.hosted.wake_for_request(&device_id, false).await {
+    if state
+        .hosted
+        .wake_for_request(
+            &device_id,
+            false,
+            state.sockets.read().await.contains_key(&device_id),
+        )
+        .await
+    {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -4270,7 +4290,15 @@ async fn device_api(
         }
     }
     let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    if state.hosted.wake_for_request(&device_id, is_activity).await {
+    if state
+        .hosted
+        .wake_for_request(
+            &device_id,
+            is_activity,
+            state.sockets.read().await.contains_key(&device_id),
+        )
+        .await
+    {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -4419,7 +4447,15 @@ async fn relay_api_compat(
         }
     }
     let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    if state.hosted.wake_for_request(&device_id, is_activity).await {
+    if state
+        .hosted
+        .wake_for_request(
+            &device_id,
+            is_activity,
+            state.sockets.read().await.contains_key(&device_id),
+        )
+        .await
+    {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -5328,6 +5364,17 @@ async fn supervisor_tunnel(
     let Some(device_id) = device_id else {
         return unauthorized();
     };
+    {
+        let conn = state.store.conn.lock().await;
+        if let Err(error) = device_tokens::remember_authenticated(
+            &conn,
+            &state.store.session_secret,
+            &device_id,
+            &token,
+        ) {
+            tracing::warn!(%error, "Could not retain authenticated device setup credential");
+        }
+    }
     ws.on_upgrade(move |socket| handle_supervisor(socket, state, device_id))
         .into_response()
 }
@@ -5345,6 +5392,7 @@ fn device_id_for_supervisor_token(
     .optional()
     .ok()
     .flatten()
+    .or_else(|| conn.query_row("SELECT d.id FROM relay_devices d JOIN relay_device_setup_tokens s ON s.device_id=d.id WHERE s.token_hash=?1", params![hash_device_token(token)], |r| r.get(0)).optional().ok().flatten())
     .or_else(|| {
         legacy_supervisor_token
             .filter(|expected| token.as_bytes().ct_eq(expected.as_bytes()).into())
@@ -5557,7 +5605,15 @@ async fn client_ws(
     let Some((user, access)) = user_and_access else {
         return unauthorized();
     };
-    if state.hosted.wake_for_request(&device_id, false).await {
+    if state
+        .hosted
+        .wake_for_request(
+            &device_id,
+            false,
+            state.sockets.read().await.contains_key(&device_id),
+        )
+        .await
+    {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -5651,7 +5707,15 @@ async fn client_ws_compat(
     let Some((device_id, user, access)) = resolved else {
         return unauthorized();
     };
-    if state.hosted.wake_for_request(&device_id, false).await {
+    if state
+        .hosted
+        .wake_for_request(
+            &device_id,
+            false,
+            state.sockets.read().await.contains_key(&device_id),
+        )
+        .await
+    {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -5736,7 +5800,7 @@ async fn handle_client_socket(
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(payload) = serde_json::from_str::<Value>(&text) else { continue; };
-                        let _ = state.hosted.wake_for_request(&device_id, true).await;
+                        let _ = state.hosted.wake_for_request(&device_id, true, state.sockets.read().await.contains_key(&device_id)).await;
                         let message_thread = payload.get("threadId").and_then(Value::as_str);
                         if thread_id.as_deref().zip(message_thread).is_some_and(|(a,b)| a != b) { break; }
                         let kind = payload.get("type").and_then(Value::as_str).unwrap_or_default();
@@ -5990,6 +6054,7 @@ mod tests {
         let hosted = hosted::HostedService::new(
             store.conn.clone(),
             hosted::HostedConfig::disabled_for_test(),
+            store.session_secret.clone(),
         )
         .unwrap();
         (
