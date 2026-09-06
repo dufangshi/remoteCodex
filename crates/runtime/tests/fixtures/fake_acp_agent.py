@@ -69,6 +69,7 @@ def handle(msg):
         )
         return
     if method in ("session/new", "session/load"):
+        send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":"fake-session", "update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"status", "description":"Session status"}]}}})
         send(
             {
                 "jsonrpc": "2.0",
@@ -126,6 +127,10 @@ def handle(msg):
         send({"jsonrpc": "2.0", "id": req_id, "result": {"outcome": "injected"}})
         send({"jsonrpc": "2.0", "id": steering_prompt_id, "result": {"stopReason": "end_turn"}})
         steering_prompt_id = None
+        return
+    if method == "session/prompt" and prompt_text(params) == "replace-commands":
+        send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":"fake-session", "update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"review", "description":"Review changes"}]}}})
+        send({"jsonrpc":"2.0", "id":req_id, "result":{"stopReason":"end_turn"}})
         return
     if method == "session/prompt":
         sid = params.get("sessionId") or "fake-session"

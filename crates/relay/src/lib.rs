@@ -4860,7 +4860,7 @@ fn shared_thread_path_allowed(
         if parts.len() == 3 && parts[0] == "items" && parts[2] == "detail" {
             return true;
         }
-        return control && suffix == "/fork-turns";
+        return control && matches!(suffix, "/fork-turns" | "/capabilities");
     }
     if !control {
         return false;

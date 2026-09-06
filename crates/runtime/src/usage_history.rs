@@ -22,13 +22,34 @@ impl UsageHistoryCache {
         home: &Path,
         session_id: &str,
     ) -> Option<Arc<Vec<ThreadTurnDto>>> {
+        self.get_for(home, session_id, false).await
+    }
+
+    pub(crate) async fn get_grok(
+        &self,
+        home: &Path,
+        session_id: &str,
+    ) -> Option<Arc<Vec<ThreadTurnDto>>> {
+        self.get_for(home, session_id, true).await
+    }
+
+    async fn get_for(
+        &self,
+        home: &Path,
+        session_id: &str,
+        grok: bool,
+    ) -> Option<Arc<Vec<ThreadTurnDto>>> {
         let key = (
             home.to_path_buf(),
             crate::import_id::parse_session_ref(session_id).raw_id,
         );
         let search = key.clone();
         let fingerprint = tokio::task::spawn_blocking(move || {
-            let path = crate::local_sessions::find_codex_rollout(&search.0, &search.1)?;
+            let path = if grok {
+                crate::local_sessions::find_grok_updates(&search.0, &search.1)
+            } else {
+                crate::local_sessions::find_codex_rollout(&search.0, &search.1)
+            }?;
             let meta = std::fs::metadata(&path).ok()?;
             Some((path, meta.len(), meta.modified().ok()))
         })
@@ -43,7 +64,11 @@ impl UsageHistoryCache {
         let history = if let Some((path, _, _)) = &fingerprint {
             let path = path.clone();
             tokio::task::spawn_blocking(move || {
-                crate::local_sessions::read_codex_usage_history(&path).map(Arc::new)
+                if grok {
+                    crate::local_sessions::read_grok_usage_history(&path).map(Arc::new)
+                } else {
+                    crate::local_sessions::read_codex_usage_history(&path).map(Arc::new)
+                }
             })
             .await
             .ok()

@@ -1,8 +1,11 @@
 mod adapter;
 mod capabilities;
 mod catalog;
+mod codex_bridge;
+pub use codex_bridge::run as run_codex_app_server_bridge;
 mod elicitation;
 mod grok;
+pub(crate) use grok::billing_usage as grok_billing_usage;
 mod mapper;
 mod modes;
 mod prompt;

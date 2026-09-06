@@ -46,6 +46,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("app-server")
+        && std::env::var_os("REMOTE_CODEX_APP_SERVER_BRIDGE").is_some()
+    {
+        return remote_codex_runtime::acp::run_codex_app_server_bridge().await;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

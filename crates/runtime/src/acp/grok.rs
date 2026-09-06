@@ -1,6 +1,37 @@
 use remote_codex_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
 use serde_json::{json, Value};
 
+/// Grok's completion is a per-prompt snapshot. Its input already includes cache
+/// reads and its output already includes reasoning, unlike ACP Usage counters.
+pub fn billing_usage(update: &Value) -> Option<Value> {
+    let body = update.get("update").unwrap_or(update);
+    if body["sessionUpdate"] == "response_completed" {
+        let usage = body.get("usage")?;
+        let mut tokens = crate::usage::Tokens::parse(usage)?;
+        tokens.reasoning_output_tokens = usage["reasoning_tokens"].as_u64().unwrap_or(0);
+        return Some(
+            json!({"total":tokens,"last":tokens,"reportKind":"delta","reportId":body.get("signature"),"source":"grokTurn"}),
+        );
+    }
+    let usage = if body["sessionUpdate"] == "turn_completed" {
+        body.get("usage")?
+    } else {
+        update.pointer("/_meta/usage")?
+    };
+    let input = usage["inputTokens"].as_u64()?;
+    let output = usage["outputTokens"].as_u64()?;
+    let tokens = json!({
+        "inputTokens": input, "outputTokens": output,
+        "totalTokens": input.saturating_add(output),
+        "cachedInputTokens": usage["cachedReadTokens"].as_u64().unwrap_or(0),
+        "cacheWriteInputTokens": usage["cacheCreationTokens"].as_u64().unwrap_or(0),
+        "reasoningOutputTokens": usage["reasoningTokens"].as_u64().unwrap_or(0),
+    });
+    Some(
+        json!({"total": tokens, "last": tokens, "cumulative": false, "source": "grokTurn", "model": update.pointer("/_meta/modelId")}),
+    )
+}
+
 use super::adapter::{HarnessProjection, SessionSettingOp};
 
 pub fn normalize_acp_effort(value: Option<&str>) -> Option<String> {
@@ -238,5 +269,55 @@ mod context_tests {
         assert!(
             context_usage(&json!({"_meta":{"usage":{"totalTokens":9000000}}}), &state).is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod billing_tests {
+    use super::*;
+    #[test]
+    fn live_reports_and_final_snapshot_do_not_double_bill() {
+        let mut accumulator = super::super::usage::AdapterUsageAccumulator::default();
+        let report = |signature: &str, input: u64, cache: u64| {
+            billing_usage(&json!({"update":{"sessionUpdate":"response_completed","signature":signature,"usage":{"input_tokens":input,"cache_read_input_tokens":cache,"output_tokens":30,"reasoning_tokens":25}}})).unwrap()
+        };
+        let first = report("one", 2842, 11776);
+        assert_eq!(
+            accumulator.apply(first.clone()).unwrap()["total"]["inputTokens"],
+            14618
+        );
+        assert!(accumulator.apply(first).is_none());
+        let second = report("two", 84, 14592);
+        assert_eq!(
+            accumulator.apply(second.clone()).unwrap()["total"]["inputTokens"],
+            29294
+        );
+        let final_report = billing_usage(&json!({"_meta":{"usage":{"inputTokens":29294,"cachedReadTokens":26368,"outputTokens":60,"reasoningTokens":50}}})).unwrap();
+        let completed = accumulator.apply(final_report.clone()).unwrap();
+        assert_eq!(completed["total"]["inputTokens"], 29294);
+        assert_eq!(completed["last"]["inputTokens"], 14676);
+        assert_eq!(accumulator.apply(final_report).unwrap(), completed);
+        assert!(
+            accumulator.apply(second).is_none(),
+            "late deltas cannot overwrite a final snapshot"
+        );
+    }
+
+    #[test]
+    fn native_completion_preserves_cache_and_reasoning_without_counting_twice() {
+        let update = json!({"update":{"sessionUpdate":"turn_completed", "usage":{
+            "inputTokens":15642,"outputTokens":39,"cachedReadTokens":6144,"cacheCreationTokens":0,"reasoningTokens":18
+        }}});
+        let raw = billing_usage(&update).unwrap();
+        let usage = crate::usage::normalize_usage(&raw).unwrap();
+        assert_eq!(usage["total"]["inputTokens"], 15642);
+        assert_eq!(usage["total"]["cachedInputTokens"], 6144);
+        assert_eq!(usage["total"]["outputTokens"], 39);
+        assert_eq!(usage["total"]["reasoningOutputTokens"], 18);
+        assert_eq!(usage["total"]["totalTokens"], 15681);
+        assert_eq!(usage["cumulative"], false);
+        let price = crate::usage::estimate_price(&usage, Some("grok-4.6"), None).unwrap();
+        assert!(price["totalUsd"].as_f64().unwrap() > 0.0);
+        assert!(billing_usage(&json!({"_meta":{"totalTokens":1607}})).is_none());
     }
 }

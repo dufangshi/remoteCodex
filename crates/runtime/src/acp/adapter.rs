@@ -24,7 +24,7 @@ pub enum SessionSettingOp {
 
 /// Per-harness translator over a shared ACP client.
 /// Generic session/prompt/cancel/permission stay in the runtime.
-/// Unique native app-server surfaces are not mixed into the same thread.
+/// Native extensions must reuse the ACP-owned connection, never a second writer.
 pub trait HarnessAdapter: Send + Sync {
     fn id(&self) -> &'static str;
     fn compact_prompt(&self) -> Option<&'static str> {
@@ -35,6 +35,22 @@ pub trait HarnessAdapter: Send + Sync {
     }
     fn context_usage(&self, _update: &Value, _state: &Value) -> Option<Value> {
         None
+    }
+    fn billing_usage(&self, _update: &Value) -> Option<Value> {
+        None
+    }
+    fn accepts_notification(&self, method: &str) -> bool {
+        method == "session/update"
+    }
+    /// Method and required-field error used by a non-mutating empty-params probe.
+    fn fork_probe(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
+    fn extension_fork_params(&self, session_id: &str, cwd: &str) -> Value {
+        json!({"sessionId":session_id,"cwd":cwd})
+    }
+    fn extension_fork_id(&self, response: &Value) -> Option<String> {
+        response["sessionId"].as_str().map(str::to_string)
     }
     fn prompt_preamble(&self) -> Option<&'static str> {
         None
@@ -128,8 +144,9 @@ impl HarnessAdapter for CodexAdapter {
         apply_negotiated(caps, negotiated);
         // Codex ACP compact is a hidden `/compact` turn, not a native method.
         caps.turns.compact = true;
-        // Not on the ACP wire today — leave false until Codex ACP advertises them.
-        caps.branching.fork = false;
+        // Fork is enabled only after the owned app-server bridge is installed.
+        caps.branching.fork = negotiated.fork;
+        caps.branching.fork_at = negotiated.fork;
         caps.branching.hard_rollback = false;
         caps.management.mcp_status = false;
         caps.management.skills = false;
@@ -211,6 +228,24 @@ impl HarnessAdapter for CursorAdapter {
 pub struct GrokAdapter;
 
 impl HarnessAdapter for GrokAdapter {
+    fn fork_probe(&self) -> Option<(&'static str, &'static str)> {
+        Some(("_x.ai/session/fork", "sourceSessionId"))
+    }
+    fn extension_fork_params(&self, session_id: &str, cwd: &str) -> Value {
+        json!({"sourceSessionId":session_id,"sourceCwd":cwd,"newCwd":cwd})
+    }
+    fn extension_fork_id(&self, response: &Value) -> Option<String> {
+        response["newSessionId"].as_str().map(str::to_string)
+    }
+    fn accepts_notification(&self, method: &str) -> bool {
+        matches!(
+            method,
+            "session/update" | "_x.ai/session/update" | "_x.ai/session_notification"
+        )
+    }
+    fn billing_usage(&self, update: &Value) -> Option<Value> {
+        grok::billing_usage(update)
+    }
     fn context_usage(&self, update: &Value, state: &Value) -> Option<Value> {
         grok::context_usage(update, state)
     }

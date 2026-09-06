@@ -628,6 +628,7 @@ export interface AgentProviderCapabilitiesDto {
   };
   branching: {
     fork: boolean;
+    forkAt?: boolean;
     hardRollback: boolean;
     resumeAt: boolean;
     rewindFiles: boolean;

@@ -35,6 +35,12 @@ Live usage accumulates per-report prices. Repricing historical totals after a
 custom rate change cannot reconstruct missing per-request context sizes or times;
 it uses the saved last input size and turn start time.
 
+Grok Build response deltas and final turn snapshots feed the same cost display.
+The final snapshot replaces the streamed total rather than adding it again.
+Older turns without token usage are backfilled from completed local Grok session
+updates when those logs are still available. See
+[ACP slash commands, forks and Grok usage](acp-slash-fork-and-usage.md).
+
 ## OAuth allowance
 
 The small composer badge shows actual available windows, with remaining allowance

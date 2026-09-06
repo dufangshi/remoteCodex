@@ -609,3 +609,56 @@ async fn cancelled_question_turn_clears_pending_card() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn commands_before_session_response_survive_and_dynamic_updates_replace_them() {
+    let dir = tempdir().unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let commands = |snapshot: remote_codex_protocol::AgentCapabilitySnapshotDto| {
+        snapshot
+            .toolbox_items
+            .into_iter()
+            .map(|i| i.command)
+            .collect::<Vec<_>>()
+    };
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if commands(
+                runtime
+                    .session_capabilities(Some("custom"), &session)
+                    .await
+                    .unwrap(),
+            )
+            .contains(&"/status".into())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    runtime
+        .start_turn(
+            turn_input(&session, "replace-commands", "commands-turn"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let result = commands(
+        runtime
+            .session_capabilities(Some("custom"), &session)
+            .await
+            .unwrap(),
+    );
+    assert!(result.contains(&"/review".into()));
+    assert!(
+        !result.contains(&"/status".into()),
+        "the new list replaces obsolete commands"
+    );
+    assert!(
+        !commands(runtime.capabilities(Some("custom")).await.unwrap()).contains(&"/review".into()),
+        "session commands must not leak to agent-wide defaults"
+    );
+}

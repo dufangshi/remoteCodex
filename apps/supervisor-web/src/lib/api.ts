@@ -1143,6 +1143,10 @@ export function fetchAgentBackendAgents(provider: AgentBackendIdDto) {
   );
 }
 
+export function fetchThreadCapabilitySnapshot(threadId: string) {
+  return request<AgentCapabilitySnapshotDto>(`/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
+}
+
 export function fetchAgentCapabilitySnapshot(
   provider: AgentBackendIdDto,
   agentId: string,

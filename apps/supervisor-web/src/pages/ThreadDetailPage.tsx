@@ -54,7 +54,7 @@ import {
   fetchAgentBackendModels,
   fetchAgentBackendAgents,
   fetchAgentBackendModelsFor,
-  fetchAgentCapabilitySnapshot,
+  fetchThreadCapabilitySnapshot,
   fetchAgentBackendStatus,
   fetchAgentSubscriptionUsage,
   fetchProviderHostFile,
@@ -1213,6 +1213,29 @@ export function ThreadDetailPage() {
     subscriptionUsageRefreshKey,
   ]);
 
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const snapshot = await fetchThreadCapabilitySnapshot(id);
+        if (cancelled) return;
+        setBackendCapabilities(snapshot.effectiveCapabilities ?? UNAVAILABLE_AGENT_CAPABILITIES);
+        setBackendManagementSchema((current) => ({
+          hostConfigFiles: current?.hostConfigFiles ?? [],
+          toolboxItems: snapshot.toolboxItems ?? [],
+          hookCommandTemplates: current?.hookCommandTemplates ?? [],
+          providerConfigFormat: current?.providerConfigFormat ?? 'none',
+          mcpConfigFormat: current?.mcpConfigFormat ?? 'none',
+          configArchives: current?.configArchives ?? false,
+          buildRestart: current?.buildRestart ?? false,
+        }));
+      } catch { /* Initial page load reports connection errors; keep the last snapshot. */ }
+    };
+    const timer = window.setInterval(() => { void refresh(); }, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [id]);
+
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
       const requestId = pageContextRequestIdRef.current + 1;
@@ -1228,8 +1251,9 @@ export function ThreadDetailPage() {
       const agentRequest = provider === 'acp'
         ? fetchAgentBackendAgents(provider)
         : Promise.resolve([] as ModelOptionDto[]);
-      const capabilityRequest = provider === 'acp' && agentId
-        ? fetchAgentCapabilitySnapshot(provider, agentId)
+      const threadId = seedThread?.id ?? detailRef.current?.thread.id;
+      const capabilityRequest = threadId
+        ? fetchThreadCapabilitySnapshot(threadId)
         : Promise.resolve(null);
 
       const [threadResult, statusResult, modelResult, agentResult, capabilityResult] = await Promise.allSettled([

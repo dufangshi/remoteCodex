@@ -60,6 +60,7 @@ impl Drop for PendingGuard {
 /// One ACP stdio process. stdin is locked only for the write, so multiple
 /// sessions on the same process can request/notify concurrently.
 pub struct AcpProcess {
+    pub(crate) id: String,
     stdin: Mutex<ChildStdin>,
     child: Arc<Mutex<Child>>,
     state: Arc<Mutex<RpcState>>,
@@ -169,6 +170,7 @@ impl AcpProcess {
         spawn_exit_monitor(child.clone(), state.clone());
         Ok((
             Self {
+                id: uuid::Uuid::new_v4().to_string(),
                 stdin: Mutex::new(stdin),
                 child,
                 state,
@@ -346,8 +348,13 @@ async fn dispatch(
         }
         return;
     }
-    if method == "session/update" {
-        let _ = updates.send(msg.get("params").cloned().unwrap_or(json!({})));
+    if method == "session/update" || method.starts_with('_') {
+        let mut params = msg.get("params").cloned().unwrap_or(json!({}));
+        let Some(object) = params.as_object_mut() else {
+            return;
+        };
+        object.insert("_remoteMethod".into(), json!(method));
+        let _ = updates.send(params);
     }
 }
 

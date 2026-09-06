@@ -14,6 +14,7 @@ pub struct NegotiatedCaps {
     pub close: bool,
     pub delete: bool,
     pub fork: bool,
+    pub fork_method: Option<String>,
     pub steer: bool,
     pub compact: bool,
     pub goals: bool,
@@ -32,14 +33,17 @@ fn capability_advertised(value: Option<&Value>) -> bool {
     }
 }
 
-fn available_commands(initialize: &Value) -> Vec<NegotiatedCommand> {
-    initialize
-        .pointer("/_meta/availableCommands")
-        .and_then(Value::as_array)
+pub(super) fn parse_commands(value: &Value) -> Vec<NegotiatedCommand> {
+    value
+        .as_array()
         .into_iter()
         .flatten()
         .filter_map(|command| {
-            let name = command.get("name").and_then(Value::as_str)?.trim();
+            let name = command
+                .get("name")
+                .and_then(Value::as_str)?
+                .trim()
+                .trim_start_matches('/');
             if name.is_empty() {
                 return None;
             }
@@ -73,7 +77,7 @@ pub fn negotiate(initialize: &Value) -> NegotiatedCaps {
     let meta = initialize.get("_meta").cloned().unwrap_or(Value::Null);
     let steering = meta.get("steering").cloned().unwrap_or(Value::Null);
     let goal = meta.get("goal").cloned().unwrap_or(Value::Null);
-    let available_commands = available_commands(initialize);
+    let available_commands = parse_commands(&meta["availableCommands"]);
     NegotiatedCaps {
         load_session: capability_advertised(caps.get("loadSession"))
             || capability_advertised(session.get("load")),
@@ -82,6 +86,7 @@ pub fn negotiate(initialize: &Value) -> NegotiatedCaps {
         close: capability_advertised(session.get("close")),
         delete: capability_advertised(session.get("delete")),
         fork: capability_advertised(session.get("fork")),
+        fork_method: None,
         steer: steering
             .get("supported")
             .and_then(Value::as_bool)

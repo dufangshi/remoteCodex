@@ -1168,6 +1168,74 @@ fn parse_grok_summary(path: &Path, with_history: bool) -> Option<ImportSessionMe
     })
 }
 
+pub(crate) fn find_grok_updates(home: &Path, session_id: &str) -> Option<PathBuf> {
+    grok_summary_paths(home).into_iter().find_map(|path| {
+        (path.parent()?.file_name()?.to_str()? == session_id)
+            .then(|| path.with_file_name("updates.jsonl"))
+    })
+}
+
+pub(crate) fn read_grok_usage_history(path: &Path) -> Option<Vec<ThreadTurnDto>> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(fs::File::open(path).ok()?);
+    let mut line = String::new();
+    let mut turns = Vec::new();
+    let mut current: Option<ThreadTurnDto> = None;
+    while reader.read_line(&mut line).ok()? > 0 {
+        if !line.ends_with('\n') {
+            break;
+        }
+        if line.contains("user_message_chunk") || line.contains("turn_completed") {
+            if let Ok(entry) = serde_json::from_str::<Value>(&line) {
+                let body = &entry["params"]["update"];
+                if body["sessionUpdate"] == "user_message_chunk" {
+                    let text = content_text(&body["content"]).unwrap_or_default();
+                    current = Some(ThreadTurnDto {
+                        id: String::new(),
+                        started_at: timestamp_to_rfc3339(&entry["timestamp"]),
+                        completed_at: None,
+                        status: "completed".into(),
+                        error: None,
+                        model: None,
+                        reasoning_effort: None,
+                        token_usage: None,
+                        price_estimate: None,
+                        has_deferred_items: None,
+                        deferred_item_count: None,
+                        items: vec![item(
+                            "grok-usage-prompt".into(),
+                            "userMessage",
+                            text,
+                            "completed",
+                            "",
+                        )],
+                    });
+                } else if body["sessionUpdate"] == "turn_completed" {
+                    if let (Some(mut turn), Some(raw)) = (
+                        current.take(),
+                        crate::acp::grok_billing_usage(&entry["params"]),
+                    ) {
+                        turn.id = body["prompt_id"].as_str().unwrap_or("").to_string();
+                        turn.completed_at = timestamp_to_rfc3339(&entry["timestamp"]);
+                        let model_usage = body["usage"]["modelUsage"].as_object();
+                        turn.model = model_usage
+                            .filter(|m| m.len() == 1)
+                            .and_then(|m| m.keys().next())
+                            .map(|id| id.trim_end_matches("-build").to_string());
+                        turn.token_usage = crate::usage::normalize_usage(&raw);
+                        turn.price_estimate = turn.token_usage.as_ref().and_then(|usage| {
+                            crate::usage::estimate_price(usage, turn.model.as_deref(), None)
+                        });
+                        turns.push(turn);
+                    }
+                }
+            }
+        }
+        line.clear();
+    }
+    Some(turns)
+}
+
 fn parse_grok_history(path: &Path) -> Vec<ThreadTurnDto> {
     let Ok(raw) = fs::read_to_string(path) else {
         return Vec::new();
@@ -1856,5 +1924,44 @@ mod tests {
             .extra
             .insert("phase".into(), serde_json::json!("commentary"));
         assert_eq!(message_key(&commentary), message_key(&paginated_commentary));
+    }
+}
+
+#[cfg(test)]
+mod grok_usage_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn reads_native_numeric_timestamps_and_completed_usage_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("updates.jsonl");
+        let rows = [
+            json!({"timestamp":1788703850,"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"fixture prompt"}}}}),
+            json!({"timestamp":1788703854,"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","prompt_id":"native-prompt","usage":{"inputTokens":10000,"cachedReadTokens":9000,"outputTokens":100,"reasoningTokens":50,"modelUsage":{"grok-4.6-build":{}}}}}}),
+        ];
+        fs::write(
+            &path,
+            format!("{}\n{}\n{{\"unfinished\":", rows[0], rows[1]),
+        )
+        .unwrap();
+        let turns = read_grok_usage_history(&path).unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].id, "native-prompt");
+        assert!(turns[0]
+            .started_at
+            .as_ref()
+            .unwrap()
+            .starts_with("2026-09-06T"));
+        assert_eq!(turns[0].items[0].text, "fixture prompt");
+        assert_eq!(
+            turns[0].token_usage.as_ref().unwrap()["total"]["inputTokens"],
+            10000
+        );
+        assert!(
+            turns[0].price_estimate.as_ref().unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
     }
 }

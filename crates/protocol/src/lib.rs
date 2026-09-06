@@ -441,6 +441,8 @@ pub struct TurnCaps {
 #[serde(rename_all = "camelCase")]
 pub struct BranchCaps {
     pub fork: bool,
+    #[serde(default)]
+    pub fork_at: bool,
     pub hard_rollback: bool,
     pub resume_at: bool,
     pub rewind_files: bool,
@@ -508,6 +510,7 @@ impl AgentProviderCapabilitiesDto {
             },
             branching: BranchCaps {
                 fork: false,
+                fork_at: false,
                 hard_rollback: false,
                 resume_at: false,
                 rewind_files: false,

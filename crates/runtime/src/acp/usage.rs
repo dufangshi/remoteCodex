@@ -9,6 +9,45 @@ use serde_json::{json, Value};
 use crate::local_sessions::LocalSessionHomes;
 use crate::usage::Tokens;
 
+/// Adapter deltas and final snapshots describe the same prompt. Reconcile them
+/// before persistence so retries and final reports never bill an API call twice.
+#[derive(Default)]
+pub(super) struct AdapterUsageAccumulator {
+    total: Tokens,
+    last: Option<Tokens>,
+    final_received: bool,
+    reports: std::collections::HashSet<String>,
+}
+
+impl AdapterUsageAccumulator {
+    pub fn apply(&mut self, mut report: Value) -> Option<Value> {
+        let tokens = report.get("total").and_then(Tokens::parse)?;
+        if report["reportKind"] == "delta" {
+            if self.final_received {
+                return None;
+            }
+            if let Some(id) = report["reportId"].as_str() {
+                if !self.reports.insert(id.to_string()) {
+                    return None;
+                }
+            }
+            self.total = self.total.add(&tokens);
+            self.last = Some(tokens);
+        } else {
+            self.final_received = true;
+            self.total = tokens;
+        }
+        report["total"] = json!(self.total);
+        report["last"] = json!(self.last.as_ref().unwrap_or(&self.total));
+        report["cumulative"] = json!(false);
+        if let Some(object) = report.as_object_mut() {
+            object.remove("reportId");
+            object.remove("reportKind");
+        }
+        Some(report)
+    }
+}
+
 #[derive(Default)]
 struct RolloutBaseline {
     offset: u64,

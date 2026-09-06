@@ -25,7 +25,7 @@ use crate::files::{write_file_with_scope, WriteScope};
 use crate::import_id::session_ids_match;
 
 use super::adapter::{adapter_for, SessionSettingOp};
-use super::capabilities::{negotiate, NegotiatedCaps};
+use super::capabilities::{negotiate, parse_commands, NegotiatedCaps, NegotiatedCommand};
 use super::catalog::{
     builtin_agents, classify_availability, command_program, parse_command_models, AcpAgentDef,
 };
@@ -53,6 +53,7 @@ enum TurnOutcome {
 
 struct LiveSession {
     process: Arc<AcpProcess>,
+    codex_bridge: Option<Arc<super::codex_bridge::CodexBridge>>,
     session_id: String,
     cwd: PathBuf,
     yolo: bool,
@@ -64,6 +65,7 @@ struct LiveSession {
     model: Option<String>,
     reasoning_effort: Option<String>,
     active: Option<ActiveTurn>,
+    operation: Arc<Mutex<()>>,
     config_options: Value,
     harness_state: Value,
     harness_models: Vec<ModelOptionDto>,
@@ -84,6 +86,8 @@ struct PendingInput {
 
 struct Inner {
     sessions: Mutex<HashMap<String, LiveSession>>,
+    commands: Mutex<HashMap<(String, String), Vec<NegotiatedCommand>>>,
+    lifecycle: Mutex<()>,
     pending_permissions: Mutex<HashMap<String, PendingPermission>>,
     pending_inputs: Mutex<HashMap<String, PendingInput>>,
     pending_dtos: Mutex<HashMap<String, Vec<ThreadActionRequestDto>>>,
@@ -126,6 +130,8 @@ impl AcpRuntime {
             started_at: Mutex::new(None),
             inner: Arc::new(Inner {
                 sessions: Mutex::new(HashMap::new()),
+                commands: Mutex::new(HashMap::new()),
+                lifecycle: Mutex::new(()),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_inputs: Mutex::new(HashMap::new()),
                 pending_dtos: Mutex::new(HashMap::new()),
@@ -168,7 +174,14 @@ impl AcpRuntime {
             bail!("{} is not available ({availability})", def.display_name);
         }
         let adapter = adapter_for(&def.id);
-        let extra_env = extra_env_for(def);
+        let mut extra_env = extra_env_for(def);
+        let codex_bridge = if def.id == "codex" {
+            Some(Arc::new(
+                super::codex_bridge::CodexBridge::new(&def.base_command, &mut extra_env).await?,
+            ))
+        } else {
+            None
+        };
         let server_command = agent_server_command(def, yolo);
         let (process, updates_rx, requests_rx) = tokio::time::timeout(
             self.startup_timeout,
@@ -202,6 +215,20 @@ impl AcpRuntime {
             )
             .await?;
         let mut negotiated = negotiate(&init);
+        if codex_bridge.is_some() {
+            negotiated.fork = true;
+        }
+        if let Some((method, required_field)) = adapter.fork_probe().filter(|_| !negotiated.fork) {
+            if process
+                .request(method, json!({}))
+                .await
+                .err()
+                .is_some_and(|e| e.to_string().contains(required_field))
+            {
+                negotiated.fork = true;
+                negotiated.fork_method = Some(method.into());
+            }
+        }
         let mut caps = AgentProviderCapabilitiesDto::conversational();
         adapter.patch_capabilities(&mut caps, &negotiated);
         let toolbox = adapter.toolbox_items(&caps, &negotiated);
@@ -219,7 +246,13 @@ impl AcpRuntime {
             .lock()
             .await
             .insert(def.id.clone(), toolbox);
-        spawn_mux(self.inner.clone(), process.clone(), updates_rx, requests_rx);
+        spawn_mux(
+            self.inner.clone(),
+            process.clone(),
+            &def.id,
+            updates_rx,
+            requests_rx,
+        );
         let raw_session = if let Some(existing) = load_id {
             if negotiated.load_session {
                 process
@@ -282,6 +315,7 @@ impl AcpRuntime {
         let scoped = Self::scoped_id(&def.id, &session_id);
         let mut live = LiveSession {
             process,
+            codex_bridge,
             session_id,
             cwd: PathBuf::from(cwd),
             yolo,
@@ -293,6 +327,7 @@ impl AcpRuntime {
             model,
             reasoning_effort,
             active: None,
+            operation: Arc::new(Mutex::new(())),
             config_options,
             harness_state,
             harness_models,
@@ -952,6 +987,39 @@ impl AgentRuntime for AcpRuntime {
         })
     }
 
+    async fn session_capabilities(
+        &self,
+        agent_id: Option<&str>,
+        session_id: &str,
+    ) -> Result<AgentCapabilitySnapshotDto> {
+        let mut snapshot = self.capabilities(agent_id).await?;
+        let sessions = self.inner.sessions.lock().await;
+        if let Some(live) = sessions.values().find(|live| {
+            session_ids_match(
+                &Self::scoped_id(&live.adapter_id, &live.session_id),
+                session_id,
+            )
+        }) {
+            let mut negotiated = live.negotiated.clone();
+            if let Some(commands) = self
+                .inner
+                .commands
+                .lock()
+                .await
+                .get(&(live.process.id.clone(), live.session_id.clone()))
+            {
+                negotiated.available_commands = commands.clone();
+            }
+            let adapter = adapter_for(&live.adapter_id);
+            let mut caps = AgentProviderCapabilitiesDto::conversational();
+            adapter.patch_capabilities(&mut caps, &negotiated);
+            apply_config_option_caps(&mut caps, &live.config_options);
+            snapshot.toolbox_items = adapter.toolbox_items(&caps, &negotiated);
+            snapshot.effective_capabilities = Some(caps);
+        }
+        Ok(snapshot)
+    }
+
     async fn start_session(&self, input: StartSessionInput) -> Result<StartSessionResult> {
         let def = self.agent_def(input.agent_id.as_deref())?;
         let (scoped, mut live) = self
@@ -1023,6 +1091,7 @@ impl AgentRuntime for AcpRuntime {
         session_id: &str,
         cwd: Option<&str>,
     ) -> Result<StartSessionResult> {
+        let _lifecycle = self.inner.lifecycle.lock().await;
         {
             let sessions = self.inner.sessions.lock().await;
             if let Some(existing) = sessions
@@ -1085,6 +1154,18 @@ impl AgentRuntime for AcpRuntime {
         bus: EventBus,
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>> {
+        let operation = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(&input.provider_session_id)
+            .ok_or_else(|| anyhow!("ACP session is not running"))?
+            .operation
+            .clone();
+        let _operation = operation
+            .try_lock()
+            .map_err(|_| anyhow!("conflict: The session is busy."))?;
         {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -1139,6 +1220,7 @@ impl AgentRuntime for AcpRuntime {
                 bus: bus.clone(),
             });
         }
+        let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
         let mut usage_reader =
             (adapter_id == "codex").then(|| super::usage::CodexUsageReader::new(&session_id));
         let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
@@ -1170,6 +1252,9 @@ impl AgentRuntime for AcpRuntime {
                 result = &mut prompt_rpc, if !prompt_done => {
                     match result {
                         Ok(response) => {
+                            if let Some(usage) = adapter.billing_usage(&response).and_then(|usage| adapter_usage.apply(usage)) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+                            }
                             if let Some(context) = adapter.context_usage(&response, &harness_state) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
@@ -1203,10 +1288,14 @@ impl AgentRuntime for AcpRuntime {
                 recv = updates.recv() => {
                     match recv {
                         Ok(update) => {
+                            if update["_remoteProcessId"].as_str() != Some(process.id.as_str()) { continue; }
                             if let Some(sid) = update.get("sessionId").and_then(Value::as_str) {
                                 if sid != session_id {
                                     continue;
                                 }
+                            }
+                            if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
                             }
                             if let Some(context) = adapter.context_usage(&update, &harness_state) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
@@ -1423,8 +1512,30 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn fork_session(&self, session_id: &str) -> Result<StartSessionResult> {
+        self.fork_session_at(session_id, 0).await
+    }
+
+    async fn fork_session_at(
+        &self,
+        session_id: &str,
+        rollback_count: u32,
+    ) -> Result<StartSessionResult> {
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let operation = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .ok_or_else(|| anyhow!("ACP session is not running"))?
+            .operation
+            .clone();
+        let _operation = operation
+            .try_lock()
+            .map_err(|_| anyhow!("conflict: The session is busy."))?;
         let (
             process,
+            codex_bridge,
             raw_session,
             cwd,
             yolo,
@@ -1445,11 +1556,15 @@ impl AgentRuntime for AcpRuntime {
             let live = sessions
                 .get(session_id)
                 .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            if live.active.is_some() {
+                bail!("conflict: Cannot fork an active turn.");
+            }
             if !live.negotiated.fork {
                 bail!("this harness does not support session/fork");
             }
             (
                 live.process.clone(),
+                live.codex_bridge.clone(),
                 live.session_id.clone(),
                 live.cwd.clone(),
                 live.yolo,
@@ -1467,16 +1582,48 @@ impl AgentRuntime for AcpRuntime {
                 live.current_mode_id.clone(),
             )
         };
-        let response = process
-            .request(
-                "session/fork",
-                json!({
-                    "sessionId": raw_session,
-                    "cwd": cwd,
-                    "mcpServers": []
-                }),
-            )
-            .await?;
+        let response = if let Some(bridge) = &codex_bridge {
+            let id = bridge.fork(&raw_session, rollback_count).await?;
+            let mut loaded = process
+                .request(
+                    "session/load",
+                    json!({"sessionId":id, "cwd":cwd, "mcpServers":[]}),
+                )
+                .await?;
+            loaded["sessionId"] = json!(id);
+            loaded
+        } else {
+            if rollback_count != 0 {
+                bail!("conflict: This backend supports latest-session fork only.");
+            }
+            if let Some(method) = negotiated.fork_method.as_deref() {
+                let adapter = adapter_for(&adapter_id);
+                let forked = process
+                    .request(
+                        method,
+                        adapter.extension_fork_params(&raw_session, &cwd.to_string_lossy()),
+                    )
+                    .await?;
+                let id = adapter
+                    .extension_fork_id(&forked)
+                    .ok_or_else(|| anyhow!("harness fork returned no session id"))?;
+                let mut loaded = process
+                    .request(
+                        "session/load",
+                        json!({"sessionId":id, "cwd":cwd, "mcpServers":[]}),
+                    )
+                    .await?;
+                loaded["sessionId"] = json!(id);
+                loaded
+            } else {
+                process
+                    .request(
+                        "session/fork",
+                        json!({"sessionId":raw_session, "cwd":cwd, "mcpServers":[]}),
+                    )
+                    .await?
+            }
+        };
         let new_id = response
             .get("sessionId")
             .and_then(Value::as_str)
@@ -1487,6 +1634,7 @@ impl AgentRuntime for AcpRuntime {
             scoped.clone(),
             LiveSession {
                 process,
+                codex_bridge,
                 session_id: new_id,
                 cwd,
                 yolo,
@@ -1498,6 +1646,7 @@ impl AgentRuntime for AcpRuntime {
                 model: model.clone(),
                 reasoning_effort: effort.clone(),
                 active: None,
+                operation: Arc::new(Mutex::new(())),
                 config_options,
                 harness_state,
                 harness_models,
@@ -1686,13 +1835,23 @@ impl AgentRuntime for AcpRuntime {
 fn spawn_mux(
     inner: Arc<Inner>,
     process: Arc<AcpProcess>,
+    agent_id: &str,
     mut updates: mpsc::UnboundedReceiver<Value>,
     mut requests: mpsc::UnboundedReceiver<(i64, String, Value)>,
 ) {
+    let adapter = adapter_for(agent_id);
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(update) = updates.recv() => {
+                Some(mut update) = updates.recv() => {
+                    if !adapter.accepts_notification(update["_remoteMethod"].as_str().unwrap_or("session/update")) { continue; }
+                    update["_remoteProcessId"] = json!(process.id);
+                    if update["update"]["sessionUpdate"] == "available_commands_update" {
+                        if let Some(sid) = update["sessionId"].as_str() {
+                            let mut commands = inner.commands.lock().await;
+                            commands.insert((process.id.clone(), sid.into()), parse_commands(&update["update"]["availableCommands"]));
+                        }
+                    }
                     apply_mode_update(&inner, &update).await;
                     let _ = inner.updates.send(update);
                 }

@@ -1508,7 +1508,7 @@ impl Supervisor {
         } else {
             self.load_turns(id, limit, before_turn_id)?
         };
-        self.hydrate_missing_codex_usage(&thread, &mut turns)
+        self.hydrate_missing_harness_usage(&thread, &mut turns)
             .await?;
         if !summary_only && thread.source == "local_codex_import" {
             normalize_imported_turns(&mut turns);
@@ -1548,12 +1548,15 @@ impl Supervisor {
         })
     }
 
-    async fn hydrate_missing_codex_usage(
+    async fn hydrate_missing_harness_usage(
         &self,
         thread: &ThreadDto,
         turns: &mut [ThreadTurnDto],
     ) -> Result<()> {
-        if (thread.provider != Provider::Codex && thread.agent_id.as_deref() != Some("codex"))
+        let grok = thread.agent_id.as_deref() == Some("grok");
+        if (!grok
+            && thread.provider != Provider::Codex
+            && thread.agent_id.as_deref() != Some("codex"))
             || !turns
                 .iter()
                 .any(|turn| turn.status != "inProgress" && usage_needs_hydration(turn))
@@ -1563,11 +1566,16 @@ impl Supervisor {
         let Some(session_id) = thread.provider_session_id.as_deref() else {
             return Ok(());
         };
-        let Some(history) = self
-            .usage_history
-            .get(&self.local_session_homes.codex_home, session_id)
-            .await
-        else {
+        let history = if grok {
+            self.usage_history
+                .get_grok(&self.local_session_homes.grok_home, session_id)
+                .await
+        } else {
+            self.usage_history
+                .get(&self.local_session_homes.codex_home, session_id)
+                .await
+        };
+        let Some(history) = history else {
             return Ok(());
         };
         let timestamp = |value: Option<&str>| {
@@ -1612,7 +1620,17 @@ impl Supervisor {
                 .reasoning_effort
                 .clone()
                 .or(turn.reasoning_effort.take());
-            turn.price_estimate = source.price_estimate.clone();
+            turn.price_estimate = if grok {
+                crate::usage::estimate_price_with_catalog(
+                    usage,
+                    turn.model.as_deref(),
+                    None,
+                    &self.model_pricing(),
+                    turn.started_at.as_deref(),
+                )
+            } else {
+                source.price_estimate.clone()
+            };
             turn.token_usage = crate::usage::public_usage(usage);
             self.db.with(|conn| {
                 conn.execute("UPDATE thread_turns SET token_usage_json=?1,model=COALESCE(?2,model),reasoning_effort=COALESCE(?3,reasoning_effort) WHERE id=?4 AND thread_id=?5 AND (token_usage_json IS NULL OR (json_extract(token_usage_json,'$.total.totalTokens')<json_extract(token_usage_json,'$.last.totalTokens')))",params![serde_json::to_string(usage)?,turn.model,turn.reasoning_effort,turn.id,thread.id])?;
@@ -1794,7 +1812,7 @@ impl Supervisor {
         if thread.source == "local_codex_import" {
             normalize_imported_turns(std::slice::from_mut(&mut turn));
         }
-        self.hydrate_missing_codex_usage(&thread, std::slice::from_mut(&mut turn))
+        self.hydrate_missing_harness_usage(&thread, std::slice::from_mut(&mut turn))
             .await?;
         turn.has_deferred_items = Some(false);
         turn.deferred_item_count = Some(0);
@@ -2559,10 +2577,15 @@ impl Supervisor {
         } else {
             return self.fork_empty_thread(&detail).await;
         };
-        if selected.turn_index < u32::try_from(turn_options.len()).unwrap_or(u32::MAX) {
-            bail!("conflict: This backend supports latest-session fork only.");
-        }
         let runtime = self.runtime(detail.thread.provider)?;
+        let session = detail
+            .thread
+            .provider_session_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        runtime
+            .resume_session(session, Some(&detail.workspace.abs_path))
+            .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
             bail!("this harness does not support session/fork");
@@ -2572,7 +2595,10 @@ impl Supervisor {
             .provider_session_id
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
-        let forked = runtime.fork_session(&session).await?;
+        let rollback_count = u32::try_from(turn_options.len())
+            .unwrap_or(u32::MAX)
+            .saturating_sub(selected.turn_index);
+        let forked = runtime.fork_session_at(&session, rollback_count).await?;
         self.persist_forked_thread(
             &detail,
             forked,
@@ -2592,6 +2618,9 @@ impl Supervisor {
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let runtime = self.runtime(detail.thread.provider)?;
+        runtime
+            .resume_session(&session, Some(&detail.workspace.abs_path))
+            .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
             bail!("this harness does not support session/fork");
@@ -2614,8 +2643,8 @@ impl Supervisor {
         self.db.with(|conn| {
             conn.execute(
                 "INSERT INTO threads(id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
-                    reasoning_effort, collaboration_mode, approval_mode, status, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,'idle',?10,?10)",
+                    reasoning_effort, collaboration_mode, approval_mode, status, created_at, updated_at, sandbox_mode, fast_mode)
+                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,?11,?9,'idle',?10,?10,?12,?13)",
                 params![
                     new_id,
                     detail.thread.workspace_id,
@@ -2626,7 +2655,10 @@ impl Supervisor {
                     detail.thread.model,
                     detail.thread.reasoning_effort,
                     detail.thread.approval_mode,
-                    now
+                    now,
+                    detail.thread.collaboration_mode,
+                    detail.thread.sandbox_mode,
+                    detail.thread.fast_mode
                 ],
             )?;
             for (ordinal, turn) in detail.turns.iter().take(turn_count).enumerate() {
@@ -2901,6 +2933,21 @@ impl Supervisor {
         agent_id: Option<&str>,
     ) -> Result<AgentCapabilitySnapshotDto> {
         self.runtime(provider)?.capabilities(agent_id).await
+    }
+
+    pub async fn thread_capabilities(&self, id: &str) -> Result<AgentCapabilitySnapshotDto> {
+        let thread = self.get_thread(id)?;
+        let runtime = self.runtime(thread.provider)?;
+        let Some(session) = thread.provider_session_id.as_deref() else {
+            return runtime.capabilities(thread.agent_id.as_deref()).await;
+        };
+        let workspace = self.get_workspace(&thread.workspace_id)?;
+        runtime
+            .resume_session(session, Some(&workspace.abs_path))
+            .await?;
+        runtime
+            .session_capabilities(thread.agent_id.as_deref(), session)
+            .await
     }
 
     pub async fn install(

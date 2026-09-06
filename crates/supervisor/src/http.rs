@@ -134,6 +134,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/resume", post(thread_resume))
         .route("/api/threads/{id}/disconnect", post(thread_disconnect))
         .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
+        .route("/api/threads/{id}/capabilities", get(thread_capabilities))
         .route("/api/threads/{id}/fork", post(thread_fork))
         .route("/api/threads/{id}/compact", post(thread_compact))
         .route(
@@ -540,6 +541,14 @@ async fn agent_agents(
     let provider = parse_provider(&provider)?;
     let agents = state.list_agents(provider).await.map_err(map_err)?;
     Ok(Json(serde_json::to_value(agents).unwrap_or(json!([]))))
+}
+
+async fn thread_capabilities(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    let caps = state.thread_capabilities(&id).await.map_err(map_err)?;
+    Ok(Json(serde_json::to_value(caps).unwrap_or(json!({}))))
 }
 
 async fn agent_caps(

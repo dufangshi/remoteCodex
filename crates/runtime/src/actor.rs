@@ -135,6 +135,13 @@ pub trait AgentRuntime: Send + Sync {
     ) -> Result<Vec<ModelOptionDto>>;
     async fn list_agents(&self) -> Result<Vec<ModelOptionDto>>;
     async fn capabilities(&self, agent_id: Option<&str>) -> Result<AgentCapabilitySnapshotDto>;
+    async fn session_capabilities(
+        &self,
+        agent_id: Option<&str>,
+        _session_id: &str,
+    ) -> Result<AgentCapabilitySnapshotDto> {
+        self.capabilities(agent_id).await
+    }
     fn negotiated_caps(&self, _agent_id: Option<&str>) -> AgentProviderCapabilitiesDto {
         AgentProviderCapabilitiesDto::conversational()
     }
@@ -170,6 +177,16 @@ pub trait AgentRuntime: Send + Sync {
     }
     async fn fork_session(&self, _session_id: &str) -> Result<StartSessionResult> {
         anyhow::bail!("fork is not supported by this harness");
+    }
+    async fn fork_session_at(
+        &self,
+        session_id: &str,
+        rollback_count: u32,
+    ) -> Result<StartSessionResult> {
+        if rollback_count != 0 {
+            anyhow::bail!("conflict: This backend supports latest-session fork only.");
+        }
+        self.fork_session(session_id).await
     }
     async fn send_input(&self, _session_id: &str, _turn_id: &str, _prompt: &str) -> Result<()> {
         anyhow::bail!("steering is not supported by this harness");

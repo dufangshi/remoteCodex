@@ -11,7 +11,6 @@ pub struct MappedUpdate {
     pub items: Vec<ThreadHistoryItemDto>,
     pub title: Option<String>,
     pub usage: Option<Value>,
-    pub commands: Option<Value>,
     pub goal: Option<Option<GoalState>>,
     pub plan: Option<Vec<(String, String)>>,
 }
@@ -189,9 +188,6 @@ impl TurnMapper {
                     self.compactions = vec![item.clone()];
                     mapped.items.push(item);
                 }
-            }
-            "available_commands_update" => {
-                mapped.commands = body.get("availableCommands").cloned();
             }
             "session_info_update" => {
                 mapped.title = body
