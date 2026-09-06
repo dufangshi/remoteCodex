@@ -401,6 +401,7 @@ pub struct RotateCredentialInput {
 
 #[derive(Clone)]
 pub struct HostedService {
+    token_secret: String,
     conn: Arc<Mutex<Connection>>,
     config: HostedConfig,
     provider: HostedProvider,
@@ -439,13 +440,23 @@ enum LifecycleAction {
 }
 
 impl HostedService {
-    pub fn new(conn: Arc<Mutex<Connection>>, config: HostedConfig) -> Result<Arc<Self>> {
+    pub fn new(
+        conn: Arc<Mutex<Connection>>,
+        config: HostedConfig,
+        token_secret: String,
+    ) -> Result<Arc<Self>> {
         if !matches!(config.provider.as_str(), "disabled" | "incus") {
             return Err(anyhow!(
                 "REMOTE_CODEX_HOSTED_SANDBOX_PROVIDER must be disabled or incus"
             ));
         }
+        super::device_tokens::ensure_schema(
+            &*conn
+                .try_lock()
+                .map_err(|_| anyhow!("database busy during initialization"))?,
+        )?;
         Ok(Arc::new(Self {
+            token_secret,
             conn,
             provider: HostedProvider::new(config.clone())?,
             config,
@@ -624,6 +635,8 @@ impl HostedService {
             ],
         )
         .map_err(HostedError::internal)?;
+        super::device_tokens::save(&tx, &self.token_secret, &device_id, &token)
+            .map_err(HostedError::internal)?;
         tx.execute(
             "INSERT INTO relay_hosted_sandboxes(
                id,device_id,assigned_user_id,created_by_admin_user_id,provider,provider_instance_id,
@@ -1048,7 +1061,7 @@ impl HostedService {
 
     async fn context(&self, id: &str) -> HostedResult<ProvisionContext> {
         let conn = self.conn.lock().await;
-        provision_context(&conn, id)
+        provision_context(&conn, id, &self.token_secret)
             .map_err(HostedError::internal)?
             .ok_or_else(|| {
                 HostedError::not_found("Hosted sandbox provision context is unavailable.")
@@ -1172,7 +1185,12 @@ impl HostedService {
         }
     }
 
-    pub async fn wake_for_request(self: &Arc<Self>, device_id: &str, activity: bool) -> bool {
+    pub async fn wake_for_request(
+        self: &Arc<Self>,
+        device_id: &str,
+        activity: bool,
+        connected: bool,
+    ) -> bool {
         let result = {
             let conn = self.conn.lock().await;
             if activity {
@@ -1187,7 +1205,10 @@ impl HostedService {
         if let Some(deadline) = deadline {
             self.schedule_idle(id.clone(), generation, deadline);
         }
-        if status == "stopped" {
+        if connected {
+            return false;
+        }
+        if matches!(status.as_str(), "stopped" | "error" | "online") {
             let _ = self.start(&id).await;
             return true;
         }
@@ -1875,8 +1896,12 @@ fn latest_create_operation(conn: &Connection, id: &str) -> Result<Option<String>
         .optional()?)
 }
 
-fn provision_context(conn: &Connection, id: &str) -> Result<Option<ProvisionContext>> {
-    Ok(conn
+fn provision_context(
+    conn: &Connection,
+    id: &str,
+    master: &str,
+) -> Result<Option<ProvisionContext>> {
+    let mut context = conn
         .query_row(
             "SELECT s.id,s.device_id,d.token,s.image_version,s.cpu_count,s.memory_mib,s.disk_gib,
                     s.credential_ref,s.codex_config_json
@@ -1901,8 +1926,12 @@ fn provision_context(conn: &Connection, id: &str) -> Result<Option<ProvisionCont
                 })
             },
         )
-        .optional()?
-        .filter(|context| !context.device_token.is_empty()))
+        .optional()?;
+    if let Some(context) = &mut context {
+        context.device_token =
+            super::device_tokens::get_or_create(conn, master, &context.device_id)?;
+    }
+    Ok(context)
 }
 
 fn set_sandbox_status(
@@ -2436,6 +2465,7 @@ mod tests {
                 idle_timeout: Duration::from_secs(60),
                 reconcile_interval: Duration::from_secs(60),
             },
+            "test-token-secret".into(),
         )
         .unwrap();
         let created = service
@@ -2508,9 +2538,61 @@ mod tests {
             )
             .unwrap();
         }
+        // Simulate the previous security migration: both recoverable values are
+        // absent, while the VM still holds its original credential.
+        let original_hash: String = {
+            let conn = service.conn.lock().await;
+            conn.execute(
+                "DELETE FROM relay_device_setup_tokens WHERE device_id=?1",
+                params![device_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE relay_devices SET token=NULL WHERE id=?1",
+                params![device_id],
+            )
+            .unwrap();
+            conn.query_row(
+                "SELECT token_hash FROM relay_devices WHERE id=?1",
+                params![device_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
         let restarted = service.start(&id).await.unwrap();
         let restart_operation_id = restarted["operation"]["id"].as_str().unwrap();
-        wait_for_operation(&service, &id, restart_operation_id).await;
+        let recovered = wait_for_operation(&service, &id, restart_operation_id).await;
+        assert_eq!(recovered["operations"][0]["status"], "succeeded");
+        let context = service.context(&id).await.unwrap();
+        assert!(!context.device_token.is_empty());
+        {
+            let conn = service.conn.lock().await;
+            assert_eq!(
+                conn.query_row(
+                    "SELECT token_hash FROM relay_devices WHERE id=?1",
+                    params![device_id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                original_hash
+            );
+        }
+        service.mark_online(device_id).await;
+        assert!(!service.wake_for_request(device_id, false, true).await);
+        service.update_status(&id, "error", None).await.unwrap();
+        assert!(service.wake_for_request(device_id, false, false).await);
+        // Wait for the retry operation to finish before the next lifecycle action.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if !service.running.lock().await.contains(&id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(service.detail(&id).await.unwrap()["status"], "starting");
         let rotated = service
             .rotate_credential(&id, "sk-test-credential-value-with-enough-characters")
             .await

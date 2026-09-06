@@ -159,9 +159,10 @@ async function installAuthenticatedDevicesMocks(
   options: {
     portalInitiallyUnavailable?: boolean;
     failLogout?: boolean;
+    devices?: RelayDeviceDto[];
   } = {},
 ) {
-  let devices = [ownedDevice];
+  let devices = options.devices ?? [ownedDevice];
   const deletedDeviceIds: string[] = [];
   const logoutRequests: unknown[] = [];
   let portalRequestCount = 0;
@@ -659,4 +660,52 @@ test.describe('relay product UI regressions', () => {
     await expect(compatibility).toContainText('HTTP 404');
     await expect(page.getByRole('heading', { name: 'Relay admin sign in' })).toHaveCount(0);
   });
+});
+
+
+test('existing devices copy setup on demand and hosted VMs remain connectable during recovery', async ({ page }) => {
+  const legacy = { ...ownedDevice, token: null, connected: false };
+  const vms = (['stopped', 'error', 'online', 'starting', 'deleting'] as const).map((status) => ({
+    ...legacy, id: `vm-${status}`, name: `VM ${status}`, hostedStatus: status,
+  }));
+  await installAuthenticatedDevicesMocks(page, { devices: [legacy, ...vms] });
+  await page.addInitScript(() => {
+    (window as any).__copiedSetup = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      write: async (items: ClipboardItem[]) => {
+        const blob = await items[0].getType('text/plain');
+        (window as any).__copiedSetup.push(await blob.text());
+      },
+      writeText: async (text: string) => { (window as any).__copiedSetup.push(text); },
+    }});
+  });
+  let fetches = 0;
+  await page.route(`**/relay/devices/${legacy.id}/setup-token`, async (route) => {
+    expect(route.request().method()).toBe('POST');
+    fetches += 1;
+    return json(route, { token: 'rcd-existing-private-setup' });
+  });
+  await page.goto('/relay-devices');
+  const row = page.getByRole('article').filter({ hasText: legacy.name });
+  for (const platform of ['macOS/Linux', 'Windows']) {
+    await row.getByRole('button', { name: `More actions for ${legacy.name}` }).click();
+    const copy = page.getByRole('menuitem', { name: `Copy setup for ${platform}` });
+    await expect(copy).toBeEnabled();
+    await copy.click();
+    await expect.poll(() => page.evaluate(() => (window as any).__copiedSetup.length)).toBe(platform === 'Windows' ? 2 : 1);
+  }
+  expect(fetches).toBe(2);
+  const commands = await page.evaluate(() => (window as any).__copiedSetup as string[]);
+  expect(commands[0]).toContain('REMOTE_CODEX_RELAY_AGENT_TOKEN=');
+  expect(commands[1]).toContain('$env:REMOTE_CODEX_RELAY_AGENT_TOKEN=');
+  expect(commands.every((command) => command.includes('rcd-existing-private-setup'))).toBe(true);
+  await page.reload();
+  await expect(page.getByText('Tokens are only shown once.')).toHaveCount(0);
+  for (const vm of vms) {
+    const connect = page.getByRole('article').filter({ hasText: vm.name }).getByRole('button', { name: /Connect/i });
+    if (vm.hostedStatus === 'deleting') await expect(connect).toBeDisabled();
+    else await expect(connect).toBeEnabled();
+  }
+  await page.getByRole('article').filter({ hasText: 'VM error' }).getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(page).toHaveURL(/\/devices\/vm-error\/workspaces/);
 });

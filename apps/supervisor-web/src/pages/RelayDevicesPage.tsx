@@ -567,16 +567,6 @@ export function RelayDevicesPage() {
     device: RelayDeviceDto,
     platform: SupervisorPlatform,
   ) {
-    const token = device.token;
-    if (!token) {
-      setDeviceCopyError({
-        deviceId: device.id,
-        message:
-          'This token is unavailable. Create a new device to generate a setup command.',
-      });
-      return;
-    }
-
     const clipboard = navigator.clipboard;
     if (!clipboard || typeof clipboard.writeText !== 'function') {
       setCopiedDeviceId(null);
@@ -589,7 +579,16 @@ export function RelayDevicesPage() {
     }
 
     try {
-      await clipboard.writeText(relaySupervisorCommand(token, platform));
+      const command = request<{ token: string }>(`/relay/devices/${device.id}/setup-token`, { method: 'POST' })
+        .then(({ token }) => relaySupervisorCommand(token, platform));
+      // Start the clipboard operation within the tap gesture, including Safari.
+      if (typeof ClipboardItem !== 'undefined' && typeof clipboard.write === 'function') {
+        await clipboard.write([new ClipboardItem({
+          'text/plain': command.then((text) => new Blob([text], { type: 'text/plain' })),
+        })]);
+      } else {
+        await clipboard.writeText(await command);
+      }
       setDeviceCopyError(null);
       setCopiedDeviceId(device.id);
       if (copiedResetTimeoutRef.current !== null) {
@@ -772,7 +771,6 @@ export function RelayDevicesPage() {
                       setDialogError(null);
                       setSharingDevice(device);
                     }}
-                    setupTokenAvailable={Boolean(device.token)}
                   />
                 ))}
               </div>
@@ -1955,7 +1953,6 @@ function DeviceRow({
   onRotate,
   onDelete,
   onShare,
-  setupTokenAvailable,
 }: {
   device: RelayDeviceDto;
   busy: boolean;
@@ -1966,7 +1963,6 @@ function DeviceRow({
   onRotate: () => void;
   onDelete: () => void;
   onShare: () => void;
-  setupTokenAvailable: boolean;
 }) {
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
@@ -1974,8 +1970,8 @@ function DeviceRow({
   const menuFocusDirectionRef = useRef<'first' | 'last'>('first');
   const menuId = `device-actions-${useId()}`;
   const hostedStatus = device.hostedStatus ?? null;
-  const canConnect = device.connected || hostedStatus === 'stopped';
-  const canCopySetup = setupTokenAvailable && !hostedStatus;
+  const canConnect = device.connected || Boolean(hostedStatus && !['stopping', 'deleting'].includes(hostedStatus));
+  const canCopySetup = !hostedStatus;
   const statusText = hostedStatus
     ? hostedStatusLabel(hostedStatus)
     : device.connected
@@ -2102,11 +2098,7 @@ function DeviceRow({
       <div className="min-w-0 text-xs text-[var(--theme-fg-muted)]">
         <p>{activityText}</p>
         <DeviceEncryptionStatus deviceId={device.id} />
-        {!setupTokenAvailable && !hostedStatus ? (
-          <p className="mt-1 text-[var(--theme-fg-soft)]">
-            Tokens are only shown once. Replace the token for a new setup command.
-          </p>
-        ) : null}
+
         {copiedSetup ? (
           <p
             className="mt-1 text-[var(--status-success-fg)]"
@@ -2244,7 +2236,7 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
         Token created for {result.device.name}
       </h2>
       <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-        Store this token now. It will not be shown again.
+        You can copy this setup again from the device actions menu.
       </p>
       <CodeBlock label="Device token" value={result.token} />
       <div className="mt-3">

@@ -19,10 +19,10 @@
 - `REMOTE_CODEX_PUBLIC_BASE_URL` 固定为实际 HTTPS origin，例如 `https://remote.lnz-study.com`，用于 Cookie、Origin 验证、WebAuthn RP 和 OAuth callback。不要使用客户端传入的 forwarded-host 决定信任 origin。
 - `REMOTE_CODEX_RELAY_SESSION_SECRET` 至少 32 字符，使用密码学随机值。未配置时，在持久的 `REMOTE_CODEX_RELAY_DATA_DIR/session-secret` 自动创建随机值；Unix 权限 0600。禁止使用临时目录或每次部署重生成。
 - 同时备份 relay 数据库 `relay-store.sqlite` 和上述 secret（环境变量形式也必须备份）。SQLite 使用一致性备份，不能只复制正在写入的主文件而漏掉 WAL。
-- **secret 同时派生 TOTP 存储加密密钥。丢失／直接替换它会使现有验证器密钥无法解密。** 迁移机器应恢复原 secret；不要把常规改密码当成更换 master secret。数据库和 secret 均按机密材料保存，分离访问权限。
+- **secret 同时派生 TOTP 和设备安装凭据的存储加密密钥。丢失／直接替换它会使这些凭据无法解密。** 迁移机器应恢复原 secret；不要把常规改密码当成更换 master secret。数据库和 secret 均按机密材料保存，分离访问权限。
 - 首次升级时，如果旧 session secret 不足 32 字符，必须先配置新的随机值，否则启动会明确拒绝；此时尚未登记本版本的 TOTP。启用 MFA 后不再直接替换 master secret，应保留原值迁移。
 - 更新后旧的无服务端会话记录 JWT 会要求一次重新登录。新 Cookie 有 Secure（HTTPS）、HttpOnly、SameSite 属性；Web 不再将长期 bearer 保存在 localStorage。原生客户端可使用显式 Authorization bearer，但也受服务端撤销约束。
-- 设备凭据继续兼容原值的哈希验证，数据库不再保留可回显的明文 token。Device 菜单可 Replace device token，强验证后显示一次新 token，旧连接立即失效；将新值配置到对应 supervisor 后重连。该操作不会删除 thread。
+- 设备凭据继续兼容原值的哈希验证，安装凭据加密保存；设备所有者可从 Device 菜单按需复制安装命令。Replace device token 仍要求强验证，显式替换时旧连接立即失效；将新值配置到对应 supervisor 后重连。该操作不会删除 thread。
 - 清空 token 列不是对 SQLite 历史页／备份的安全擦除。若怀疑旧数据库泄露，应轮换设备 token，而不是只依赖字段迁移。
 
 丢失手机时使用恢复码或已登记 Passkey 登录，重新设置因素并生成新恢复码。如果同时丢失全部因素和恢复码，UI 不提供绕过验证的入口；需要可信运维恢复流程。此版本不提供邮件重置 MFA 的捷径，也不应直接删除 session-secret“修复”登录。
@@ -64,3 +64,14 @@ WebSocket 一次握手后复用分方向 AES-GCM 密钥，以单调序号构造 
 `relay_security_events` 保留最近 10,000 条安全事件：账号 ID、事件名、资源 ID、时间。记录登录／挑战、安全设置、会话与浏览器撤销、设备 token 轮换，不记录密码、OTP、token、私有正文或原始 User-Agent。审计数据库仍应仅供可信运维读取；不是无限期合规日志。
 
 合并前保留分支测试证据；正式上线需新不可变 runtime/npm 版本及完整四平台资产，按 [release-runtime](../.agents/skills/release-runtime/SKILL.md) 执行。Web 由公网 Rust relay 提供，合并 main 后固定共享 UI SHA 运行 relay-deploy，不能以重启设备 supervisor 代替 Web 部署。Windows Device Manager 不随本次 runtime 改动独立发版。
+
+
+## 设备安装命令与旧 VM 恢复
+
+设备所有者可在 Devices 菜单反复复制 macOS/Linux 或 Windows 安装命令。列表和共享响应不包含 token；点击时通过所有者专用 `POST /relay/devices/:id/setup-token` 获取，响应禁止缓存。不会为复制而轮换凭据或关闭设备连接。
+
+安装凭据存于 `relay_device_setup_tokens`，使用 session secret 派生的独立 AES-256-GCM 密钥加密，设备 ID 绑定为认证数据。备份需同时保留数据库和 session secret。认证仍校验 token 哈希。
+
+旧安全迁移错误清空过 `relay_devices.token`。残存明文会迁移到加密存储；原设备重连时可恢复已通过认证的原凭据。若已经只剩哈希且尚未恢复，首次复制或 VM 配置会为原设备创建可重复使用的补充凭据，原哈希保持有效，设备 ID、工作区与历史不变。显式 Replace token 会同时撤销原凭据和补充凭据。删除设备也使两者失效。
+
+Hosted VM 启动使用同一凭据存储，不再依赖已清空的明文字段。停止、启动中、错误和暂时断开的 VM 可以进入连接流程；恢复错误和过期在线状态时重试启动。正在停止或删除的 VM 不允许连接，已有在线连接不会被重新启动。
