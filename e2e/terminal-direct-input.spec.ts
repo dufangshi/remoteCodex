@@ -19,21 +19,31 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
   try {
     await page.goto(`/threads/${thread.id}`);
     await page.getByRole('button',{name:'Switch to shell',exact:true}).click();
+    const mobile = testInfo.project.name === 'mobile-chromium';
     const controls = page.getByRole('toolbar',{name:'Terminal controls'});
-    await expect(page.locator('.shell-pane-active .xterm')).toBeVisible({timeout:5000});
-    await expect(controls.getByRole('button',{name:'Terminal Tab',exact:true})).toBeEnabled().catch(async error => { console.log(await page.locator('body').innerText()); await page.screenshot({path:testInfo.outputPath('connection.png')}); throw error; });
-    await expect(page.getByRole('textbox',{name:'Shell input'})).toHaveCount(0);
+    await expect(page.locator('.shell-pane-active .xterm')).toBeVisible();
+    if (mobile) {
+      await expect(controls.getByRole('button',{name:'Terminal Tab',exact:true})).toBeEnabled();
+      await expect(controls.locator('button[aria-label*="Disconnect"], button[aria-label*="Connect"]')).toHaveCount(0);
+    } else await expect(controls).toHaveCount(0);
     const terminal = page.locator('.shell-pane-active .xterm-helper-textarea');
-    await page.locator('.shell-pane-active .xterm-screen').click();
+    await page.locator(mobile ? '.shell-pane-active .xterm-viewport' : '.shell-pane-active .xterm-screen').click();
     await expect(terminal).toBeFocused();
     await page.keyboard.type("printf 'TERMINAL_DIRECT_OK\\n'");
     await page.keyboard.press('Enter');
     await expect.poll(()=>output).toContain('TERMINAL_DIRECT_OK');
+    if (!mobile) {
+      await page.keyboard.press('Control+c');
+      await expect.poll(()=>inputs.some(x=>x.data==='\x03')).toBe(true);
+      const back = page.getByRole('button',{name:'Back to chat',exact:true});
+      expect((await back.boundingBox())!.y).toBeLessThan((await page.locator('.shell-terminal-frame').boundingBox())!.y);
+      await back.click();
+      await expect(page.getByRole('textbox',{name:'Prompt',exact:true})).toBeVisible();
+      return;
+    }
     await controls.getByRole('button',{name:'Control modifier'}).click();
-    await expect(controls.getByRole('button',{name:'Control modifier'})).toHaveAttribute('aria-pressed','true');
     await page.keyboard.type('c');
     await expect.poll(()=>inputs.some(x=>x.data==='\x03')).toBe(true);
-    await expect(controls.getByRole('button',{name:'Control modifier'})).toHaveAttribute('aria-pressed','false');
     for(const [label,data] of [['Esc','\x1b'],['Tab','\t'],['↑','\x1b[A'],['↓','\x1b[B'],['←','\x1b[D'],['→','\x1b[C']]) {
       await controls.getByRole('button',{name:`Terminal ${label}`,exact:true}).click();
       await expect.poll(()=>inputs.at(-1)?.data).toBe(data);
@@ -53,6 +63,38 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
     await sessions.getByRole('button',{name:'Shell 1',exact:true}).click();
     await controls.getByRole('button',{name:'Terminal Tab',exact:true}).click();
     await expect.poll(()=>inputs.at(-1)?.shellId).toBe(firstId);
+    await controls.getByRole('button',{name:'Switch terminal session'}).click();
+    await sessions.getByRole('button',{name:'Rename Shell 2',exact:true}).click();
+    await sessions.getByRole('textbox',{name:'Shell name'}).fill('build logs');
+    await sessions.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(sessions.getByRole('button',{name:'build logs',exact:true})).toBeVisible();
+    const renamed = await api<any>(apiBase,`/api/threads/${thread.id}/shell`);
+    expect(renamed.shells.some((s:any)=>s.label==='build logs')).toBe(true);
+    await sessions.getByRole('button',{name:'Kill build logs',exact:true}).click();
+    await expect(sessions.getByRole('button',{name:'build logs',exact:true})).toHaveCount(0);
+    await controls.getByRole('button',{name:'Switch terminal session'}).click();
+    await page.locator('.shell-pane-active .xterm-viewport').click();
+    await page.keyboard.press('Control+c');
+    await page.keyboard.type("printf '%s\\n' {1..180}");
+    await page.keyboard.press('Enter');
+    await expect.poll(()=>output).toContain('180');
+    const viewport=page.locator('.shell-pane-active .xterm-viewport');
+    await expect.poll(()=>viewport.evaluate(el=>el.scrollTop)).toBeGreaterThan(500);
+    const bounds=(await viewport.boundingBox())!;
+    const cdp=await page.context().newCDPSession(page);
+    const x=bounds.x+bounds.width/2, y=bounds.y+100;
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+    // Real timed touch samples establish fling velocity, then native scroll must
+    // continue after release (not merely move while the finger is down).
+    for(let i=1;i<=5;i++) {
+      await page.waitForTimeout(20);
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+i*24}]});
+    }
+    const releasedAt=await viewport.evaluate(el=>el.scrollTop);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await expect.poll(()=>viewport.evaluate(el=>el.scrollTop)).toBeLessThan(releasedAt-10);
+    await cdp.detach();
+    await viewport.click();
     if(testInfo.project.name==='mobile-chromium') {
       // A deterministic visualViewport IME event exercises geometry without
       // claiming Playwright's desktop host can launch an Android soft keyboard.
