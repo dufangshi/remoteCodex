@@ -436,3 +436,31 @@ async fn custom_model_rates_match_display_names_survive_reload_and_reprice_histo
         .unwrap();
     assert!(supervisor.model_pricing()["models"]["my-model"].is_null());
 }
+
+#[tokio::test]
+async fn context_window_restores_native_history_and_persists_acp_without_billing_tokens() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.spawn_live_item_persister();
+    supervisor.db.with(|conn| {
+        conn.execute("UPDATE thread_turns SET token_usage_json=?1 WHERE id='live-turn'", params![json!({
+            "total":{"inputTokens":16000000,"outputTokens":100000},
+            "last":{"inputTokens":120000,"outputTokens":1000},"modelContextWindow":1000000
+        }).to_string()])?;
+        Ok(())
+    }).unwrap();
+    let usage = supervisor.get_thread(&thread_id).unwrap().context_usage.unwrap();
+    assert_eq!(usage["tokensInContextWindow"], 121000);
+    assert_eq!(usage["remainingPercent"], 88.0);
+    // Standard ACP occupancy is independent of billable usage.
+    for (used, size) in [(40000, 200000), (60000, 256000), (100000, 1000000)] {
+        emit(&supervisor, &thread_id, "thread.context.updated", json!({"contextUsage": {
+            "availability":"available", "tokensInContextWindow":used,
+            "modelContextWindow":size, "remainingPercent":100.0 * (size-used) as f64 / size as f64
+        }}));
+        let usage = supervisor.get_thread_detail(&thread_id, None).await.unwrap().thread.context_usage.unwrap();
+        assert_eq!(usage["tokensInContextWindow"], used);
+        assert_eq!(usage["modelContextWindow"], size);
+    }
+    emit(&supervisor, &thread_id, "thread.context.updated", json!({"contextUsage":{"availability":"unavailable"}}));
+    assert_eq!(supervisor.get_thread(&thread_id).unwrap().context_usage.unwrap()["tokensInContextWindow"], 100000);
+}

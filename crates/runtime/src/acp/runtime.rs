@@ -1104,7 +1104,7 @@ impl AgentRuntime for AcpRuntime {
             input.performance_mode,
         )
         .await?;
-        let (process, session_id, cwd, image_capable, adapter_id) = {
+        let (process, session_id, cwd, image_capable, adapter_id, harness_state) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
                 .get(&input.provider_session_id)
@@ -1115,6 +1115,7 @@ impl AgentRuntime for AcpRuntime {
                 live.cwd.clone(),
                 live.negotiated.image,
                 live.adapter_id.clone(),
+                live.harness_state.clone(),
             )
         };
         let adapter = adapter_for(&adapter_id);
@@ -1169,6 +1170,9 @@ impl AgentRuntime for AcpRuntime {
                 result = &mut prompt_rpc, if !prompt_done => {
                     match result {
                         Ok(response) => {
+                            if let Some(context) = adapter.context_usage(&response, &harness_state) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
+                            }
                             if let Some(reader) = usage_reader.as_mut() {
                                 for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
                             }
@@ -1203,6 +1207,9 @@ impl AgentRuntime for AcpRuntime {
                                 if sid != session_id {
                                     continue;
                                 }
+                            }
+                            if let Some(context) = adapter.context_usage(&update, &harness_state) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
                             let mapped = mapper.apply(&update);
                             if let Some(goal) = mapped.goal.clone() {
@@ -2390,14 +2397,8 @@ fn emit_usage(bus: &EventBus, thread_id: &str, turn_id: &str, usage: Value, hidd
     if hidden {
         return;
     }
-    if let (Some(used), Some(size)) = (
-        usage.get("used").and_then(Value::as_u64),
-        usage
-            .get("size")
-            .and_then(Value::as_u64)
-            .filter(|size| *size > 0),
-    ) {
-        bus.emit(ThreadEventEnvelope { event_type: "thread.context.updated".into(), thread_id: thread_id.into(), timestamp:now_rfc3339(), payload:json!({"contextUsage":{"availability":"available","tokensInContextWindow":used,"modelContextWindow":size,"remainingPercent":(100.0 * size.saturating_sub(used) as f64 / size as f64).round(),"updatedAt":now_rfc3339()}}) });
+    if let Some(context) = crate::usage::context_usage(&usage, &now_rfc3339()) {
+        bus.emit(ThreadEventEnvelope { event_type: "thread.context.updated".into(), thread_id: thread_id.into(), timestamp:now_rfc3339(), payload:json!({"contextUsage":context}) });
     }
     if crate::usage::normalize_usage(&usage).is_some() {
         bus.emit(ThreadEventEnvelope {

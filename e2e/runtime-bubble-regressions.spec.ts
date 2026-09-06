@@ -1133,9 +1133,13 @@ test('keeps delivered steer bubbles in collapsed and expanded history with tappa
     expect(Math.abs(label!.y - amount!.y)).toBeLessThan(12);
     expect(amount!.x + amount!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   }
+  const summaryBefore = (await summary.boundingBox())!;
   await page.getByRole('button', { name: /Expand turn 1/ }).click();
   await expect(page.getByText('BEFORE_STEER', {exact:true})).toBeVisible();
-  expect((await page.getByText('BEFORE_STEER', {exact:true}).boundingBox())!.y).toBeLessThan((await steer.boundingBox())!.y);
+  expect((await steer.boundingBox())!.y).toBeLessThan((await summary.boundingBox())!.y);
+  expect(Math.abs((await summary.boundingBox())!.y - summaryBefore.y)).toBeLessThan(3);
+  await page.getByRole('button', { name: /Collapse turn 1/ }).click();
+  expect(Math.abs((await summary.boundingBox())!.y - summaryBefore.y)).toBeLessThan(3);
   expect((await steer.boundingBox())!.y).toBeLessThan((await page.getByText('AFTER_STEER', {exact:true}).boundingBox())!.y);
   await page.reload();
   await expect(steer).toHaveCount(1);
@@ -1184,6 +1188,8 @@ test('keeps subtle timestamps above messages and reveals touch copy controls', a
   await expect(time).toBeVisible();
   expect((await time.boundingBox())!.height).toBeLessThanOrEqual(13);
   expect((await time.boundingBox())!.y).toBeLessThan((await bubble.boundingBox())!.y);
+  const timeBox = (await time.boundingBox())!;
+  expect((await bubble.locator('p').first().boundingBox())!.y - timeBox.y - timeBox.height).toBeLessThanOrEqual(4);
   const copy = bubble.locator('.thread-graph-message-copy-desktop');
   const code = bubble.locator('.thread-graph-code-block');
   const codeCopy = code.locator('.thread-graph-code-copy');
@@ -1294,3 +1300,34 @@ for (const provider of ['claude', 'acp'] as const) {
     await expect(badge.getByRole('tooltip')).toContainText('resets');
   });
 }
+
+test('keeps running indicators on active commands and the turn footer only', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex', {
+    thread:{status:'running',activeTurnId:'turn-1'},
+    turns:[{id:'turn-1',status:'inProgress',startedAt:now,error:null,items:[
+      {id:'user-1',kind:'userMessage',text:'RUNNING_INDICATORS'},
+      {id:'agent-1',kind:'agentMessage',text:'Earlier checkpoint',status:'running'},
+      {id:'old-command',kind:'commandExecution',text:'printf done',status:'completed'},
+      {id:'agent-2',kind:'agentMessage',text:'Next checkpoint',status:'running'},
+      {id:'new-command',kind:'commandExecution',text:'sleep 30',status:'running'},
+    ]}],
+  }));
+  await page.goto('/threads/thread-1');
+  await expect(page.getByText('Earlier checkpoint',{exact:true})).toBeVisible();
+  await expect(page.locator('.thread-graph-message-bubble.is-assistant .animate-pulse')).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer .animate-pulse').first()).toBeVisible();
+});
+
+test('restores context from last request on older Codex supervisors', async ({page}) => {
+  await installFakeWebSocket(page);
+  const last={totalTokens:120000,inputTokens:119000,outputTokens:1000,cachedInputTokens:100000,reasoningOutputTokens:0};
+  await installApiRoutes(page, () => detail('codex', {
+    thread:{status:'idle',activeTurnId:null,contextUsage:null},
+    turns:[{id:'turn-1',status:'completed',startedAt:now,error:null,items:[{id:'reply',kind:'agentMessage',text:'Context restored'}],tokenUsage:{last,total:{...last,totalTokens:16000000},modelContextWindow:1000000}}],
+  }));
+  await page.goto('/threads/thread-1');
+  await expect(page.getByTitle(/120k used.*88% context left/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByTitle(/120k used.*88% context left/)).toBeVisible();
+});

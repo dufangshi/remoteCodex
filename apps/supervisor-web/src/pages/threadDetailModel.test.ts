@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ThreadDetailDto, ThreadHistoryItemDto, ThreadTurnDto } from '@remote-codex/shared';
-import { appendLatestTurns, appendLiveAgentDeltaToItems, reconcileLiveItemsWithDetail } from './threadDetailModel';
+import { resolveThreadContextUsage, appendLatestTurns, appendLiveAgentDeltaToItems, reconcileLiveItemsWithDetail } from './threadDetailModel';
 
 const startedAt = '2026-09-05T00:00:00.000Z';
 
@@ -161,5 +161,15 @@ describe('live transcript reconciliation', () => {
       status: 'completed' as const,
     };
     expect(reconcileLiveItemsWithDetail(live([item]), null, [completed])).toBeNull();
+  });
+});
+
+describe('context compatibility', () => {
+  it('uses last request occupancy and never the cumulative billing total', () => {
+    const last = {totalTokens:120000,inputTokens:119000,outputTokens:1000,cachedInputTokens:100000,reasoningOutputTokens:0};
+    const detail = {thread:{updatedAt:startedAt},turns:[{...turn([]),tokenUsage:{total:{...last,totalTokens:16000000},last,modelContextWindow:1000000}}]} as ThreadDetailDto;
+    expect(resolveThreadContextUsage(detail)).toMatchObject({tokensInContextWindow:120000,remainingPercent:88});
+    detail.turns[0]!.tokenUsage!.modelContextWindow = null;
+    expect(resolveThreadContextUsage(detail)).toBeUndefined();
   });
 });

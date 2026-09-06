@@ -33,6 +33,7 @@ pub trait HarnessAdapter: Send + Sync {
     fn initialize_client_meta(&self) -> Value {
         json!({})
     }
+    fn context_usage(&self, _update: &Value, _state: &Value) -> Option<Value> { None }
     fn prompt_preamble(&self) -> Option<&'static str> {
         None
     }
@@ -208,6 +209,9 @@ impl HarnessAdapter for CursorAdapter {
 pub struct GrokAdapter;
 
 impl HarnessAdapter for GrokAdapter {
+    fn context_usage(&self, update: &Value, state: &Value) -> Option<Value> {
+        grok::context_usage(update, state)
+    }
     fn id(&self) -> &'static str {
         "grok"
     }

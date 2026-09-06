@@ -136,6 +136,13 @@ test.describe('real ACP harnesses', () => {
       expect(detail.thread.status).not.toBe('failed');
       const blob = collectTexts(detail).join('\n');
       expect(blob).toContain(marker);
+      if (['codex', 'claude', 'grok'].includes(harness.id)) {
+        expect(detail.thread.contextUsage?.availability).toBe('available');
+        expect(detail.thread.contextUsage.tokensInContextWindow).toBeGreaterThan(0);
+        expect(detail.thread.contextUsage.modelContextWindow).toBeGreaterThan(detail.thread.contextUsage.tokensInContextWindow);
+        const restored = await api<any>(apiBase, `/api/threads/${thread.id}`);
+        expect(restored.thread.contextUsage).toEqual(detail.thread.contextUsage);
+      }
     });
   }
 

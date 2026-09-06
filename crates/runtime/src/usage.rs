@@ -202,6 +202,19 @@ pub(crate) fn normalize_usage(raw: &Value) -> Option<Value> {
     }))
 }
 
+/// Context occupancy is the latest request, not the cumulative billing total.
+pub(crate) fn context_usage(raw: &Value, updated_at: &str) -> Option<Value> {
+    let size = number(raw, &["size", "modelContextWindow", "model_context_window"])?;
+    if size == 0 { return None; }
+    let used = number(raw, &["used"]).or_else(|| {
+        raw.get("last").or_else(|| raw.get("last_token_usage"))
+            .and_then(Tokens::parse).map(|tokens| tokens.total_tokens)
+    })?;
+    Some(json!({"availability":"available", "tokensInContextWindow":used,
+        "modelContextWindow":size, "remainingPercent":(100.0 * size.saturating_sub(used) as f64 / size as f64).round(),
+        "updatedAt":updated_at}))
+}
+
 pub(crate) fn pricing() -> &'static Value {
     static CONFIG: OnceLock<Value> = OnceLock::new();
     CONFIG.get_or_init(|| {

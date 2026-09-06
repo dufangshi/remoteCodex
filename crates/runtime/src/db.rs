@@ -48,6 +48,11 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
         name: "legacy_thread_goals",
         apply: migrate_legacy_thread_goals,
     },
+    Migration {
+        version: 7,
+        name: "thread_context_usage",
+        apply: |conn| { conn.execute("ALTER TABLE threads ADD COLUMN context_usage_json TEXT", [])?; Ok(()) },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[

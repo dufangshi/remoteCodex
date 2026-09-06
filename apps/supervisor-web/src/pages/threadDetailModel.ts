@@ -607,3 +607,19 @@ export function mergeTurnTokenUsage(
 
   return changed ? nextTurns : turns;
 }
+
+// Older supervisors expose Codex's last request in turn usage but omit the
+// thread context DTO. Keep those devices useful during a rolling upgrade.
+export function resolveThreadContextUsage(detail: Pick<ThreadDetailDto, 'thread' | 'turns'>): ThreadDto['contextUsage'] {
+  if (detail.thread.contextUsage?.availability === 'available') return detail.thread.contextUsage;
+  for (const turn of [...detail.turns].reverse()) {
+    const usage = turn.tokenUsage;
+    const size = usage?.modelContextWindow;
+    const used = usage?.last?.totalTokens;
+    if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0 || typeof used !== 'number' || !Number.isFinite(used) || used < 0) continue;
+    return { availability:'available', tokensInContextWindow:used, modelContextWindow:size,
+      remainingPercent:Math.round(100 * Math.max(0,size-used)/size),
+      updatedAt:turn.completedAt ?? turn.startedAt ?? detail.thread.updatedAt };
+  }
+  return detail.thread.contextUsage;
+}

@@ -308,6 +308,12 @@ impl Supervisor {
             };
             match event.event_type.as_str() {
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                "thread.context.updated" => supervisor.db.with(|conn| {
+                    if let Some(context) = event.payload.get("contextUsage").filter(|v| v["availability"] == "available") {
+                        conn.execute("UPDATE threads SET context_usage_json=?1 WHERE id=?2", params![context.to_string(),event.thread_id])?;
+                    }
+                    Ok(())
+                }),
                 "thread.output.delta" => supervisor.append_history_delta(event),
                 "thread.item.started" | "thread.item.completed" => {
                     let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str) else {
@@ -457,6 +463,12 @@ impl Supervisor {
         let Some(mut usage) = crate::usage::normalize_usage(raw) else {
             return Ok(());
         };
+        if let Some(context) = crate::usage::context_usage(raw, &event.timestamp) {
+            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                event_type: "thread.context.updated".into(), thread_id: event.thread_id.clone(),
+                timestamp: event.timestamp.clone(), payload: json!({"contextUsage":context}),
+            });
+        }
         let catalog = self.model_pricing();
         let payload = self.db.with(|conn| {
             let row = conn.query_row(
@@ -870,7 +882,7 @@ impl Supervisor {
                 "SELECT id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
                         reasoning_effort, fast_mode, collaboration_mode, approval_mode, sandbox_mode, status,
                         summary_text, last_error, created_at, updated_at, last_turn_started_at, last_turn_completed_at,
-                        is_pinned FROM threads",
+                        is_pinned, context_usage_json FROM threads",
             );
             if workspace_id.is_some() {
                 sql.push_str(" WHERE workspace_id=?1");
@@ -901,6 +913,16 @@ impl Supervisor {
             .into_iter()
             .find(|t| t.id == id)
             .ok_or_else(|| anyhow!("thread not found"))?;
+        if thread.context_usage.is_none() || thread.source == "local_codex_import" {
+            let historical_context = self.db.with(|conn| {
+                let raw: Option<String> = conn.query_row(
+                    "SELECT token_usage_json FROM thread_turns WHERE thread_id=?1 AND token_usage_json IS NOT NULL ORDER BY ordinal DESC LIMIT 1",
+                    params![id], |row| row.get(0)).optional()?;
+                Ok(raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                    .and_then(|usage| crate::usage::context_usage(&usage, &thread.updated_at)))
+            })?;
+            thread.context_usage = historical_context.or(thread.context_usage);
+        }
         thread.active_turn_id = self.active_turn_id(id)?;
         if thread.active_turn_id.is_some() {
             thread.status = "running".into();
@@ -1456,6 +1478,7 @@ impl Supervisor {
             self.goal_snapshot(id, runtime_goal)?
                 .and_then(|goal| serde_json::to_value(goal).ok())
         };
+        let thread = self.get_thread(id)?;
         Ok(ThreadDetailDto {
             thread,
             workspace,
@@ -2933,7 +2956,7 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
         updated_at: row.get(17).unwrap_or_default(),
         last_turn_started_at: row.get(18).unwrap_or(None),
         last_turn_completed_at: row.get(19).unwrap_or(None),
-        context_usage: None,
+        context_usage: row.get::<_, Option<String>>(21).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
     }
 }
 
