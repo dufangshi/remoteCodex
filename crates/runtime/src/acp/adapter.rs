@@ -136,6 +136,9 @@ impl HarnessAdapter for CodexAdapter {
     fn compact_prompt(&self) -> Option<&'static str> {
         Some("/compact")
     }
+    fn project_session(&self, response: &Value) -> Option<HarnessProjection> {
+        super::codex_models::project_session(response)
+    }
     fn patch_capabilities(
         &self,
         caps: &mut AgentProviderCapabilitiesDto,

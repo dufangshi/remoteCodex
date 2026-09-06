@@ -1,6 +1,6 @@
 //! Narrow control bridge to the app-server already owned by codex-acp.
-//! ACP owns prompt/resume/cancel; only reading turn IDs and creating a NEW fork travels
-//! over the authenticated loopback pipe. No second app-server loads the source.
+//! ACP owns prompt/resume/cancel; model catalog compatibility is applied in transit.
+//! The control pipe only reads turn IDs and creates forks on the same app-server.
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashSet, process::Stdio, time::Duration};
@@ -131,10 +131,12 @@ pub async fn run() -> Result<()> {
         .await?;
     let mut control_in = BufReader::new(read).lines();
     let mut pending = HashSet::new();
+    let mut models = super::codex_models::ModelCatalogBridge::default();
     loop {
         tokio::select! {
             line = acp_in.next_line() => {
                 let Some(line) = line? else { break; };
+                models.observe_request(&serde_json::from_str(&line)?);
                 native_in.write_all(format!("{line}\n").as_bytes()).await?;
             }
             line = control_in.next_line() => {
@@ -148,14 +150,15 @@ pub async fn run() -> Result<()> {
             }
             line = native_out.next_line() => {
                 let Some(line) = line? else { break; };
-                let message: Value = serde_json::from_str(&line)?;
+                let mut message: Value = serde_json::from_str(&line)?;
                 let id = message["id"].as_str().unwrap_or("");
                 let owned = pending.iter().find(|(key,_)| key == id).cloned();
                 if let Some(key) = owned {
                     pending.remove(&key);
                     control_out.write_all(format!("{line}\n").as_bytes()).await?;
                 } else {
-                    acp_out.write_all(format!("{line}\n").as_bytes()).await?;
+                    models.observe_response(&mut message);
+                    acp_out.write_all(format!("{message}\n").as_bytes()).await?;
                     acp_out.flush().await?;
                 }
             }

@@ -530,6 +530,16 @@ impl AcpRuntime {
                     .await?;
                 if let Some(options) = response.get("configOptions") {
                     live.config_options = options.clone();
+                    if let Some(options) = options.as_array() {
+                        for option in options {
+                            let value = option["currentValue"].as_str().map(str::to_string);
+                            match option["category"].as_str() {
+                                Some("model") => live.model = value,
+                                Some("thought_level") => live.reasoning_effort = value,
+                                _ => {}
+                            }
+                        }
+                    }
                 }
                 if config_id == reasoning_config_id(&live.config_options) {
                     live.reasoning_effort = Some(value.clone());
@@ -1040,13 +1050,15 @@ impl AgentRuntime for AcpRuntime {
             if let Some(op) = adapter.apply_model(&input.model, &live.harness_state) {
                 let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
             } else {
-                let _ = live
-                    .process
-                    .request(
-                        "session/set_config_option",
-                        json!({ "sessionId": live.session_id, "configId": "model", "value": input.model }),
-                    )
-                    .await;
+                let _ = Self::apply_setting_op(
+                    &live.process.clone(),
+                    &mut live,
+                    SessionSettingOp::SetConfig {
+                        config_id: "model".into(),
+                        value: input.model.clone(),
+                    },
+                )
+                .await;
                 live.model = Some(input.model.clone());
             }
         }
@@ -2392,7 +2404,7 @@ fn reasoning_config_id(options: &Value) -> &str {
         .unwrap_or("thought-level")
 }
 
-fn models_from_config_options(options: &Value) -> Vec<ModelOptionDto> {
+pub(super) fn models_from_config_options(options: &Value) -> Vec<ModelOptionDto> {
     let Some(arr) = options.as_array() else {
         return Vec::new();
     };

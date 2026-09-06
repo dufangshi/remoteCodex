@@ -59,6 +59,49 @@ function openMenu(page: Page) {
   return page.locator('[data-composer-menu-surface="true"]:visible');
 }
 
+test('Astra and Sol efforts remain editable across model switches and reload', async ({ page, threadId }) => {
+  const efforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
+  await page.route((url) => url.pathname === '/api/agent-runtimes/codex/models', async (route) => {
+    const response = await route.fetch();
+    const models = await response.json() as ModelOptionDto[];
+    const codexModels = ['gpt-6-astra', 'gpt-5.6-sol'].map((model): ModelOptionDto => ({
+      ...models[0], id: model, model, displayName: model, isDefault: false,
+      defaultReasoningEffort: 'medium',
+      supportedReasoningEfforts: efforts.map((reasoningEffort) => ({ reasoningEffort, description: '' })),
+    }));
+    await route.fulfill({ response, json: [...models, ...codexModels] });
+  });
+  await page.goto(`/threads/${threadId}`);
+  const menu = openMenu(page);
+  const trigger = page.getByRole('button', { name: /^Model and effort:/ });
+  for (const [model, effort] of [
+    ['gpt-6-astra', 'ultra'], ['gpt-5.6-sol', 'high'], ['gpt-6-astra', 'low'],
+  ]) {
+    await trigger.click();
+    await menu.getByRole('button', { name: /^Model\s/ }).click();
+    await menu.getByRole('button', { name: model, exact: true }).click();
+    await expect(trigger).toHaveAttribute('aria-label', expect.stringContaining(`Model and effort: ${model},`));
+    await trigger.click();
+    const effortControl = menu.getByRole('button', { name: /^Effort\s/ });
+    await expect(effortControl).toBeEnabled();
+    await effortControl.click();
+    for (const value of efforts) {
+      await expect(menu.getByRole('button', { name: value, exact: true })).toBeEnabled();
+    }
+    const saved = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/threads/${threadId}/settings`)
+      && response.request().method() === 'PATCH'
+      && response.request().postDataJSON().reasoningEffort === effort);
+    await menu.getByRole('button', { name: effort, exact: true }).click();
+    expect((await saved).ok()).toBeTruthy();
+    await expect(trigger).toHaveAccessibleName(`Model and effort: ${model}, ${effort}`);
+  }
+  await page.reload();
+  await expect(trigger).toHaveAccessibleName('Model and effort: gpt-6-astra, low');
+  await trigger.click();
+  await expect(menu.getByRole('button', { name: /^Effort\s/ })).toBeEnabled();
+});
+
 async function expectMenuInsideViewport(menu: Locator) {
   await expect(menu).toBeVisible();
   await expect.poll(async () => menu.evaluate((node) => {
