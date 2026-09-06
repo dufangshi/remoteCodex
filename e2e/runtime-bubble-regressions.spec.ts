@@ -1391,3 +1391,25 @@ test('a gateway timeout confirms delivered steer without showing an HTML error',
   await expect(page.getByText(/Gateway timeout cloudflare diagnostic|not yet confirmed|Request failed/)).toHaveCount(0);
   expect(submits).toBe(1);
 });
+
+test('an expanded long reply stays expanded when the running turn becomes final history', async ({page}) => {
+  await installFakeWebSocket(page);
+  let complete=false;
+  const answer='A detailed explanation while the agent runs. '.repeat(160);
+  await installApiRoutes(page,()=>detail('codex',{
+    thread:{status:complete?'idle':'running',activeTurnId:complete?null:'turn-1'},
+    turns:[{id:'turn-1',startedAt:now,status:complete?'completed':'inProgress',hasDeferredItems:complete,deferredItemCount:complete?1:0,items:[
+      {id:'user-1',kind:'userMessage',text:'Explain in detail'},
+      {id:'same-answer',kind:'agentMessage',text:answer+(complete?' FINAL_SENTENCE':'')},
+    ]}],
+  }));
+  await page.goto('/threads/thread-1');
+  await page.getByRole('button',{name:'Show more',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Show less',exact:true})).toBeVisible();
+  await waitForSocketReady(page);
+  complete=true;
+  await emitSocketMessage(page,{type:'thread.turn.completed',threadId:'thread-1',timestamp:now,payload:{turnId:'turn-1',status:'completed'}});
+  await expect(page.getByText(/FINAL_SENTENCE/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Show less',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Show more',exact:true})).toHaveCount(0);
+});
