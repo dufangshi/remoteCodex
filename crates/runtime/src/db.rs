@@ -51,7 +51,10 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 7,
         name: "thread_context_usage",
-        apply: |conn| { conn.execute("ALTER TABLE threads ADD COLUMN context_usage_json TEXT", [])?; Ok(()) },
+        apply: |conn| {
+            conn.execute("ALTER TABLE threads ADD COLUMN context_usage_json TEXT", [])?;
+            Ok(())
+        },
     },
 ];
 
@@ -690,6 +693,10 @@ fn create_runtime_schema(conn: &Connection) -> Result<()> {
         );
         CREATE UNIQUE INDEX IF NOT EXISTS thread_history_items_thread_turn_item_idx
           ON thread_history_items(thread_id, turn_id, item_id);
+        -- Summary reads must not scan/decode large command and tool payloads.
+        CREATE INDEX IF NOT EXISTS thread_history_conversation_idx
+          ON thread_history_items(thread_id, turn_id, created_at)
+          WHERE json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage');
         CREATE TABLE IF NOT EXISTS thread_pending_steers (
           id TEXT PRIMARY KEY,
           thread_id TEXT NOT NULL,

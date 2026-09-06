@@ -213,7 +213,10 @@ mod tests {
 pub fn context_usage(update: &Value, state: &Value) -> Option<Value> {
     let used = update.pointer("/_meta/totalTokens")?.as_u64()?;
     let model_id = state.get("currentModelId")?.as_str()?;
-    let model = state.get("availableModels")?.as_array()?.iter()
+    let model = state
+        .get("availableModels")?
+        .as_array()?
+        .iter()
         .find(|model| model.get("modelId").and_then(Value::as_str) == Some(model_id))?;
     let size = model.pointer("/_meta/totalContextTokens")?.as_u64()?;
     (size > 0).then(|| json!({"used":used,"size":size}))
@@ -228,7 +231,12 @@ mod context_tests {
             {"modelId":"other","_meta":{"totalContextTokens":100000}},
             {"modelId":"grok-build","_meta":{"totalContextTokens":500000}}]});
         let update = json!({"_meta":{"totalTokens":15515,"usage":{"totalTokens":9000000}}});
-        assert_eq!(context_usage(&update,&state),Some(json!({"used":15515,"size":500000})));
-        assert!(context_usage(&json!({"_meta":{"usage":{"totalTokens":9000000}}}),&state).is_none());
+        assert_eq!(
+            context_usage(&update, &state),
+            Some(json!({"used":15515,"size":500000}))
+        );
+        assert!(
+            context_usage(&json!({"_meta":{"usage":{"totalTokens":9000000}}}), &state).is_none()
+        );
     }
 }

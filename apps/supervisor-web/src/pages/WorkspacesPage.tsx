@@ -1,3 +1,4 @@
+import { ProductHeader } from '../components/ProductHeader';
 import {
   useEffect,
   useMemo,
@@ -7,7 +8,6 @@ import {
 } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  ArrowLeft,
   ChevronDown,
   Eye,
   FileInput,
@@ -20,14 +20,9 @@ import {
 } from 'lucide-react';
 
 import type { RuntimeConfigDto, WorkspaceDto } from '@remote-codex/shared';
-import {
-  AppShellMenuButton,
-  AppShellNavigationMenu,
-} from '../components/AppShellNavigation';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
-import { RelayUserMenu } from '../components/RelayUserMenu';
 import {
   ApiError,
   deleteWorkspace,
@@ -218,56 +213,10 @@ export function WorkspacesPage() {
 
   return (
     <div className="product-page space-y-4">
-      <header className="product-topbar -mx-4 px-2 sm:mx-0 sm:rounded-lg sm:border sm:px-3">
-        <div className="relative shrink-0">
-          <AppShellMenuButton className="!h-11 !w-11 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]" />
-          <AppShellNavigationMenu className="absolute left-0 top-[calc(100%+0.5rem)] z-50 w-64" />
-        </div>
-
-        {relayDeviceId ? (
-          <Link
-            to="/relay-devices"
-            aria-label="Back to devices"
-            title="Back to devices"
-            className="host-secondary-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] md:w-auto md:gap-2 md:px-3"
-          >
-            <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-            <span className="hidden md:inline">Devices</span>
-          </Link>
-        ) : null}
-
-        <div className="min-w-0 flex-1 px-1">
-          <h1 className="product-title truncate !text-sm sm:!text-base">Workspaces</h1>
-          <p className="host-muted hidden truncate text-xs lg:block">
-            {loading ? 'Loading registry' : `${workspaces.length} registered`}
-          </p>
-        </div>
-
-        <Link
-          to={currentRelayScopedPath('/threads/import')}
-          aria-label="Import session"
-          title="Import session"
-          className="host-secondary-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] sm:w-auto sm:gap-2 sm:px-3"
-        >
-          <FileInput aria-hidden="true" className="h-4 w-4" />
-          <span className="hidden sm:inline">Import</span>
-        </Link>
-        {!loading && workspaces.length > 0 ? (
-          <Link
-            to={currentRelayScopedPath('/workspaces/new')}
-            aria-label="Add workspace"
-            title="Add workspace"
-            className="ui-action-primary inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-sm font-medium transition sm:w-auto sm:gap-2 sm:px-3.5"
-          >
-            <Plus aria-hidden="true" className="h-4 w-4" />
-            <span className="hidden sm:inline">Add workspace</span>
-          </Link>
-        ) : null}
-        <RelayUserMenu
-          className="[&>button]:!h-11 [&>button]:!w-11"
-          menuAlign="right"
-        />
-      </header>
+      <ProductHeader title="Workspaces" {...(relayDeviceId ? {backHref: '/relay-devices', backLabel: 'Back to devices'} : {})} actions={<>
+        <Link to={currentRelayScopedPath('/threads/import')} aria-label="Import session" title="Import session" className="product-icon-button"><FileInput size={19} /></Link>
+        <Link to={currentRelayScopedPath('/workspaces/new')} aria-label="Add workspace" title="Add workspace" className="product-icon-button"><Plus size={20} /></Link>
+      </>} />
 
       <details className="group border-y border-[var(--theme-border)]">
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 py-2.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)] [&::-webkit-details-marker]:hidden">
@@ -405,11 +354,7 @@ export function WorkspacesPage() {
                       <span className="truncate text-sm font-semibold text-[var(--theme-fg)] sm:text-base">
                         {workspace.label}
                       </span>
-                      {workspace.isFavorite ? (
-                        <span className="host-warning-pill shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase">
-                          Pinned
-                        </span>
-                      ) : null}
+
                     </span>
                     <span
                       className="mt-1 block truncate font-mono text-xs leading-5 text-[var(--theme-fg-muted)]"

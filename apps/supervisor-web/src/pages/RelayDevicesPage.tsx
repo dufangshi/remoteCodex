@@ -1,3 +1,4 @@
+import { ProductHeader } from '../components/ProductHeader';
 import {
   ChevronDown,
   Copy,
@@ -45,7 +46,6 @@ import {
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { RelayUserMenu } from '../components/RelayUserMenu';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
 type SupervisorPlatform = 'unix' | 'windows';
@@ -656,20 +656,7 @@ export function RelayDevicesPage() {
   return (
     <div>
       <div className="product-page space-y-6">
-        <header className="product-topbar -mx-4 px-2.5 sm:mx-0 sm:px-4">
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            <RelayUserMenu className="[&>button]:h-11 [&>button]:w-11 [&_[role=menuitem]]:min-h-11 sm:[&>button]:h-9 sm:[&>button]:w-9" />
-            <Link
-              className="relay-button-secondary inline-flex h-11 shrink-0 items-center px-3 text-xs font-medium sm:h-9"
-              to="/"
-            >
-              Relay home
-            </Link>
-            <div className="min-w-0 flex-1 text-right">
-              <p className="truncate text-xs font-medium text-[var(--theme-fg-muted)]">Devices</p>
-            </div>
-          </div>
-        </header>
+        <ProductHeader title="Devices" backHref="/" backLabel="Relay home" />
 
         <section className="product-page-header">
           <div>

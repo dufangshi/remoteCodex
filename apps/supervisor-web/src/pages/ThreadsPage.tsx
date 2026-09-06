@@ -1,25 +1,18 @@
+import { ProductHeader } from '../components/ProductHeader';
+import { Plus, MessageSquare, Pencil, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 
 import {
-  AgentRuntimeStatusDto,
-  defaultAgentBackendId,
   ThreadDto,
   truncateAutoThreadTitle,
   WorkspaceDto,
 } from '@remote-codex/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { useAppShellNav } from '../components/AppShellNavContext';
-import {
-  ThreadCards,
-  ThreadWorkspaceLayout,
-} from '../components/ThreadWorkspaceLayout';
 import { RenameDialog } from '../components/RenameDialog';
 import {
   connectSupervisorEvents,
   deleteThread,
-  fetchAgentBackends,
-  fetchAgentBackendStatus,
   fetchThreads,
   fetchWorkspaces,
   updateThread,
@@ -33,12 +26,9 @@ import { useThreadListPolling } from './useThreadListPolling';
 
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const shellNav = useAppShellNav();
   const selectedWorkspaceId = searchParams.get('workspaceId');
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
-  const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingRecentThreadId, setEditingRecentThreadId] = useState<string | null>(null);
@@ -46,38 +36,17 @@ export function ThreadsPage() {
   const [savingRecentThreadId, setSavingRecentThreadId] = useState<string | null>(null);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
-  const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
-
-  const fetchRuntimeStatus = useCallback(async () => {
-    try {
-      return (await fetchAgentBackendStatus(defaultBackend)).status;
-    } catch (error) {
-      const backends = await fetchAgentBackends();
-      const fallback = backends.find(
-        (backend) =>
-          backend.enabled &&
-          backend.capabilities.sessions.resume &&
-          backend.capabilities.turns.start,
-      );
-      if (fallback) {
-        return fallback.status;
-      }
-      throw error;
-    }
-  }, [defaultBackend]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const [statusResponse, threadResponse, workspaceResponse] =
+      const [threadResponse, workspaceResponse] =
         await Promise.all([
-          fetchRuntimeStatus(),
           fetchThreads(),
           fetchWorkspaces(),
         ]);
-      setStatus(statusResponse);
       setThreads(threadResponse);
       setWorkspaces(workspaceResponse);
     } catch (caught) {
@@ -87,7 +56,7 @@ export function ThreadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [fetchRuntimeStatus]);
+  }, []);
 
   useEffect(() => {
     if (selectedWorkspaceId === null) {
@@ -129,9 +98,6 @@ export function ThreadsPage() {
     };
   }, [load, selectedWorkspaceId]);
 
-  const workspaceLabels = Object.fromEntries(
-    workspaces.map((workspace) => [workspace.id, workspace.label]),
-  );
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null;
   const visibleThreads = useMemo(
     () =>
@@ -154,15 +120,6 @@ export function ThreadsPage() {
   if (selectedWorkspaceId === null) {
     return <Navigate to={currentWorkspacesHref()} replace />;
   }
-
-  const supervisorDotClassName =
-    status?.state === 'ready'
-      ? 'bg-teal-300 shadow-[0_0_0_3px_rgba(94,234,212,0.14)]'
-      : status?.state === 'starting'
-        ? 'bg-[var(--status-warning-fg)] shadow-[0_0_0_3px_var(--status-warning-bg)]'
-        : status?.state === 'degraded' || status?.state === 'failed'
-          ? 'bg-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.14)]'
-          : 'bg-slate-500 shadow-[0_0_0_3px_rgba(100,116,139,0.14)]';
 
   async function handleRenameThread(threadId: string, title: string) {
     try {
@@ -220,51 +177,12 @@ export function ThreadsPage() {
   }
 
   return (
-    <ThreadWorkspaceLayout
-      threads={threads}
-      workspaceLabels={workspaceLabels}
-      status={status}
-      loading={loading}
-      error={error}
-      viewportConstrained={selectedWorkspaceId !== null}
-      showMobileAppMenu
-      showMobileThreadNavToggle={false}
-      showMobileNewThreadShortcut={false}
-      currentWorkspaceId={selectedWorkspaceId}
-      currentWorkspaceLabel={selectedWorkspace?.label ?? null}
-      onRenameThread={handleRenameThread}
-      onDeleteThread={setDeletingThread}
-    >
+    <div className="product-page">
+      <ProductHeader title={selectedWorkspace?.label ?? 'Workspace'} backHref={currentWorkspacesHref()} backLabel="Back to workspaces" actions={<Link to={newThreadHref} aria-label="New thread" title="New thread" className="product-icon-button"><Plus size={20} /></Link>} />
+      {error && <p role="alert" className="host-error rounded-lg p-3">{error}</p>}
+      {loading && <p className="host-muted py-4">Loading threads…</p>}
       <>
         <div className="threads-workspace-overview flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--theme-bg)]">
-          <div className="border-b border-[var(--theme-border)] px-4 py-3.5 sm:px-6">
-            <div className="flex items-center justify-between gap-3">
-              <h2
-                className="host-page-title min-w-0 truncate text-base font-semibold sm:text-lg"
-                title={selectedWorkspace ? `${selectedWorkspace.label} threads` : 'All threads'}
-              >
-                {selectedWorkspace ? selectedWorkspace.label : 'All Threads'}
-              </h2>
-              <Link
-                to={newThreadHref}
-                className="ui-action-primary inline-flex h-10 shrink-0 items-center rounded-md px-3.5 text-sm font-medium transition"
-              >
-                New Thread
-              </Link>
-            </div>
-          </div>
-
-          <div className="flex min-h-12 items-center gap-3 border-b border-[var(--theme-border)] px-4 py-2.5 sm:px-6">
-              <span
-                aria-hidden="true"
-                className={`h-2 w-2 shrink-0 rounded-full ${supervisorDotClassName}`}
-              />
-              <span className="shrink-0 text-sm font-medium text-[var(--theme-fg)]">Supervisor</span>
-              <span className="host-muted min-w-0 truncate text-sm">
-                {status?.lastError ?? (status?.state === 'ready' ? 'Ready' : status?.state ?? 'Checking')}
-              </span>
-          </div>
-
           {!loading && !error && visibleThreads.length > 0 && (
             <section className="flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-2">
@@ -280,22 +198,15 @@ export function ThreadsPage() {
                   </span>
                 )}
               </div>
-              <div className="threads-product-list mt-3 min-h-0 flex-1 overflow-hidden rounded-md border border-[var(--theme-border)]">
-                <ThreadCards
-                  threads={visibleThreads}
-                  currentWorkspaceId={selectedWorkspaceId}
-                  workspaceLabels={workspaceLabels}
-                  onOpenThread={(threadId) => navigate(currentThreadHref(threadId))}
-                  onBeginRenameThread={(thread) => {
-                    setEditingRecentThreadId(thread.id);
-                    setRecentDraftTitle(thread.title);
-                  }}
-                  onDeleteThread={(thread) => setDeletingThread(thread)}
-                  scrollable
-                  maxHeightClassName="max-h-full"
-                  showDeleteButton
-                  showSessionCopyButton
-                />
+              <div className="recent-thread-list mt-4 grid gap-3">
+                {visibleThreads.map(thread => <article key={thread.id} className="recent-thread-card group flex items-center gap-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4">
+                  <Link to={currentThreadHref(thread.id)} className="flex min-w-0 flex-1 items-center gap-3">
+                    <span className="rounded-lg bg-[var(--theme-hover)] p-2.5 text-[var(--theme-fg-muted)]"><MessageSquare size={18} /></span>
+                    <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-medium">{thread.title}</h3><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--theme-fg-muted)]"><time>{new Date(thread.updatedAt).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</time>{thread.status !== 'idle' && <span>{thread.status}</span>}</div></div>
+                  </Link>
+                  <button type="button" className="product-icon-button" aria-label={`Rename thread ${thread.title}`} onClick={() => {setEditingRecentThreadId(thread.id);setRecentDraftTitle(thread.title);}}><Pencil size={16} /></button>
+                  <button type="button" className="product-icon-button" aria-label={`Delete thread ${thread.title}`} onClick={() => setDeletingThread(thread)}><Trash2 size={16} /></button>
+                </article>)}
               </div>
             </section>
           )}
@@ -338,6 +249,6 @@ export function ThreadsPage() {
           onConfirm={() => void handleDeleteThread()}
         />
       </>
-    </ThreadWorkspaceLayout>
+    </div>
   );
 }

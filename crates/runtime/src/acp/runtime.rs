@@ -2398,7 +2398,12 @@ fn emit_usage(bus: &EventBus, thread_id: &str, turn_id: &str, usage: Value, hidd
         return;
     }
     if let Some(context) = crate::usage::context_usage(&usage, &now_rfc3339()) {
-        bus.emit(ThreadEventEnvelope { event_type: "thread.context.updated".into(), thread_id: thread_id.into(), timestamp:now_rfc3339(), payload:json!({"contextUsage":context}) });
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.context.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({"contextUsage":context}),
+        });
     }
     if crate::usage::normalize_usage(&usage).is_some() {
         bus.emit(ThreadEventEnvelope {

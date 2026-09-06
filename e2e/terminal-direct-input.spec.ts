@@ -18,10 +18,16 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
   });
   try {
     await page.goto(`/threads/${thread.id}`);
+    await page.reload();
     await page.getByRole('button',{name:'Switch to shell',exact:true}).click();
     const mobile = testInfo.project.name === 'mobile-chromium';
     const controls = page.getByRole('toolbar',{name:'Terminal controls'});
     await expect(page.locator('.shell-pane-active .xterm')).toBeVisible();
+    await expect.poll(async () => {
+      const frame = (await page.locator('.shell-terminal-frame').boundingBox())!;
+      const screen = (await page.locator('.shell-pane-active .xterm-screen').boundingBox())!;
+      return frame.height - screen.height;
+    }).toBeLessThan(45);
     if (mobile) {
       await expect(controls.getByRole('button',{name:'Terminal Tab',exact:true})).toBeEnabled();
       await expect(controls.locator('button[aria-label*="Disconnect"], button[aria-label*="Connect"]')).toHaveCount(0);
@@ -36,7 +42,11 @@ test('terminal types directly, sends touch controls, switches sessions and keeps
       await page.keyboard.press('Control+c');
       await expect.poll(()=>inputs.some(x=>x.data==='\x03')).toBe(true);
       const back = page.getByRole('button',{name:'Back to chat',exact:true});
-      expect((await back.boundingBox())!.y).toBeLessThan((await page.locator('.shell-terminal-frame').boundingBox())!.y);
+      const frame = (await page.locator('.shell-terminal-frame').boundingBox())!;
+      const button = (await back.boundingBox())!;
+      expect(button.y).toBeGreaterThan(frame.y + frame.height - 90);
+      expect(button.x + button.width).toBeLessThan(frame.x + frame.width);
+      await expect(back).toHaveText('');
       await back.click();
       await expect(page.getByRole('textbox',{name:'Prompt',exact:true})).toBeVisible();
       return;

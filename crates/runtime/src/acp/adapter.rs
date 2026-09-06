@@ -33,7 +33,9 @@ pub trait HarnessAdapter: Send + Sync {
     fn initialize_client_meta(&self) -> Value {
         json!({})
     }
-    fn context_usage(&self, _update: &Value, _state: &Value) -> Option<Value> { None }
+    fn context_usage(&self, _update: &Value, _state: &Value) -> Option<Value> {
+        None
+    }
     fn prompt_preamble(&self) -> Option<&'static str> {
         None
     }

@@ -1718,6 +1718,7 @@ export interface RespondThreadActionRequestInput {
 
 export interface ThreadEventPayloadMap {
   'thread.updated': {
+    pendingSteers?: ThreadDetailDto['pendingSteers'];
     status?: ThreadStatusDto | string | null;
     title?: string | null;
     reason?: string;

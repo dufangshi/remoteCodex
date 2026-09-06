@@ -1331,3 +1331,63 @@ test('restores context from last request on older Codex supervisors', async ({pa
   await page.reload();
   await expect(page.getByTitle(/120k used.*88% context left/)).toBeVisible();
 });
+
+test('loads three summaries and fetches running operations only on expansion', async ({page}) => {
+  await installFakeWebSocket(page);
+  const turns = [1,2,3].map(n => ({id:`turn-${n}`,startedAt:now,status:n===3?'inProgress':'completed',hasDeferredItems:true,deferredItemCount:1,items:[{id:`user-${n}`,kind:'userMessage',text:`Lazy prompt ${n}`},{id:`agent-${n}`,kind:'agentMessage',text:`Visible answer ${n}`}]}));
+  await installApiRoutes(page,()=>detail('codex',{thread:{status:'running',activeTurnId:'turn-3'},totalTurnCount:3,turns}));
+  let fullRequests=0;
+  const summaryQueries:string[]=[];
+  page.on('request',request=>{const url=new URL(request.url());if(url.pathname==='/api/threads/thread-1')summaryQueries.push(url.search);});
+  await page.route('**/api/threads/thread-1/turns/turn-3/detail',async route=>{
+    fullRequests++;
+    await route.fulfill({json:{...turns[2],hasDeferredItems:false,items:[turns[2]!.items[0],{id:'checkpoint',kind:'agentMessage',text:'Previously deferred checkpoint'},{id:'op',kind:'commandExecution',text:'echo LAZY_OPERATION',status:'completed'},turns[2]!.items[1]]}});
+  });
+  await page.goto('/threads/thread-1');
+  await expect(page.getByText('Visible answer 3',{exact:true})).toBeVisible();
+  expect(summaryQueries[0]).toBe('?view=summary&limit=3');
+  expect(fullRequests).toBe(0);
+  await expect(page.locator('[data-timeline-turn]')).toHaveCount(3);
+  await page.getByRole('button',{name:/Expand turn 3/}).click();
+  await expect(page.getByText('Previously deferred checkpoint',{exact:true})).toBeVisible();
+  expect(fullRequests).toBe(1);
+  await page.getByRole('button',{name:/Collapse turn 3/}).click();
+  await expect(page.getByText('Previously deferred checkpoint',{exact:true})).toHaveCount(0);
+});
+
+test('long message disclosure stays compact and preserves the complete text', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page,()=>detail('codex',{turns:[{id:'turn-1',startedAt:now,status:'completed',items:[{id:'agent-long',kind:'agentMessage',text:'A readable long answer. '.repeat(200)+' END_OF_LONG_ANSWER'}]}]}));
+  await page.goto('/threads/thread-1');
+  const more=page.getByRole('button',{name:'Show more',exact:true});
+  await expect(more).toBeVisible();
+  expect((await more.boundingBox())!.width).toBeLessThan(140);
+  await more.click();
+  await expect(page.getByText(/END_OF_LONG_ANSWER/)).toBeVisible();
+  const less=page.getByRole('button',{name:'Show less',exact:true});
+  await expect(less).toBeVisible();
+  await less.click();
+  await expect(more).toBeVisible();
+});
+
+test('a gateway timeout confirms delivered steer without showing an HTML error', async ({page}) => {
+  await installFakeWebSocket(page);
+  let delivered=false;
+  let submits=0;
+  const pending={id:'queue-1',turnId:'turn-1',clientRequestId:'client-1',prompt:'Reply with a single one',delivery:'continuation',createdAt:now};
+  const current=()=>detail('codex',{thread:{status:'running',activeTurnId:'turn-1'},pendingSteers:[{...pending,delivery:delivered?'steer':'continuation'}],turns:[{id:'turn-1',startedAt:now,status:'inProgress',items:[{id:'user-1',kind:'userMessage',text:'Original task'}]}]});
+  await installApiRoutes(page,current);
+  await page.route('**/api/threads/thread-1/pending-steers/queue-1/steer',async route=>{
+    submits++;delivered=true;
+    await route.fulfill({status:504,contentType:'text/html',body:'<!doctype html><html>Gateway timeout cloudflare diagnostic</html>'});
+  });
+  await page.route('**/api/threads/thread-1?view=delivery',async route=>route.fulfill({json:{...current(),turns:[],acceptedSteerIds:['queue-1']}}));
+  await page.goto('/threads/thread-1');
+  const queue=page.getByRole('region',{name:'Queued prompts'});
+  await queue.getByRole('button',{name:'Steer',exact:true}).click();
+  await expect(queue).toHaveCount(0);
+  await expect(page.getByText('Reply with a single one',{exact:true})).toBeVisible();
+  await expect(page.getByText('Accepted',{exact:true})).toBeVisible();
+  await expect(page.getByText(/Gateway timeout cloudflare diagnostic|not yet confirmed|Request failed/)).toHaveCount(0);
+  expect(submits).toBe(1);
+});

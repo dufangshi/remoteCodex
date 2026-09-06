@@ -146,7 +146,8 @@ async fn reloading_running_history_restores_streamed_text_and_interleaved_activi
         .find(|turn| turn.id == "live-turn")
         .unwrap();
     assert_eq!(restored.status, "inProgress");
-    assert_ne!(restored.has_deferred_items, Some(true));
+    assert_eq!(restored.has_deferred_items, Some(true));
+    assert_eq!(restored.deferred_item_count, Some(1));
     assert_eq!(
         restored
             .items
@@ -155,7 +156,6 @@ async fn reloading_running_history_restores_streamed_text_and_interleaved_activi
             .collect::<Vec<_>>(),
         vec![
             ("agentMessage", "正在检查代码。", Some(1)),
-            ("reasoning", "Checking the output.", Some(2)),
             ("agentMessage", "继续。", Some(3)),
         ]
     );
@@ -350,6 +350,10 @@ async fn accepted_steer_survives_queue_cleanup_completion_and_reopen() {
         .steer_pending_prompt(&thread_id, "steer-one")
         .await
         .unwrap();
+    assert!(
+        detail.turns.is_empty(),
+        "delivery acknowledgement must not load history"
+    );
     assert_eq!(detail.pending_steers.len(), 1);
     assert_eq!(detail.pending_steers[0].delivery, "steer");
     let turn = supervisor
@@ -388,6 +392,14 @@ async fn accepted_steer_survives_queue_cleanup_completion_and_reopen() {
         Database::open(&config.database_url).unwrap(),
         vec![Arc::new(FakeRuntime::new(Provider::Codex))],
     );
+    let receipt = reopened.thread_delivery(&thread_id).await.unwrap();
+    assert_eq!(receipt["acceptedSteerIds"], json!(["steer-one"]));
+    assert_eq!(receipt["turns"], json!([]));
+    // A repeated request after completion/restart confirms the original delivery.
+    reopened
+        .steer_pending_prompt(&thread_id, "steer-one")
+        .await
+        .unwrap();
     let turn = reopened
         .get_thread_turn_detail(&thread_id, "live-turn")
         .await
@@ -399,4 +411,70 @@ async fn accepted_steer_survives_queue_cleanup_completion_and_reopen() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn summaries_and_delivery_do_not_materialize_large_operation_history() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.db.with(|conn| {
+        for n in 2..=7 {
+            conn.execute("INSERT INTO thread_turns(id,thread_id,status,started_at,ordinal) VALUES (?1,?2,'completed','2026-09-05T09:00:00Z',?3)", params![format!("older-{n}"),thread_id,-n])?;
+        }
+        for turn in ["live-turn", "older-2", "older-3", "older-4", "older-5", "older-6", "older-7"] {
+            for (kind, text) in [("userMessage", "Small prompt".to_owned()), ("commandExecution", "large output ".repeat(100_000)), ("agentMessage", "Small answer".to_owned())] {
+                let id = format!("{turn}-{kind}");
+                conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES (?1,?2,?3,?1,?4,'2026-09-05T10:00:00Z','2026-09-05T10:00:00Z')",params![id,thread_id,turn,json!({"id":id,"kind":kind,"text":text}).to_string()])?;
+            }
+        }
+        Ok(())
+    }).unwrap();
+    let summary = supervisor
+        .get_thread_detail_view(&thread_id, None, true)
+        .await
+        .unwrap();
+    assert_eq!(summary.total_turn_count, Some(7));
+    assert_eq!(summary.turns.len(), 3);
+    for turn in &summary.turns {
+        assert_eq!(turn.has_deferred_items, Some(true));
+        assert_eq!(turn.items.len(), 2);
+        assert!(turn
+            .items
+            .iter()
+            .all(|item| item.kind != "commandExecution"));
+    }
+    assert!(serde_json::to_vec(&summary).unwrap().len() < 15_000);
+    let full = supervisor
+        .get_thread_turn_detail(&thread_id, "live-turn")
+        .await
+        .unwrap();
+    assert_eq!(full.items.len(), 3);
+    assert!(full.items.iter().any(|item| item.text.len() > 1_000_000));
+    let mut events = supervisor.bus.subscribe();
+    let queued = supervisor
+        .prompt(
+            &thread_id,
+            serde_json::from_value(
+                json!({"prompt":"Quick follow-up", "clientRequestId":"receipt-test"}),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(queued.turns.is_empty());
+    assert!(serde_json::to_vec(&queued).unwrap().len() < 10_000);
+    let event = events.recv().await.unwrap();
+    assert_eq!(
+        event.payload["pendingSteers"][0]["clientRequestId"],
+        "receipt-test"
+    );
+    let pending_id = &queued.pending_steers[0].id;
+    let (first, duplicate) = tokio::join!(
+        supervisor.steer_pending_prompt(&thread_id, pending_id),
+        supervisor.steer_pending_prompt(&thread_id, pending_id)
+    );
+    assert!(first.unwrap().turns.is_empty());
+    assert!(duplicate.unwrap().turns.is_empty());
+    let receipt = supervisor.thread_delivery(&thread_id).await.unwrap();
+    assert_eq!(receipt["acceptedSteerIds"], json!([pending_id]));
+    assert!(serde_json::to_vec(&receipt).unwrap().len() < 10_000);
 }

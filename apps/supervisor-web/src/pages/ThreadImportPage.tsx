@@ -1,3 +1,4 @@
+import { ProductHeader } from '../components/ProductHeader';
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
@@ -239,18 +240,8 @@ export function ThreadImportPage() {
   }
 
   return (
-    <div className="product-page !max-w-3xl pt-[calc(env(safe-area-inset-top)+0.5rem)] sm:pt-4">
-      <div className="product-topbar">
-        <button
-          aria-label="Back to workspaces"
-          className="product-icon-button"
-          onClick={cancelImport}
-          type="button"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-        </button>
-        <span className="text-sm font-semibold text-[var(--theme-fg)]">Import session</span>
-      </div>
+    <div className="product-page">
+      <ProductHeader title="Import threads" backHref={currentWorkspacesHref()} backLabel="Back to workspaces" />
 
       <header className="product-page-header">
         <div>

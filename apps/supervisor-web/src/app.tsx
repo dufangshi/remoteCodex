@@ -1,3 +1,4 @@
+import { PublicThreadPage } from './pages/PublicThreadPage';
 import {
   BrowserRouter,
   Navigate,
@@ -633,6 +634,7 @@ export function App() {
         <RoutePluginProvider>
           <Routes>
             <Route path="/" element={<RootRoute />} />
+            <Route path="/s/:id" element={<PublicThreadPage />} />
             <Route path="/relay-guide" element={<RelayGuidePage />} />
             <Route path="/relay-portal" element={<RelayPortalPage />} />
             <Route path="/relay-admin" element={<RelayAdminPage />} />

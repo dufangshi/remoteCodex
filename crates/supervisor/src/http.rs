@@ -860,13 +860,16 @@ async fn get_thread(
     if query
         .view
         .as_deref()
-        .is_some_and(|view| !matches!(view, "summary" | "full"))
+        .is_some_and(|view| !matches!(view, "summary" | "full" | "delivery"))
     {
         return Err(err(
             StatusCode::BAD_REQUEST,
             "bad_request",
-            "view must be summary or full",
+            "view must be summary, full or delivery",
         ));
+    }
+    if query.view.as_deref() == Some("delivery") {
+        return Ok(Json(state.thread_delivery(&id).await.map_err(map_err)?));
     }
     let summary_only = query.view.as_deref() == Some("summary");
     Ok(Json(
@@ -874,7 +877,7 @@ async fn get_thread(
             state
                 .get_thread_detail_page(
                     &id,
-                    query.limit.or(Some(10)),
+                    query.limit.or(Some(if summary_only { 3 } else { 10 })),
                     query.before_turn_id.as_deref(),
                     summary_only,
                 )
@@ -1157,6 +1160,11 @@ async fn thread_prompt(
     };
     let thread = state.get_thread(&id).map_err(map_err)?;
     state.ensure_prompt_allowed(&thread).map_err(map_err)?;
+    if thread.status == "running" {
+        // A queued prompt is acknowledged only after its durable insert.
+        let detail = state.prompt(&id, input).await.map_err(map_err)?;
+        return Ok(Json(serde_json::to_value(detail.thread).unwrap()));
+    }
     let background = state.clone();
     let background_id = id.clone();
     tokio::spawn(async move {

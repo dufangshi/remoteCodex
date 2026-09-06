@@ -348,6 +348,8 @@ function fallbackErrorMessage(status: number, statusText?: string) {
     return `Too many requests (${suffix}).`;
   }
 
+  if (status === 504) return 'The request timed out before delivery could be confirmed (504).';
+
   if (status === 503) {
     return `Upstream service unavailable (${suffix}).`;
   }
@@ -421,7 +423,8 @@ async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
 
     return normalizedApiErrorPayload(
       response,
-      text ? { message: `${fallbackMessage}\n${text}` } : null,
+      text && !contentType.includes('text/html') && !/<(?:!doctype|html|head|body)\b/i.test(text)
+        ? { message: `${fallbackMessage}\n${text.slice(0, 500)}` } : null,
       fallbackMessage,
     );
   } catch {
@@ -1360,9 +1363,7 @@ export function fetchThreadDetail(
 ) {
   const params = new URLSearchParams();
   params.set('view', 'summary');
-  if (options.limit !== undefined) {
-    params.set('limit', String(options.limit));
-  }
+  params.set('limit', String(options.limit ?? 3));
   if (options.beforeTurnId) {
     params.set('beforeTurnId', options.beforeTurnId);
   }
@@ -1630,13 +1631,36 @@ export function cancelPendingSteer(id: string, pendingSteerId: string) {
   );
 }
 
-export function steerPendingPrompt(id: string, pendingSteerId: string) {
-  return request<ThreadDetailDto>(
-    `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}/steer`,
-    {
-      method: 'POST',
-    },
-  );
+export async function fetchThreadDelivery(id: string) {
+  try {
+    return await request<ThreadDetailDto & {acceptedSteerIds?: string[]}>(`/api/threads/${id}?view=delivery`);
+  } catch (error) {
+    // Compatible with devices that have not installed the lightweight endpoint yet.
+    if (error instanceof ApiError && error.statusCode === 400) return fetchThreadDetail(id, {limit:1});
+    throw error;
+  }
+}
+
+export async function steerPendingPrompt(id: string, pendingSteerId: string) {
+  try {
+    return await request<ThreadDetailDto>(
+      `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}/steer`, {method:'POST'},
+    );
+  } catch (error) {
+    if (!(error instanceof TypeError) && !(error instanceof ApiError && [408,502,503,504].includes(error.statusCode))) throw error;
+    // A gateway timeout says nothing about delivery. Check the same durable ID;
+    // never repeat the POST or treat a missing queue entry as proof of delivery.
+    for (let attempt=0; attempt<4; attempt++) {
+      if (attempt) await new Promise(resolve=>setTimeout(resolve, attempt*500));
+      try {
+        const delivery = await fetchThreadDelivery(id);
+        if ((delivery as ThreadDetailDto & {acceptedSteerIds?:string[]}).acceptedSteerIds?.includes(pendingSteerId)
+          || delivery.pendingSteers.some(item=>item.id===pendingSteerId && item.delivery==='steer')
+          || delivery.turns.some(turn=>turn.items.some(item=>item.id===`steer:${pendingSteerId}`))) return delivery;
+      } catch { /* The connection can recover between confirmation reads. */ }
+    }
+    throw new Error('Steer delivery is not yet confirmed. Check again after reconnecting; the message may already have been delivered.');
+  }
 }
 
 export function updateThreadSettings(

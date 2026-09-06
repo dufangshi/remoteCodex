@@ -1,5 +1,6 @@
 mod hosted;
 mod oauth;
+mod public_links;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -399,6 +400,15 @@ impl RelayStore {
             );
             CREATE INDEX IF NOT EXISTS relay_devices_owner_idx
               ON relay_devices(owner_user_id);
+            CREATE TABLE IF NOT EXISTS relay_public_links (
+              id TEXT PRIMARY KEY,
+              owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+              device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+              thread_id TEXT NOT NULL,
+              snapshot_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS relay_public_links_owner_idx ON relay_public_links(owner_user_id,device_id,thread_id);
             CREATE TABLE IF NOT EXISTS relay_shares (
               id TEXT PRIMARY KEY,
               owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
@@ -785,6 +795,14 @@ pub async fn serve() -> Result<()> {
         .route("/relay/access", get(relay_access))
         .route("/relay/devices", get(list_devices).post(create_device))
         .route("/relay/devices/{device_id}", delete(delete_device))
+        .route(
+            "/relay/thread-links",
+            get(public_links::list).post(public_links::create),
+        )
+        .route(
+            "/relay/public-links/{id}",
+            get(public_links::read).delete(public_links::revoke),
+        )
         .route("/relay/shares", get(list_shares).post(create_share))
         .route(
             "/relay/shares/{share_id}",

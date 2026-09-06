@@ -1,3 +1,4 @@
+import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Share2 } from 'lucide-react';
@@ -65,6 +66,7 @@ import {
   fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
+  fetchThreadDelivery,
   interruptThread,
   respondToThreadRequest,
   revokeRelayShare,
@@ -753,12 +755,30 @@ export function ThreadDetailPage() {
           error: message,
         }));
         setError(message);
+        throw caught;
       } finally {
         setShareBusy(false);
       }
     },
     [detailRef, loadThreadShares],
   );
+  const handleUpdateThreadShare = useCallback(async (shareId: string, input: CreateThreadShareInput) => {
+    const currentDetail = detailRef.current;
+    if (!currentDetail) return;
+    setShareBusy(true);
+    try {
+      await updateRelayShare(shareId, {
+        threadAccess: input.threadAccess, workspaceAccess: input.workspaceAccess,
+        workspaceId: currentDetail.workspace.id,
+        workspaceLabel: currentDetail.workspace.label,
+        label: input.label ?? null,
+      });
+      await loadThreadShares();
+    } catch (caught) {
+      setThreadShareState(current => ({...current, status:'failed', error:actionErrorMessage(caught, 'Unable to update permissions.')}));
+      throw caught;
+    } finally {setShareBusy(false);}
+  }, [detailRef, loadThreadShares]);
   const handleRevokeThreadShare = useCallback(async (shareId: string) => {
     setShareBusy(true);
     setThreadShareState((current) => ({
@@ -790,10 +810,10 @@ export function ThreadDetailPage() {
     navigate(`/relay-devices?shareDevice=${encodeURIComponent(deviceId)}`);
   }, [navigate]);
   useEffect(() => {
-    if (exportDialogOpen) {
+    if (detail?.thread.id && relayThreadCanShare) {
       void loadThreadShares();
     }
-  }, [exportDialogOpen, loadThreadShares]);
+  }, [detail?.thread.id, relayThreadCanShare, exportDialogOpen, loadThreadShares]);
   useEffect(() => {
     const currentDetail = detailRef.current;
     const deviceId = currentRelayDeviceIdFromPath();
@@ -936,6 +956,7 @@ export function ThreadDetailPage() {
           : detailResponse;
       const nextDetailWithLiveTimestamps = {
         ...nextDetail,
+        totalTurnCount: nextDetail.totalTurnCount ?? detailRef.current?.totalTurnCount ?? nextDetail.turns.length,
         turns: applyLiveItemTimestampsToTurns(nextDetail.turns, liveItemsRef.current),
       };
       const previousDetail = detailRef.current;
@@ -1685,6 +1706,14 @@ export function ThreadDetailPage() {
         );
       }
 
+      if (event.type === 'thread.updated' && Array.isArray(event.payload.pendingSteers)) {
+        const pendingSteers = event.payload.pendingSteers as ThreadDetailDto['pendingSteers'];
+        setDetail(current => current ? {...current, pendingSteers} : current);
+        if (detailRef.current) detailRef.current = {...detailRef.current, pendingSteers};
+        const acknowledged = new Set(pendingSteers.map(item => item.clientRequestId));
+        setOptimisticSteers(current => current.filter(item => !acknowledged.has(item.clientRequestId)));
+        return;
+      }
       if (
         event.type === 'thread.turn.started' ||
         event.type === 'thread.turn.completed' ||
@@ -2338,6 +2367,16 @@ export function ThreadDetailPage() {
         current.map((entry) => (entry.id === nextThread.id ? nextThread : entry)),
       );
       if (shouldSteer && steerTargetTurnId) {
+        // The prompt response acknowledges persistence. Read only the queue if
+        // its WebSocket receipt has not arrived; never wait for a history poll.
+        if (!detailRef.current?.pendingSteers.some((item) => item.clientRequestId === clientRequestId)) {
+          void fetchThreadDelivery(id).then((delivery) => {
+            if (activeThreadIdRef.current !== id) return;
+            setDetail((current) => current ? { ...current, pendingSteers: delivery.pendingSteers } : current);
+            const acknowledged = new Set(delivery.pendingSteers.map((item) => item.clientRequestId));
+            setOptimisticSteers((current) => current.filter((item) => !acknowledged.has(item.clientRequestId)));
+          }).catch(() => { /* Realtime or the normal summary poll can recover. */ });
+        }
         const fellBackToNewTurn =
           nextThread.activeTurnId !== null &&
           nextThread.activeTurnId !== steerTargetTurnId &&
@@ -3258,12 +3297,13 @@ export function ThreadDetailPage() {
         title="Thread actions"
         onClick={() => setExportDialogOpen(true)}
         disabled={!detail}
-        className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-[var(--theme-shadow)] transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
+        className="host-icon-button relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-[var(--theme-shadow)] transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
       >
         <Share2 className="h-4 w-4" aria-hidden="true" />
+        {threadShareState.shares.length > 0 && <span aria-label={`${new Set(threadShareState.shares.map(share => share.targetUsername)).size} people shared`} className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[var(--theme-accent)] px-1 text-[9px] font-semibold text-[var(--theme-accent-fg)]">{new Set(threadShareState.shares.map(share => share.targetUsername)).size}</span>}
       </button>
     ),
-    [detail],
+    [detail, threadShareState.shares],
   );
   const mobileSessionConnectionButton = useMemo(
     () => (
@@ -3541,6 +3581,8 @@ export function ThreadDetailPage() {
     () => (
       <>
         <ThreadActionsDialog
+          initialMode="share"
+          {...(relayThreadCanShare && relayRouteDeviceId && id ? {linkContent: <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} />} : {})}
           open={exportDialogOpen}
           busy={exportBusy || shareBusy}
           turnsState={exportTurnsState}
@@ -3559,6 +3601,7 @@ export function ThreadDetailPage() {
           {...(relayThreadCanShare
             ? {
                 onCreateShare: handleCreateThreadShare,
+                onUpdateShare: handleUpdateThreadShare,
                 onOpenDeviceSharing: handleOpenDeviceSharing,
                 onRevokeShare: handleRevokeThreadShare,
               }
@@ -3597,6 +3640,7 @@ export function ThreadDetailPage() {
       loadExportTurns,
       relayDeviceRouteActive,
       shareBusy,
+      handleUpdateThreadShare, relayRouteDeviceId, id,
       threadShareState,
     ],
   );

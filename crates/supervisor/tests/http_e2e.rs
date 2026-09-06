@@ -387,9 +387,7 @@ async fn thread_history_pages_before_turn_without_repeating_latest_turns() {
 
     let latest = json(
         &client,
-        client.get(format!(
-            "{base}/api/threads/{thread_id}?view=summary&limit=3"
-        )),
+        client.get(format!("{base}/api/threads/{thread_id}?view=summary")),
     )
     .await;
     assert_eq!(latest["totalTurnCount"], 7);
@@ -547,7 +545,14 @@ async fn pending_prompt_routes_match_the_frontend_contract() {
         .send()
         .await
         .unwrap();
-    assert_eq!(duplicate_steer.status(), reqwest::StatusCode::CONFLICT);
+    assert_eq!(duplicate_steer.status(), reqwest::StatusCode::OK);
+    let receipt = json(
+        &client,
+        client.get(format!("{base}/api/threads/{thread_id}?view=delivery")),
+    )
+    .await;
+    assert_eq!(receipt["turns"], json!([]));
+    assert_eq!(receipt["acceptedSteerIds"], json!([steer_id]));
 
     json(
         &client,

@@ -90,6 +90,7 @@
 }
 
 :root[data-theme-effective='light'] {
+  --theme-bg: oklch(0.965 0.006 220);
   color: oklch(0.22 0.012 235);
   background: oklch(0.965 0.006 220);
   --app-bg: oklch(0.965 0.006 220);
@@ -2481,3 +2482,9 @@ input {
     transition-duration: 0.01ms !important;
   }
 }
+
+.product-navigation { height: 64px; min-height: 64px; margin-inline: -16px; padding-inline: 8px; border-radius: 0; border-inline: 0; }
+.product-navigation .product-icon-button { width: 44px; height: 44px; }
+.recent-thread-card:hover { border-color: var(--theme-fg-muted); }
+.threads-workspace-overview { overflow: visible; }
+@media (min-width: 640px) { .product-navigation { margin-inline: 0; padding-inline: 4px; } .recent-thread-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); } }

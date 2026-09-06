@@ -266,6 +266,7 @@ pub struct Supervisor {
     pub bus: EventBus,
     runtimes: HashMap<Provider, SharedRuntime>,
     live: Mutex<HashMap<String, LiveTurn>>,
+    steer_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
@@ -283,6 +284,7 @@ impl Supervisor {
             bus: EventBus::new(),
             runtimes: map,
             live: Mutex::new(HashMap::new()),
+            steer_locks: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
             subscription_usage: Default::default(),
@@ -309,8 +311,15 @@ impl Supervisor {
             match event.event_type.as_str() {
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
                 "thread.context.updated" => supervisor.db.with(|conn| {
-                    if let Some(context) = event.payload.get("contextUsage").filter(|v| v["availability"] == "available") {
-                        conn.execute("UPDATE threads SET context_usage_json=?1 WHERE id=?2", params![context.to_string(),event.thread_id])?;
+                    if let Some(context) = event
+                        .payload
+                        .get("contextUsage")
+                        .filter(|v| v["availability"] == "available")
+                    {
+                        conn.execute(
+                            "UPDATE threads SET context_usage_json=?1 WHERE id=?2",
+                            params![context.to_string(), event.thread_id],
+                        )?;
                     }
                     Ok(())
                 }),
@@ -465,8 +474,10 @@ impl Supervisor {
         };
         if let Some(context) = crate::usage::context_usage(raw, &event.timestamp) {
             self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
-                event_type: "thread.context.updated".into(), thread_id: event.thread_id.clone(),
-                timestamp: event.timestamp.clone(), payload: json!({"contextUsage":context}),
+                event_type: "thread.context.updated".into(),
+                thread_id: event.thread_id.clone(),
+                timestamp: event.timestamp.clone(),
+                payload: json!({"contextUsage":context}),
             });
         }
         let catalog = self.model_pricing();
@@ -1074,7 +1085,7 @@ impl Supervisor {
         );
         if let Some(existing) = self.find_thread_by_session(&parsed.raw_id)? {
             return self
-                .get_thread_detail_page(&existing.id, Some(10), None, true)
+                .get_thread_detail_page(&existing.id, Some(3), None, true)
                 .await;
         }
 
@@ -1130,7 +1141,7 @@ impl Supervisor {
             Ok(())
         })?;
         self.persist_imported_turns(&thread_id, &session)?;
-        self.get_thread_detail_page(&thread_id, Some(10), None, true)
+        self.get_thread_detail_page(&thread_id, Some(3), None, true)
             .await
     }
 
@@ -1419,6 +1430,51 @@ impl Supervisor {
         Ok(goal)
     }
 
+    /// Delivery checks must not read/serialize command history or scan usage logs.
+    pub async fn thread_delivery(&self, id: &str) -> Result<Value> {
+        let detail = self.thread_action_detail(id).await?;
+        let accepted: Vec<String> = self.db.with(|conn| {
+            let mut statement = conn.prepare("SELECT item_id FROM thread_history_items WHERE thread_id=?1 AND item_id LIKE 'steer:%'")?;
+            let rows = statement.query_map(params![id], |row| row.get::<_, String>(0))?;
+            Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        })?;
+        let mut response = serde_json::to_value(detail)?;
+        response["acceptedSteerIds"] = json!(accepted
+            .into_iter()
+            .map(|id| id.trim_start_matches("steer:").to_string())
+            .collect::<Vec<_>>());
+        Ok(response)
+    }
+
+    async fn thread_action_detail(&self, id: &str) -> Result<ThreadDetailDto> {
+        let thread = self.get_thread(id)?;
+        let workspace = self.get_workspace(&thread.workspace_id)?;
+        let pending_requests = if let Ok(runtime) = self.runtime(thread.provider) {
+            runtime.pending_requests(id).await
+        } else {
+            vec![]
+        };
+        Ok(ThreadDetailDto {
+            thread,
+            workspace_path_status: if Path::new(&workspace.abs_path).exists() {
+                "present"
+            } else {
+                "missing"
+            }
+            .into(),
+            workspace,
+            // Empty is an incremental response: clients keep already loaded turns.
+            turns: vec![],
+            total_turn_count: None,
+            pending_requests,
+            pending_steers: self.load_steers(id)?,
+            activity_notes: None,
+            goal: self
+                .stored_goal(id)?
+                .and_then(|goal| serde_json::to_value(goal).ok()),
+        })
+    }
+
     pub async fn get_thread_detail(&self, id: &str, limit: Option<u32>) -> Result<ThreadDetailDto> {
         self.get_thread_detail_page(id, limit, None, false).await
     }
@@ -1445,7 +1501,7 @@ impl Supervisor {
         let (mut turns, total) = if summary_only {
             self.load_turn_summaries(
                 id,
-                limit,
+                Some(limit.unwrap_or(3)),
                 before_turn_id,
                 thread.source == "local_codex_import",
             )?
@@ -1609,13 +1665,6 @@ impl Supervisor {
         let (mut turns, total_turn_count) =
             self.load_turns_meta_page(thread_id, limit, before_turn_id)?;
         for turn in &mut turns {
-            if turn.status == "inProgress" {
-                turn.items = self.load_items_for_turn(thread_id, &turn.id)?;
-                if normalize_imported {
-                    normalize_imported_turns(std::slice::from_mut(turn));
-                }
-                continue;
-            }
             let (items, total_item_count) = self.load_turn_conversation(thread_id, &turn.id)?;
             let conversation_item_count = items.len();
             turn.items = items;
@@ -1830,11 +1879,11 @@ impl Supervisor {
                 client_request_id.as_deref(),
                 &prompt,
             )?;
-            return self.get_thread_detail(thread_id, None).await;
+            return self.thread_action_detail(thread_id).await;
         }
         self.run_turn(thread, prompt, model, reasoning_effort, images)
             .await?;
-        self.get_thread_detail(thread_id, None).await
+        self.get_thread_detail_view(thread_id, Some(3), true).await
     }
 
     fn enqueue_steer(
@@ -1855,7 +1904,12 @@ impl Supervisor {
                 params![id, thread_id, turn_id, client_request_id, prompt, now],
             )?;
             Ok(())
-        })
+        })?;
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(), thread_id: thread_id.into(), timestamp: now,
+            payload: json!({"reason":"pending_steer_updated", "pendingSteers":self.load_steers(thread_id)?}),
+        });
+        Ok(())
     }
 
     async fn run_turn(
@@ -2195,7 +2249,7 @@ impl Supervisor {
             timestamp: now_rfc3339(),
             payload: json!({ "reason": "pending_steer_updated" }),
         });
-        self.get_thread_detail(thread_id, None).await
+        self.thread_action_detail(thread_id).await
     }
 
     pub async fn steer_pending_prompt(
@@ -2203,6 +2257,31 @@ impl Supervisor {
         thread_id: &str,
         pending_steer_id: &str,
     ) -> Result<ThreadDetailDto> {
+        let lock = {
+            let mut locks = self.steer_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            let key = format!("{thread_id}:{pending_steer_id}");
+            let lock = locks
+                .get(&key)
+                .and_then(std::sync::Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            locks.insert(key, Arc::downgrade(&lock));
+            lock
+        };
+        let _delivery_guard = lock.lock().await;
+        let delivered = self.db.with(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT 1 FROM thread_history_items WHERE thread_id=?1 AND item_id=?2 LIMIT 1",
+                    params![thread_id, format!("steer:{pending_steer_id}")],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some())
+        })?;
+        if delivered {
+            return self.thread_action_detail(thread_id).await;
+        }
         let thread = self.get_thread(thread_id)?;
         let pending = self
             .find_pending_steer(thread_id, pending_steer_id)?
@@ -2279,7 +2358,7 @@ impl Supervisor {
                 "previousTurnId": pending.turn_id
             }),
         });
-        self.get_thread_detail(thread_id, None).await
+        self.thread_action_detail(thread_id).await
     }
 
     pub async fn interrupt(&self, thread_id: &str) -> Result<ThreadDetailDto> {
@@ -2310,7 +2389,7 @@ impl Supervisor {
                     payload: json!({ "status": "interrupted" }),
                 });
             }
-            return self.get_thread_detail(thread_id, None).await;
+            return self.get_thread_detail_view(thread_id, Some(3), true).await;
         }
         for _ in 0..100 {
             if self.active_turn_id(thread_id)?.is_none() {
@@ -2321,7 +2400,7 @@ impl Supervisor {
         if self.active_turn_id(thread_id)?.is_some() {
             self.reconcile_stale_turns(Some(thread_id), true)?;
         }
-        self.get_thread_detail(thread_id, None).await
+        self.get_thread_detail_view(thread_id, Some(3), true).await
     }
 
     pub fn rename_thread(&self, id: &str, title: &str) -> Result<ThreadDto> {
@@ -2651,7 +2730,7 @@ impl Supervisor {
                 )
                 .await;
         }
-        self.get_thread_detail(id, None).await
+        self.get_thread_detail_view(id, Some(3), true).await
     }
 
     pub fn prepare_prompt_attachments(
@@ -2781,7 +2860,7 @@ impl Supervisor {
             timestamp: now_rfc3339(),
             payload: json!({ "requestId": request_id }),
         });
-        self.get_thread_detail(id, None).await
+        self.get_thread_detail_view(id, Some(3), true).await
     }
 
     pub fn active_turn_count(&self) -> u32 {
@@ -2956,7 +3035,11 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
         updated_at: row.get(17).unwrap_or_default(),
         last_turn_started_at: row.get(18).unwrap_or(None),
         last_turn_completed_at: row.get(19).unwrap_or(None),
-        context_usage: row.get::<_, Option<String>>(21).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
+        context_usage: row
+            .get::<_, Option<String>>(21)
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok()),
     }
 }
 
