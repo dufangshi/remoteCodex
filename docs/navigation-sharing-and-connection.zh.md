@@ -18,7 +18,7 @@
 
 ### 本地检查
 
-- Rust workspace 共 223 项检查已通过。首次并行运行中，一个既有 ACP 子进程退出测试超过 800ms 限时；单独复跑通过，其余测试及后续集成测试通过。
+- 合并远端设备安装凭据/托管 VM 恢复修复（a839b760）后，`cargo test --workspace -- --test-threads=4` 全部 225 项通过；合并后的 TypeScript 检查及设备恢复/共享页面 2 项手机回归通过。
 - ThreadWorkspaceLayout 8 项组件测试；连接图标和共享名称 4 项 Web 测试；Web TypeScript 检查通过。
 - 手机及桌面专项：共享资料/访问历史/菜单迁移、跨页面顶栏位置与尺寸、终端输入和会话控制。未加载 harness 的用例显式断言点击终端发出 resume；保留真实 PTY 和 WebSocket 输入输出。
 - 移动终端额外覆盖浏览器原生惯性和 visualViewport 键盘布局；不把桌面模拟器宣称为真机软键盘测试。
