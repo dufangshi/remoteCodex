@@ -212,6 +212,22 @@ jobs:
             sudo grep -Fxq 'PORT=18791' "${base}/relay.env"
             sudo grep -Fxq 'REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-rust-relay' "${base}/relay.env"
             sudo grep -Fxq 'REMOTE_CODEX_RELAY_WEB_DIST_DIR=/opt/remote-codex-rust-relay/web' "${base}/relay.env"
+            # Fail before stopping the old service if the auth migration is misconfigured.
+            sudo python3 - "${base}/relay.env" <<'PYPREFLIGHT'
+            import pathlib, shlex, sys
+            values = {}
+            for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+                if '=' not in line or line.lstrip().startswith('#'):
+                    continue
+                key, raw = line.split('=', 1)
+                parts = shlex.split(raw, comments=True)
+                values[key.strip()] = parts[0] if parts else ''
+            secret = values.get('REMOTE_CODEX_RELAY_SESSION_SECRET')
+            if secret is not None and len(secret) < 32:
+                raise SystemExit('Relay auth preflight: session secret must be at least 32 characters')
+            if values.get('REMOTE_CODEX_PUBLIC_BASE_URL', '').rstrip('/') != 'https://remote.lnz-study.com':
+                raise SystemExit('Relay auth preflight: configure the public HTTPS origin for Passkeys and OAuth')
+            PYPREFLIGHT
             test -f "${archive}"
             test -x "${base}/remote-codex"
             test -d "${base}/web"
@@ -297,6 +313,25 @@ jobs:
             trap handle_exit EXIT
             deployment_active='true'
             sudo systemctl stop "${service}"
+            # Preserve authentication state and its encryption key before schema migration.
+            # Keep these files root-only: old snapshots may contain legacy device tokens.
+            sudo install -d -m 0700 "${backup}/relay-data"
+            sudo install -m 0600 "${base}/relay.env" "${backup}/relay-data/relay.env"
+            sudo python3 - "${backup}/relay-data" <<'PYBACKUP'
+            import os, pathlib, shutil, sqlite3, sys
+            source = pathlib.Path('/var/lib/remote-codex-rust-relay')
+            destination = pathlib.Path(sys.argv[1])
+            os.umask(0o077)
+            for name in ('relay-store.sqlite', 'relay.sqlite'):
+                path = source / name
+                if path.is_file():
+                    with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as original:
+                        with sqlite3.connect(destination / name) as snapshot:
+                            original.backup(snapshot)
+            secret = source / 'session-secret'
+            if secret.is_file():
+                shutil.copyfile(secret, destination / 'session-secret')
+            PYBACKUP
             mv "${base}/remote-codex" "${backup}/remote-codex"
             mv "${base}/web" "${backup}/web"
             chmod 0755 "${stage}/remote-codex"

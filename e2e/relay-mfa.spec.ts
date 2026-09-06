@@ -237,15 +237,17 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
         .toBe(true);
       const security = (await json(another, '/relay/account/security')).data;
       expect(security.trustedBrowsers).toHaveLength(1);
-      expect(
-        (
-          await json(
-            another,
-            `/relay/account/security/browsers/${security.trustedBrowsers[0].id}`,
-            'DELETE',
-          )
-        ).status,
-      ).toBe(200);
+      await another.goto(`${base}/relay-account`);
+      await another
+        .getByRole('button', { name: 'Revoke', exact: true })
+        .click();
+      await expect
+        .poll(
+          async () =>
+            (await json(another, '/relay/account/security')).data
+              .trustedBrowsers.length,
+        )
+        .toBe(0);
       expect((await json(page, '/relay/account/security')).status).toBe(401);
       const revokedLogin = await json(page, '/relay/auth/login', 'POST', {
         username: 'mfaowner',
@@ -294,6 +296,54 @@ test('authenticator and passkey enrollment, new-browser challenge and trusted-br
     } finally {
       await fresh.close();
     }
+    // Exercise management controls, rather than only checking that they render.
+    await json(page, '/relay/auth/login', 'POST', {
+      username: 'mfaowner',
+      password,
+    });
+    expect(
+      (
+        await json(page, '/relay/auth/challenge', 'POST', {
+          code: recoveryCodes[1],
+        })
+      ).status,
+    ).toBe(200);
+    await page.goto(`${base}/relay-account`);
+    await page.getByRole('button', { name: 'Rename', exact: true }).click();
+    await page.getByLabel('Rename passkey', { exact: true }).fill('My phone');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText('My phone', { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: resolve(
+        `.local/security-audit/security-management-${test.info().project.name}.png`,
+      ),
+      fullPage: true,
+    });
+    await page
+      .getByRole('button', { name: 'Generate new codes', exact: true })
+      .click();
+    await expect(
+      page.getByRole('region', { name: 'Save recovery codes' }),
+    ).toBeVisible();
+    const regenerated = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    await regenerated;
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    expect(
+      (await json(page, '/relay/account/security')).data.recoveryCodesRemaining,
+    ).toBe(10);
+    await page
+      .getByRole('button', { name: 'Remove My phone', exact: true })
+      .click();
+    await expect(page.getByText('My phone', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Disable', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Set up', exact: true }),
+    ).toBeVisible();
+    expect(
+      (await json(page, '/relay/account/security')).data.authenticatorEnabled,
+    ).toBe(false);
+    await json(page, '/relay/auth/logout', 'POST');
     const admin = await json(page, '/relay/auth/login', 'POST', {
       username: 'testadmin',
       password,
