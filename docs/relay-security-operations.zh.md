@@ -20,6 +20,7 @@
 - `REMOTE_CODEX_RELAY_SESSION_SECRET` 至少 32 字符，使用密码学随机值。未配置时，在持久的 `REMOTE_CODEX_RELAY_DATA_DIR/session-secret` 自动创建随机值；Unix 权限 0600。禁止使用临时目录或每次部署重生成。
 - 同时备份 relay 数据库 `relay-store.sqlite` 和上述 secret（环境变量形式也必须备份）。SQLite 使用一致性备份，不能只复制正在写入的主文件而漏掉 WAL。
 - **secret 同时派生 TOTP 存储加密密钥。丢失／直接替换它会使现有验证器密钥无法解密。** 迁移机器应恢复原 secret；不要把常规改密码当成更换 master secret。数据库和 secret 均按机密材料保存，分离访问权限。
+- 首次升级时，如果旧 session secret 不足 32 字符，必须先配置新的随机值，否则启动会明确拒绝；此时尚未登记本版本的 TOTP。启用 MFA 后不再直接替换 master secret，应保留原值迁移。
 - 更新后旧的无服务端会话记录 JWT 会要求一次重新登录。新 Cookie 有 Secure（HTTPS）、HttpOnly、SameSite 属性；Web 不再将长期 bearer 保存在 localStorage。原生客户端可使用显式 Authorization bearer，但也受服务端撤销约束。
 - 设备凭据继续兼容原值的哈希验证，数据库不再保留可回显的明文 token。Device 菜单可 Replace device token，强验证后显示一次新 token，旧连接立即失效；将新值配置到对应 supervisor 后重连。该操作不会删除 thread。
 - 清空 token 列不是对 SQLite 历史页／备份的安全擦除。若怀疑旧数据库泄露，应轮换设备 token，而不是只依赖字段迁移。

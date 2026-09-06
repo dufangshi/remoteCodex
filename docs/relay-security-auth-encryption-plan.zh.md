@@ -1,6 +1,6 @@
 # Relay 安全、低打扰二步验证与密文转发实施计划
 
-状态：实现及本地验收完成；分支提交与四平台构建核验中。起点：main `5dd2acc5`，共享 UI main `d3bcbfd`。分支：`security/relay-auth-encryption`（两个仓库）。
+状态：完成。实现、浏览器验收、四平台构建与分支推送均完成；未合并 main、未上线。起点：main `5dd2acc5`，共享 UI main `d3bcbfd`。分支：`security/relay-auth-encryption`（两个仓库）。
 
 ## 本次边界
 
@@ -59,7 +59,7 @@
 - [x] 修改 crates 后 cargo test --workspace；相关 Vitest、Web 类型检查与构建。
 - [x] 按 focused-e2e 技能只跑安全／登录／分享／加密相关 spec 和明确 browser project；桌面与移动覆盖有不同交互的流程。
 - [x] 更新 docs 的完成状态、实际协议／迁移、运维恢复和验证结果；提交实际受影响仓库的相关变更；共享 UI 仓库本次无差异。
-- [ ] 分支推送，保持 main 未合并；部署前固定 runtime／UI SHA，按 release-runtime 完整四平台发布策略处理。用户本次要求新分支推进，不自动把未验收分支替换 main。
+- [x] 分支推送，保持 main 未合并；部署前固定 runtime／UI SHA，按 release-runtime 完整四平台发布策略处理。用户本次要求新分支推进，不自动把未验收分支替换 main。
 
 ## 验证原则
 
@@ -105,3 +105,7 @@ Service Worker 覆盖图片、原始文件、下载等浏览器直接请求；�
 - 共享 UI 固定 SHA：`d3bcbfd1b8f984922aba637fbbee8878ba11d604`，无本次代码变化。root runtime/npm 版本保持 0.12.14，尚未发新版，不覆盖已发布资产。
 
 - 四平台 dry-run 首轮发现 Windows Git Bash 的 Perl 缺少 OpenSSL 构建模块；已指定 runner 预装的原生 Strawberry Perl，并在编译前验证 IPC::Cmd。此修复只影响 runtime 构建，不变更 Device Manager。
+
+- 最终四平台 [dry-run 34046817024](https://github.com/dufangshi/remoteCodex/actions/runs/34046817024) 成功，固定代码提交 `a907ffe971091032d8e2298d9f748140babd88a4`：test gate 1m01s、Web 41s、Linux x64 2m01s、Linux arm64 2m06s、macOS arm64 2m41s、Windows x64 首次 vendored OpenSSL 构建 10m25s、组装校验 19s。并行流水线实际运行约 10m48s；不将各平台耗时相加。
+- CI 验证包含四平台资产及 Web 的 npm 包，实际执行安装、原生启动、Web/API、status、stop 检查。release／publish 均跳过，未发布 npm／GitHub 版本。Windows 构建环境修复经 actionlint 检查通过。
+- 本地工作完成于 2026-09-06 约 12:48（America/Toronto），最终 CI 核验于 13:04 完成；功能与构建修复已推送 feature branch，后续提交只补最终验收文档。main 和线上运行进程未改变。
