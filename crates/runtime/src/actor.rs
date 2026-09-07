@@ -195,6 +195,13 @@ pub trait AgentRuntime: Send + Sync {
     async fn send_input(&self, _session_id: &str, _turn_id: &str, _prompt: &str) -> Result<()> {
         anyhow::bail!("steering is not supported by this harness");
     }
+    /// Harness-owned goal commands that must run inside a tracked prompt turn.
+    async fn stage_goal(&self, _session_id: &str, _goal: GoalState) -> Result<()> {
+        Ok(())
+    }
+    async fn goal_prompt(&self, _session_id: &str, _argument: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
     async fn get_goal(&self, _session_id: &str) -> Result<Option<GoalState>> {
         Ok(None)
     }

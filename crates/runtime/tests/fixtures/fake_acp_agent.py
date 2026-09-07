@@ -70,7 +70,7 @@ def handle(msg):
                     "protocolVersion": 1,
                     "agentCapabilities": {"promptCapabilities": {}, "loadSession": True},
                     "agentInfo": {"name": "fake-acp"},
-                    "_meta": {"steering": {"supported": True}},
+                    "_meta": {"steering": {"supported": True}, "goal": {"controlMethod": "_session/goal", "version": 1}},
                 },
             }
         )
@@ -88,6 +88,14 @@ def handle(msg):
             }
         )
         return
+    if method == "_session/goal":
+        if params.get("objective") == "stalled-goal":
+            return
+        def finish_goal():
+            time.sleep(0.6)
+            send({"jsonrpc":"2.0","id":req_id,"result":{}})
+        threading.Thread(target=finish_goal, daemon=True).start()
+        return
     if method == "session/cancel" and cancellable_prompt is not None:
         old = cancellable_prompt
         if cancel_delay is None:
@@ -99,6 +107,15 @@ def handle(msg):
                 cancellable_prompt = None
                 send({"jsonrpc":"2.0","id":old,"error":{"code":-32800,"message":"Request cancelled"}})
         threading.Thread(target=finish_cancel, daemon=True).start()
+        return
+    if method == "session/prompt" and prompt_text(params).startswith("/goal "):
+        objective = prompt_text(params)[6:]
+        def run_goal():
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"session_info_update","_meta":{"goal":{"objective":objective,"status":"active"}}}}})
+            time.sleep(0.2)
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"goal executed: " + objective}}}})
+            send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"end_turn"}})
+        threading.Thread(target=run_goal, daemon=True).start()
         return
     if method == "session/prompt" and cancellable_prompt is not None:
         send({"jsonrpc":"2.0","id":req_id,"error":{"code":-32000,"message":"A prompt is already running"}})

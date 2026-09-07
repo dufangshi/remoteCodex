@@ -1785,6 +1785,24 @@ impl AgentRuntime for AcpRuntime {
         }
     }
 
+    async fn stage_goal(&self, session_id: &str, goal: GoalState) -> Result<()> {
+        let mut sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| anyhow!("ACP session is not running"))?;
+        live.goal = Some(goal);
+        Ok(())
+    }
+
+    async fn goal_prompt(&self, session_id: &str, argument: &str) -> Result<Option<String>> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .get(session_id)
+            .ok_or_else(|| anyhow!("ACP session is not running"))?;
+        Ok((live.adapter_id == "codex" && live.negotiated.goals)
+            .then(|| format!("/goal {argument}")))
+    }
+
     async fn get_goal(&self, session_id: &str) -> Result<Option<GoalState>> {
         Ok(self
             .inner
@@ -1801,18 +1819,23 @@ impl AgentRuntime for AcpRuntime {
         objective: Option<String>,
         status: Option<String>,
     ) -> Result<Option<GoalState>> {
-        let mut sessions = self.inner.sessions.lock().await;
-        let live = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| anyhow!("ACP session is not running"))?;
-        if !live.negotiated.goals {
-            bail!("this harness does not support goals");
-        }
-        let method = live
-            .negotiated
-            .goal_method
-            .clone()
-            .unwrap_or_else(|| "session/set_goal".into());
+        let (process, provider_session_id, method) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            if !live.negotiated.goals {
+                bail!("this harness does not support goals");
+            }
+            (
+                live.process.clone(),
+                live.session_id.clone(),
+                live.negotiated
+                    .goal_method
+                    .clone()
+                    .unwrap_or_else(|| "session/set_goal".into()),
+            )
+        };
         let action = if objective
             .as_ref()
             .map(|s| !s.trim().is_empty())
@@ -1826,16 +1849,22 @@ impl AgentRuntime for AcpRuntime {
         } else {
             "clear"
         };
-        live.process
-            .request(
+        // A slow extension must not hold the global sessions mutex. Bound the
+        // entire exchange, including a blocked stdin write.
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            process.request(
                 &method,
-                json!({
-                    "sessionId": live.session_id,
-                    "action": action,
-                    "objective": objective
-                }),
-            )
-            .await?;
+                json!({"sessionId": provider_session_id, "action": action, "objective": objective}),
+            ),
+        )
+        .await
+        .map_err(|_| anyhow!("Goal control timed out; inspect the goal before retrying"))??;
+        let mut sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .get_mut(session_id)
+            .filter(|live| Arc::ptr_eq(&live.process, &process))
+            .ok_or_else(|| anyhow!("ACP session changed during goal control"))?;
         if action == "set" {
             live.goal = Some(GoalState {
                 objective: objective.unwrap_or_default(),
@@ -2331,6 +2360,82 @@ fn agent_server_command(def: &AcpAgentDef, auto_approve: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn codex_goal_command_uses_the_tracked_prompt_stream_for_both_provider_modes() {
+        for provider in [Provider::Codex, Provider::Acp] {
+            let dir = tempfile::tempdir().unwrap();
+            let python = which::which("python3")
+                .or_else(|_| which::which("python"))
+                .unwrap();
+            let script = dir.path().join("goal_agent.py");
+            std::fs::write(
+                &script,
+                include_str!("../../tests/fixtures/fake_acp_agent.py"),
+            )
+            .unwrap();
+            let runtime = AcpRuntime::new(provider, None, None, 5000);
+            let def = AcpAgentDef {
+                id: "codex".into(),
+                display_name: "fixture".into(),
+                description: String::new(),
+                transport: "adapter".into(),
+                base_command: python.to_string_lossy().into(),
+                server_command: format!("\"{}\" \"{}\"", python.display(), script.display()),
+                install_command: None,
+                model_list_command: None,
+            };
+            let (session, live) = runtime
+                .spawn_session(
+                    &def,
+                    &dir.path().to_string_lossy(),
+                    ProductSessionPolicy::default(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            runtime
+                .inner
+                .sessions
+                .lock()
+                .await
+                .insert(session.clone(), live);
+            let prompt = runtime
+                .goal_prompt(&session, "verify goal output")
+                .await
+                .unwrap()
+                .unwrap();
+            let items = runtime
+                .start_turn(
+                    StartTurnInput {
+                        provider_session_id: session.clone(),
+                        prompt,
+                        model: None,
+                        reasoning_effort: None,
+                        sandbox_mode: None,
+                        collaboration_mode: None,
+                        approval_mode: None,
+                        performance_mode: None,
+                        thread_id: "goal-thread".into(),
+                        turn_id: "goal-turn".into(),
+                        hidden: false,
+                        images: vec![],
+                    },
+                    EventBus::new(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert!(items
+                .iter()
+                .any(|item| item.text == "goal executed: verify goal output"));
+            assert_eq!(
+                runtime.get_goal(&session).await.unwrap().unwrap().objective,
+                "verify goal output"
+            );
+        }
+    }
 
     #[test]
     fn codex_path_preserves_an_absolute_command_path_with_spaces() {

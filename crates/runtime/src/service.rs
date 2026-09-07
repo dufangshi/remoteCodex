@@ -29,6 +29,13 @@ use crate::import_id::{
 };
 use crate::local_sessions::{find_local_session, list_local_sessions, LocalSessionHomes};
 
+struct GoalSubmission {
+    wire_prompt: String,
+    goal: GoalState,
+    token_budget: Option<Option<u64>>,
+    accepted: tokio::sync::oneshot::Sender<()>,
+}
+
 const RESTART_INTERRUPTED_ERROR: &str =
     "Turn interrupted because the supervisor restarted before it completed.";
 
@@ -1934,7 +1941,7 @@ impl Supervisor {
             )?;
             return self.thread_action_detail(thread_id).await;
         }
-        self.run_turn(thread, prompt, model, reasoning_effort, images, None)
+        self.run_turn(thread, prompt, model, reasoning_effort, images, None, None)
             .await?;
         self.get_thread_detail_view(thread_id, Some(3), true).await
     }
@@ -1973,6 +1980,7 @@ impl Supervisor {
         effort: Option<String>,
         images: Vec<PromptImage>,
         pending_steer_id: Option<&str>,
+        goal_submission: Option<GoalSubmission>,
     ) -> Result<()> {
         let provider = thread.provider;
         let _maintenance = self
@@ -2013,6 +2021,11 @@ impl Supervisor {
                     },
                 )
                 .await;
+        }
+        if let Some(submission) = &goal_submission {
+            runtime
+                .stage_goal(&session_id, submission.goal.clone())
+                .await?;
         }
         let turn_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
@@ -2103,6 +2116,18 @@ impl Supervisor {
                 cancel: cancel.clone(),
             },
         );
+        let prompt = if let Some(submission) = goal_submission {
+            self.updated_goal_snapshot(
+                &thread.id,
+                submission.goal,
+                Some("active"),
+                submission.token_budget,
+            )?;
+            let _ = submission.accepted.send(());
+            submission.wire_prompt
+        } else {
+            prompt
+        };
         let bus = self.bus.clone();
         let result = runtime
             .start_turn(
@@ -2273,7 +2298,8 @@ impl Supervisor {
         })?;
         if let Some((id, prompt)) = next {
             let thread = self.get_thread(thread_id)?;
-            Box::pin(self.run_turn(thread, prompt, None, None, Vec::new(), Some(&id))).await?;
+            Box::pin(self.run_turn(thread, prompt, None, None, Vec::new(), Some(&id), None))
+                .await?;
         }
         Ok(())
     }
@@ -2858,6 +2884,108 @@ impl Supervisor {
             rewritten = rewritten.replace(&attachment.placeholder, &token);
         }
         Ok(rewritten)
+    }
+
+    /// Goal set/resume in codex-acp can execute a complete model turn. Admit it
+    /// like a prompt, returning after durable history rather than model completion.
+    pub async fn submit_thread_goal(
+        self: &Arc<Self>,
+        id: &str,
+        objective: Option<String>,
+        status: Option<String>,
+        token_budget: Option<Option<u64>>,
+    ) -> Result<Value> {
+        if objective.as_deref().is_some_and(|s| s.trim().is_empty()) {
+            bail!("objective must not be empty");
+        }
+        if token_budget == Some(Some(0)) {
+            bail!("tokenBudget must be positive");
+        }
+        if status.as_deref().is_some_and(|s| {
+            !matches!(
+                s,
+                "active" | "paused" | "budgetLimited" | "complete" | "terminated"
+            )
+        }) {
+            bail!("invalid goal status");
+        }
+        let thread = self.get_thread(id)?;
+        let runtime = self.runtime(thread.provider)?;
+        let session = thread
+            .provider_session_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        if objective.is_none() && status.as_deref() != Some("active") {
+            return self
+                .thread_goal(id, objective, status, token_budget, false)
+                .await;
+        }
+        if !runtime.session_loaded(session) {
+            let workspace = self.get_workspace(&thread.workspace_id)?;
+            runtime
+                .resume_session(session, Some(&workspace.abs_path))
+                .await?;
+        }
+        let argument = objective.as_deref().unwrap_or("resume").trim();
+        let Some(wire_prompt) = runtime.goal_prompt(session, argument).await? else {
+            return self
+                .thread_goal(id, objective, status, token_budget, false)
+                .await;
+        };
+        if objective.is_some()
+            && (matches!(
+                argument.to_ascii_lowercase().as_str(),
+                "pause" | "resume" | "clear"
+            ) || argument.chars().count() > 4000)
+        {
+            bail!("Use a descriptive goal objective of at most 4000 characters");
+        }
+        self.ensure_prompt_allowed(&thread)?;
+        if thread.status == "running" {
+            bail!("conflict: Pause or interrupt the current turn before starting a goal");
+        }
+        let objective = objective
+            .or_else(|| self.stored_goal(id).ok().flatten().map(|g| g.objective))
+            .ok_or_else(|| anyhow!("No goal to resume"))?;
+        let (accepted, acknowledgement) = tokio::sync::oneshot::channel();
+        let submission = GoalSubmission {
+            wire_prompt,
+            goal: GoalState {
+                objective: objective.clone(),
+                status: "active".into(),
+                tokens_used: 0,
+                time_used_seconds: 0,
+            },
+            token_budget,
+            accepted,
+        };
+        let background = self.clone();
+        let task = tokio::spawn(async move {
+            background
+                .run_turn(
+                    thread,
+                    objective,
+                    None,
+                    None,
+                    Vec::new(),
+                    None,
+                    Some(submission),
+                )
+                .await
+        });
+        match tokio::time::timeout(std::time::Duration::from_secs(20), acknowledgement).await {
+            Ok(Ok(())) => Ok(json!({"goal": self.stored_goal(id)?})),
+            Ok(Err(_)) => {
+                task.await.map_err(|e| anyhow!(e))??;
+                bail!("Goal was not accepted")
+            }
+            Err(_) => {
+                // The acknowledgement only waits for preflight, not the model.
+                task.abort();
+                let _ = task.await;
+                bail!("Goal startup timed out; retry after reconnecting the thread")
+            }
+        }
     }
 
     pub async fn thread_goal(

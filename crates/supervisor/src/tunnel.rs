@@ -194,8 +194,19 @@ fn handle_relay_message(
             let payload = message.get("payload").cloned().unwrap_or_else(|| json!({}));
             static REQUESTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
                 std::sync::OnceLock::new();
-            let permit = REQUESTS
-                .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(32)))
+            static HANDSHAKES: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+                std::sync::OnceLock::new();
+            // Reserve handshake capacity so slow application requests cannot make
+            // an online device appear to have broken encryption.
+            let handshake = payload["path"].as_str().is_some_and(|path| {
+                let path = path.split('?').next().unwrap_or("");
+                path.ends_with("/transport/key") || path.ends_with("/transport/session")
+            });
+            let pool = if handshake { &HANDSHAKES } else { &REQUESTS };
+            let permit = pool
+                .get_or_init(|| {
+                    Arc::new(tokio::sync::Semaphore::new(if handshake { 4 } else { 32 }))
+                })
                 .clone()
                 .try_acquire_owned();
             let Ok(permit) = permit else {
@@ -205,7 +216,8 @@ fn handle_relay_message(
             let outgoing = outgoing.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let payload = forward_local(&state, payload).await;
+                let payload =
+                    bounded_forward(forward_local(&state, payload), Duration::from_secs(60)).await;
                 let _ = outgoing.send(json!({
                     "type": "relay.response",
                     "timestamp": now_rfc3339(),
@@ -349,6 +361,20 @@ fn relay_activity(event: &ThreadEventEnvelope) -> Option<Value> {
             "turnId": turn_id
         }
     }))
+}
+
+async fn bounded_forward(
+    future: impl std::future::Future<Output = Value>,
+    timeout: Duration,
+) -> Value {
+    tokio::time::timeout(timeout, future)
+        .await
+        .unwrap_or_else(|_| {
+            relay_error_response(
+                504,
+                "Device request timed out; check its status before retrying",
+            )
+        })
 }
 
 async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
@@ -718,6 +744,22 @@ mod tests {
             directory,
             Arc::new(Supervisor::new(config, database, vec![runtime])),
         )
+    }
+
+    #[tokio::test]
+    async fn stalled_request_releases_capacity() {
+        let permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let result = bounded_forward(
+            async move {
+                let _permit = permit;
+                std::future::pending::<Value>().await
+            },
+            Duration::from_millis(10),
+        )
+        .await;
+        assert_eq!(result["statusCode"], 504);
+        assert!(permits.try_acquire().is_ok());
     }
 
     #[tokio::test]

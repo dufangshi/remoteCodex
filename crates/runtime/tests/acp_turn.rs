@@ -694,3 +694,39 @@ async fn restarting_harness_reloads_config_and_preserves_resumable_session() {
         .unwrap();
     assert!(second.iter().any(|item| item.text == "after"));
 }
+
+#[tokio::test]
+async fn slow_goal_control_does_not_block_session_reads_and_recovers_after_timeout() {
+    let dir = tempdir().unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let runtime = std::sync::Arc::new(runtime);
+    let pending = {
+        let runtime = runtime.clone();
+        let session = session.clone();
+        tokio::spawn(async move {
+            runtime
+                .set_goal(&session, Some("stalled-goal".into()), None)
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::timeout(Duration::from_millis(300), runtime.get_goal(&session))
+        .await
+        .expect("goal RPC must not lock all sessions")
+        .unwrap();
+    let error = pending.await.unwrap().unwrap_err().to_string();
+    assert!(error.contains("timed out"), "{error}");
+    assert!(runtime
+        .set_goal(&session, Some("working goal".into()), None)
+        .await
+        .unwrap()
+        .is_some());
+    runtime
+        .start_turn(
+            turn_input(&session, "hello", "after-goal"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("session still usable after a stalled extension");
+}

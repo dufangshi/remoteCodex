@@ -231,6 +231,14 @@ impl AgentRuntime for FakeRuntime {
         if input.hidden {
             return Ok(vec![]);
         }
+        if let Some(argument) = input.prompt.strip_prefix("/goal ") {
+            self.set_goal(
+                &input.provider_session_id,
+                (argument != "resume").then(|| argument.to_string()),
+                Some("active".into()),
+            )
+            .await?;
+        }
         let reply = reply_for(&input.prompt);
         let item_id = format!("{}:assistant", input.turn_id);
         emit(
@@ -348,6 +356,19 @@ impl AgentRuntime for FakeRuntime {
             model: None,
             reasoning_effort: None,
         })
+    }
+
+    async fn stage_goal(&self, _session_id: &str, goal: GoalState) -> Result<()> {
+        *self.goal.lock().unwrap() = Some(goal);
+        Ok(())
+    }
+
+    async fn goal_prompt(&self, _session_id: &str, argument: &str) -> Result<Option<String>> {
+        Ok(self
+            .caps()
+            .controls
+            .goals
+            .then(|| format!("/goal {argument}")))
     }
 
     async fn get_goal(&self, _session_id: &str) -> Result<Option<GoalState>> {

@@ -620,3 +620,55 @@ async fn check_acp_queue_after_interrupt(initial_prompt: &'static str, continuat
     assert_eq!(detail.thread.status, "idle");
     assert!(detail.pending_steers.is_empty());
 }
+
+#[tokio::test]
+async fn goal_submission_acknowledges_before_completion_and_is_interruptible() {
+    let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    let supervisor = Arc::new(supervisor);
+    supervisor.spawn_live_item_persister();
+    let objective = "Inspect this repository and fix the goal regression";
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        supervisor.submit_thread_goal(
+            &thread.id,
+            Some(objective.into()),
+            Some("active".into()),
+            Some(Some(1000)),
+        ),
+    )
+    .await
+    .expect("goal submission must not wait for the 25-second model turn")
+    .unwrap();
+    assert_eq!(response["goal"]["objective"], objective);
+    assert_eq!(response["goal"]["tokenBudget"], 1000);
+    let detail = supervisor
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap();
+    assert_eq!(detail.thread.status, "running");
+    assert_eq!(detail.turns.len(), 1);
+    assert!(detail.turns[0]
+        .items
+        .iter()
+        .any(|i| i.kind == "userMessage" && i.text == objective));
+    assert!(supervisor
+        .submit_thread_goal(
+            &thread.id,
+            Some("second goal".into()),
+            Some("active".into()),
+            None
+        )
+        .await
+        .is_err());
+    supervisor.interrupt(&thread.id).await.unwrap();
+    let detail = supervisor
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap();
+    assert_eq!(detail.turns[0].status, "interrupted");
+    supervisor
+        .prompt(&thread.id, prompt_input("hello"))
+        .await
+        .unwrap();
+    assert_eq!(supervisor.get_thread(&thread.id).unwrap().status, "idle");
+}

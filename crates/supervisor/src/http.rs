@@ -1404,7 +1404,7 @@ async fn thread_goal(
         .unwrap_or((None, None, None));
     Ok(Json(
         state
-            .thread_goal(&id, objective, status, token_budget, false)
+            .submit_thread_goal(&id, objective, status, token_budget)
             .await
             .map_err(map_err)?,
     ))
