@@ -3,6 +3,9 @@ import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import type { ThreadWorkspaceAdapter } from '@remote-codex/thread-ui';
 import {
   ApiError,
+  fetchLinkedFile,
+  fetchLinkedFilePreview,
+  buildLinkedFileUrl,
   buildWorkspaceRawFileUrl,
   downloadWorkspaceFile,
   fetchWorkspaceFilePreview,
@@ -14,6 +17,7 @@ import {
 interface UseThreadWorkspaceAdapterInput {
   setError: Dispatch<SetStateAction<string | null>>;
   workspaceId: string | null;
+  allowLinkedFiles?: boolean;
   access?: 'none' | 'read' | 'write';
 }
 
@@ -21,28 +25,32 @@ export function useThreadWorkspaceAdapter({
   setError,
   workspaceId,
   access = 'write',
+  allowLinkedFiles = false,
 }: UseThreadWorkspaceAdapterInput): ThreadWorkspaceAdapter | null {
   return useMemo<ThreadWorkspaceAdapter | null>(() => {
     if (!workspaceId || access === 'none') {
       return null;
     }
 
+    const isLinked = (path: string) => path.startsWith('/') || /^[a-z]:[\\/]/i.test(path);
     return {
+      ...(allowLinkedFiles ? {statLinkedFile: (input: {threadId: string; path: string}) => fetchLinkedFile(input.threadId, input.path)} : {}),
       listTree: (input) =>
         fetchWorkspaceFileTree(workspaceId, { path: input.path ?? '' }),
       readFile: (input) =>
-        fetchWorkspaceFilePreview(workspaceId, {
+        isLinked(input.path) && allowLinkedFiles ? fetchLinkedFilePreview(input.threadId, input) : fetchWorkspaceFilePreview(workspaceId, {
           path: input.path,
           ...(input.offset !== undefined ? { offset: input.offset } : {}),
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
         }),
       getRawFileUrl: (input) =>
-        buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
+        isLinked(input.path) && allowLinkedFiles ? buildLinkedFileUrl(input.threadId, input.path) : buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       ...(access === 'write'
         ? {
             uploadFile: (input) =>
               uploadWorkspaceFile(workspaceId, { file: input.file }),
             writeFile: async (input) => {
+              if (isLinked(input.path)) throw new Error('Linked files are read-only previews.');
               await writeWorkspaceFile(workspaceId, {
                 path: input.path,
                 content: input.content,
@@ -53,6 +61,7 @@ export function useThreadWorkspaceAdapter({
       downloadNode: async (input) => {
         setError(null);
         try {
+          if (isLinked(input.path)) throw new Error('Linked files are read-only previews.');
           const result = await downloadWorkspaceFile(workspaceId, {
             path: input.path,
           });
@@ -75,5 +84,5 @@ export function useThreadWorkspaceAdapter({
         }
       },
     };
-  }, [access, setError, workspaceId]);
+  }, [access, allowLinkedFiles, setError, workspaceId]);
 }

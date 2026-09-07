@@ -3439,6 +3439,7 @@ export function ThreadDetailPage() {
     setError,
     workspaceId: detail?.workspace.id ?? null,
     access: effectiveWorkspaceAccess,
+    allowLinkedFiles: relayThreadIsOwner,
   });
   const handleOpenWorkspaceFile = useCallback(
     (input: { path: string; line?: number }) => {
@@ -3451,14 +3452,9 @@ export function ThreadDetailPage() {
         input.path,
         currentDetail.workspace.absPath,
       );
-      if (relativePath === null) {
-        setError(`Cannot open ${input.path}; it is outside this workspace.`);
-        return;
-      }
-
       setActiveView('chat');
       setWorkspaceFocusPathRequest((current) => ({
-        path: relativePath,
+        path: relativePath ?? input.path,
         ...(input.line !== undefined ? { line: input.line } : {}),
         requestId: (current?.requestId ?? 0) + 1,
       }));

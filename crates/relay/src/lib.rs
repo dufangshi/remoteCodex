@@ -4540,6 +4540,7 @@ struct HostedResourceRequest<'a> {
 }
 
 fn hosted_resource_allowed(conn: &Connection, request: HostedResourceRequest<'_>) -> bool {
+    if request.path.split('?').next().unwrap_or("").contains("/linked-files/") { return false; }
     if let Some(workspace_id) = request.workspace_id {
         let owns = conn
             .query_row(
@@ -6465,6 +6466,10 @@ mod tests {
                    ('sandbox','user-b','thread-b','workspace-b','2026-01-01T00:00:00Z');",
             )
             .unwrap();
+            assert!(!hosted_resource_allowed(&conn, HostedResourceRequest {
+                sandbox_id: "sandbox", user_id: "user-a", thread_id: Some("thread-a"), workspace_id: None,
+                method: &Method::GET, path: "/api/threads/thread-a/linked-files/raw?path=/private/file", body: &[],
+            }));
             assert!(hosted_resource_allowed(
                 &conn,
                 HostedResourceRequest {
@@ -6621,6 +6626,17 @@ mod tests {
             &Method::GET,
             "/api/threads/thread-1/items/item-1/detail"
         ));
+        for action in ["stat", "preview", "raw"] {
+            let path = format!("/api/threads/thread-1/linked-files/{action}?path=/private/file");
+            assert!(!access_allows(&access, &Method::GET, &path));
+            let mut device = access.clone();
+            device.scope = "device".into();
+            device.thread_access = "control".into();
+            device.workspace_access = "write".into();
+            assert!(!access_allows(&device, &Method::GET, &path));
+            assert!(access_allows(&owner_access(), &Method::GET, &path));
+        }
+
         assert!(!access_allows(
             &access,
             &Method::GET,

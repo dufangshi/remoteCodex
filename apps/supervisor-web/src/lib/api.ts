@@ -1228,6 +1228,17 @@ export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
 }
 
+export function fetchLinkedFile(threadId: string, path: string) {
+  return request<ThreadWorkspaceTreeNodeDto>(`/api/threads/${encodeURIComponent(threadId)}/linked-files/stat?${new URLSearchParams({path})}`, {cache: 'no-store'});
+}
+export function fetchLinkedFilePreview(threadId: string, input: {path: string; offset?: number; limit?: number}) {
+  const params = new URLSearchParams({path: input.path, offset: String(input.offset ?? 0), limit: String(input.limit ?? 24000)});
+  return request<ThreadWorkspaceFilePreviewDto>(`/api/threads/${encodeURIComponent(threadId)}/linked-files/preview?${params}`, {cache: 'no-store'});
+}
+export function buildLinkedFileUrl(threadId: string, path: string) {
+  return buildBrowserMediaUrl(`/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
+}
+
 export function fetchWorkspaceFileTree(
   workspaceId: string,
   input: { path?: string | null } = {},

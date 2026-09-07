@@ -325,7 +325,7 @@ pub fn count_files(root: &Path) -> usize {
         .count()
 }
 
-fn language_for(name: &str) -> String {
+pub fn language_for(name: &str) -> String {
     match Path::new(name)
         .extension()
         .and_then(|e| e.to_str())

@@ -149,6 +149,7 @@ pub fn router(state: AppState) -> Router {
             get(thread_item_detail),
         )
         .route("/api/threads/{id}/assets/image", get(thread_image))
+        .route("/api/threads/{id}/linked-files/{action}", get(crate::linked_files::read))
         .route("/api/threads/{id}/settings", patch(thread_settings))
         .route("/api/threads/{id}/prompt", post(thread_prompt))
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
@@ -275,7 +276,7 @@ fn safe_static_path(dist: &FsPath, uri_path: &str) -> Option<PathBuf> {
     Some(dist.join(requested))
 }
 
-fn static_content_type(path: &FsPath) -> &'static str {
+pub(crate) fn static_content_type(path: &FsPath) -> &'static str {
     match path
         .extension()
         .and_then(|value| value.to_str())
@@ -1718,7 +1719,7 @@ async fn workspace_download(
     }
 }
 
-fn stream_file<G: Send + 'static>(file: tokio::fs::File, guard: G) -> Body {
+pub(crate) fn stream_file<G: Send + 'static>(file: tokio::fs::File, guard: G) -> Body {
     Body::from_stream(futures_util::stream::try_unfold(
         (file, guard),
         |(mut file, guard)| async move {

@@ -3,6 +3,7 @@ mod bounded_channel;
 mod export;
 mod http;
 mod management;
+mod linked_files;
 mod secure_transport;
 mod shells;
 mod socket;

@@ -1558,3 +1558,38 @@ test('completed commands stop running immediately and survive stale snapshots', 
   await expect(page.getByText('running',{exact:true})).toHaveCount(0);
   await expect(page.locator('.thread-graph-turn-footer .animate-pulse').first()).toBeVisible();
 });
+
+
+test('external generated image and document links open read-only Explorer previews without navigation', async ({page}, testInfo) => {
+  await installFakeWebSocket(page);
+  const imagePath='/Users/mac/.codex/generated_images/upstream test.png';
+  const docPath='/Users/mac/.codex/generated_images/result.md';
+  await installApiRoutes(page,()=>detail('codex',{thread:{status:'idle',activeTurnId:null},turns:[{id:'turn-1',status:'completed',startedAt:now,items:[{id:'user',kind:'userMessage',text:'Generate a picture'},{id:'answer',kind:'agentMessage',text:`[Generated image](<${imagePath}>) [Generated document](${new URL(docPath, 'http://localhost:'+ (process.env.E2E_WEB_PORT ?? '5173')).href})`}]}]}));
+  const reads:string[]=[];
+  await page.route('**/api/workspaces/workspace-1/files/**', async route=>{
+    const url=new URL(route.request().url());
+    if (url.pathname.endsWith('/tree')) await route.fulfill({json:{path:'',name:'Demo Workspace',kind:'directory',childrenLoaded:true,children:[{path:'WRONG.md',name:'WRONG.md',kind:'file'}]}});
+    else {reads.push('WRONG');await route.fulfill({status:404});}
+  });
+  await page.route('**/api/threads/thread-1/linked-files/**',async route=>{
+    const url=new URL(route.request().url());const path=url.searchParams.get('path');
+    expect([imagePath,docPath]).toContain(path);
+    if(url.pathname.endsWith('/stat')) await route.fulfill({json:{path,name:path!.split('/').at(-1),kind:'file',size:80}});
+    else if(url.pathname.endsWith('/raw')) {reads.push(path!);await route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/a0AAAAASUVORK5CYII=','base64')});}
+    else {reads.push(path!);await route.fulfill({json:{path,name:'result.md',content:'# Linked result',language:'markdown',size:15,truncated:false,nextOffset:15}});}
+  });
+  await page.goto('/threads/thread-1');
+  const before=page.url();
+  await page.getByRole('link',{name:'Generated image',exact:true}).click();
+  const image=page.locator('img[src*="linked-files/raw"]').first();
+  await expect(image).toBeVisible();
+  await expect.poll(()=>image.evaluate(el=>(el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(page.url()).toBe(before);
+  expect(reads).toEqual([imagePath]);
+  await page.screenshot({path:testInfo.outputPath('linked-image.png')});
+  await page.getByRole('button',{name:testInfo.project.name === 'mobile-chromium' ? 'Show chat' : 'Collapse workspace',exact:true}).first().click();
+  await page.getByRole('link',{name:'Generated document',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Linked result',exact:true})).toBeVisible();
+  expect(page.url()).toBe(before);
+  expect(reads).toEqual([imagePath,docPath]);
+});

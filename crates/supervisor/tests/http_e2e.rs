@@ -1569,3 +1569,40 @@ async fn global_model_prices_are_editable_and_invalid_prices_rejected() {
     let usage:Value=client.get(format!("http://127.0.0.1:{port}/api/agent-runtimes/acp/subscription-usage?agentId=not-installed")).send().await.unwrap().json().await.unwrap();
     assert!(usage["usage"].is_null());
 }
+
+
+#[tokio::test]
+async fn linked_files_preview_external_bytes_without_relaxing_workspace_paths() {
+    let (dir, port, ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let workspace_path = ws_root.join("links");
+    std::fs::create_dir_all(&workspace_path).unwrap();
+    let workspace = json(&client, client.post(format!("{base}/api/workspaces")).json(&json!({"absPath":workspace_path,"label":"Links"}))).await;
+    let thread = json(&client, client.post(format!("{base}/api/threads/start")).json(&json!({"workspaceId":workspace["id"],"provider":"codex","model":"fake"}))).await;
+    let tid = thread["id"].as_str().unwrap();
+    let external = dir.path().join("generated image.png");
+    let bytes = vec![137,80,78,71,13,10,26,10,0,255,128];
+    std::fs::write(&external, &bytes).unwrap();
+    let external = external.to_str().unwrap();
+    let stat = json(&client, client.get(format!("{base}/api/threads/{tid}/linked-files/stat")).query(&[("path",external)])).await;
+    assert_eq!(stat["path"], external);
+    assert_eq!(stat["name"], "generated image.png");
+    let raw = client.get(format!("{base}/api/threads/{tid}/linked-files/raw")).query(&[("path",external)]).send().await.unwrap();
+    assert_eq!(raw.status(), 200);
+    assert_eq!(raw.headers()["content-type"], "image/png");
+    assert!(raw.headers()["content-security-policy"].to_str().unwrap().contains("sandbox"));
+    assert_eq!(raw.bytes().await.unwrap().as_ref(), bytes);
+    let document = dir.path().join("result.md");
+    std::fs::write(&document, "# Exact linked document").unwrap();
+    let preview = json(&client, client.get(format!("{base}/api/threads/{tid}/linked-files/preview")).query(&[("path",document.to_str().unwrap()),("offset","2"),("limit","5")])).await;
+    assert_eq!(preview["content"], "Exact");
+    assert_eq!(preview["nextOffset"], 7);
+    assert_eq!(preview["language"], "markdown");
+    for path in ["relative.png", workspace_path.to_str().unwrap(), "/nonexistent-generated-test.png"] {
+        assert_eq!(client.get(format!("{base}/api/threads/{tid}/linked-files/stat")).query(&[("path",path)]).send().await.unwrap().status(), 400);
+    }
+    assert!(!client.get(format!("{base}/api/workspaces/{}/files/raw",workspace["id"].as_str().unwrap())).query(&[("path",external)]).send().await.unwrap().status().is_success());
+    let (_auth_dir, auth_port) = spawn_authenticated_supervisor().await;
+    assert_eq!(client.get(format!("http://127.0.0.1:{auth_port}/api/threads/{tid}/linked-files/raw")).query(&[("path",external)]).send().await.unwrap().status(),401);
+}
