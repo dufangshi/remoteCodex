@@ -1593,3 +1593,65 @@ test('external generated image and document links open read-only Explorer previe
   expect(page.url()).toBe(before);
   expect(reads).toEqual([imagePath,docPath]);
 });
+
+test('archive links show a download panel and preserve original bytes for local and linked files', async ({page}, testInfo) => {
+  await installFakeWebSocket(page);
+  const externalPath = '/Users/mac/Downloads/upstream-imagegen.zip';
+  const bytes = Buffer.from([0x50, 0x4b, 3, 4, 0, 255, 128, 10, 13, 0]);
+  const reads: string[] = [];
+  await installApiRoutes(page, () => detail('codex', {
+    thread: {status: 'idle', activeTurnId: null},
+    turns: [{id: 'turn-1', status: 'completed', startedAt: now, items: [
+      {id: 'answer', kind: 'agentMessage', text: `[Download linked archive](${externalPath}) [Download workspace archive](./bundle.zip)`},
+    ]}],
+  }));
+  await page.route('**/api/workspaces/workspace-1/files/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/tree')) {
+      await route.fulfill({json: {path: '', name: 'Demo Workspace', kind: 'directory', childrenLoaded: true, children: [
+        {path: 'bundle.zip', name: 'bundle.zip', kind: 'file', size: bytes.length},
+      ]}});
+    } else if (url.pathname.endsWith('/download')) {
+      expect(url.searchParams.get('path')).toBe('bundle.zip');
+      reads.push('workspace-download');
+      await route.fulfill({contentType: 'application/zip', headers: {'content-disposition': 'attachment; filename="bundle.zip"'}, body: bytes});
+    } else { reads.push('unexpected-preview'); await route.fulfill({status: 500}); }
+  });
+  await page.route('**/api/threads/thread-1/linked-files/**', async route => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get('path')).toBe(externalPath);
+    if (url.pathname.endsWith('/stat')) {
+      await route.fulfill({json: {path: externalPath, name: 'upstream-imagegen.zip', kind: 'file', size: bytes.length}});
+    } else if (url.pathname.endsWith('/raw')) {
+      reads.push('linked-download');
+      await route.fulfill({contentType: 'application/zip', body: bytes});
+    } else { reads.push('unexpected-preview'); await route.fulfill({status: 500}); }
+  });
+  await page.goto('/threads/thread-1');
+  const before = page.url();
+  for (const [index, label, filename] of [
+    [0, 'Download linked archive', 'upstream-imagegen.zip'],
+    [1, 'Download workspace archive', 'bundle.zip'],
+  ] as const) {
+    await page.getByRole('link', {name: label, exact: true}).click();
+    const panel = page.locator('.thread-graph-download-preview');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(filename, {exact: true})).toBeVisible();
+    await expect(page.getByRole('textbox', {name: 'Workspace file editor'})).toHaveCount(0);
+    expect(reads).toHaveLength(index);
+    const downloadPromise = page.waitForEvent('download');
+    await panel.getByRole('button', {name: `Download ${filename}`, exact: true}).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(filename);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(bytes);
+    expect(page.url()).toBe(before);
+    if (index === 0) {
+      await page.screenshot({path: testInfo.outputPath('archive-download.png')});
+      await page.getByRole('button', {name: testInfo.project.name === 'mobile-chromium' ? 'Show chat' : 'Collapse workspace', exact: true}).first().click();
+    }
+  }
+  expect(reads).toEqual(['linked-download', 'workspace-download']);
+});

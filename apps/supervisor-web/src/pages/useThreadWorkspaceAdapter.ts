@@ -8,6 +8,7 @@ import {
   buildLinkedFileUrl,
   buildWorkspaceRawFileUrl,
   downloadWorkspaceFile,
+  downloadLinkedFile,
   fetchWorkspaceFilePreview,
   fetchWorkspaceFileTree,
   uploadWorkspaceFile,
@@ -61,10 +62,10 @@ export function useThreadWorkspaceAdapter({
       downloadNode: async (input) => {
         setError(null);
         try {
-          if (isLinked(input.path)) throw new Error('Linked files are read-only previews.');
-          const result = await downloadWorkspaceFile(workspaceId, {
-            path: input.path,
-          });
+          if (isLinked(input.path) && !allowLinkedFiles) throw new Error('Linked file access is unavailable.');
+          const result = isLinked(input.path)
+            ? await downloadLinkedFile(input.threadId, input.path)
+            : await downloadWorkspaceFile(workspaceId, { path: input.path });
           const url = URL.createObjectURL(result.blob);
           const anchor = document.createElement('a');
           anchor.href = url;

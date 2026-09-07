@@ -1235,6 +1235,11 @@ export function fetchLinkedFilePreview(threadId: string, input: {path: string; o
   const params = new URLSearchParams({path: input.path, offset: String(input.offset ?? 0), limit: String(input.limit ?? 24000)});
   return request<ThreadWorkspaceFilePreviewDto>(`/api/threads/${encodeURIComponent(threadId)}/linked-files/preview?${params}`, {cache: 'no-store'});
 }
+export async function downloadLinkedFile(threadId: string, path: string) {
+  const result = await downloadFile(`/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
+  return { ...result, filename: path.replace(/\\/g, '/').split('/').pop() || 'download' };
+}
+
 export function buildLinkedFileUrl(threadId: string, path: string) {
   return buildBrowserMediaUrl(`/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
 }
