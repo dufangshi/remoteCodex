@@ -203,6 +203,8 @@ export interface UpdateRelaySessionShareInput {
 }
 
 export interface RelaySessionShareDto {
+  /** Live supervisor connection; absent on older relays. */
+  deviceConnected?: boolean;
   id: string;
   ownerUserId: string;
   ownerUsername: string;
@@ -279,6 +281,7 @@ export interface UpdateRelayAccessGrantInput {
 }
 
 export interface RelayAccessGrantDto {
+  deviceConnected?: boolean;
   id: string;
   ownerUserId: string;
   ownerUsername: string;

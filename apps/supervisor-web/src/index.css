@@ -2539,3 +2539,11 @@ main:has(.product-navigation) { padding-top: 0 !important; }
 .shared-access-date { font-size: 10px; color: var(--theme-fg-muted); padding-top: 3px; }
 .shared-access-history { margin-top: 16px; padding: 12px; border-radius: 10px; background: var(--theme-surface); border: 1px solid var(--theme-border); }
 @media (min-width: 640px) { .shared-access-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.shared-access-device { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-top:12px; font-size:11px; color:var(--theme-fg-muted); }
+.shared-access-device-name { display:inline-flex; align-items:center; gap:6px; min-width:0; overflow-wrap:anywhere; }
+.shared-access-device-name > svg { flex-shrink:0; }
+.shared-supervisor-presence { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.shared-supervisor-presence > span { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.shared-supervisor-presence[data-online="true"] { color:var(--status-success-fg); }
+.shared-access-open:disabled { opacity:.45; cursor:not-allowed; background:var(--theme-muted); color:var(--theme-fg-muted); }

@@ -429,12 +429,14 @@ export function RelayDevicesPage() {
   }
 
   function openSharedSession(share: RelaySessionShareDto) {
+    if (share.deviceConnected !== true) return;
     setSelectedRelayDeviceId(share.deviceId);
     setSelectedRelayThreadId(share.threadId);
     navigate(threadHref(share.threadId, share.deviceId));
   }
 
   function openSharedGrant(grant: RelayAccessGrantDto) {
+    if (grant.deviceConnected !== true) return;
     setSelectedRelayDeviceId(grant.deviceId);
     setSelectedRelayThreadId(grant.threadId);
     if (grant.threadId) {
@@ -1267,7 +1269,8 @@ function SharedSessionRow({
   onOpen?: () => void;
 }) {
   return <SharedAccessCard title={relayShareTitleText(share)}
-    subtitle={`${relayShareWorkspaceLabel(share)} · ${share.deviceName}`}
+    subtitle={relayShareWorkspaceLabel(share)}
+    deviceName={share.deviceName} deviceConnected={share.deviceConnected}
     username={mode === 'incoming' ? share.ownerUsername : share.targetUsername} mode={mode}
     permissions={[share.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(share.workspaceAccess)]}
     events={share.accessEvents} lastAccessedAt={share.lastAccessedAt} busy={busy} expanded={expanded}
@@ -1349,7 +1352,7 @@ function GrantScopeRow({
   onRevoke?: () => void;
   onToggleAccess?: () => void;
 }) {
-  return <SharedAccessCard title={grant.label?.trim() || (grant.scope === 'thread' ? stableGrantThreadTitle(grant) : grant.scope === 'workspace' ? grant.workspaceLabel : grant.deviceName) || grantScopeLabel(grant)}
+  return <SharedAccessCard deviceName={grant.deviceName} deviceConnected={grant.deviceConnected} title={grant.label?.trim() || (grant.scope === 'thread' ? stableGrantThreadTitle(grant) : grant.scope === 'workspace' ? grant.workspaceLabel : grant.deviceName) || grantScopeLabel(grant)}
     subtitle={`${grantScopeLabel(grant)} · ${grant.scope === 'device' ? deviceGrantScopeText(grant) : grant.workspaceLabel || grant.deviceName}`}
     username={mode === 'incoming' ? grant.ownerUsername : grant.targetUsername} mode={mode}
     permissions={[grant.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(grant.workspaceAccess), ...(grant.canCreateThreads ? ['Can create threads'] : [])]}

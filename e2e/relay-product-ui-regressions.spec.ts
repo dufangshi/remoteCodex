@@ -43,6 +43,7 @@ const incomingThreadShare = {
   targetUsername: relayUser.username,
   deviceId: 'device-shared',
   deviceName: 'Review Mac',
+  deviceConnected: true,
   threadId: 'thread-incoming',
   threadTitle: 'Inbound review',
   workspaceId: 'workspace-shared',
@@ -82,6 +83,7 @@ const incomingDeviceGrant = {
   targetUsername: relayUser.username,
   deviceId: 'device-shared',
   deviceName: 'Review Mac',
+  deviceConnected: true,
   scope: 'device',
   threadId: null,
   threadTitle: null,
@@ -166,6 +168,7 @@ async function installAuthenticatedDevicesMocks(
   const deletedDeviceIds: string[] = [];
   const logoutRequests: unknown[] = [];
   let portalRequestCount = 0;
+  let sharedConnected = true;
   let portalUnavailable = options.portalInitiallyUnavailable ?? false;
 
   await page.addInitScript(
@@ -203,7 +206,10 @@ async function installAuthenticatedDevicesMocks(
           503,
         );
       }
-      return json(route, portalSummary(devices));
+      const portal = portalSummary(devices);
+      for (const list of [portal.sharedWithMe, portal.sharedByMe, portal.sharedDevicesWithMe, portal.grantsByMe])
+        for (const item of list ?? []) item.deviceConnected = sharedConnected;
+      return json(route, portal);
     }
     if (pathname === '/relay/auth/logout' && request.method() === 'POST') {
       logoutRequests.push(request.postDataJSON());
@@ -236,6 +242,7 @@ async function installAuthenticatedDevicesMocks(
 
   return {
     deletedDeviceIds,
+    setSharedConnected: (connected: boolean) => { sharedConnected = connected; },
     logoutRequests,
     portalRequestCount: () => portalRequestCount,
     recoverPortal: () => {
@@ -708,4 +715,27 @@ test('existing devices copy setup on demand and hosted VMs remain connectable du
   }
   await page.getByRole('article').filter({ hasText: 'VM error' }).getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(page).toHaveURL(/\/devices\/vm-error\/workspaces/);
+});
+
+
+test('shared resource cards name their device and follow supervisor disconnects', async ({ page }, testInfo) => {
+  const controls = await installAuthenticatedDevicesMocks(page);
+  await page.goto('/relay-devices');
+  const card = page.locator('.shared-access-card').first();
+  await expect(card.locator('.shared-access-device-name')).toHaveText('Review Mac');
+  await expect(card.getByRole('status')).toHaveText('Supervisor online');
+  await expect(card.getByRole('button', {name:'Open',exact:true})).toBeEnabled();
+  controls.setSharedConnected(false);
+  await expect(card.getByRole('status')).toHaveText('Supervisor offline');
+  await expect(card.getByRole('button', {name:'Open',exact:true})).toBeDisabled();
+  for (const name of [/Devices with me/, /Devices by me/, /Threads by me/]) {
+    await page.getByRole('tab', {name}).click();
+    await expect(card.getByRole('status')).toHaveText('Supervisor offline');
+    await expect(card.getByRole('button', {name:'Open',exact:true})).toBeDisabled();
+  }
+  controls.setSharedConnected(true);
+  await expect(card.getByRole('status')).toHaveText('Supervisor online');
+  await expect(card.getByRole('button', {name:'Open',exact:true})).toBeEnabled();
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({path:testInfo.outputPath('shared-presence.png')});
 });

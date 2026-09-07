@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import {
   ArrowUpRight,
+  MonitorSmartphone,
   History,
   SlidersHorizontal,
   UserRound,
@@ -17,6 +18,8 @@ type AccessEvent = {
 export function SharedAccessCard({
   title,
   subtitle,
+  deviceName,
+  deviceConnected,
   username,
   mode,
   permissions,
@@ -31,6 +34,8 @@ export function SharedAccessCard({
 }: {
   title: string;
   subtitle: string;
+  deviceName: string;
+  deviceConnected?: boolean | undefined;
   username: string;
   mode: 'incoming' | 'outgoing';
   permissions: string[];
@@ -66,9 +71,15 @@ export function SharedAccessCard({
             {subtitle}
           </p>
         </div>
-        <button type="button" className="shared-access-open" onClick={onOpen}>
+        <button type="button" className="shared-access-open" onClick={onOpen} disabled={deviceConnected !== true || !onOpen} title={deviceConnected === true ? "Open" : deviceConnected === false ? "Supervisor offline — reconnect the device to open" : "Supervisor status unavailable"}>
           Open <ArrowUpRight size={15} aria-hidden="true" />
         </button>
+      </div>
+      <div className="shared-access-device">
+        <span className="shared-access-device-name" title={deviceName}><MonitorSmartphone size={14} aria-hidden="true" /><span>{deviceName}</span></span>
+        <span className="shared-supervisor-presence" data-online={deviceConnected === true} role="status">
+          <span aria-hidden="true" />Supervisor {deviceConnected === true ? 'online' : deviceConnected === false ? 'offline' : 'unknown'}
+        </span>
       </div>
       <div className="shared-access-card-person">
         <button

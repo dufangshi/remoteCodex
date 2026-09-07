@@ -73,15 +73,37 @@ test('workspace, recent threads and import share one compact navigation header',
   await page.goto(`/threads/${thread.id}`);
   const threadHeader = page.locator('.thread-topbar-surface');
   await expect(
-    threadHeader.getByRole('button', { name: 'Open rooms', exact: true }),
+    threadHeader.getByRole('button', { name: 'Open settings', exact: true }),
   ).toBeVisible();
   const finalHeader = (await threadHeader.boundingBox())!;
   const finalMenu = (await threadHeader
-    .getByRole('button', { name: 'Open rooms', exact: true })
+    .getByRole('button', { name: 'Open settings', exact: true })
     .boundingBox())!;
   for (const property of ['x', 'y', 'height', 'width'] as const)
     expect(finalHeader[property]).toBeCloseTo(initial[property], 0);
   for (const property of ['x', 'y', 'height', 'width'] as const)
     expect(finalMenu[property]).toBeCloseTo(initialMenu[property], 0);
+  const back = threadHeader.getByRole('link', { name: 'Back to workspace', exact: true });
+  await expect(back).toBeVisible();
+  expect((await back.boundingBox())!.x).toBeCloseTo(initialMenu.x + 52, 0);
+  await expect(threadHeader.getByRole('button', { name: 'Open rooms', exact: true })).toHaveCount(testInfo.project.name === 'mobile-chromium' ? 1 : 0);
+  if (testInfo.project.name === 'mobile-chromium') {
+    await threadHeader.getByRole('button', {name:'Open rooms',exact:true}).click();
+    await expect(page.locator('.thread-rooms-rail')).toBeVisible();
+    await page.getByRole('button', {name:'Close rooms',exact:true}).click();
+    await expect(page.locator('.thread-rooms-rail')).not.toBeInViewport();
+  } else {
+    await page.getByRole('button', {name:'Collapse rooms',exact:true}).click();
+    const room = page.locator('.thread-rooms-rail .thread-graph-room-card').filter({hasText:'A readable recent thread'});
+    await room.hover();
+    await expect(page.getByRole('tooltip')).toContainText('A readable recent thread');
+    expect(await page.locator('.thread-room-tooltip').evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+    await page.screenshot({ path: testInfo.outputPath('room-tooltip.png') });
+    await api(base, `/api/threads/${thread.id}/prompt`, {method:'POST',body:JSON.stringify({prompt:'Inspect this repository for the running icon regression.'})});
+    await expect(room.locator('[data-thread-status="running"]')).toBeVisible();
+    await api(base, `/api/threads/${thread.id}/interrupt`, {method:'POST',body:'{}'});
+    await expect(room.locator('[data-thread-status="running"]')).toHaveCount(0);
+  }
+  await page.mouse.move(900, 500);
   await page.screenshot({ path: testInfo.outputPath('thread-header.png') });
 });

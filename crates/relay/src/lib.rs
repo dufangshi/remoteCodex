@@ -6,6 +6,7 @@ mod oauth;
 mod public_links;
 mod security;
 mod share_activity;
+mod share_presence;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -2573,13 +2574,20 @@ async fn portal(
         return unauthorized();
     };
     let (shared_with_me, shared_by_me, grants_with_me, grants_by_me) = {
+        let sockets = state.sockets.read().await;
+        let connected = sockets.keys().cloned().collect();
         let conn = state.store.conn.lock().await;
-        (
+        let mut lists = [
             relay_shares_for(&conn, "target_user_id", &user.id),
             relay_shares_for(&conn, "owner_user_id", &user.id),
             relay_grants_for(&conn, "target_user_id", &user.id),
             relay_grants_for(&conn, "owner_user_id", &user.id),
-        )
+        ];
+        for list in &mut lists {
+            share_presence::enrich(&conn, &connected, list);
+        }
+        let [incoming, outgoing, incoming_grants, outgoing_grants] = lists;
+        (incoming, outgoing, incoming_grants, outgoing_grants)
     };
     let shared_devices_with_me: Vec<Value> = grants_with_me
         .iter()
