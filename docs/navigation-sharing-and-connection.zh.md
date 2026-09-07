@@ -23,3 +23,11 @@
 - 手机及桌面专项：共享资料/访问历史/菜单迁移、跨页面顶栏位置与尺寸、终端输入和会话控制。未加载 harness 的用例显式断言点击终端发出 resume；保留真实 PTY 和 WebSocket 输入输出。
 - 移动终端额外覆盖浏览器原生惯性和 visualViewport 键盘布局；不把桌面模拟器宣称为真机软键盘测试。
 - 修正了共享布局 CSS 缺少闭合括号，以及 Vite 动态优化终端依赖时旧 chunk 返回 504 的测试/开发环境问题。
+
+### 发布结果与设备范围补充
+
+- Runtime/UI：`b7224019ebce481066a300d00f84f7d05a7ddf06` / `c34bb966936655eb80b294ba8289dae4ed8cdcda`。
+- npm [34066490014](https://github.com/dufangshi/remoteCodex/actions/runs/34066490014) 成功，耗时 4m30s；relay [34066491638](https://github.com/dufangshi/remoteCodex/actions/runs/34066491638) 成功，耗时 2m21s。npm tarball SHA-512、四平台原生资产大小与 SHA-256、公开站点 JS/CSS 均核对通过。
+- 本机独立 launchd worker 已完成 0.12.16 → 0.12.18 更新；新进程健康检查与 relay 重连通过，PATH 中 launcher 版本也为 0.12.18。
+- 后续修复：运行时管理此前使用通用 API 的“上次设备”回退，造成 Devices 页可能显示某个旧设备的版本。现在 relay 全局页只提示进入设备；设备内以路由 ID 固定管理 API 和旧版 `/api/version` 回退，切换设备重建组件状态，关闭原设备弹窗，旧异步结果不会覆盖新设备。local 模式仍管理本机。
+- 此范围修复通过 3 项组件测试、1 项设置窗口手机 E2E 和 TypeScript 检查；为前端改动，随 relay Web 部署生效。

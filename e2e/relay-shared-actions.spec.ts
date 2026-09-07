@@ -523,3 +523,35 @@ test('shared access uses profiles, compact actions and stable navigation', async
   await indicator.click();
   await expect(page.getByRole('status').getByText('Connection is not end-to-end encrypted',{exact:true})).toBeVisible();
 });
+
+test('runtime settings require an explicit device and manage only that device', async ({ page }) => {
+  await installRelayMocks(page, {access:'owner'});
+  await page.addInitScript(() => localStorage.setItem('remote-codex-relay-device-id', 'some-other-device'));
+  const managementRequests: string[] = [];
+  await page.route('**/api/management/**', async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    managementRequests.push(pathname);
+    return json(route, pathname.endsWith('/harnesses') ? [{
+      id:'codex', name:'Codex on this device', adapter:null,
+      base:{version:'test-harness',path:'/device/bin/codex',resolvedPath:'/device/bin/codex',manager:'npm',canUpdate:false},
+    }] : {runningVersion:'device-specific-version',canUpdate:true});
+  });
+  const openSettings = async () => {
+    await page.getByRole('button',{name:'Open Navigation',exact:true}).click();
+    await page.getByRole('navigation',{name:'Supervisor navigation'}).getByRole('button',{name:'Settings',exact:true}).click();
+    return page.getByRole('dialog',{name:'Settings',exact:true});
+  };
+  await page.goto('/relay-devices');
+  const outside = await openSettings();
+  await expect(outside.getByText(/Open a device to view and manage/)).toBeVisible();
+  await expect(outside.getByRole('button',{name:'Check updates',exact:true})).toHaveCount(0);
+  expect(managementRequests).toEqual([]);
+  await page.goto('/devices/device-shared/workspaces');
+  const inside = await openSettings();
+  await expect(inside.getByText('Running device-specific-version')).toBeVisible();
+  await inside.getByRole('button',{name:'Check updates',exact:true}).click();
+  await inside.getByRole('button',{name:'Restart Codex on this device',exact:true}).click();
+  await expect.poll(() => managementRequests.includes('/relay/devices/device-shared/api/management/harnesses/codex')).toBe(true);
+  expect(managementRequests).toContain('/relay/devices/device-shared/api/management/supervisor/check');
+  expect(managementRequests.every(path => path.startsWith('/relay/devices/device-shared/api/'))).toBe(true);
+});

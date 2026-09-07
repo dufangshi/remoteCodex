@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Download, RefreshCw, ChevronDown, RotateCw } from 'lucide-react';
-import { ApiError, request } from '../lib/api';
+import { ApiError, relayModeActive, request } from '../lib/api';
+import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 import { FormDialog } from './FormDialog';
 
 type Installation = {
@@ -40,15 +42,31 @@ const active = (job?: Job) =>
   );
 const button =
   'host-secondary-button inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs disabled:opacity-50';
-const api = <T,>(path: string, action?: unknown) =>
-  request<T>(
-    `/api/management/${path}`,
-    action
-      ? { method: 'POST', body: JSON.stringify(action) }
-      : { cache: 'no-store' },
-  );
-
 export function RuntimeManagement() {
+  const { pathname } = useLocation();
+  const deviceId = relayDeviceIdFromPath(pathname);
+  if (relayModeActive() && !deviceId) {
+    return (
+      <section className="py-5" aria-label="Runtime management">
+        <h3 className="text-sm font-semibold">Device runtimes</h3>
+        <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
+          Open a device to view and manage its Supervisor and harness versions.
+        </p>
+      </section>
+    );
+  }
+  // Route identity owns both the state and requests. Never fall back to a
+  // remembered device, or retain another device's open update confirmation.
+  return <DeviceRuntimeManagement key={deviceId ?? 'local'} apiRoot={
+    deviceId ? `/relay/devices/${encodeURIComponent(deviceId)}/api` : '/api'
+  } />;
+}
+
+function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
+  const api = <T,>(path: string, action?: unknown) =>
+    request<T>(`${apiRoot}/management/${path}`, action
+      ? { method: 'POST', body: JSON.stringify(action) }
+      : { cache: 'no-store' });
   const [supervisor, setSupervisor] = useState<Supervisor | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
@@ -80,7 +98,7 @@ export function RuntimeManagement() {
         !(error instanceof ApiError && error.statusCode === 404)
       )
         throw error;
-      const current = await request<{ version: string }>('/api/version');
+      const current = await request<{ version: string }>(`${apiRoot}/version`);
       setSupervisor({
         runningVersion: current.version,
         canUpdate: false,
