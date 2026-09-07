@@ -1355,6 +1355,7 @@ export function AppShellSettingsDialog({
         aria-labelledby={settingsTitleId}
         aria-modal="true"
         className="product-dialog relative z-10 flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:rounded-lg sm:border sm:border-[var(--theme-border)]"
+        data-testid="settingsDialog"
         ref={settingsDialogRef}
         role="dialog"
         tabIndex={-1}

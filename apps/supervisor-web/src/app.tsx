@@ -33,6 +33,7 @@ import { RelayDevicesPage } from './pages/RelayDevicesPage';
 import { RelayGuidePage } from './pages/RelayGuidePage';
 import { RelayHomePage } from './pages/RelayHomePage';
 import { RelayPortalPage } from './pages/RelayPortalPage';
+import { RelaySettingsPage } from './pages/RelaySettingsPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
 import { ThreadNewPage } from './pages/ThreadNewPage';
@@ -126,6 +127,9 @@ function routeDocumentTitle(pathname: string) {
   }
   if (pathname === '/relay-devices') {
     return 'Devices and Shared Sessions';
+  }
+  if (pathname === '/relay-settings') {
+    return 'Settings';
   }
   if (
     pathname === '/workspaces' ||
@@ -225,6 +229,9 @@ function AppShell({
   const isWorkspacesRoute =
     location.pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(location.pathname);
+  const isSettingsRoute = location.pathname === '/relay-settings';
+  const isNativeApp =
+    new URLSearchParams(location.search).get('nativeApp') === '1';
 
   useEffect(() => {
     setNavOpen(false);
@@ -273,7 +280,12 @@ function AppShell({
       setNavOpen(false);
       setSettingsOpen(true);
     },
-    closeSettings: () => setSettingsOpen(false),
+    closeSettings: () => {
+      setSettingsOpen(false);
+      if (isSettingsRoute && isNativeApp) {
+        window.location.assign('/__native/close');
+      }
+    },
     themeMode,
     setThemeMode,
     effectiveTheme,
@@ -287,7 +299,7 @@ function AppShell({
     <AppShellNavContext.Provider value={shellNavValue}>
       <div
         className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
-          isViewportLockedRoute
+          isViewportLockedRoute || isSettingsRoute
             ? 'fixed inset-0 overflow-hidden overscroll-none'
             : 'min-h-screen'
         }`}
@@ -320,22 +332,24 @@ function AppShell({
           className={`mx-auto w-full ${
             isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
           } ${
-            isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
+            isViewportLockedRoute || isSettingsRoute
+              ? 'absolute inset-0 pb-0 sm:pb-4'
+              : 'pb-4'
           } ${
-            isThreadWorkspaceRoute
-              ? isThreadDetailRoute
-                ? 'pt-0'
-                : isThreadsRoute
-                  ? 'pt-[env(safe-area-inset-top)] sm:pt-0'
-                  : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
-              : isWorkspacesRoute
-                ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
-                : 'pt-4'
+            isSettingsRoute
+              ? 'pt-0'
+              : isThreadWorkspaceRoute
+                ? isThreadDetailRoute
+                  ? 'pt-0'
+                  : isThreadsRoute
+                    ? 'pt-[env(safe-area-inset-top)] sm:pt-0'
+                    : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
+                : isWorkspacesRoute
+                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                  : 'pt-4'
           } ${
-            isViewportLockedRoute
-              ? isThreadDetailRoute
-                ? 'overflow-hidden overscroll-none px-0'
-                : 'overflow-hidden overscroll-none px-0'
+            isViewportLockedRoute || isSettingsRoute
+              ? 'overflow-hidden overscroll-none px-0'
               : 'px-4 sm:px-6'
           }`}
         >
@@ -553,6 +567,7 @@ function SupervisorRoutes({
         <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
         <Route path="/relay-account" element={<RelayAccountPage />} />
         <Route path="/relay-devices" element={<RelayDevicesPage />} />
+        <Route path="/relay-settings" element={<RelaySettingsPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/import" element={<ThreadImportPage />} />
         <Route path="/threads/new" element={<ThreadNewPage />} />
