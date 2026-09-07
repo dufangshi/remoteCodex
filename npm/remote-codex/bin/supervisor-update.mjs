@@ -276,7 +276,8 @@ export async function worker(plan, hooks = {}) {
       processId: result.processId,
     });
   } catch (error) {
-    status('failed', { error: error.message });
+    // Keep the job active until rollback finishes; the old runtime must stay paused.
+    status('restarting', { rollingBack: true, error: error.message });
     try {
       // Never kill a process found only by port: only the child started by this worker.
       if (newPid && isAlive(newPid)) {
@@ -341,15 +342,23 @@ export function launchWorker(
     if (result.status !== 0)
       throw Error('Unable to launch independent update job in launchd');
   } else if (process.platform === 'linux') {
-    const result = spawnSync(
-      'systemd-run',
-      ['--user', '--collect', '--property=KillMode=process', '--', ...args],
-      { stdio: 'ignore' },
-    );
-    if (result.status !== 0)
-      throw Error(
-        'An active systemd user session is required for independent updates',
+    const userManager = spawnSync('systemctl', ['--user', 'show-environment'], { stdio: 'ignore' });
+    if (userManager.status === 0) {
+      const result = spawnSync(
+        'systemd-run',
+        ['--user', '--collect', '--property=KillMode=process', '--', ...args],
+        { stdio: 'ignore' },
       );
+      if (result.status !== 0) throw Error('Unable to launch independent systemd update worker');
+    } else {
+      // Container machines often have no user D-Bus session. A new OS session
+      // survives launcher/Supervisor termination without requiring sudo or a shell.
+      const fd = fs.openSync(path.join(plan.directory, 'update.log'), 'a', 0o600);
+      try {
+        const result = spawnSync('setsid', ['--fork', ...args], { stdio: ['ignore', fd, fd] });
+        if (result.status !== 0) throw Error('Unable to detach update worker with setsid');
+      } finally { fs.closeSync(fd); }
+    }
   } else if (process.platform === 'win32') {
     // WMI creates the worker outside the Supervisor/Device Manager job object.
     const line = args.map((a) => `"${a.replaceAll('"', '\\"')}"`).join(' ');

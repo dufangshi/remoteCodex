@@ -672,3 +672,179 @@ async fn goal_submission_acknowledges_before_completion_and_is_interruptible() {
         .unwrap();
     assert_eq!(supervisor.get_thread(&thread.id).unwrap().status, "idle");
 }
+
+async fn verify_update_recovery(restart: bool) {
+    let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    let supervisor = Arc::new(supervisor);
+    supervisor.spawn_live_item_persister();
+    let mut events = supervisor.bus.subscribe();
+    let running = {
+        let state = supervisor.clone();
+        let id = thread.id.clone();
+        tokio::spawn(async move {
+            state
+                .prompt(
+                    &id,
+                    prompt_input("Inspect this repository before making changes."),
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while events.recv().await.unwrap().event_type != "thread.turn.started" {}
+    })
+    .await
+    .unwrap();
+    let session = supervisor
+        .get_thread(&thread.id)
+        .unwrap()
+        .provider_session_id;
+    supervisor
+        .prompt(&thread.id, prompt_input("hello queued after recovery"))
+        .await
+        .unwrap();
+    let guard = supervisor.prepare_update_restart().await.unwrap();
+    running.await.unwrap().unwrap();
+    assert_eq!(
+        supervisor.get_thread(&thread.id).unwrap().status,
+        "interrupted"
+    );
+    assert!(supervisor
+        .prompt(&thread.id, prompt_input("must not start while updating"))
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("updating"));
+    let paused = supervisor
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        paused.pending_steers.len(),
+        1,
+        "internal resume must stay hidden"
+    );
+    assert_eq!(paused.turns.len(), 1);
+    drop(guard);
+    let state = if restart {
+        let config = supervisor.config.clone();
+        drop(supervisor);
+        let db = Database::open(&config.database_url).unwrap();
+        Arc::new(Supervisor::new(
+            config,
+            db,
+            vec![Arc::new(FakeRuntime::new(Provider::Codex))],
+        ))
+    } else {
+        supervisor
+    };
+    state.spawn_live_item_persister();
+    assert!(state.defer_update_recovery());
+    assert!(state
+        .prompt(
+            &thread.id,
+            prompt_input("wait for update health verification")
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("updating"));
+    state.finish_update_attempt();
+    state.spawn_update_recovery(); // Repeated startup notification must not duplicate a turn.
+    tokio::time::timeout(std::time::Duration::from_secs(35), async {
+        loop {
+            let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+            if detail.turns.len() == 3 && detail.thread.status == "idle" {
+                assert_eq!(detail.turns[0].status, "interrupted");
+                assert_eq!(detail.turns[1].status, "completed");
+                assert!(detail.turns[1]
+                    .items
+                    .iter()
+                    .find(|item| item.kind == "userMessage")
+                    .unwrap()
+                    .text
+                    .as_str()
+                    .contains("Supervisor was updated"));
+                assert_eq!(
+                    detail.turns[2]
+                        .items
+                        .iter()
+                        .find(|item| item.kind == "userMessage")
+                        .unwrap()
+                        .text
+                        .as_str(),
+                    "hello queued after recovery"
+                );
+                assert!(detail.pending_steers.is_empty());
+                assert_eq!(detail.thread.provider_session_id, session);
+                assert_eq!(
+                    detail.thread.sandbox_mode.as_deref(),
+                    Some("danger-full-access")
+                );
+                assert!(detail.thread.last_error.is_none());
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let remaining: i64 = state
+        .db
+        .with(|conn| {
+            Ok(
+                conn.query_row("SELECT count(*) FROM thread_pending_steers", [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn supervisor_update_recovers_session_and_queue_after_process_restart() {
+    verify_update_recovery(true).await;
+}
+
+#[tokio::test]
+async fn supervisor_update_failure_resumes_old_process_without_duplicate_turns() {
+    verify_update_recovery(false).await;
+}
+
+#[tokio::test]
+async fn supervisor_update_recovery_respects_user_stop_and_ordinary_crashes() {
+    let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    insert_stale_turn(&supervisor, &thread.id, "stale-update");
+    supervisor.db.with(|conn| {
+        conn.execute("INSERT INTO thread_pending_steers(id,thread_id,turn_id,display_prompt,submitted_prompt,delivery,created_at,updated_at) VALUES ('update-resume:stale-update',?1,'stale-update','resume','resume','update-resume','2026-09-07','2026-09-07')", [&thread.id])?;
+        Ok(())
+    }).unwrap();
+    let config = supervisor.config.clone();
+    drop(supervisor);
+    let db = Database::open(&config.database_url).unwrap();
+    let state = Arc::new(Supervisor::new(
+        config,
+        db,
+        vec![Arc::new(FakeRuntime::new(Provider::Codex))],
+    ));
+    state.interrupt(&thread.id).await.unwrap();
+    state.spawn_update_recovery();
+    let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+    assert_eq!(detail.turns.len(), 1);
+    assert_eq!(detail.thread.status, "interrupted");
+    let remaining: i64 = state
+        .db
+        .with(|conn| {
+            Ok(
+                conn.query_row("SELECT count(*) FROM thread_pending_steers", [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(remaining, 0);
+    // Without an update marker, a restart must leave this interrupted turn alone.
+    state.spawn_update_recovery();
+    assert_eq!(state.get_thread(&thread.id).unwrap().status, "interrupted");
+}

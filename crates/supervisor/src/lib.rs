@@ -32,6 +32,9 @@ pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
             }
         });
     }
+    if state.defer_update_recovery() {
+        tokio::spawn(management::recover_after_update(state.clone()));
+    }
     axum::serve(listener, router(state)).await?;
     Ok(())
 }

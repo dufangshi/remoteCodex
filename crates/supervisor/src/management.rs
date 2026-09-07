@@ -75,6 +75,11 @@ pub async fn harness_action(
 }
 
 async fn updater(state: &Supervisor, action: &str) -> anyhow::Result<Value> {
+    if action == "status" {
+        if let Some(status) = state.supervisor_update_status.lock().unwrap().clone() {
+            return Ok(status);
+        }
+    }
     let node = std::env::var_os("REMOTE_CODEX_LAUNCHER_NODE").ok_or_else(|| {
         anyhow::anyhow!("This Supervisor was not started by an updatable npm launcher")
     })?;
@@ -118,44 +123,113 @@ pub async fn supervisor_check(State(state): State<Arc<Supervisor>>) -> Response 
     update_response(&state, "check").await
 }
 pub async fn supervisor_update(State(state): State<Arc<Supervisor>>) -> Response {
-    let Ok(guard) = state.maintenance_gate.clone().try_write_owned() else {
-        return (StatusCode::CONFLICT, Json(json!({"code":"conflict","message":"Wait for running turns to finish before updating the Supervisor."}))).into_response();
+    let Ok(update_lock) = state.update_lock.clone().try_lock_owned() else {
+        return (
+            StatusCode::CONFLICT,
+            Json(
+                json!({"code":"conflict","message":"A Supervisor update is already in progress."}),
+            ),
+        )
+            .into_response();
     };
-    match updater(&state, "launch").await {
-        Ok(value) => {
-            if value["canUpdate"] == true
-                && value["job"]["phase"].as_str().is_some_and(|phase| {
-                    matches!(
-                        phase,
-                        "scheduled" | "preparing" | "installing" | "restarting"
-                    )
-                })
-            {
-                tokio::spawn(async move {
-                    let _guard = guard;
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        if let Ok(status) = updater(&state, "status").await {
-                            if status["job"]["phase"].as_str().is_some_and(|phase| {
-                                matches!(
-                                    phase,
-                                    "completed" | "failed" | "rolled-back" | "rollback-failed"
-                                )
-                            }) {
-                                break;
+    let mut value = match updater(&state, "check").await {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"code":"update_unavailable","message":error.to_string()})),
+            )
+                .into_response()
+        }
+    };
+    if value["job"]["phase"].as_str().is_some_and(|phase| {
+        matches!(
+            phase,
+            "scheduled" | "preparing" | "installing" | "restarting"
+        )
+    }) {
+        return (
+            StatusCode::CONFLICT,
+            Json(
+                json!({"code":"conflict","message":"A Supervisor update is already in progress."}),
+            ),
+        )
+            .into_response();
+    }
+    if value["canUpdate"] != true || value["latestVersion"] == value["runningVersion"] {
+        return Json(value).into_response();
+    }
+    value["job"] = json!({"phase":"preparing","targetVersion":value["latestVersion"]});
+    *state.supervisor_update_status.lock().unwrap() = Some(value.clone());
+    let response = value.clone();
+    // Own the orchestration independently of the browser/relay HTTP request.
+    tokio::spawn(async move {
+        let _update_lock = update_lock;
+        let result = async {
+            let guard = state.prepare_update_restart().await?;
+            let launch = updater(&state, "launch").await;
+            match launch {
+                Ok(launched) => {
+                    if launched["canUpdate"] != true {
+                        anyhow::bail!(
+                            "{}",
+                            launched["reason"]
+                                .as_str()
+                                .unwrap_or("Unable to launch update worker")
+                        );
+                    }
+                    *state.supervisor_update_status.lock().unwrap() = None;
+                    if launched["job"]["phase"].as_str().is_some_and(|phase| {
+                        matches!(
+                            phase,
+                            "scheduled" | "preparing" | "installing" | "restarting"
+                        )
+                    }) {
+                        let mut errors = 0;
+                        loop {
+                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                            match updater(&state, "status").await {
+                                Ok(status) => {
+                                    errors = 0;
+                                    if status["job"]["phase"].as_str().is_some_and(|phase| {
+                                        matches!(
+                                            phase,
+                                            "completed"
+                                                | "failed"
+                                                | "rolled-back"
+                                                | "rollback-failed"
+                                        )
+                                    }) {
+                                        break;
+                                    }
+                                }
+                                Err(error) => {
+                                    errors += 1;
+                                    if errors >= 10 {
+                                        return Err(error);
+                                    }
+                                }
                             }
                         }
                     }
-                });
+                    drop(guard);
+                    Ok(())
+                }
+                Err(error) => {
+                    drop(guard);
+                    Err(error)
+                }
             }
-            Json(value).into_response()
         }
-        Err(error) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"code":"update_unavailable","message":error.to_string()})),
-        )
-            .into_response(),
-    }
+        .await;
+        if let Err(error) = result {
+            value["job"] = json!({"phase":"failed","error":error.to_string()});
+            *state.supervisor_update_status.lock().unwrap() = Some(value);
+        }
+        // The old process reaches here only when launch failed or rolled back.
+        state.finish_update_attempt();
+    });
+    (StatusCode::ACCEPTED, Json(response)).into_response()
 }
 
 async fn update_response(state: &Supervisor, action: &str) -> Response {
@@ -167,4 +241,25 @@ async fn update_response(state: &Supervisor, action: &str) -> Response {
         )
             .into_response(),
     }
+}
+
+/// Health/relay verification must complete before an updated process resumes tasks.
+/// Otherwise a subsequent rollback could interrupt a continuation whose marker
+/// has already been consumed.
+pub(crate) async fn recover_after_update(state: Arc<Supervisor>) {
+    loop {
+        let active = updater(&state, "status").await.ok().is_some_and(|status| {
+            status["job"]["phase"].as_str().is_some_and(|phase| {
+                matches!(
+                    phase,
+                    "scheduled" | "preparing" | "installing" | "restarting"
+                )
+            })
+        });
+        if !active {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    state.finish_update_attempt();
 }

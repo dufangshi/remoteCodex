@@ -1,3 +1,5 @@
+mod update;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -285,6 +287,10 @@ pub struct Supervisor {
     runtimes: HashMap<Provider, SharedRuntime>,
     live: Mutex<HashMap<String, LiveTurn>>,
     pub harness_gates: std::sync::Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
+    pub supervisor_update_status: std::sync::Mutex<Option<Value>>,
+    pub update_lock: Arc<Mutex<()>>,
+    update_draining: std::sync::atomic::AtomicBool,
+    update_recovering: std::sync::Mutex<HashSet<String>>,
     pub maintenance_gate: Arc<tokio::sync::RwLock<()>>,
     pub management_jobs: std::sync::Mutex<HashMap<String, Value>>,
     steer_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
@@ -324,6 +330,10 @@ impl Supervisor {
             harness_gates: Default::default(),
             management_jobs: Default::default(),
             maintenance_gate: Default::default(),
+            update_lock: Default::default(),
+            supervisor_update_status: Default::default(),
+            update_draining: Default::default(),
+            update_recovering: Default::default(),
             steer_locks: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
@@ -1324,6 +1334,7 @@ impl Supervisor {
     }
 
     pub fn ensure_prompt_allowed(&self, thread: &ThreadDto) -> Result<()> {
+        self.ensure_not_updating()?;
         if thread.source != "local_codex_import" && thread.source != "local_provider_import" {
             return Ok(());
         }
@@ -1905,7 +1916,7 @@ impl Supervisor {
         self.db.with(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, client_request_id, turn_id, display_prompt, delivery, created_at
-                 FROM thread_pending_steers WHERE thread_id=?1 ORDER BY created_at ASC",
+                 FROM thread_pending_steers WHERE thread_id=?1 AND delivery!='update-resume' ORDER BY created_at ASC",
             )?;
             let rows = stmt.query_map(params![thread_id], |row| {
                 Ok(ThreadPendingSteerDto {
@@ -1983,6 +1994,16 @@ impl Supervisor {
         Ok(())
     }
 
+    fn ensure_not_updating(&self) -> Result<()> {
+        if self
+            .update_draining
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            bail!("conflict: Supervisor is updating; running threads will resume automatically");
+        }
+        Ok(())
+    }
+
     async fn run_turn(
         &self,
         thread: ThreadDto,
@@ -1993,6 +2014,7 @@ impl Supervisor {
         pending_steer_id: Option<&str>,
         goal_submission: Option<GoalSubmission>,
     ) -> Result<()> {
+        self.ensure_not_updating()?;
         let provider = thread.provider;
         let _maintenance = self
             .maintenance_gate
@@ -2053,7 +2075,19 @@ impl Supervisor {
         } else {
             None
         };
+        let mut live_turns = self.live.lock().await;
+        self.ensure_not_updating()?;
+        if live_turns.contains_key(&thread.id) {
+            bail!("conflict: This thread is already running");
+        }
         self.db.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let conn = &tx;
+            if let Some(id) = pending_steer_id {
+                if conn.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2", params![id, thread.id])? != 1 {
+                    bail!("conflict: Queued prompt was already consumed or cancelled");
+                }
+            }
             let ordinal: i64 = conn
                 .query_row(
                     "SELECT COALESCE(MAX(ordinal),0)+1 FROM thread_turns WHERE thread_id=?1",
@@ -2115,9 +2149,7 @@ impl Supervisor {
                 Some(&now),
                 &now,
             )?;
-            if let Some(id) = pending_steer_id {
-                conn.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2", params![id, thread.id])?;
-            }
+            tx.commit()?;
             Ok(())
         })?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -2127,12 +2159,13 @@ impl Supervisor {
             payload: json!({ "status": "running", "turnId": turn_id, "title": title }),
         });
         let cancel = CancellationToken::new();
-        self.live.lock().await.insert(
+        live_turns.insert(
             thread.id.clone(),
             LiveTurn {
                 cancel: cancel.clone(),
             },
         );
+        drop(live_turns);
         let prompt = if let Some(submission) = goal_submission {
             self.updated_goal_snapshot(
                 &thread.id,
@@ -2301,6 +2334,12 @@ impl Supervisor {
     }
 
     async fn drain_steers(&self, thread_id: &str) -> Result<()> {
+        if self
+            .update_draining
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(());
+        }
         let next = self.db.with(|conn| {
             let row: Option<(String, String)> = conn
                 .query_row(
@@ -2480,9 +2519,18 @@ impl Supervisor {
     }
 
     pub async fn interrupt(&self, thread_id: &str) -> Result<ThreadDetailDto> {
+        // Serialize user stops with the update's snapshot and cancellation.
+        let live_turns = self.live.lock().await;
+        // An explicit user stop cancels an update's automatic continuation too.
+        self.db.with(|conn| {
+            conn.execute(
+                "DELETE FROM thread_pending_steers WHERE thread_id=?1 AND delivery='update-resume'",
+                params![thread_id],
+            )?;
+            Ok(())
+        })?;
         let interrupted_turn_id = self.active_turn_id(thread_id)?;
         let had_live_turn = {
-            let live_turns = self.live.lock().await;
             if let Some(live) = live_turns.get(thread_id) {
                 live.cancel.cancel();
                 true
@@ -2490,6 +2538,7 @@ impl Supervisor {
                 false
             }
         };
+        drop(live_turns);
         if !had_live_turn {
             if let Ok(thread) = self.get_thread(thread_id) {
                 if let Some(session) = thread.provider_session_id {

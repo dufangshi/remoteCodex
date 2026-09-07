@@ -4,6 +4,28 @@ Self-hosted control plane for long-running coding agents. The supervisor is Rust
 
 This branch replaces the TypeScript `supervisor-api` / `relay-server` / per-harness SDK stacks.
 
+## Updates and agent guidance
+
+Read [AGENTS.md](AGENTS.md) before changing or releasing this project.
+When a Supervisor is already running, prefer its own device-scoped update API
+(the same **Check updates** / **Update** controls in Settings) over a manual npm
+install and process kill:
+
+- `POST /api/management/supervisor/check`
+- `POST /api/management/supervisor/update`
+- `GET /api/management/supervisor` to follow progress
+
+Through the public relay, prefix these paths with `/relay/devices/<deviceId>`
+and use the device owner's authenticated session. Updates run independently of
+the initiating browser or agent, restart the Supervisor, and resume the threads
+interrupted by that update with their saved sessions, permissions, and queued
+input. Threads already stopped by the user stay stopped. If installation or
+restart fails, rollback restores the previous service and resumes its interrupted
+work where possible; recovery failures are reported on the affected thread.
+
+Use the existing installation method only to bootstrap a version without this
+API or when the API is unavailable. See [the update and recovery design](docs/supervisor-update-recovery.md).
+
 ## Layout
 
 - `crates/protocol` — wire DTOs

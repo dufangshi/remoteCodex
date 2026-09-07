@@ -121,12 +121,16 @@ for (const failure of ['download', 'startup', 'new-turn'])
         },
         start: (_exe, _args, env) => {
           launches.push(env);
-          if (env.REMOTE_CODEX_NATIVE_BINARY === plan.executable)
+          if (env.REMOTE_CODEX_NATIVE_BINARY === plan.executable) {
+            const job = readJob(plan.statusFile, plan.lock);
+            assert.equal(job.phase, 'restarting', 'rollback must retain an active job until health verification');
+            assert.equal(job.rollingBack, true);
             health = {
               processId: 2147483645,
               runningVersion: plan.runningVersion,
               status: 'ok',
             };
+          }
         },
       });
       assert.equal(

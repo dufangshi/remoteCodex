@@ -15,3 +15,5 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - For runtime/npm releases or installed-version troubleshooting, follow the project [release-runtime skill](.agents/skills/release-runtime/SKILL.md).
 
 - Public Web UI for `remote.lnz-study.com` is served by the remote Rust relay, not the device supervisor. After a Web/shared UI change, publish the shared UI commit and dispatch `relay-deploy.yml` from `main` with its full `thread_ui_sha`; restarting a device supervisor alone does not deploy Web changes. `legacy/node-0.11` is a backup branch, not the main deployment target.
+
+- For an already-running Supervisor, prefer its device-scoped management Check/Update API (Settings) over manual npm installation or killing the process. The updater must run independently, restart the service, and resume only threads interrupted by that update. Test restart/recovery changes in the Treer Apple container machine, not the active host Supervisor. Use manual detached recovery only when the installed API is unavailable or cannot complete the update.
