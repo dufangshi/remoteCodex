@@ -1655,3 +1655,98 @@ test('archive links show a download panel and preserve original bytes for local 
   }
   expect(reads).toEqual(['linked-download', 'workspace-download']);
 });
+
+test('Windows Markdown images and links resolve drive URLs to the correct device files', async ({page}, testInfo) => {
+  await installFakeWebSocket(page);
+  const root = 'C:\\Users\\Administrator\\Documents\\美股';
+  const relative = 'output/imagegen/a b.png';
+  const external = 'D:/Downloads/生成.png';
+  const origin = `http://localhost:${process.env.E2E_WEB_PORT ?? '5173'}`;
+  const href = `${origin}/C%3A/Users/Administrator/Documents/%E7%BE%8E%E8%82%A1/output/imagegen/a%20b.png`;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/a0AAAAASUVORK5CYII=', 'base64');
+  await installApiRoutes(page, () => detail('codex', {
+    workspace: {...workspace(), absPath: root},
+    thread: {status:'idle', activeTurnId:null},
+    turns: [{id:'turn-1', status:'completed', startedAt:now, items:[{id:'answer', kind:'agentMessage', text:
+      `![Windows inline](${href})\n\n[Open Windows original](${href})\n\n[Open another drive](file:///D:/Downloads/%E7%94%9F%E6%88%90.png)`}]}],
+  }));
+  const stats: string[] = [];
+  const images: string[] = [];
+  await page.route('**/api/workspaces/workspace-1/files/**', async route => {
+    const url = new URL(route.request().url());
+    const path = url.searchParams.get('path') ?? '';
+    if (url.pathname.endsWith('/tree')) {
+      const next: Record<string, {path:string;name:string;kind:string;hasChildren?:boolean}> = {
+        '': {path:'output',name:'output',kind:'directory',hasChildren:true},
+        output: {path:'output/imagegen',name:'imagegen',kind:'directory',hasChildren:true},
+        'output/imagegen': {path:relative,name:'a b.png',kind:'file'},
+      };
+      expect(next[path]).toBeDefined();
+      await route.fulfill({json:{path,name:path.split('/').pop() || '美股',kind:'directory',childrenLoaded:true,children:[next[path]]}});
+    } else {
+      expect(url.pathname.endsWith('/raw')).toBe(true);
+      expect(path).toBe(relative);
+      images.push(path);
+      await route.fulfill({contentType:'image/png',body:png});
+    }
+  });
+  await page.route('**/api/threads/thread-1/linked-files/**', async route => {
+    const url = new URL(route.request().url());
+    const path = url.searchParams.get('path');
+    expect(path).toBe(external); // Never /D:/..., which Windows rejects as non-absolute.
+    if (url.pathname.endsWith('/stat')) {
+      stats.push(path!);
+      await route.fulfill({json:{path,name:'生成.png',kind:'file',size:png.length}});
+    } else {
+      expect(url.pathname.endsWith('/raw')).toBe(true);
+      await route.fulfill({contentType:'image/png',body:png});
+    }
+  });
+  await page.goto('/threads/thread-1');
+  const before = page.url();
+  const inline = page.getByRole('img',{name:'Windows inline',exact:true});
+  await expect.poll(() => inline.evaluate(el => (el as HTMLImageElement).naturalWidth)).toBe(1);
+  await page.getByRole('link',{name:'Open Windows original',exact:true}).click();
+  const preview = page.locator('section img[src*="/files/raw"]').last();
+  await expect(preview).toBeVisible();
+  await expect.poll(() => preview.evaluate(el => (el as HTMLImageElement).naturalWidth)).toBe(1);
+  expect(stats).toEqual([]);
+  expect(images).toContain(relative);
+  await page.getByRole('button',{name:testInfo.project.name === 'mobile-chromium' ? 'Show chat' : 'Collapse workspace',exact:true}).first().click();
+  await page.getByRole('link',{name:'Open another drive',exact:true}).click();
+  const linkedImage = page.locator('img[src*="linked-files/raw"]').first();
+  await expect(linkedImage).toBeVisible();
+  await expect.poll(() => linkedImage.evaluate(el => (el as HTMLImageElement).naturalWidth)).toBe(1);
+  expect(stats).toEqual([external]);
+  expect(page.url()).toBe(before);
+});
+
+test('composer image cards open zoom preview without changing the draft or sending it', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex', {thread:{status:'idle',activeTurnId:null}}));
+  await page.goto('/threads/thread-1');
+  const prompt = page.getByRole('textbox',{name:'Prompt',exact:true});
+  await prompt.fill('Keep this draft ');
+  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+    name:'draft.png', mimeType:'image/png',
+    buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/a0AAAAASUVORK5CYII=','base64'),
+  });
+  const card = prompt.getByRole('button',{name:'Open image preview: draft.png',exact:true});
+  await expect(card).toBeVisible();
+  const draft = await prompt.textContent();
+  await card.click();
+  const dialog = page.getByRole('dialog',{name:'Image preview: draft.png',exact:true});
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.getByRole('img').evaluate(el => (el as HTMLImageElement).naturalWidth)).toBe(1);
+  await dialog.getByRole('button',{name:'Zoom in',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'Reset zoom, currently 125%',exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'Close image preview',exact:true}).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await prompt.textContent()).toBe(draft);
+  await expect(card).toBeFocused();
+  await card.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(await prompt.textContent()).toBe(draft);
+});
