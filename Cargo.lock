@@ -1929,7 +1929,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-codex"
-version = "0.12.18"
+version = "0.12.19"
 dependencies = [
  "anyhow",
  "clap",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-protocol"
-version = "0.12.18"
+version = "0.12.19"
 dependencies = [
  "chrono",
  "serde",
@@ -1955,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-relay"
-version = "0.12.18"
+version = "0.12.19"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-runtime"
-version = "0.12.18"
+version = "0.12.19"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-supervisor"
-version = "0.12.18"
+version = "0.12.19"
 dependencies = [
  "aes-gcm",
  "anyhow",
