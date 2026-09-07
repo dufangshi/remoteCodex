@@ -177,7 +177,8 @@ impl AcpRuntime {
         let mut extra_env = extra_env_for(def);
         let codex_bridge = if def.id == "codex" {
             Some(Arc::new(
-                super::codex_bridge::CodexBridge::new(&def.base_command, &mut extra_env).await?,
+                super::codex_bridge::CodexBridge::new(&def.base_command, &mut extra_env, &policy)
+                    .await?,
             ))
         } else {
             None
@@ -334,9 +335,7 @@ impl AcpRuntime {
             available_modes,
             current_mode_id,
         };
-        if let Err(err) = Self::apply_product_mode(&live.process.clone(), &mut live).await {
-            tracing::warn!(error = %err, "failed to apply ACP session mode on spawn");
-        }
+        Self::apply_product_mode(&live.process.clone(), &mut live).await?;
         Ok((scoped, live))
     }
 
@@ -624,6 +623,9 @@ impl AcpRuntime {
 
     async fn apply_product_mode(process: &AcpProcess, live: &mut LiveSession) -> Result<()> {
         let policy = Self::policy_from_live(live);
+        if let Some(bridge) = &live.codex_bridge {
+            bridge.set_policy(&live.session_id, &policy).await?;
+        }
         if let Some(mode_id) = resolve_mode(&live.available_modes, &policy) {
             if live.current_mode_id.as_deref() != Some(mode_id.as_str()) {
                 Self::apply_setting_op(process, live, SessionSettingOp::SetMode { mode_id })
@@ -707,9 +709,7 @@ impl AcpRuntime {
             Self::apply_fast_mode(&live.process.clone(), live, enabled).await?;
         }
         if sandbox.is_some() || collab.is_some() || approval.is_some() {
-            if let Err(err) = Self::apply_product_mode(&live.process.clone(), live).await {
-                tracing::warn!(error = %err, "failed to apply ACP session mode");
-            }
+            Self::apply_product_mode(&live.process.clone(), live).await?;
         }
         Ok(())
     }
@@ -1144,6 +1144,7 @@ impl AgentRuntime for AcpRuntime {
         &self,
         session_id: &str,
         cwd: Option<&str>,
+        settings: SessionSettings,
     ) -> Result<StartSessionResult> {
         let _lifecycle = self.inner.lifecycle.lock().await;
         {
@@ -1183,8 +1184,9 @@ impl AgentRuntime for AcpRuntime {
                 &def,
                 &cwd,
                 ProductSessionPolicy {
-                    approval_mode: Some("yolo".into()),
-                    ..ProductSessionPolicy::default()
+                    approval_mode: settings.approval_mode,
+                    sandbox_mode: settings.sandbox_mode,
+                    collaboration_mode: settings.collaboration_mode,
                 },
                 Some(raw.as_str()),
                 None,
@@ -2389,7 +2391,11 @@ mod tests {
                 .spawn_session(
                     &def,
                     &dir.path().to_string_lossy(),
-                    ProductSessionPolicy::default(),
+                    ProductSessionPolicy {
+                        sandbox_mode: Some("danger-full-access".into()),
+                        approval_mode: Some("yolo".into()),
+                        ..Default::default()
+                    },
                     None,
                     None,
                 )
@@ -2427,6 +2433,12 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            let native: Value = serde_json::from_str(
+                &std::fs::read_to_string(dir.path().join("native-policy.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(native["sandboxPolicy"]["type"], "dangerFullAccess");
+            assert_eq!(native["approvalPolicy"], "never");
             assert!(items
                 .iter()
                 .any(|item| item.text == "goal executed: verify goal output"));

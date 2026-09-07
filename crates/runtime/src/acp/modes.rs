@@ -30,6 +30,7 @@ impl ProductSessionPolicy {
 
     pub fn allows_writes_outside_workspace(&self) -> bool {
         matches!(self.sandbox_mode.as_deref(), Some("danger-full-access"))
+            || self.sandbox_mode.is_none() && self.approval_mode.as_deref() == Some("yolo")
     }
 
     pub fn rejects_writes(&self) -> bool {
@@ -50,7 +51,7 @@ impl ProductSessionPolicy {
 /// Full access wins over Plan: Plan is a collaboration hint, Full is an
 /// explicit permission grant. Plan still wins over workspace-write/read-only.
 pub fn preferred_mode_ids(policy: &ProductSessionPolicy) -> Vec<&'static str> {
-    if matches!(policy.sandbox_mode.as_deref(), Some("danger-full-access")) {
+    if policy.allows_writes_outside_workspace() {
         vec![
             "agent-full-access",
             "full-access",
@@ -290,6 +291,25 @@ mod tests {
                 name: Some((*id).to_string()),
             })
             .collect()
+    }
+
+    #[test]
+    fn imported_yolo_without_sandbox_is_full_but_explicit_restrictions_win() {
+        let mut policy = ProductSessionPolicy {
+            approval_mode: Some("yolo".into()),
+            ..Default::default()
+        };
+        let available = modes(&["agent", "agent-full-access", "read-only"]);
+        assert_eq!(
+            resolve_mode(&available, &policy).as_deref(),
+            Some("agent-full-access")
+        );
+        assert!(policy.allows_writes_outside_workspace());
+        policy.sandbox_mode = Some("workspace-write".into());
+        assert_eq!(resolve_mode(&available, &policy).as_deref(), Some("agent"));
+        assert!(!policy.allows_writes_outside_workspace());
+        policy.sandbox_mode = Some("read-only".into());
+        assert!(policy.rejects_writes());
     }
 
     #[test]

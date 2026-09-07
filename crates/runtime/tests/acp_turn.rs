@@ -409,7 +409,7 @@ async fn restored_session_applies_advertised_effort_and_recovers_after_settings_
     restored.start().await.unwrap();
     assert!(!restored.session_loaded(&session_id));
     restored
-        .resume_session(&session_id, dir.path().to_str())
+        .resume_session(&session_id, dir.path().to_str(), Default::default())
         .await
         .unwrap();
     for (turn_id, effort) in [("after-restart", "high"), ("retry", "medium")] {
@@ -681,7 +681,7 @@ async fn restarting_harness_reloads_config_and_preserves_resumable_session() {
     assert_eq!(runtime.restart("custom").await.unwrap(), 1);
     assert!(!runtime.session_loaded(&session));
     runtime
-        .resume_session(&session, dir.path().to_str())
+        .resume_session(&session, dir.path().to_str(), Default::default())
         .await
         .unwrap();
     let second = runtime

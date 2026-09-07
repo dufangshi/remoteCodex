@@ -154,6 +154,7 @@ pub trait AgentRuntime: Send + Sync {
         &self,
         session_id: &str,
         cwd: Option<&str>,
+        settings: SessionSettings,
     ) -> Result<StartSessionResult>;
     async fn start_turn(
         &self,

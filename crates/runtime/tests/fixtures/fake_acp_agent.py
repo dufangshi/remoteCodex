@@ -8,6 +8,25 @@ import time
 import threading
 
 
+# Model the private native control connection used by Codex-backed ACP sessions.
+if os.environ.get("REMOTE_CODEX_APP_SERVER_BRIDGE"):
+    def bridge_loop():
+        import socket
+        config = json.loads(os.environ["REMOTE_CODEX_APP_SERVER_BRIDGE"])
+        host, port = config["address"].rsplit(":", 1)
+        sock = socket.create_connection((host, int(port)))
+        stream = sock.makefile("rw")
+        stream.write(config["token"] + "\n")
+        stream.flush()
+        for line in stream:
+            request = json.loads(line)
+            if request.get("method") == "thread/settings/update":
+                with open("native-policy.json", "w") as f:
+                    json.dump(request["params"], f)
+            stream.write(json.dumps({"id": request["id"], "result": {}}) + "\n")
+            stream.flush()
+    threading.Thread(target=bridge_loop, daemon=True).start()
+
 startup_config = open("restart-config.txt").read() if os.path.exists("restart-config.txt") else "unset"
 fast_enabled = False
 steering_prompt_id = None

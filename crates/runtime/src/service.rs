@@ -29,6 +29,17 @@ use crate::import_id::{
 };
 use crate::local_sessions::{find_local_session, list_local_sessions, LocalSessionHomes};
 
+fn thread_session_settings(thread: &ThreadDto) -> SessionSettings {
+    SessionSettings {
+        model: thread.model.clone(),
+        effort: thread.reasoning_effort.clone(),
+        sandbox_mode: thread.sandbox_mode.clone(),
+        collaboration_mode: Some(thread.collaboration_mode.clone()),
+        approval_mode: Some(thread.approval_mode.clone()),
+        performance_mode: thread.fast_mode.then_some(true),
+    }
+}
+
 struct GoalSubmission {
     wire_prompt: String,
     goal: GoalState,
@@ -2007,8 +2018,14 @@ impl Supervisor {
                 .get_workspace(&thread.workspace_id)
                 .ok()
                 .map(|ws| ws.abs_path);
-            runtime.resume_session(&session_id, cwd.as_deref()).await?;
-            let _ = runtime
+            runtime
+                .resume_session(
+                    &session_id,
+                    cwd.as_deref(),
+                    thread_session_settings(&thread),
+                )
+                .await?;
+            runtime
                 .apply_session_settings(
                     session_id.as_str(),
                     SessionSettings {
@@ -2020,7 +2037,7 @@ impl Supervisor {
                         performance_mode: thread.fast_mode.then_some(true),
                     },
                 )
-                .await;
+                .await?;
         }
         if let Some(submission) = &goal_submission {
             runtime
@@ -2668,7 +2685,11 @@ impl Supervisor {
             .as_deref()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         runtime
-            .resume_session(session, Some(&detail.workspace.abs_path))
+            .resume_session(
+                session,
+                Some(&detail.workspace.abs_path),
+                thread_session_settings(&detail.thread),
+            )
             .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
@@ -2703,7 +2724,11 @@ impl Supervisor {
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let runtime = self.runtime(detail.thread.provider)?;
         runtime
-            .resume_session(&session, Some(&detail.workspace.abs_path))
+            .resume_session(
+                &session,
+                Some(&detail.workspace.abs_path),
+                thread_session_settings(&detail.thread),
+            )
             .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
@@ -2831,8 +2856,10 @@ impl Supervisor {
             .map(|ws| ws.abs_path);
         if let Some(session) = &thread.provider_session_id {
             let runtime = self.runtime(thread.provider)?;
-            let _ = runtime.resume_session(session, cwd.as_deref()).await;
-            let _ = runtime
+            runtime
+                .resume_session(session, cwd.as_deref(), thread_session_settings(&thread))
+                .await?;
+            runtime
                 .apply_session_settings(
                     session,
                     SessionSettings {
@@ -2844,7 +2871,7 @@ impl Supervisor {
                         performance_mode: thread.fast_mode.then_some(true),
                     },
                 )
-                .await;
+                .await?;
         }
         self.get_thread_detail_view(id, Some(3), true).await
     }
@@ -2923,7 +2950,11 @@ impl Supervisor {
         if !runtime.session_loaded(session) {
             let workspace = self.get_workspace(&thread.workspace_id)?;
             runtime
-                .resume_session(session, Some(&workspace.abs_path))
+                .resume_session(
+                    session,
+                    Some(&workspace.abs_path),
+                    thread_session_settings(&thread),
+                )
                 .await?;
         }
         let argument = objective.as_deref().unwrap_or("resume").trim();
@@ -3129,7 +3160,11 @@ impl Supervisor {
         };
         let workspace = self.get_workspace(&thread.workspace_id)?;
         runtime
-            .resume_session(session, Some(&workspace.abs_path))
+            .resume_session(
+                session,
+                Some(&workspace.abs_path),
+                thread_session_settings(&thread),
+            )
             .await?;
         runtime
             .session_capabilities(thread.agent_id.as_deref(), session)

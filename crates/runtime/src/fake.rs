@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use crate::acp::{adapter_for, NegotiatedCaps};
 use crate::actor::{
-    AgentRuntime, EventBus, GoalState, ImportSessionMeta, StartSessionInput, StartSessionResult,
-    StartTurnInput,
+    AgentRuntime, EventBus, GoalState, ImportSessionMeta, SessionSettings, StartSessionInput,
+    StartSessionResult, StartTurnInput,
 };
 use crate::import_id::session_ids_match;
 
@@ -210,6 +210,7 @@ impl AgentRuntime for FakeRuntime {
         &self,
         session_id: &str,
         cwd: Option<&str>,
+        _settings: SessionSettings,
     ) -> Result<StartSessionResult> {
         let mut sessions = self.sessions.lock().unwrap();
         if !sessions.contains_key(session_id) {

@@ -1,6 +1,6 @@
 //! Narrow control bridge to the app-server already owned by codex-acp.
 //! ACP owns prompt/resume/cancel; model catalog compatibility is applied in transit.
-//! The control pipe only reads turn IDs and creates forks on the same app-server.
+//! The private control pipe also synchronizes native permission defaults before ACP prompts.
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashSet, process::Stdio, time::Duration};
@@ -18,7 +18,11 @@ pub(super) struct CodexBridge {
 }
 
 impl CodexBridge {
-    pub async fn new(command: &str, env: &mut Vec<(&'static str, String)>) -> Result<Self> {
+    pub async fn new(
+        command: &str,
+        env: &mut Vec<(&'static str, String)>,
+        policy: &super::modes::ProductSessionPolicy,
+    ) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let token = uuid::Uuid::new_v4().to_string();
         env.retain(|(key, _)| *key != "CODEX_PATH");
@@ -29,7 +33,7 @@ impl CodexBridge {
         env.push((
             "REMOTE_CODEX_APP_SERVER_BRIDGE",
             json!({
-                "address": listener.local_addr()?.to_string(), "token": token, "command": command
+                "address": listener.local_addr()?.to_string(), "token": token, "command": command, "policy": super::codex_permissions::native_policy(policy)
             })
             .to_string(),
         ));
@@ -38,6 +42,34 @@ impl CodexBridge {
             token,
             stream: Mutex::new(None),
         })
+    }
+
+    pub async fn set_policy(
+        &self,
+        session: &str,
+        policy: &super::modes::ProductSessionPolicy,
+    ) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let mut guard = self.stream.lock().await;
+            if guard.is_none() {
+                loop {
+                    let (stream, _) = self.listener.accept().await?;
+                    let mut reader = BufReader::new(stream);
+                    let mut hello = String::new();
+                    if matches!(tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut hello)).await, Ok(Ok(_)))
+                        && hello.trim() == self.token {
+                        *guard = Some(reader);
+                        break;
+                    }
+                }
+            }
+            let native = super::codex_permissions::native_policy(policy);
+            request(guard.as_mut().unwrap(), "thread/settings/update", json!({
+                "threadId":session, "sandboxPolicy":native["sandboxPolicy"],
+                "approvalPolicy":native["approvalPolicy"], "approvalsReviewer":native["approvalsReviewer"]
+            })).await?;
+            Ok(())
+        }).await.context("Codex permission synchronization timed out")?
     }
 
     pub async fn fork(&self, source: &str, rollback_count: u32) -> Result<String> {
@@ -132,25 +164,30 @@ pub async fn run() -> Result<()> {
     let mut control_in = BufReader::new(read).lines();
     let mut pending = HashSet::new();
     let mut models = super::codex_models::ModelCatalogBridge::default();
+    let mut permissions = super::codex_permissions::PermissionBridge::new(config["policy"].clone());
     loop {
         tokio::select! {
             line = acp_in.next_line() => {
                 let Some(line) = line? else { break; };
-                models.observe_request(&serde_json::from_str(&line)?);
-                native_in.write_all(format!("{line}\n").as_bytes()).await?;
+                let mut message: Value = serde_json::from_str(&line)?;
+                permissions.request(&mut message);
+                models.observe_request(&message);
+                native_in.write_all(format!("{message}\n").as_bytes()).await?;
             }
             line = control_in.next_line() => {
                 let Some(line) = line? else { break; };
-                let message: Value = serde_json::from_str(&line)?;
+                let mut message: Value = serde_json::from_str(&line)?;
                 let method = message["method"].as_str().unwrap_or("");
                 if !allowed_control(&message) { bail!("unsupported Codex bridge operation"); }
                 let id = message["id"].as_str().context("bridge request id")?.to_string();
                 pending.insert((id, method.to_string()));
-                native_in.write_all(format!("{line}\n").as_bytes()).await?;
+                permissions.request(&mut message);
+                native_in.write_all(format!("{message}\n").as_bytes()).await?;
             }
             line = native_out.next_line() => {
                 let Some(line) = line? else { break; };
                 let mut message: Value = serde_json::from_str(&line)?;
+                permissions.response(&message);
                 let id = message["id"].as_str().unwrap_or("");
                 let owned = pending.iter().find(|(key,_)| key == id).cloned();
                 if let Some(key) = owned {
@@ -172,7 +209,16 @@ fn allowed_control(message: &Value) -> bool {
     matches!(
         message["method"].as_str(),
         Some("thread/fork" | "thread/turns/list")
-    )
+    ) || (message["method"] == "thread/settings/update"
+        && message["params"].as_object().is_some_and(|params| {
+            params.keys().all(|key| {
+                matches!(
+                    key.as_str(),
+                    "threadId" | "sandboxPolicy" | "approvalPolicy" | "approvalsReviewer"
+                )
+            }) && params.get("threadId").is_some_and(Value::is_string)
+                && params.contains_key("sandboxPolicy")
+        }))
 }
 
 #[cfg(test)]
