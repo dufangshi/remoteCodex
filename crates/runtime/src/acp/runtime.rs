@@ -1296,11 +1296,22 @@ impl AgentRuntime for AcpRuntime {
         }
         tokio::pin!(prompt_rpc);
         let mut prompt_done = false;
+        let mut cancel_sent = false;
+        let mut cancel_deadline = tokio::time::Instant::now();
+        let mut discard_session = false;
         let outcome = loop {
             tokio::select! {
                 biased;
-                _ = cancel.cancelled() => {
+                _ = cancel.cancelled(), if !cancel_sent => {
+                    cancel_sent = true;
+                    cancel_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
                     let _ = process.notify("session/cancel", json!({ "sessionId": session_id })).await;
+                }
+                _ = tokio::time::sleep_until(cancel_deadline), if cancel_sent && !prompt_done => {
+                    // Never reuse a session while its previous prompt may still be
+                    // executing. A stalled cancellation must resume a fresh process.
+                    let _ = process.shutdown().await;
+                    discard_session = true;
                     break TurnOutcome::Interrupted;
                 }
                 result = &mut prompt_rpc, if !prompt_done => {
@@ -1320,11 +1331,19 @@ impl AgentRuntime for AcpRuntime {
                             }
                             if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") {
                                 cancel.cancel();
-                                break TurnOutcome::Interrupted;
+                                cancel_sent = true;
+                            }
+                            if cancel_sent {
+                                prompt_done = true;
+                                continue;
                             }
                             prompt_done = true;
                         },
                         Err(err) => {
+                            if cancel_sent || cancel.is_cancelled() {
+                                discard_session = process.exited().await.unwrap_or(true);
+                                break TurnOutcome::Interrupted;
+                            }
                             tracing::warn!(
                                 error = %err,
                                 session_id = %session_id,
@@ -1387,11 +1406,12 @@ impl AgentRuntime for AcpRuntime {
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(250)), if prompt_done => {
-                    break TurnOutcome::Completed;
+                    break if cancel.is_cancelled() { TurnOutcome::Interrupted } else { TurnOutcome::Completed };
                 }
                 _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
                     match process.exited().await {
                         Ok(true) => {
+                            if cancel_sent { discard_session = true; break TurnOutcome::Interrupted; }
                             break TurnOutcome::Failed(anyhow!("ACP process exited before session/prompt completed"));
                         }
                         Ok(false) => {}
@@ -1416,6 +1436,13 @@ impl AgentRuntime for AcpRuntime {
             {
                 live.active = None;
             }
+        }
+        if discard_session {
+            self.inner
+                .sessions
+                .lock()
+                .await
+                .remove(&input.provider_session_id);
         }
         if let Some(reader) = usage_reader.as_mut() {
             for usage in reader.poll_final() {
@@ -1459,8 +1486,15 @@ impl AgentRuntime for AcpRuntime {
         }
     }
 
-    async fn interrupt(&self, session_id: &str, _turn_id: &str) -> Result<()> {
+    async fn interrupt(&self, session_id: &str, turn_id: &str) -> Result<()> {
         if let Some(live) = self.inner.sessions.lock().await.get(session_id) {
+            if !live
+                .active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == turn_id)
+            {
+                return Ok(());
+            }
             live.process
                 .notify("session/cancel", json!({ "sessionId": live.session_id }))
                 .await?;

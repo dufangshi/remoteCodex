@@ -1934,7 +1934,7 @@ impl Supervisor {
             )?;
             return self.thread_action_detail(thread_id).await;
         }
-        self.run_turn(thread, prompt, model, reasoning_effort, images)
+        self.run_turn(thread, prompt, model, reasoning_effort, images, None)
             .await?;
         self.get_thread_detail_view(thread_id, Some(3), true).await
     }
@@ -1972,6 +1972,7 @@ impl Supervisor {
         model: Option<String>,
         effort: Option<String>,
         images: Vec<PromptImage>,
+        pending_steer_id: Option<&str>,
     ) -> Result<()> {
         let provider = thread.provider;
         let _maintenance = self
@@ -2084,6 +2085,9 @@ impl Supervisor {
                 Some(&now),
                 &now,
             )?;
+            if let Some(id) = pending_steer_id {
+                conn.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2", params![id, thread.id])?;
+            }
             Ok(())
         })?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -2141,11 +2145,20 @@ impl Supervisor {
                 )?;
             }
             Err(err) => {
+                let error = err.to_string();
                 self.persist_turn_result(
                     &thread.id,
                     &turn_id,
-                    "failed",
-                    Some(&err.to_string()),
+                    if cancel.is_cancelled() {
+                        "interrupted"
+                    } else {
+                        "failed"
+                    },
+                    if cancel.is_cancelled() {
+                        None
+                    } else {
+                        Some(error.as_str())
+                    },
                     &[],
                     &completed_at,
                 )?;
@@ -2256,16 +2269,11 @@ impl Supervisor {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            if let Some((id, prompt)) = &row {
-                conn.execute("DELETE FROM thread_pending_steers WHERE id=?1", params![id])?;
-                Ok(Some(prompt.clone()))
-            } else {
-                Ok(None)
-            }
+            Ok(row)
         })?;
-        if let Some(prompt) = next {
+        if let Some((id, prompt)) = next {
             let thread = self.get_thread(thread_id)?;
-            Box::pin(self.run_turn(thread, prompt, None, None, Vec::new())).await?;
+            Box::pin(self.run_turn(thread, prompt, None, None, Vec::new(), Some(&id))).await?;
         }
         Ok(())
     }
@@ -2429,6 +2437,7 @@ impl Supervisor {
     }
 
     pub async fn interrupt(&self, thread_id: &str) -> Result<ThreadDetailDto> {
+        let interrupted_turn_id = self.active_turn_id(thread_id)?;
         let had_live_turn = {
             let live_turns = self.live.lock().await;
             if let Some(live) = live_turns.get(thread_id) {
@@ -2438,15 +2447,16 @@ impl Supervisor {
                 false
             }
         };
-        if let Ok(thread) = self.get_thread(thread_id) {
-            if let Some(session) = thread.provider_session_id {
-                let _ = self
-                    .runtime(thread.provider)?
-                    .interrupt(&session, thread.active_turn_id.as_deref().unwrap_or(""))
-                    .await;
-            }
-        }
         if !had_live_turn {
+            if let Ok(thread) = self.get_thread(thread_id) {
+                if let Some(session) = thread.provider_session_id {
+                    let _ = self
+                        .runtime(thread.provider)?
+                        .interrupt(&session, thread.active_turn_id.as_deref().unwrap_or(""))
+                        .await;
+                }
+            }
+
             let reconciled = self.reconcile_stale_turns(Some(thread_id), true)?;
             if reconciled > 0 {
                 self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -2459,14 +2469,13 @@ impl Supervisor {
             return self.get_thread_detail_view(thread_id, Some(3), true).await;
         }
         for _ in 0..100 {
-            if self.active_turn_id(thread_id)?.is_none() {
+            if self.active_turn_id(thread_id)? != interrupted_turn_id {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        if self.active_turn_id(thread_id)?.is_some() {
-            self.reconcile_stale_turns(Some(thread_id), true)?;
-        }
+        // The live turn owns cancellation and queue draining. Do not reconcile
+        // a slow cancellation (or its newly started continuation) as stale.
         self.get_thread_detail_view(thread_id, Some(3), true).await
     }
 

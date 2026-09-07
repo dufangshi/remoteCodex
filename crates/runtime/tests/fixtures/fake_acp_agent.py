@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import threading
 
 
 startup_config = open("restart-config.txt").read() if os.path.exists("restart-config.txt") else "unset"
@@ -13,6 +14,9 @@ steering_prompt_id = None
 reasoning_effort = "medium"
 question_turn = None
 form_capability = False
+cancellable_prompt = None
+cancel_delay = 2.4
+write_lock = threading.Lock()
 
 
 def config_options():
@@ -30,8 +34,9 @@ def config_options():
 
 
 def send(obj):
-    sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    with write_lock:
+        sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
 
 
 def prompt_text(params):
@@ -45,6 +50,7 @@ def prompt_text(params):
 
 def handle(msg):
     global fast_enabled, steering_prompt_id, reasoning_effort, question_turn, form_capability
+    global cancellable_prompt, cancel_delay
     method = msg.get("method")
     req_id = msg.get("id")
     params = msg.get("params") or {}
@@ -81,6 +87,26 @@ def handle(msg):
                 },
             }
         )
+        return
+    if method == "session/cancel" and cancellable_prompt is not None:
+        old = cancellable_prompt
+        if cancel_delay is None:
+            return
+        def finish_cancel():
+            global cancellable_prompt
+            time.sleep(cancel_delay)
+            if cancellable_prompt == old:
+                cancellable_prompt = None
+                send({"jsonrpc":"2.0","id":old,"error":{"code":-32800,"message":"Request cancelled"}})
+        threading.Thread(target=finish_cancel, daemon=True).start()
+        return
+    if method == "session/prompt" and cancellable_prompt is not None:
+        send({"jsonrpc":"2.0","id":req_id,"error":{"code":-32000,"message":"A prompt is already running"}})
+        return
+    if method == "session/prompt" and prompt_text(params) in {"wait-for-cancel-ack", "wait-for-fast-cancel-ack", "wait-for-stalled-cancel"}:
+        cancel_delay = {"wait-for-cancel-ack": 2.4, "wait-for-fast-cancel-ack": 0.05, "wait-for-stalled-cancel": None}[prompt_text(params)]
+        cancellable_prompt = req_id
+        send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"waiting for cancellation"}}}})
         return
     if method == "session/set_config_option":
         if params.get("configId") == "reasoning_effort" and params.get("value") in ("medium", "high"):
@@ -244,7 +270,7 @@ def handle(msg):
                 },
             }
         )
-        default_delay_ms = "1500" if text in {"hello", "slow-cancel"} else "20"
+        default_delay_ms = "3500" if text == "slow-queued" else "1500" if text in {"hello", "slow-cancel"} else "20"
         time.sleep(int(os.environ.get("FAKE_ACP_PROMPT_DELAY_MS", default_delay_ms)) / 1000.0)
         send(
             {

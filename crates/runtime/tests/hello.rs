@@ -514,3 +514,109 @@ fn create_workspace_from_simple_name_under_dev_home() {
     );
     assert!(expected.is_dir());
 }
+
+#[tokio::test]
+async fn acp_interrupt_drains_queue_after_cancel_ack_without_failing_next_turn() {
+    check_acp_queue_after_interrupt("wait-for-cancel-ack", "hello").await;
+}
+
+#[tokio::test]
+async fn acp_interrupt_does_not_reconcile_the_running_continuation() {
+    check_acp_queue_after_interrupt("wait-for-fast-cancel-ack", "slow-queued").await;
+}
+
+#[tokio::test]
+async fn acp_interrupt_recovers_unresponsive_session_before_draining_queue() {
+    check_acp_queue_after_interrupt("wait-for-stalled-cancel", "hello").await;
+}
+
+async fn check_acp_queue_after_interrupt(initial_prompt: &'static str, continuation: &str) {
+    use remote_codex_runtime::acp::AcpRuntime;
+    let dir = tempdir().unwrap();
+    let script = dir.path().join("fake_acp_agent.py");
+    std::fs::write(&script, include_str!("fixtures/fake_acp_agent.py")).unwrap();
+    let python = which::which("python3").unwrap();
+    let runtime: SharedRuntime = Arc::new(AcpRuntime::catalog(
+        Some(format!(
+            "{} \"{}\" --no-fast",
+            python.display(),
+            script.display()
+        )),
+        5000,
+    ));
+    runtime.start().await.unwrap();
+    let mut config = test_config(dir.path());
+    config.enabled_providers = vec![Provider::Acp];
+    let db = Database::open(&config.database_url).unwrap();
+    let supervisor = Arc::new(Supervisor::new(config, db, vec![runtime]));
+    supervisor.spawn_live_item_persister();
+    let workspace = supervisor
+        .create_workspace(CreateWorkspaceInput {
+            abs_path: Some(dir.path().to_string_lossy().into()),
+            git_url: None,
+            label: Some("cancel-test".into()),
+        })
+        .unwrap();
+    let thread = supervisor
+        .create_thread(CreateThreadInput {
+            workspace_id: workspace.id,
+            title: Some("queue".into()),
+            provider: Some(Provider::Acp),
+            agent_id: Some("custom".into()),
+            model: "default".into(),
+            reasoning_effort: None,
+            approval_mode: "yolo".into(),
+        })
+        .await
+        .unwrap();
+    let run = {
+        let supervisor = supervisor.clone();
+        let id = thread.id.clone();
+        tokio::spawn(async move { supervisor.prompt(&id, prompt_input(initial_prompt)).await })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let detail = supervisor
+                .get_thread_detail(&thread.id, None)
+                .await
+                .unwrap();
+            assert!(
+                !run.is_finished(),
+                "prompt ended before cancellation: {:?}",
+                detail.turns
+            );
+            if detail
+                .turns
+                .iter()
+                .flat_map(|t| &t.items)
+                .any(|i| i.text.contains("waiting for cancellation"))
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let queued = supervisor
+        .prompt(&thread.id, prompt_input(continuation))
+        .await
+        .unwrap();
+    assert_eq!(queued.pending_steers.len(), 1);
+    supervisor.interrupt(&thread.id).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(8), run)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let detail = supervisor
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap();
+    assert_eq!(detail.turns.len(), 2);
+    assert_eq!(detail.turns[0].status, "interrupted");
+    assert!(detail.turns[0].error.is_none());
+    assert_eq!(detail.turns[1].status, "completed");
+    assert_eq!(detail.thread.status, "idle");
+    assert!(detail.pending_steers.is_empty());
+}
