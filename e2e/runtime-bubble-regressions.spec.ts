@@ -1750,3 +1750,48 @@ test('composer image cards open zoom preview without changing the draft or sendi
   await expect(dialog).toHaveCount(0);
   expect(await prompt.textContent()).toBe(draft);
 });
+
+test('pasted image preserves the DOM and Chinese IME composition while typing after it', async ({page}) => {
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex', {thread:{status:'idle',activeTurnId:null}}));
+  await page.goto('/threads/thread-1');
+  const prompt = page.getByRole('textbox',{name:'Prompt',exact:true});
+  await prompt.focus();
+  await prompt.evaluate(editor => {
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/a0AAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'ime.png', {type:'image/png'}));
+    editor.dispatchEvent(new ClipboardEvent('paste', {bubbles:true,cancelable:true,clipboardData:transfer}));
+  });
+  const card = prompt.getByRole('button',{name:'Open image preview: ime.png',exact:true});
+  await expect(card).toBeVisible();
+  const originalCard = await card.elementHandle();
+  await prompt.evaluate(editor => {
+    editor.focus();
+    const selection = window.getSelection()!;
+    const range = document.createRange();range.selectNodeContents(editor);range.collapse(false);
+    selection.removeAllRanges();selection.addRange(range);
+  });
+  await page.keyboard.insertText(' ');
+  await expect.poll(() => originalCard!.evaluate(node => node.isConnected)).toBe(true);
+  const cdp = await page.context().newCDPSession(page);
+  for (const text of ['ni', '你好', '你好世界']) {
+    await cdp.send('Input.imeSetComposition', {text,selectionStart:text.length,selectionEnd:text.length});
+    await expect(prompt).toContainText(text);
+    await expect(prompt).toHaveAttribute('data-ime-composing','true');
+    expect(await originalCard!.evaluate(node => node.isConnected)).toBe(true);
+    await expect(prompt).toBeFocused();
+  }
+  // IME confirmation keys must not reach composer submit shortcuts (including 229 fallback).
+  await prompt.evaluate(editor => editor.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',ctrlKey:true,keyCode:229,isComposing:true,bubbles:true,cancelable:true})));
+  await cdp.send('Input.insertText', {text:'你好世界'});
+  await expect(prompt).not.toHaveAttribute('data-ime-composing','true');
+  await expect(prompt).toContainText('你好世界');
+  await page.keyboard.insertText('，继续输入');
+  await expect(prompt).toContainText('你好世界，继续输入');
+  expect(await originalCard!.evaluate(node => node.isConnected)).toBe(true);
+  await card.click();
+  await expect(page.getByRole('dialog',{name:'Image preview: ime.png'})).toBeVisible();
+  await page.getByRole('button',{name:'Close image preview',exact:true}).click();
+  await expect(prompt).toContainText('你好世界，继续输入');
+});
