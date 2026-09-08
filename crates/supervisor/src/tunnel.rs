@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use url::Url;
 
 const RELAY_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const RELAY_RECEIVE_TIMEOUT: Duration = Duration::from_secs(90);
 const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const RELAY_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const RELAY_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
@@ -104,7 +105,18 @@ async fn run_connected_tunnel(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
 ) -> Result<()> {
+    run_connected_tunnel_with_deadline(state, socket, RELAY_RECEIVE_TIMEOUT).await
+}
+
+async fn run_connected_tunnel_with_deadline(
+    state: Arc<Supervisor>,
+    socket: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    receive_timeout: Duration,
+) -> Result<()> {
     let (mut sink, mut stream) = socket.split();
+    let mut last_received = tokio::time::Instant::now();
     let (outgoing, mut outbound) = mpsc::channel::<Value>();
     let mut clients = HashMap::<String, RelayClientSession>::new();
     let mut heartbeat = tokio::time::interval(RELAY_HEARTBEAT_INTERVAL);
@@ -126,7 +138,11 @@ async fn run_connected_tunnel(
                 };
                 tokio::time::timeout(Duration::from_secs(10),sink.send(Message::Text(message.to_string().into()))).await??;
             }
+            _ = tokio::time::sleep_until(last_received + receive_timeout) => {
+                return Err(anyhow!("relay stopped responding; reconnecting"));
+            }
             incoming = stream.next() => {
+                last_received = tokio::time::Instant::now();
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(message) = serde_json::from_str::<Value>(&text) else {
@@ -140,7 +156,7 @@ async fn run_connected_tunnel(
                         );
                     }
                     Some(Ok(Message::Ping(payload))) => {
-                        sink.send(Message::Pong(payload)).await?;
+                        tokio::time::timeout(Duration::from_secs(10), sink.send(Message::Pong(payload))).await??;
                     }
                     Some(Ok(Message::Close(frame))) => {
                         return Err(anyhow!("relay tunnel closed: {frame:?}"));
@@ -151,6 +167,9 @@ async fn run_connected_tunnel(
                 }
             }
             _ = heartbeat.tick() => {
+                // TCP writes can succeed after a network change even though the
+                // peer is unreachable. A WebSocket ping requires a return path.
+                tokio::time::timeout(Duration::from_secs(10), sink.send(Message::Ping(Vec::new().into()))).await??;
                 if outgoing.send(json!({
                     "type": "relay.heartbeat",
                     "timestamp": now_rfc3339()
@@ -852,6 +871,30 @@ mod tests {
             pong["payload"]["payload"]["requestTimestamp"],
             "2026-09-03T12:00:00.000Z"
         );
+    }
+
+    #[tokio::test]
+    async fn unresponsive_peer_expires_even_when_socket_writes_succeed() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("ws://{}", listener.local_addr().unwrap());
+        let (_dir, state) = state_with_relay_url(&address);
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            // Keep TCP open, but never read or acknowledge any messages.
+            let _socket = socket;
+            std::future::pending::<()>().await;
+        });
+        let (socket, _) = connect_async(&address).await.unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_connected_tunnel_with_deadline(state, socket, Duration::from_millis(100)),
+        )
+        .await
+        .expect("half-open connection must not wait for the OS TCP timeout")
+        .unwrap_err();
+        assert!(error.to_string().contains("stopped responding"));
+        server.abort();
     }
 
     #[tokio::test]

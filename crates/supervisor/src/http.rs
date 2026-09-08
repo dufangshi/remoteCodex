@@ -388,7 +388,10 @@ fn err(status: StatusCode, code: &str, message: impl Into<String>) -> ApiErr {
 
 fn map_err(e: anyhow::Error) -> ApiErr {
     let message = e.to_string();
-    if message.contains("not found") {
+    if message.contains("database disk image is malformed") || message.contains("SQLITE_CORRUPT") {
+        err(StatusCode::SERVICE_UNAVAILABLE, "harness_storage_corrupt",
+            "The agent's local database is damaged. Reconnecting or retrying the prompt cannot repair it. Back up and recover the agent database before resuming this thread.")
+    } else if message.contains("not found") {
         err(StatusCode::NOT_FOUND, "not_found", message)
     } else if message.contains("Resume / Connect") || message.starts_with("conflict: ") {
         err(
@@ -2028,4 +2031,24 @@ async fn subscription_usage(
         &provider
     });
     Json(json!({"usage":state.subscription_usage.read(agent).await}))
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn damaged_harness_storage_has_an_actionable_error() {
+        let error = map_err(anyhow::anyhow!(
+            "{}", r#"{"code":-32603,"data":{"details":"failed to list thread history: database disk image is malformed"},"message":"Internal error"}"#
+        ));
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+        let body = serde_json::to_value(error.1).unwrap();
+        assert_eq!(body["code"], "harness_storage_corrupt");
+        assert!(body["message"]
+            .as_str()
+            .unwrap()
+            .contains("Back up and recover"));
+        assert!(!body["message"].as_str().unwrap().contains("-32603"));
+    }
 }
