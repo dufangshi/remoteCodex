@@ -46,3 +46,9 @@ The shared `config.toml` now contains top-level `sqlite_home = "~/.local/state/c
 After the user authorized stopping the local Supervisor, restarted it and verified the original public thread through the browser. Its encrypted device connection recovered, the corruption banner disappeared, and a no-tools prompt received `RECOVERY_OK`. The original history remains available. The verification adds one turn after the 31 nonempty native history turns; the Remote Codex history additionally includes its preexisting empty interrupted turn.
 
 The Treer Apple container installation skill was corrected in commit `a4b4afd` to require local SQLite while preserving shared config/auth, avoiding the original whole-directory sharing hazard on future setups.
+
+## Release and installed verification
+
+Runtime `0.12.26` was published from `47c10d04a3877aa50a90f25f1b13222b23685ecc`, with UI pinned to `68493a1c8b2ed27c2572c9309c3dfe06bc284f9d`. [Release run 34306040931](https://github.com/dufangshi/remoteCodex/actions/runs/34306040931) passed its workspace test gate, Web build, all four native builds, package verification and publication. The npm launcher manifest and GitHub assets were checked at the same version.
+
+Installed through the existing device Settings Check/Update API. The first attempt falsely rolled back because this shell's inherited `RUST_LOG=warn` hid the INFO connection message the updater uses for relay verification. Restoring the normal service log filter (`info,rusqlite=warn,hyper=warn`) and using the API again completed the update. The managed job and live `/healthz` both report `0.12.26`, with zero active turns. This operational log-filter issue was corrected locally; the released updater still relies on the connection log for that check.
