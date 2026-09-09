@@ -281,7 +281,9 @@ fn parse_codex_turn_error(value: Option<&str>) -> Option<String> {
 }
 
 fn load_codex_paginated_history(home: &Path, session_id: &str) -> Option<Vec<ThreadTurnDto>> {
-    let path = home.join("thread_history_1.sqlite");
+    let path = codex_sqlite_home(home)
+        .unwrap_or_else(|| home.to_path_buf())
+        .join("thread_history_1.sqlite");
     let conn = open_readonly(&path).ok()?;
     let mut stmt = conn
         .prepare(
@@ -1448,7 +1450,11 @@ fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
 
 fn codex_state_files(home: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    for dir in [home.to_path_buf(), home.join("sqlite")] {
+    let dirs = match codex_sqlite_home(home) {
+        Some(dir) => vec![dir],
+        None => vec![home.to_path_buf(), home.join("sqlite")],
+    };
+    for dir in dirs {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
@@ -1470,6 +1476,45 @@ fn codex_state_files(home: &Path) -> Vec<PathBuf> {
         )
     });
     files
+}
+
+// Codex can share configuration/authentication while keeping SQLite on each
+// machine's local disk. Never fall back to shared legacy databases when the
+// user has explicitly moved the database directory.
+fn codex_sqlite_home(home: &Path) -> Option<PathBuf> {
+    let configured = fs::read_to_string(home.join("config.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok())
+        .and_then(|config| config.get("sqlite_home")?.as_str().map(str::to_owned));
+    resolve_codex_sqlite_home(
+        home,
+        &crate::config::home_dir(),
+        configured.as_deref(),
+        std::env::var("CODEX_SQLITE_HOME").ok().as_deref(),
+    )
+}
+
+fn resolve_codex_sqlite_home(
+    codex_home: &Path,
+    user_home: &Path,
+    configured: Option<&str>,
+    environment: Option<&str>,
+) -> Option<PathBuf> {
+    let value = configured
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| environment.filter(|value| !value.trim().is_empty()))?;
+    if value == "~" {
+        return Some(user_home.to_path_buf());
+    }
+    if let Some(relative) = value.strip_prefix("~/") {
+        return Some(user_home.join(relative));
+    }
+    let path = PathBuf::from(value);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        codex_home.join(path)
+    })
 }
 
 fn dedupe_sessions(sessions: Vec<ImportSessionMeta>) -> Vec<ImportSessionMeta> {
@@ -1561,6 +1606,66 @@ fn int_to_rfc3339(value: Option<i64>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlite_directory_uses_each_machines_home_and_config_precedence() {
+        let codex = Path::new("/shared/.codex");
+        for user in ["/Users/mac", "/home/mac"] {
+            assert_eq!(
+                resolve_codex_sqlite_home(
+                    codex,
+                    Path::new(user),
+                    Some("~/.local/state/codex"),
+                    Some("/ignored")
+                ),
+                Some(Path::new(user).join(".local/state/codex"))
+            );
+        }
+        assert_eq!(
+            resolve_codex_sqlite_home(codex, Path::new("/home/mac"), None, Some("/local/db")),
+            Some(PathBuf::from("/local/db"))
+        );
+        assert_eq!(
+            resolve_codex_sqlite_home(codex, Path::new("/home/mac"), None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn imports_state_and_history_from_configured_sqlite_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("shared");
+        let local = root.path().join("local");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&local).unwrap();
+        fs::write(
+            home.join("config.toml"),
+            format!(
+                "sqlite_home = {}\n",
+                serde_json::to_string(&local.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+        // A migrated installation must not read the old shared/corrupt files.
+        fs::write(home.join("state_5.sqlite"), "damaged legacy database").unwrap();
+        fs::write(
+            home.join("thread_history_1.sqlite"),
+            "damaged legacy history",
+        )
+        .unwrap();
+        let state = Connection::open(local.join("state_5.sqlite")).unwrap();
+        state.execute_batch("CREATE TABLE threads (id TEXT,cwd TEXT,title TEXT,model TEXT,first_user_message TEXT,preview TEXT,created_at INTEGER,updated_at INTEGER);
+            INSERT INTO threads VALUES ('session-local','/workspace','Recovered','codex','hello','hello',1720000000,1720000001);").unwrap();
+        let history = Connection::open(local.join("thread_history_1.sqlite")).unwrap();
+        history.execute_batch("CREATE TABLE thread_turns (thread_id TEXT,turn_id TEXT,status TEXT,error_json TEXT,started_at INTEGER,rollout_ordinal INTEGER);
+            CREATE TABLE thread_items (thread_id TEXT,turn_id TEXT,rollout_ordinal INTEGER,created_at_ms INTEGER,item_type TEXT,item_json TEXT);
+            INSERT INTO thread_turns VALUES ('session-local','turn-local','completed',NULL,1720000000,0);").unwrap();
+        history.execute("INSERT INTO thread_items VALUES ('session-local','turn-local',0,1720000000,'agentMessage',?1)", params![serde_json::json!({"id":"reply","type":"agentMessage","text":"Recovered reply"}).to_string()]).unwrap();
+        assert_eq!(codex_state_files(&home), vec![local.join("state_5.sqlite")]);
+        assert_eq!(list_codex_sessions(&home)[0].title, "Recovered");
+        let session = find_codex_session(&home, "session-local").unwrap();
+        assert_eq!(session.turns[0].items[0].text, "Recovered reply");
+    }
     use std::io::Write;
 
     #[test]

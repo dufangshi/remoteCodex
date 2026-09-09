@@ -20,6 +20,7 @@ shell-words.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+toml = "0.8"
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
