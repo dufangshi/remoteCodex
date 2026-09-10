@@ -98,8 +98,10 @@
 
 - `cargo test --workspace`：248 项通过，包含正常心跳、无入站帧超时、未来时间戳、持续出站流量、等待请求清理、替换连接隔离、共享探测授权、自动重连及写入者冲突错误分类。`cargo fmt --all --check` 与 Clippy 通过（Clippy 存在既有警告）。为满足 CI，同时格式化了基线中未格式化的 Rust 片段，未修改其行为。
 - Windows CI 首轮在三个既有 ACP 中断测试中报 `base_missing`：测试 helper 未对 Python 绝对路径加引号，通用命令解析器吞掉 Windows 反斜杠。改为统一 `shell_words::join` 编码测试参数，保留原测试断言及产品逻辑。
+- Windows CI 随后暴露既有进程退出测试的启动时序问题：800ms 截止时间包含 Python 和子进程启动。夹具现在先发送 ready 通知，再计时原有的退出断言；持有 stdout 的后代仍保持运行，退出监控的验证没有放宽。
 - thread UI 包已在正确仓库构建；supervisor-web 类型检查与生产构建通过。
+- 移动端线程页的展开按钮移至左上角，设置移入展开抽屉的顶部。共享 UI 的 10 项相关测试及 mobile Chromium 的展开、设置对话框、收起流程通过，已检查关闭动画后的截图。
 - Chromium 四项相关用例通过：离线/重连错误分类、真实加密 HTTP/附件/终端及旧密钥 POST 恢复、共享卡片断连恢复、portal 保持在线但探测沉默时卡片按时变灰及原地恢复。Vitest 覆盖 5 秒有效期、多个设备相互独立、旧 portal 不能续期、后台停止探测及丢弃过期回复。
 - `scripts/verify-relay-recovery.mjs` 在无外网、无认证挂载的 Docker 中运行。SIGSTOP 9 秒模拟进程暂停，探测 5 秒内返回不可达；SIGCONT 后约 113ms 建立新隧道，PID 不变，正在运行的 fake turn 保持运行并最终完成。另在 TCP 不关闭的情况下双向丢弃数据，网络恢复后约 2104ms 自动连回，PID 仍不变。该测试证明 Linux 下的时序及运行时隔离；macOS 真机合盖仍需现场验证。
 
-在线状态探测和加密恢复需要部署 relay/Web；新的快速隧道重连及写入者冲突提示需要后续 runtime 版本更新到设备。合入 main 本身不会替换本机正在运行的 supervisor，也不等于已发布新的 npm runtime。单独重启设备不部署公网 Web。
+本次发布候选为 runtime/npm `0.12.27`。在线状态探测、加密恢复和移动端导航需要部署 relay/Web；新的快速隧道重连及写入者冲突提示需要设备更新 runtime。合入 main 本身不会替换本机正在运行的 supervisor，单独重启设备也不部署公网 Web。测试阶段始终隔离真实 supervisor；完成发布后按用户授权，通过管理 Check/Update API 更新本机，另行核验运行中版本与 relay 连接。

@@ -165,11 +165,24 @@ test.describe('Phase 2 acceptance', () => {
     await expect(page).toHaveURL(/\/threads\/.+/);
     const threadNavButton = page.getByRole('button', { name: 'Open rooms' });
     await expect(threadNavButton).toBeVisible();
+    const topbar = page.locator('.thread-topbar-row');
+    await expect(topbar.getByRole('button').first()).toHaveAccessibleName('Open rooms');
+    await expect(topbar.getByRole('button', { name: 'Open settings' })).toHaveCount(0);
+    await expect(topbar.locator('h1')).toHaveText(`${workspaceName} thread`);
     await threadNavButton.click();
 
     await expect(page.getByRole('button', { name: 'Close rooms' }).first()).toBeVisible();
     const mobileSidebar = page.locator('aside:visible').first();
-    await expect(mobileSidebar.getByText('Rooms', { exact: true })).toBeVisible();
     await expect(mobileSidebar.getByRole('link', { name: new RegExp(`${workspaceName} thread`) })).toBeVisible();
+    const settings = mobileSidebar.locator('.thread-rooms-rail-header').getByRole('button', { name: 'Open settings' });
+    await expect(settings).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('mobile-expanded-settings.png'), animations: 'disabled' });
+    await settings.click();
+    await expect(page.getByTestId('settings-dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
+    await mobileSidebar.getByRole('button', { name: 'Close rooms' }).click();
+    await expect(threadNavButton).toHaveAttribute('aria-expanded', 'false');
+    await page.screenshot({ path: testInfo.outputPath('mobile-topbar-navigation.png'), animations: 'disabled' });
   });
 });
