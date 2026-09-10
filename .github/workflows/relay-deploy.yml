@@ -113,8 +113,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          legacy_asset="$(curl -fsS https://remote-codex.lnz-study.com/ | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
-          test -n "${legacy_asset}"
+          legacy_html="$(curl -fsS --max-time 20 https://remote-codex.lnz-study.com/)"
+          legacy_asset="$(printf '%s' "${legacy_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
+          legacy_health_code="$(curl -sS --max-time 20 -o legacy-health.json -w '%{http_code}' https://remote-codex.lnz-study.com/healthz)"
+          if [ -n "${legacy_asset}" ]; then
+            test "${legacy_health_code}" = '200'
+            jq -e '.status == "ok"' legacy-health.json >/dev/null
+            legacy_mode='active'
+          else
+            # The retired hostname may intentionally point at NPM's default site.
+            # Accept that specific baseline, not an arbitrary unhealthy legacy app.
+            printf '%s' "${legacy_html}" | grep -Fq '<title>Default Site</title>'
+            printf '%s' "${legacy_html}" | grep -Fq 'Nginx Proxy Manager'
+            test "${legacy_health_code}" = '404'
+            legacy_mode='retired'
+          fi
+          legacy_html_sha="$(printf '%s' "${legacy_html}" | sha256sum | awk '{print $1}')"
+          echo "legacy_mode=${legacy_mode}" >> "${GITHUB_OUTPUT}"
+          echo "legacy_html_sha=${legacy_html_sha}" >> "${GITHUB_OUTPUT}"
           echo "legacy_asset=${legacy_asset}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Rust relay deployment host
@@ -232,7 +248,7 @@ jobs:
             test -x "${base}/remote-codex"
             test -d "${base}/web"
 
-            node_container_before="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
+            node_container_before="$(sudo docker ps --all --no-trunc --filter 'name=^/remote-codex-relay$' --format '{{.ID}}')"
             old_binary_sha="$(sha256sum "${base}/remote-codex" | awk '{print $1}')"
             old_asset="$(sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' "${base}/web/index.html" | head -n 1)"
             test -n "${old_asset}"
@@ -355,7 +371,7 @@ jobs:
               exit 1
             fi
 
-            node_container_after="$(sudo docker inspect --format '{{.Id}}' remote-codex-relay)"
+            node_container_after="$(sudo docker ps --all --no-trunc --filter 'name=^/remote-codex-relay$' --format '{{.ID}}')"
             test "${node_container_after}" = "${node_container_before}"
 
             public_ready='false'
@@ -382,6 +398,10 @@ jobs:
       - name: Verify the public Rust relay and legacy isolation
         if: inputs.deploy
         shell: bash
+        env:
+          LEGACY_MODE: ${{ steps.before.outputs.legacy_mode }}
+          LEGACY_HTML_SHA: ${{ steps.before.outputs.legacy_html_sha }}
+          LEGACY_ASSET: ${{ steps.before.outputs.legacy_asset }}
         run: |
           set -euo pipefail
 
@@ -405,11 +425,19 @@ jobs:
           legacy_ready='false'
           legacy_asset=''
           for _ in $(seq 1 15); do
-            legacy_html="$(curl -fsS https://remote-codex.lnz-study.com/ || true)"
+            legacy_html="$(curl -fsS --max-time 20 https://remote-codex.lnz-study.com/ || true)"
             legacy_asset="$(printf '%s' "${legacy_html}" | sed -n 's#.*src="\(/assets/index-[^"]*\.js\)".*#\1#p' | head -n 1)"
-            legacy_health="$(curl -fsS https://remote-codex.lnz-study.com/healthz || true)"
-            if [ "${legacy_asset}" = '${{ steps.before.outputs.legacy_asset }}' ] \
-              && printf '%s' "${legacy_health}" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+            legacy_health_code="$(curl -sS --max-time 20 -o legacy-health.json -w '%{http_code}' https://remote-codex.lnz-study.com/healthz || true)"
+            legacy_html_sha="$(printf '%s' "${legacy_html}" | sha256sum | awk '{print $1}')"
+            if [ "${LEGACY_MODE}" = 'active' ] \
+              && [ "${legacy_asset}" = "${LEGACY_ASSET}" ] \
+              && [ "${legacy_health_code}" = '200' ] \
+              && jq -e '.status == "ok"' legacy-health.json >/dev/null 2>&1; then
+              legacy_ready='true'
+              break
+            elif [ "${LEGACY_MODE}" = 'retired' ] \
+              && [ "${legacy_html_sha}" = "${LEGACY_HTML_SHA}" ] \
+              && [ "${legacy_health_code}" = '404' ]; then
               legacy_ready='true'
               break
             fi
@@ -418,4 +446,4 @@ jobs:
           test "${legacy_ready}" = 'true'
 
           printf 'Rust relay asset: %s\n' "${target_asset}"
-          printf 'Legacy relay asset unchanged: %s\n' "${legacy_asset}"
+          printf 'Legacy baseline unchanged (%s): %s\n' "${LEGACY_MODE}" "${legacy_asset:-default site}"
