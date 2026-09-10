@@ -537,11 +537,13 @@ async fn check_acp_queue_after_interrupt(initial_prompt: &'static str, continuat
     std::fs::write(&script, include_str!("fixtures/fake_acp_agent.py")).unwrap();
     let python = which::which("python3").unwrap();
     let runtime: SharedRuntime = Arc::new(AcpRuntime::catalog(
-        Some(format!(
-            "{} \"{}\" --no-fast",
-            python.display(),
-            script.display()
-        )),
+        // ACP command strings use shell_words on every platform. Quote the
+        // executable too, preserving Windows backslashes and paths with spaces.
+        Some(shell_words::join([
+            python.to_string_lossy().as_ref(),
+            script.to_string_lossy().as_ref(),
+            "--no-fast",
+        ])),
         5000,
     ));
     runtime.start().await.unwrap();
