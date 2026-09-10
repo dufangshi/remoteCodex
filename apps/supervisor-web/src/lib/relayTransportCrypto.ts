@@ -156,14 +156,41 @@ async function keyFor(
       setTimeout(() => keys.delete(deviceId), 10000);
       return null;
     }
-    if (!response.ok)
+    if (!response.ok) {
+      const failure = (await response.clone().json().catch(() => null)) as {
+        code?: string;
+        message?: string;
+      } | null;
+      if (
+        response.status === 503 &&
+        failure?.code === 'service_unavailable' &&
+        failure.message === 'device is offline'
+      )
+        throw new TransportError(
+          'device_offline',
+          'This device is offline. Wake it and check its network connection, then retry.',
+          response.status,
+        );
+      if (response.status === 504)
+        throw new TransportError(
+          'device_unresponsive',
+          'This device did not respond. It may be asleep or reconnecting. Wake it and retry.',
+          response.status,
+        );
       throw new TransportError(
         'transport_unavailable',
         response.status === 401
           ? 'Sign in to connect to this device.'
-          : 'Unable to establish an encrypted device connection.',
+          : response.status === 403
+            ? 'You no longer have access to this device.'
+            : response.status === 429
+              ? 'This device is busy. Wait a moment and retry.'
+              : response.status >= 500
+                ? 'The device connection is temporarily unavailable. Retry in a moment.'
+                : 'Unable to establish an encrypted device connection.',
         response.status,
       );
+    }
     const descriptor = (await response.json()) as Descriptor;
     if (
       descriptor.version !== 1 ||

@@ -8,6 +8,53 @@ import { createServer } from 'node:net';
 
 // Isolated real relay + fake-harness device; no production credentials or files.
 test.use({ actionTimeout: 15000 });
+test('device key failures distinguish offline and reconnecting devices without downgrading encryption', async ({ page }) => {
+  await page.goto('/');
+  const failures = [
+    { status: 503, body: { code: 'service_unavailable', message: 'device is offline' }, code: 'device_offline', message: 'Wake it' },
+    { status: 504, body: '<html>Gateway timeout</html>', code: 'device_unresponsive', message: 'may be asleep or reconnecting' },
+    { status: 403, body: {}, code: 'transport_unavailable', message: 'no longer have access' },
+    { status: 429, body: {}, code: 'transport_unavailable', message: 'busy' },
+    { status: 503, body: {}, code: 'transport_unavailable', message: 'temporarily unavailable' },
+    { status: 404, body: {}, code: 'transport_unavailable', message: 'encrypted device connection' },
+  ];
+  let attempts = 0;
+  await page.route('**/relay/devices/sleeping-device/api/transport/key?*', route => {
+    const failure = failures[attempts++]!;
+    return route.fulfill({ status: failure.status, contentType: 'application/json', body: typeof failure.body === 'string' ? failure.body : JSON.stringify(failure.body) });
+  });
+  const results = await page.evaluate(async count => {
+    // Use the same transport code as the browser and Service Worker, with real IndexedDB.
+    const modulePath = '/src/lib/relayTransportCrypto.ts';
+    const transport = await import(/* @vite-ignore */ modulePath);
+    await transport.resetPinnedDevice('sleeping-device');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('remote-codex-transport-v1', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('identities', 'readwrite');
+      tx.objectStore('identities').put('saved-identity', 'sleeping-device');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    const results = [];
+    for (let i = 0; i < count; i++) {
+      const { response } = await transport.exchange(new Request(`${location.origin}/relay/devices/sleeping-device/api/threads`));
+      results.push({ status: response.status, ...await response.json() });
+    }
+    return results;
+  }, failures.length);
+  expect(attempts).toBe(failures.length); // Failed key promises must not poison retries.
+  for (const [index, result] of results.entries()) {
+    expect(result.status).toBe(failures[index]!.status);
+    expect(result.code).toBe(failures[index]!.code);
+    expect(result.message).toContain(failures[index]!.message);
+  }
+});
+
 test('encrypted relay interoperates with Rust for HTTP, attachments, terminal and public snapshots', async ({
   browser,
   context,
@@ -314,6 +361,7 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
         plain: `${base}/relay/api/workspaces/${workspace.id}/files/raw?path=performance.bin`,
       },
     );
+    await mkdir(resolve('.local/security-audit'), { recursive: true });
     await writeFile(
       resolve(
         `.local/security-audit/performance-${test.info().project.name}-${process.env.E2E_SECURITY_BINARY?.includes('release') ? 'release' : 'debug'}.json`,
@@ -388,8 +436,7 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
     expect(afterRestart).toBe('ENCRYPTED_FILE_MARKER');
     await expect(
       page.getByRole('button', {
-        name: 'Device identity changed',
-        exact: true,
+        name: /Device identity changed/,
       }),
     ).toHaveCount(0);
     // A valid signature from a different device identity must never replace the saved key silently.
@@ -421,8 +468,7 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
     await page.reload();
     await expect(
       page.getByRole('button', {
-        name: 'Device identity changed',
-        exact: true,
+        name: /Device identity changed/,
       }),
     ).toBeVisible();
     await context.close();

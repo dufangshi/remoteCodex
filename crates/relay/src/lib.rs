@@ -640,6 +640,12 @@ struct DeviceSocket {
     last_heartbeat_at: String,
 }
 
+struct PendingDeviceRequest {
+    device_id: String,
+    connection_id: Uuid,
+    tx: tokio::sync::oneshot::Sender<Value>,
+}
+
 struct ClientSocket {
     tx: tokio::sync::mpsc::Sender<String>,
     device_id: String,
@@ -654,7 +660,7 @@ struct AppState {
     store: RelayStore,
     sockets: RwLock<HashMap<String, DeviceSocket>>,
     clients: RwLock<HashMap<String, ClientSocket>>,
-    pending: StdMutex<HashMap<String, (String, tokio::sync::oneshot::Sender<Value>)>>,
+    pending: StdMutex<HashMap<String, PendingDeviceRequest>>,
     web_dist: Option<PathBuf>,
     legacy_supervisor_token: Option<String>,
     oauth: OAuthConfig,
@@ -5192,7 +5198,7 @@ async fn forward_device(
 }
 
 struct PendingRequestGuard<'a> {
-    pending: &'a StdMutex<HashMap<String, (String, tokio::sync::oneshot::Sender<Value>)>>,
+    pending: &'a StdMutex<HashMap<String, PendingDeviceRequest>>,
     request_id: &'a str,
 }
 
@@ -5218,13 +5224,6 @@ async fn forward_device_with_timeout(
 ) -> axum::response::Response {
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    {
-        let mut pending = state.pending.lock().unwrap_or_else(|e| e.into_inner());
-        if pending.len() >= 256 {
-            return StatusCode::TOO_MANY_REQUESTS.into_response();
-        }
-        pending.insert(request_id.clone(), (device_id.clone(), tx));
-    }
     let _pending_guard = PendingRequestGuard {
         pending: &state.pending,
         request_id: &request_id,
@@ -5249,6 +5248,20 @@ async fn forward_device_with_timeout(
     let sent = {
         let sockets = state.sockets.read().await;
         if let Some(socket) = sockets.get(&device_id) {
+            // Register against the exact connection while it is still current.
+            // A replaced connection must only cancel its own pending requests.
+            let mut pending = state.pending.lock().unwrap_or_else(|e| e.into_inner());
+            if pending.len() >= 256 {
+                return StatusCode::TOO_MANY_REQUESTS.into_response();
+            }
+            pending.insert(
+                request_id.clone(),
+                PendingDeviceRequest {
+                    device_id: device_id.clone(),
+                    connection_id: socket.connection_id,
+                    tx,
+                },
+            );
             socket.tx.try_send(payload).is_ok()
         } else {
             false
@@ -5263,7 +5276,12 @@ async fn forward_device_with_timeout(
     }
     match tokio::time::timeout(response_timeout, rx).await {
         Ok(Ok(value)) => forwarded_device_response(value),
-        _ => (
+        Ok(Err(_)) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "code": "service_unavailable", "message": "device is offline" })),
+        )
+            .into_response(),
+        Err(_) => (
             StatusCode::GATEWAY_TIMEOUT,
             Json(json!({ "code": "timeout", "message": "device did not respond" })),
         )
@@ -5416,6 +5434,15 @@ fn device_id_for_supervisor_token(
 }
 
 async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: String) {
+    handle_supervisor_with_timeout(socket, state, device_id, Duration::from_secs(90)).await;
+}
+
+async fn handle_supervisor_with_timeout(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    device_id: String,
+    receive_timeout: Duration,
+) {
     let connection_id = Uuid::new_v4();
     let connected_at = now_rfc3339();
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -5431,20 +5458,32 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
     state.hosted.mark_online(&device_id).await;
     schedule_hosted_bootstraps(state.clone(), device_id.clone()).await;
     let (mut sink, mut stream) = socket.split();
-    let _ = sink
-        .send(Message::Text(
-            json!({
-                "type": "relay.connected",
-                "timestamp": connected_at,
-                "deviceId": device_id
-            })
-            .to_string()
-            .into(),
-        ))
-        .await;
+    let greeting = Message::Text(
+        json!({
+            "type": "relay.connected",
+            "timestamp": connected_at,
+            "deviceId": device_id
+        })
+        .to_string()
+        .into(),
+    );
+    if !matches!(
+        tokio::time::timeout(Duration::from_secs(10), sink.send(greeting)).await,
+        Ok(Ok(()))
+    ) {
+        remove_supervisor_connection(&state, &device_id, connection_id).await;
+        return;
+    }
+    let mut last_received = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(last_received + receive_timeout) => {
+                tracing::warn!(%device_id, "supervisor stopped responding; marking device offline");
+                break;
+            }
             incoming = stream.next() => {
+                last_received = tokio::time::Instant::now();
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         if !state.sockets.read().await.get(&device_id).is_some_and(|socket|socket.connection_id==connection_id) {break;}
@@ -5453,10 +5492,10 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
                                 Some("relay.response") => {
                                     if let Some(request_id) = msg.get("requestId").and_then(Value::as_str) {
                                         let mut pending=state.pending.lock().unwrap_or_else(|p|p.into_inner());
-                                        if pending.get(request_id).is_some_and(|(owner,_)|owner==&device_id) {
-                                            if let Some((_,sender))=pending.remove(request_id) {
+                                        if pending.get(request_id).is_some_and(|request|request.device_id==device_id && request.connection_id==connection_id) {
+                                            if let Some(request)=pending.remove(request_id) {
                                                 let payload=msg.get("payload").cloned().unwrap_or(json!({}));
-                                                let _=sender.send(payload);
+                                                let _=request.tx.send(payload);
                                             }
                                         }
                                     }
@@ -5483,11 +5522,9 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
                                     }
                                 }
                                 Some("relay.heartbeat") => {
-                                    let timestamp = msg
-                                        .get("timestamp")
-                                        .and_then(Value::as_str)
-                                        .map(str::to_string)
-                                        .unwrap_or_else(now_rfc3339);
+                                    // Display relay receipt time; a sleeping or clock-skewed
+                                    // device cannot extend its own online lease.
+                                    let timestamp = now_rfc3339();
                                     let mut sockets = state.sockets.write().await;
                                     if let Some(socket) = sockets.get_mut(&device_id) {
                                         if socket.connection_id == connection_id {
@@ -5520,6 +5557,11 @@ async fn handle_supervisor(socket: WebSocket, state: Arc<AppState>, device_id: S
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
+                    Some(Ok(Message::Ping(payload))) => {
+                        if !matches!(tokio::time::timeout(Duration::from_secs(10), sink.send(Message::Pong(payload))).await, Ok(Ok(()))) {
+                            break;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -5550,6 +5592,13 @@ async fn remove_supervisor_connection(state: &AppState, device_id: &str, connect
     state.clients.write().await.retain(|_, client| {
         client.device_id != device_id || client.supervisor_connection_id != connection_id
     });
+    state
+        .pending
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .retain(|_, request| {
+            request.device_id != device_id || request.connection_id != connection_id
+        });
 }
 
 #[derive(Deserialize, Default)]
@@ -6135,8 +6184,8 @@ mod tests {
             let response_task = async {
                 let message: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
                 let request_id = message["requestId"].as_str().unwrap();
-                let (_, sender) = responder.pending.lock().unwrap().remove(request_id).unwrap();
-                sender.send(json!({"statusCode":status,"headers":{"x-rcd-encrypted":"1"},"body":"opaque encrypted response"})).unwrap();
+                let request = responder.pending.lock().unwrap().remove(request_id).unwrap();
+                request.tx.send(json!({"statusCode":status,"headers":{"x-rcd-encrypted":"1"},"body":"opaque encrypted response"})).unwrap();
             };
             let mut headers = HeaderMap::new();
             headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
@@ -6259,6 +6308,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn silent_supervisor_expires_even_with_outgoing_traffic_and_future_heartbeat() {
+        use tokio_tungstenite::{connect_async, tungstenite::Message as ClientMessage};
+        let (state, data_dir) = test_app_state("silent-supervisor");
+        let app_state = state.clone();
+        let app = Router::new().route(
+            "/tunnel",
+            get(move |ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(move |socket| {
+                    handle_supervisor_with_timeout(
+                        socket,
+                        app_state,
+                        "device".into(),
+                        Duration::from_millis(250),
+                    )
+                })
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let (mut socket, _) = connect_async(format!("ws://{address}/tunnel"))
+            .await
+            .unwrap();
+        // relay.connected
+        socket.next().await.unwrap().unwrap();
+        // A healthy device must remain online across multiple lease periods.
+        for _ in 0..4 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            socket
+                .send(ClientMessage::Text(
+                    json!({"type":"relay.heartbeat"}).to_string().into(),
+                ))
+                .await
+                .unwrap();
+            socket
+                .send(ClientMessage::Ping(Vec::new().into()))
+                .await
+                .unwrap();
+            assert!(matches!(
+                socket.next().await.unwrap().unwrap(),
+                ClientMessage::Pong(_)
+            ));
+            assert!(state.sockets.read().await.contains_key("device"));
+        }
+        socket
+            .send(ClientMessage::Text(
+                json!({"type":"relay.heartbeat","timestamp":"2999-01-01T00:00:00Z"})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        // Receiving a pong proves the preceding heartbeat has been processed.
+        socket
+            .send(ClientMessage::Ping(Vec::new().into()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            socket.next().await.unwrap().unwrap(),
+            ClientMessage::Pong(_)
+        ));
+        let (connection_id, tx) = {
+            let sockets = state.sockets.read().await;
+            let device = sockets.get("device").unwrap();
+            assert!(!device.last_heartbeat_at.starts_with("2999"));
+            (device.connection_id, device.tx.clone())
+        };
+        state
+            .clients
+            .write()
+            .await
+            .insert("client".into(), client_socket("device", connection_id));
+        let request_state = state.clone();
+        let request = tokio::spawn(async move {
+            forward_device_with_timeout(
+                request_state,
+                "device".into(),
+                "GET".into(),
+                "/api/transport/key".into(),
+                None,
+                None,
+                json!({}),
+                Duration::from_secs(10),
+            )
+            .await
+        });
+        assert!(matches!(
+            socket.next().await.unwrap().unwrap(),
+            ClientMessage::Text(_)
+        ));
+        // Simulate a half-open connection: continue writing towards it, but no
+        // supervisor frames arrive. Outbound traffic must not renew liveness.
+        let writer = tokio::spawn(async move {
+            while tx.send("{}".into()).await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+        let response = tokio::time::timeout(Duration::from_secs(2), request)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!state.sockets.read().await.contains_key("device"));
+        assert!(!state.clients.read().await.contains_key("client"));
+        assert!(state.pending.lock().unwrap().is_empty());
+        writer.await.unwrap();
+        server.abort();
+        let _ = server.await;
+        drop(socket);
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn stale_supervisor_cleanup_preserves_replacement_socket_and_clients() {
         let (state, data_dir) = test_app_state("connection-replacement");
         let device_id = "device";
@@ -6286,7 +6451,34 @@ mod tests {
             );
         }
 
+        let (old_tx, old_rx) = tokio::sync::oneshot::channel();
+        let (new_tx, mut new_rx) = tokio::sync::oneshot::channel();
+        {
+            let mut pending = state.pending.lock().unwrap();
+            pending.insert(
+                "old".into(),
+                PendingDeviceRequest {
+                    device_id: device_id.into(),
+                    connection_id: old_connection_id,
+                    tx: old_tx,
+                },
+            );
+            pending.insert(
+                "new".into(),
+                PendingDeviceRequest {
+                    device_id: device_id.into(),
+                    connection_id: new_connection_id,
+                    tx: new_tx,
+                },
+            );
+        }
         remove_supervisor_connection(&state, device_id, old_connection_id).await;
+        assert!(old_rx.await.is_err());
+        assert!(matches!(
+            new_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(state.pending.lock().unwrap().contains_key("new"));
 
         assert_eq!(
             state
