@@ -50,6 +50,7 @@ import {
 } from '../lib/api';
 import { threadHref, workspacesHref } from '../lib/relayRoutes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useDevicePresence } from '../lib/useDevicePresence';
 
 const RELAY_PORTAL_REFRESH_INTERVAL_MS = 3000;
 type SupervisorPlatform = 'unix' | 'windows';
@@ -181,7 +182,8 @@ function sanitizeGrantMetadata(
 export function RelayDevicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [portal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
+  const [rawPortal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
+  const portal = useDevicePresence(rawPortal);
   const [rotatingDevice, setRotatingDevice] = useState<RelayDeviceDto | null>(null);
   const [rotationVerification,setRotationVerification] = useState<SecurityStatus | null>(null);
   async function rotateDevice(verified=false) {

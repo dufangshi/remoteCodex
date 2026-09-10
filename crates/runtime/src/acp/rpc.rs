@@ -598,16 +598,25 @@ mod tests {
             &script,
             concat!(
                 "import subprocess, sys\n",
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'], stdout=sys.stdout)\n",
+                "print('{\"method\":\"_fixture/ready\"}', flush=True)\n",
                 "sys.stdin.readline()\n",
-                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(1)'], stdout=sys.stdout)\n",
                 "sys.exit(17)\n",
             ),
         )
         .unwrap();
-        let (process, _updates, _requests) =
+        let (process, mut updates, _requests) =
             AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
                 .await
                 .expect("spawn exiting process");
+
+        // Python and descendant startup can exceed 800ms on a busy Windows
+        // runner. Start the exit deadline only once the fixture is ready.
+        let ready = timeout(Duration::from_secs(10), updates.recv())
+            .await
+            .expect("fixture startup")
+            .expect("fixture ready notification");
+        assert_eq!(ready["_remoteMethod"], "_fixture/ready");
 
         let error = timeout(
             Duration::from_millis(800),

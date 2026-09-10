@@ -31,3 +31,6 @@ hkdf = "0.12"
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation"] }
 qrcodegen = "1.8"
 openssl = { version = "0.10.81", features = ["vendored"] }
+
+[dev-dependencies]
+tokio-tungstenite.workspace = true
