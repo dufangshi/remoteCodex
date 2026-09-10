@@ -76,8 +76,8 @@ export async function loadExportSnapshot(
       turn.messages.flatMap((message) =>
         Array.from(
           message.text.matchAll(/\[PHOTO\s+([^\]]+)\]/g),
-          (match) => match[1]!,
-        ),
+          (match) => match[1]!.trim(),
+        ).filter(Boolean),
       ),
     ),
   );

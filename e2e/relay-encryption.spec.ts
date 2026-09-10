@@ -243,7 +243,7 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
       await request(
         `${api}/threads/${tid}/prompt`,
         'POST',
-        { prompt: 'PUBLIC_PROMPT_MARKER' },
+        { prompt: `PUBLIC_PROMPT_MARKER [PHOTO ./.temp/threads/${tid}/ok.png ]` },
         owner,
       ),
     );
@@ -406,6 +406,9 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
     await expect(publicPage.locator('body')).toContainText(
       'PUBLIC_PROMPT_MARKER',
     );
+    await expect(publicPage.locator('img')).toHaveCount(1);
+    await expect.poll(() => publicPage.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
+    await expect(publicPage.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
     await expect(
       publicPage.getByRole('button', { name: 'Thread actions', exact: true }),
     ).toHaveCount(0);
