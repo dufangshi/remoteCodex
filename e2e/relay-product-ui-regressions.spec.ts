@@ -211,6 +211,7 @@ async function installAuthenticatedDevicesMocks(
         for (const item of list ?? []) item.deviceConnected = sharedConnected;
       return json(route, portal);
     }
+    if (pathname.endsWith('/presence')) return json(route, { connected: true });
     if (pathname === '/relay/auth/logout' && request.method() === 'POST') {
       logoutRequests.push(request.postDataJSON());
       if (options.failLogout) {
@@ -738,4 +739,27 @@ test('shared resource cards name their device and follow supervisor disconnects'
   await expect(card.getByRole('button', {name:'Open',exact:true})).toBeEnabled();
   await card.scrollIntoViewIfNeeded();
   await page.screenshot({path:testInfo.outputPath('shared-presence.png')});
+});
+
+test('device cards expire silent health probes while portal stays online and recover in place', async ({ page }) => {
+  await installAuthenticatedDevicesMocks(page);
+  let sleeping = false;
+  let healthRequests = 0;
+  await page.route(`**/relay/devices/${ownedDevice.id}/presence?*`, async route => {
+    healthRequests++;
+    if (!sleeping) return json(route, { connected: true });
+    // A silent supervisor leaves the request pending; lease expiry must still
+    // gray the card without waiting for this request or a portal disconnect.
+    await new Promise<void>(resolve => route.request().frame().page().once('close', () => resolve()));
+  });
+  await page.goto('/relay-devices');
+  const card = page.getByRole('article').filter({ hasText: ownedDevice.name });
+  await expect(card.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled();
+  const started = Date.now();
+  sleeping = true;
+  await expect(card.getByRole('button', { name: 'Connect', exact: true })).toBeDisabled({ timeout: 6500 });
+  expect(Date.now() - started).toBeLessThan(6000);
+  expect(healthRequests).toBeGreaterThan(1);
+  sleeping = false;
+  await expect(card.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled({ timeout: 6000 });
 });

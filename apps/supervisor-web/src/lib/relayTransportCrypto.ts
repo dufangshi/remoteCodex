@@ -146,14 +146,25 @@ async function keyFor(
           ? `/api/threads/${scope}`
           : '/api';
     const challenge = crypto.randomUUID();
-    const response = await nativeFetch(
-      `/relay/devices/${encodeURIComponent(deviceId)}${prefix}/transport/key?challenge=${challenge}`,
-      { credentials: 'same-origin', cache: 'no-store' },
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    let response: Response;
+    try {
+      response = await nativeFetch(
+        `/relay/devices/${encodeURIComponent(deviceId)}${prefix}/transport/key?challenge=${challenge}`,
+        { credentials: 'same-origin', cache: 'no-store', signal: controller.signal },
+      );
+    } catch (error) {
+      if (controller.signal.aborted)
+        throw new TransportError('device_unresponsive', 'The device did not respond to the encryption handshake. Retry in a moment.', 504);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     const previous = await pinned(deviceId);
     if (response.status === 404 && !previous) {
       reportTransport({ deviceId, state: 'legacy' });
-      setTimeout(() => keys.delete(deviceId), 10000);
+      setTimeout(() => { if (keys.get(deviceId) === task) keys.delete(deviceId); }, 10000);
       return null;
     }
     if (!response.ok) {
@@ -250,7 +261,7 @@ async function keyFor(
   try {
     return await task;
   } catch (e) {
-    keys.delete(deviceId);
+    if (keys.get(deviceId) === task) keys.delete(deviceId);
     throw e;
   }
 }
@@ -398,9 +409,16 @@ export async function exchange(
       ).code === 'transport_reconnect_required'
     ) {
       clearTransportKeyCache(route.deviceId);
-      if (retryRead && request.method === 'GET')
+      // Unknown recipient keys are rejected before decryption/dispatch. Session
+      // creation must recover too, but never replay arbitrary application POSTs.
+      const sessionRetry = request.method === 'POST' && wirePath.endsWith('/transport/session');
+      if (retryRead && (request.method === 'GET' || sessionRetry))
         return exchange(
-          request,
+          sessionRetry ? new Request(request.url, {
+            method: request.method, headers: request.headers,
+            credentials: request.credentials, signal: request.signal,
+            body: buffer(body),
+          }) : request,
           scope,
           beforeEncrypt,
           socketKeys,

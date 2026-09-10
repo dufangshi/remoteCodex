@@ -410,6 +410,27 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
       publicPage.getByRole('button', { name: 'Thread actions', exact: true }),
     ).toHaveCount(0);
     await anonymous.close();
+    // A separate transport client primes its key once and stays idle through
+    // restart. Its FIRST request afterwards is POST session, without a GET or
+    // another socket reconnect accidentally refreshing the key first.
+    const recoveryPage = await context.newPage();
+    await recoveryPage.goto('/');
+    const sessionStatuses: number[] = [];
+    await recoveryPage.route(`**/relay/devices/${device.device.id}/**`, async route => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({
+        url: `${base}${url.pathname}${url.search}`,
+        headers: { ...route.request().headers(), authorization: `Bearer ${owner}`, origin: base, referer: `${base}/` },
+      });
+      if (url.pathname.endsWith('/transport/session')) sessionStatuses.push(response.status());
+      await route.fulfill({ response });
+    });
+    const recoveryApi = `/relay/devices/${device.device.id}/api`;
+    expect(await recoveryPage.evaluate(async api => {
+      const modulePath = '/src/lib/relayTransportCrypto.ts';
+      const { exchange } = await import(/* @vite-ignore */ modulePath);
+      return (await exchange(new Request(`${location.origin}${api}/threads`))).response.status;
+    }, recoveryApi)).toBe(200);
     // Restart only this fixture's device: persistent identity stays, ephemeral keys change.
     // Keep the page and service worker alive so both must recover their stale key cache.
     await new Promise<void>((done) => {
@@ -429,6 +450,19 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
           (await request(`${base}/healthz`)).data.connectedSupervisors,
       )
       .toBe(1);
+    const recoveredSession = await recoveryPage.evaluate(async api => {
+      const modulePath = '/src/lib/relayTransportCrypto.ts';
+      const { exchange } = await import(/* @vite-ignore */ modulePath);
+      const result = await exchange(new Request(`${location.origin}${api}/transport/session`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      }), undefined, undefined, true);
+      return { status: result.response.status, body: await result.response.json(), keys: Boolean(result.sendKey && result.receiveKey) };
+    }, recoveryApi);
+    expect(sessionStatuses).toEqual([409, 200]);
+    expect(recoveredSession.status).toBe(200);
+    expect(recoveredSession.body.channelId).toBeTruthy();
+    expect(recoveredSession.keys).toBe(true);
+    await recoveryPage.close();
     const afterRestart = await page.evaluate(
       async (url) => (await fetch(url)).text(),
       `${api}/workspaces/${workspace.id}/files/raw?path=private.txt`,

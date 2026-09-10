@@ -149,7 +149,10 @@ pub fn router(state: AppState) -> Router {
             get(thread_item_detail),
         )
         .route("/api/threads/{id}/assets/image", get(thread_image))
-        .route("/api/threads/{id}/linked-files/{action}", get(crate::linked_files::read))
+        .route(
+            "/api/threads/{id}/linked-files/{action}",
+            get(crate::linked_files::read),
+        )
         .route("/api/threads/{id}/settings", patch(thread_settings))
         .route("/api/threads/{id}/prompt", post(thread_prompt))
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
@@ -2059,7 +2062,8 @@ mod error_tests {
     #[test]
     fn damaged_harness_storage_has_an_actionable_error() {
         let error = map_err(anyhow::anyhow!(
-            "{}", r#"{"code":-32603,"data":{"details":"failed to list thread history: database disk image is malformed"},"message":"Internal error"}"#
+            "{}",
+            r#"{"code":-32603,"data":{"details":"failed to list thread history: database disk image is malformed"},"message":"Internal error"}"#
         ));
         assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
         let body = serde_json::to_value(error.1).unwrap();

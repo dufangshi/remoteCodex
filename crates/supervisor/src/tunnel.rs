@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::bounded_channel as mpsc;
 use anyhow::{anyhow, Result};
@@ -14,11 +14,11 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 use tower::ServiceExt;
 use url::Url;
 
-const RELAY_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-const RELAY_RECEIVE_TIMEOUT: Duration = Duration::from_secs(90);
-const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const RELAY_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
+const RELAY_RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RELAY_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
-const RELAY_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
+const RELAY_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(3);
 
 struct RelayClientSession {
     socket: crate::socket::SocketSession,
@@ -64,6 +64,9 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
                 if let Err(error) = run_connected_tunnel(state.clone(), socket).await {
                     tracing::warn!(%error, "relay tunnel connection ended");
                 }
+                // Reconnect an established tunnel immediately. Only failed
+                // connection attempts back off; the runtime remains alive.
+                continue;
             }
             Ok(Err(_)) => {
                 // Do not log the websocket error verbatim: some implementations
@@ -117,6 +120,7 @@ async fn run_connected_tunnel_with_deadline(
 ) -> Result<()> {
     let (mut sink, mut stream) = socket.split();
     let mut last_received = tokio::time::Instant::now();
+    let mut last_tick = SystemTime::now();
     let (outgoing, mut outbound) = mpsc::channel::<Value>();
     let mut clients = HashMap::<String, RelayClientSession>::new();
     let mut heartbeat = tokio::time::interval(RELAY_HEARTBEAT_INTERVAL);
@@ -136,7 +140,7 @@ async fn run_connected_tunnel_with_deadline(
                 let Some(message) = message else {
                     return Err(anyhow!("relay tunnel writer closed"));
                 };
-                tokio::time::timeout(Duration::from_secs(10),sink.send(Message::Text(message.to_string().into()))).await??;
+                tokio::time::timeout(RELAY_RECEIVE_TIMEOUT,sink.send(Message::Text(message.to_string().into()))).await??;
             }
             _ = tokio::time::sleep_until(last_received + receive_timeout) => {
                 return Err(anyhow!("relay stopped responding; reconnecting"));
@@ -156,7 +160,7 @@ async fn run_connected_tunnel_with_deadline(
                         );
                     }
                     Some(Ok(Message::Ping(payload))) => {
-                        tokio::time::timeout(Duration::from_secs(10), sink.send(Message::Pong(payload))).await??;
+                        tokio::time::timeout(RELAY_RECEIVE_TIMEOUT, sink.send(Message::Pong(payload))).await??;
                     }
                     Some(Ok(Message::Close(frame))) => {
                         return Err(anyhow!("relay tunnel closed: {frame:?}"));
@@ -167,9 +171,14 @@ async fn run_connected_tunnel_with_deadline(
                 }
             }
             _ = heartbeat.tick() => {
+                let now = SystemTime::now();
+                if resumed_after_pause(last_tick, now) {
+                    return Err(anyhow!("supervisor resumed after a pause; reconnecting relay"));
+                }
+                last_tick = now;
                 // TCP writes can succeed after a network change even though the
                 // peer is unreachable. A WebSocket ping requires a return path.
-                tokio::time::timeout(Duration::from_secs(10), sink.send(Message::Ping(Vec::new().into()))).await??;
+                tokio::time::timeout(RELAY_RECEIVE_TIMEOUT, sink.send(Message::Ping(Vec::new().into()))).await??;
                 if outgoing.send(json!({
                     "type": "relay.heartbeat",
                     "timestamp": now_rfc3339()
@@ -194,6 +203,13 @@ async fn run_connected_tunnel_with_deadline(
     }
 }
 
+fn resumed_after_pause(previous: SystemTime, now: SystemTime) -> bool {
+    // macOS's monotonic timer can exclude time asleep. A wall-clock gap forces
+    // a fresh socket on the first heartbeat after wake instead of trusting TCP.
+    now.duration_since(previous)
+        .is_ok_and(|gap| gap > RELAY_HEARTBEAT_INTERVAL + RELAY_RECEIVE_TIMEOUT)
+}
+
 fn handle_relay_message(
     state: Arc<Supervisor>,
     clients: &mut HashMap<String, RelayClientSession>,
@@ -215,16 +231,29 @@ fn handle_relay_message(
                 std::sync::OnceLock::new();
             static HANDSHAKES: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
                 std::sync::OnceLock::new();
+            static HEALTH: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+                std::sync::OnceLock::new();
             // Reserve handshake capacity so slow application requests cannot make
             // an online device appear to have broken encryption.
             let handshake = payload["path"].as_str().is_some_and(|path| {
                 let path = path.split('?').next().unwrap_or("");
                 path.ends_with("/transport/key") || path.ends_with("/transport/session")
             });
-            let pool = if handshake { &HANDSHAKES } else { &REQUESTS };
+            let health = payload["path"] == "/healthz";
+            let pool = if health {
+                &HEALTH
+            } else if handshake {
+                &HANDSHAKES
+            } else {
+                &REQUESTS
+            };
             let permit = pool
                 .get_or_init(|| {
-                    Arc::new(tokio::sync::Semaphore::new(if handshake { 4 } else { 32 }))
+                    Arc::new(tokio::sync::Semaphore::new(if handshake || health {
+                        4
+                    } else {
+                        32
+                    }))
                 })
                 .clone()
                 .try_acquire_owned();
@@ -895,6 +924,62 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("stopped responding"));
         server.abort();
+    }
+
+    #[test]
+    fn wake_detection_uses_elapsed_wall_time_not_a_clock_adjustment_backwards() {
+        let before = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        assert!(!resumed_after_pause(
+            before,
+            before + Duration::from_secs(3)
+        ));
+        assert!(resumed_after_pause(
+            before,
+            before + Duration::from_secs(60)
+        ));
+        assert!(!resumed_after_pause(
+            before,
+            before - Duration::from_secs(60)
+        ));
+    }
+
+    #[tokio::test]
+    async fn half_open_tunnel_reconnects_automatically_with_the_same_supervisor() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay_url = format!("ws://{}", listener.local_addr().unwrap());
+        let (_directory, state) = state_with_relay_url(&relay_url);
+        let tunnel = tokio::spawn(run_relay_tunnel(state.clone()));
+        let (tcp, _) = listener.accept().await.unwrap();
+        let _silent = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        // TCP remains open and writable. No return frames reach the supervisor.
+        let (tcp, _) = tokio::time::timeout(Duration::from_secs(7), listener.accept())
+            .await
+            .expect("reconnect without user intervention or process restart")
+            .unwrap();
+        let mut replacement = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        replacement.send(Message::Text(json!({
+            "type":"relay.request", "requestId":"health", "payload":{"method":"GET","path":"/healthz"}
+        }).to_string().into())).await.unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(Ok(message)) = replacement.next().await {
+                if let Message::Text(text) = message {
+                    let value: Value = serde_json::from_str(&text).unwrap();
+                    if value["type"] == "relay.response" {
+                        return value;
+                    }
+                }
+            }
+            panic!("replacement tunnel closed");
+        })
+        .await
+        .unwrap();
+        assert_eq!(response["requestId"], "health");
+        assert_eq!(response["payload"]["statusCode"], 200);
+        let body: Value =
+            serde_json::from_str(response["payload"]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(body["processId"], std::process::id());
+        assert!(!tunnel.is_finished());
+        tunnel.abort();
     }
 
     #[tokio::test]

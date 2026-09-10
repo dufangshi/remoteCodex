@@ -920,6 +920,7 @@ pub async fn serve() -> Result<()> {
         .route("/relay/devices/{device_id}/api/{*rest}", any(device_api))
         .route("/relay/api/{*rest}", any(relay_api_compat))
         .route("/relay/devices/{device_id}/healthz", get(device_healthz))
+        .route("/relay/devices/{device_id}/presence", get(device_presence))
         .route("/supervisor/tunnel", get(supervisor_tunnel))
         .route("/relay/devices/{device_id}/ws", get(client_ws))
         .route("/relay/ws", get(client_ws_compat))
@@ -4185,6 +4186,60 @@ async fn reject_registration(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PresenceQuery {
+    #[serde(flatten)]
+    auth: TokenQuery,
+    thread_id: Option<String>,
+    workspace_id: Option<String>,
+}
+
+async fn device_presence(
+    Path(device_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<PresenceQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let allowed = {
+        let conn = state.store.conn.lock().await;
+        authenticated_user(&conn, &state.store.session_secret, &headers, &query.auth)
+            .and_then(|user| {
+                effective_access(
+                    &conn,
+                    &user.id,
+                    &device_id,
+                    query.thread_id.as_deref(),
+                    query.workspace_id.as_deref(),
+                )
+            })
+            .is_some()
+    };
+    if !allowed {
+        return unauthorized();
+    }
+    // A presence probe never wakes a hosted VM, renews user activity, or drops
+    // the tunnel. Only return reachability, including to thread-only guests.
+    let response = forward_device_with_timeout(
+        state,
+        device_id,
+        "GET".into(),
+        "/healthz".into(),
+        None,
+        None,
+        json!({}),
+        Duration::from_secs(5),
+    )
+    .await;
+    (
+        [("cache-control", "no-store")],
+        Json(json!({
+            "connected": response.status().is_success()
+        })),
+    )
+        .into_response()
+}
+
 async fn device_healthz(
     Path(device_id): Path<String>,
     headers: HeaderMap,
@@ -4364,7 +4419,8 @@ async fn device_api(
         Value::Object(forwarded_headers),
     )
     .await;
-    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status()).await;
+    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status())
+        .await;
     if let Some(sandbox_id) = isolation {
         transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
     } else {
@@ -4514,7 +4570,8 @@ async fn relay_api_compat(
         Value::Object(forwarded_headers),
     )
     .await;
-    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status()).await;
+    share_activity::record_response(&state, &access, &user_id, &method, &path, response.status())
+        .await;
     if let Some(sandbox_id) = isolation {
         transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
     } else {
@@ -4546,7 +4603,15 @@ struct HostedResourceRequest<'a> {
 }
 
 fn hosted_resource_allowed(conn: &Connection, request: HostedResourceRequest<'_>) -> bool {
-    if request.path.split('?').next().unwrap_or("").contains("/linked-files/") { return false; }
+    if request
+        .path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .contains("/linked-files/")
+    {
+        return false;
+    }
     if let Some(workspace_id) = request.workspace_id {
         let owns = conn
             .query_row(
@@ -6171,40 +6236,166 @@ mod tests {
         let (owner_token, guest_token) = {
             let conn = state.store.conn.lock().await;
             for (id, username) in [("owner", "owner"), ("guest", "friend")] {
-                conn.execute("INSERT INTO relay_users VALUES (?1,?2,?3,'user',1,NULL,'now','salt','hash')", params![id, format!("{id}@example.test"), username]).unwrap();
+                conn.execute(
+                    "INSERT INTO relay_users VALUES (?1,?2,?3,'user',1,NULL,'now','salt','hash')",
+                    params![id, format!("{id}@example.test"), username],
+                )
+                .unwrap();
             }
             conn.execute("INSERT INTO relay_devices VALUES ('device','owner','Laptop',NULL,'hash','preview','now')", []).unwrap();
             conn.execute("INSERT INTO relay_shares(id,owner_user_id,target_user_id,device_id,thread_id,created_at) VALUES ('share','owner','guest','device','thread','now')", []).unwrap();
-            (create_session(&conn,"test-secret","owner").unwrap(), create_session(&conn,"test-secret","guest").unwrap())
+            (
+                create_session(&conn, "test-secret", "owner").unwrap(),
+                create_session(&conn, "test-secret", "guest").unwrap(),
+            )
         };
         let (socket, mut rx) = device_socket(Uuid::new_v4());
         state.sockets.write().await.insert("device".into(), socket);
-        for (token, status, compatibility) in [(&owner_token,200,false), (&guest_token,404,false), (&guest_token,200,false), (&guest_token,200,true)] {
+        for (token, status, compatibility) in [
+            (&owner_token, 200, false),
+            (&guest_token, 404, false),
+            (&guest_token, 200, false),
+            (&guest_token, 200, true),
+        ] {
             let responder = state.clone();
             let response_task = async {
                 let message: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
                 let request_id = message["requestId"].as_str().unwrap();
-                let request = responder.pending.lock().unwrap().remove(request_id).unwrap();
+                let request = responder
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .remove(request_id)
+                    .unwrap();
                 request.tx.send(json!({"statusCode":status,"headers":{"x-rcd-encrypted":"1"},"body":"opaque encrypted response"})).unwrap();
             };
             let mut headers = HeaderMap::new();
-            headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
+            headers.insert(
+                header::AUTHORIZATION,
+                format!("Bearer {token}").parse().unwrap(),
+            );
             let request = async {
                 if compatibility {
-                    relay_api_compat(Path("threads/thread".into()), Method::GET, "/relay/api/threads/thread?turnLimit=3".parse().unwrap(), Query(TokenQuery::default()), State(state.clone()), headers, Bytes::new()).await.into_response()
+                    relay_api_compat(
+                        Path("threads/thread".into()),
+                        Method::GET,
+                        "/relay/api/threads/thread?turnLimit=3".parse().unwrap(),
+                        Query(TokenQuery::default()),
+                        State(state.clone()),
+                        headers,
+                        Bytes::new(),
+                    )
+                    .await
+                    .into_response()
                 } else {
-                    device_api(Path(("device".into(),"threads/thread".into())), Method::GET, "/relay/devices/device/api/threads/thread?turnLimit=3".parse().unwrap(), Query(TokenQuery::default()), State(state.clone()), headers, Bytes::new()).await.into_response()
+                    device_api(
+                        Path(("device".into(), "threads/thread".into())),
+                        Method::GET,
+                        "/relay/devices/device/api/threads/thread?turnLimit=3"
+                            .parse()
+                            .unwrap(),
+                        Query(TokenQuery::default()),
+                        State(state.clone()),
+                        headers,
+                        Bytes::new(),
+                    )
+                    .await
+                    .into_response()
                 }
             };
-            let (response, _) = tokio::join!(request,response_task);
+            let (response, _) = tokio::join!(request, response_task);
             assert_eq!(response.status().as_u16(), status);
             let conn = state.store.conn.lock().await;
-            let shares = relay_shares_for(&conn,"owner_user_id","owner");
+            let shares = relay_shares_for(&conn, "owner_user_id", "owner");
             let count = shares[0]["accessEvents"].as_array().unwrap().len();
-            assert_eq!(count, if token == &guest_token && status == 200 { 1 } else { 0 });
-            if count > 0 { assert_eq!(shares[0]["lastAccessedByUsername"],"friend"); }
+            assert_eq!(
+                count,
+                if token == &guest_token && status == 200 {
+                    1
+                } else {
+                    0
+                }
+            );
+            if count > 0 {
+                assert_eq!(shares[0]["lastAccessedByUsername"], "friend");
+            }
         }
         drop(rx);
+        drop(state);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn presence_probes_require_scope_and_do_not_disconnect_silent_devices() {
+        let (state, data_dir) = test_app_state("presence");
+        let token = {
+            let conn = state.store.conn.lock().await;
+            for id in ["owner", "guest"] {
+                conn.execute(
+                    "INSERT INTO relay_users VALUES (?1,?2,?1,'user',1,NULL,'now','salt','hash')",
+                    params![id, format!("{id}@example.test")],
+                )
+                .unwrap();
+            }
+            conn.execute("INSERT INTO relay_devices VALUES ('device','owner','Mac',NULL,'hash','preview','now')", []).unwrap();
+            conn.execute("INSERT INTO relay_shares(id,owner_user_id,target_user_id,device_id,thread_id,created_at) VALUES ('share','owner','guest','device','thread','now')", []).unwrap();
+            create_session(&conn, "test-secret", "guest").unwrap()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        let probe = |thread: Option<&str>| {
+            device_presence(
+                Path("device".into()),
+                headers.clone(),
+                Query(PresenceQuery {
+                    auth: TokenQuery::default(),
+                    thread_id: thread.map(str::to_string),
+                    workspace_id: None,
+                }),
+                State(state.clone()),
+            )
+        };
+        assert_eq!(probe(None).await.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            probe(Some("other-thread")).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let (socket, mut rx) = device_socket(Uuid::new_v4());
+        state.sockets.write().await.insert("device".into(), socket);
+        let responder = async {
+            let message: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+            assert_eq!(message["payload"]["path"], "/healthz");
+            let pending = state
+                .pending
+                .lock()
+                .unwrap()
+                .remove(message["requestId"].as_str().unwrap())
+                .unwrap();
+            pending
+                .tx
+                .send(json!({"statusCode":200,"body":"private health metadata"}))
+                .unwrap();
+        };
+        let (response, ()) = tokio::join!(probe(Some("thread")), responder);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"connected":true})
+        );
+        let started = tokio::time::Instant::now();
+        let response = probe(Some("thread")).await;
+        assert!(started.elapsed() < Duration::from_secs(6));
+        let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"connected":false})
+        );
+        assert!(state.sockets.read().await.contains_key("device"));
+        assert!(state.pending.lock().unwrap().is_empty());
         drop(state);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
@@ -6658,10 +6849,18 @@ mod tests {
                    ('sandbox','user-b','thread-b','workspace-b','2026-01-01T00:00:00Z');",
             )
             .unwrap();
-            assert!(!hosted_resource_allowed(&conn, HostedResourceRequest {
-                sandbox_id: "sandbox", user_id: "user-a", thread_id: Some("thread-a"), workspace_id: None,
-                method: &Method::GET, path: "/api/threads/thread-a/linked-files/raw?path=/private/file", body: &[],
-            }));
+            assert!(!hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "sandbox",
+                    user_id: "user-a",
+                    thread_id: Some("thread-a"),
+                    workspace_id: None,
+                    method: &Method::GET,
+                    path: "/api/threads/thread-a/linked-files/raw?path=/private/file",
+                    body: &[],
+                }
+            ));
             assert!(hosted_resource_allowed(
                 &conn,
                 HostedResourceRequest {
