@@ -284,6 +284,7 @@ pub struct UploadedPromptAttachment {
 
 pub struct Supervisor {
     pub interaction: crate::interaction::InteractionState,
+    pub relay_connected: std::sync::atomic::AtomicBool,
     pub started_at: String,
     pub started_instant: std::time::Instant,
     pub config: RuntimeConfig,
@@ -330,6 +331,7 @@ impl Supervisor {
             started_at: now_rfc3339(),
             started_instant: std::time::Instant::now(),
             interaction: Default::default(),
+            relay_connected: Default::default(),
             config,
             db,
             bus: EventBus::new(),
@@ -2517,7 +2519,7 @@ impl Supervisor {
         let pending = self
             .find_pending_steer(thread_id, pending_steer_id)?
             .ok_or_else(|| anyhow!("Pending queued prompt was not found."))?;
-        if pending.delivery != "continuation" {
+        if !["continuation", "cli-steer"].contains(&pending.delivery.as_str()) {
             bail!("conflict: This prompt has already been steered.");
         }
         let active_turn_id = thread

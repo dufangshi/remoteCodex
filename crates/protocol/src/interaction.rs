@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSendInput {
     pub text: String,
+    #[serde(default = "inbox_delivery")]
+    pub delivery: String,
+    #[serde(default = "inbox_delivery")]
+    pub notify_delivery: String,
     #[serde(default)]
     pub from_thread_id: Option<String>,
     #[serde(default)]
@@ -24,4 +28,8 @@ pub struct ThreadTranscriptQuery {
     pub text_offset: Option<u32>,
     #[serde(default)]
     pub raw: bool,
+}
+
+fn inbox_delivery() -> String {
+    "inbox".into()
 }

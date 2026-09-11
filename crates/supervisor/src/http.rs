@@ -420,7 +420,7 @@ pub(crate) fn map_err(e: anyhow::Error) -> ApiErr {
 
 async fn healthz(State(state): State<AppState>) -> Json<Value> {
     Json(
-        json!({"status":"ok", "timestamp":now_rfc3339(), "activeTurnCount":state.active_turn_count(), "runningVersion":APP_VERSION, "processId":std::process::id()}),
+        json!({"status":"ok", "timestamp":now_rfc3339(), "activeTurnCount":state.active_turn_count(), "runningVersion":APP_VERSION, "processId":std::process::id(), "relayConnected":state.relay_connected.load(std::sync::atomic::Ordering::SeqCst)}),
     )
 }
 

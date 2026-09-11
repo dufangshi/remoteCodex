@@ -141,6 +141,12 @@ function detachedService(program, args, env, cwd, log) {
   return child;
 }
 
+export function relayLogFile(env, cwd = process.cwd(), home = os.homedir()) {
+  // tmux clears optional launcher controls by exporting empty strings.
+  return path.resolve(cwd, env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG ||
+    path.join(home, '.remote-codex/logs/relay-supervisor.log'));
+}
+
 export async function worker(plan, hooks = {}) {
   const execute = hooks.run ?? run;
   const getHealth = hooks.health ?? health;
@@ -157,6 +163,7 @@ export async function worker(plan, hooks = {}) {
   const backup = path.join(plan.directory, 'previous-package');
   let installed = false,
     stopped = false,
+    newStartAttempted = false,
     newPid;
   const status = (phase, extra = {}) =>
     write(plan.statusFile, {
@@ -236,10 +243,11 @@ export async function worker(plan, hooks = {}) {
       throw Error(
         'Old Supervisor did not stop; refusing to kill another process',
       );
-    const log =
-      plan.env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG ??
-      path.join(os.homedir(), '.remote-codex/logs/relay-supervisor.log');
+    const log = relayLogFile(plan.env, plan.cwd);
     const previousLog = fs.existsSync(log) ? fs.statSync(log) : null;
+    // A new process may migrate the database before binding HTTP. From this point
+    // a package-only rollback cannot establish that the old binary is compatible.
+    newStartAttempted = true;
     start(
       plan.node,
       [
@@ -252,26 +260,30 @@ export async function worker(plan, hooks = {}) {
       path.join(plan.directory, 'launch.log'),
     );
     const result = await verify(plan.version);
+    status('verifying', { runningVersion: plan.version, processId: result.processId });
     // Relay mode must reconnect as well as bind its local HTTP port.
     if (plan.mode === 'relay') {
       let connected = false;
       for (let i = 0; i < 60; i++) {
-        if (fs.existsSync(log)) {
+        const currentHealth = await getHealth(plan.port, plan.host);
+        if (currentHealth?.processId !== result.processId || currentHealth?.status !== 'ok') {
+          await pause(1000);
+          continue;
+        }
+        if (typeof currentHealth.relayConnected === 'boolean') {
+          connected = currentHealth.relayConnected;
+        } else if (fs.existsSync(log)) {
+          // Compatibility with older runtimes. Read offsets as bytes, and never
+          // use a log line to override an explicit current disconnected state.
           const current = fs.statSync(log);
           const offset =
             previousLog?.ino === current.ino && current.size >= previousLog.size
               ? previousLog.size
               : 0;
-          if (
-            fs
-              .readFileSync(log, 'utf8')
-              .slice(offset)
-              .includes('relay tunnel connected')
-          ) {
-            connected = true;
-            break;
-          }
+          connected = fs.readFileSync(log).subarray(offset)
+            .includes(Buffer.from('relay tunnel connected'));
         }
+        if (connected) break;
         await pause(1000);
       }
       if (!connected)
@@ -282,6 +294,16 @@ export async function worker(plan, hooks = {}) {
       processId: result.processId,
     });
   } catch (error) {
+    if (newStartAttempted) {
+      // Keep a healthy, reconnecting process alive. Even failed startup may have
+      // migrated the database, so do not restore an older package or database.
+      status('failed', {
+        ...(newPid ? { runningVersion: plan.version, processId: newPid } : {}),
+        keptInstalledVersion: true,
+        error: `${error.message}. Kept the current installation to avoid an incompatible database downgrade; check the service connection and logs before retrying.`,
+      });
+      return;
+    }
     // Keep the job active until rollback finishes; the old runtime must stay paused.
     status('restarting', { rollingBack: true, error: error.message });
     try {
@@ -387,7 +409,7 @@ export function readJob(statusFile, lock, now = Date.now(), isAlive = alive) {
   const job = read(statusFile);
   if (
     !job ||
-    !['scheduled', 'preparing', 'installing', 'restarting'].includes(job.phase)
+    !['scheduled', 'preparing', 'installing', 'restarting', 'verifying'].includes(job.phase)
   )
     return job;
   const stale =

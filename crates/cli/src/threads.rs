@@ -21,6 +21,12 @@ pub struct Connection {
 }
 #[derive(Args)]
 pub struct Body {
+    /// inbox stores passive mail (send default); queue starts a continuation (create default); steer targets an active supported turn.
+    #[arg(long, value_parser=["inbox","queue","steer"])]
+    pub delivery: Option<String>,
+    /// Where the terminal-turn notification is delivered (requires --notify-on-complete).
+    #[arg(long, default_value="inbox", value_parser=["inbox","queue"], requires="notify_on_complete")]
+    pub notify_delivery: String,
     #[arg(long, conflicts_with = "text_file")]
     pub text: Option<String>,
     #[arg(long)]
@@ -186,11 +192,11 @@ impl Client {
         }
         Ok(uuid::Uuid::parse_str(value)?.to_string())
     }
-    async fn send(&self, id: &str, body: &Body) -> Result<Value> {
+    async fn send(&self, id: &str, body: &Body, default_delivery: &str) -> Result<Value> {
         let text = body
             .text()?
             .context("send requires --text or --text-file")?;
-        self.request(json!({"operation":"send","threadId":id,"text":text,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id})).await
+        self.request(json!({"operation":"send","threadId":id,"text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id})).await
     }
     pub async fn thread(&self, command: ThreadCommand) -> Result<Value> {
         match command {
@@ -199,7 +205,7 @@ impl Client {
             ThreadCommand::Show{id}|ThreadCommand::Status{id}=>self.request(json!({"operation":"status","threadId":self.id(&id).await?})).await,
             ThreadCommand::Backends=>self.request(json!({"operation":"backends"})).await,
             ThreadCommand::Models{provider,agent}=>self.request(json!({"operation":"models","provider":provider,"agentId":agent,"fromThreadId":self.from})).await,
-            ThreadCommand::Send{id,body}=>self.send(&self.id(&id).await?,&body).await,
+            ThreadCommand::Send{id,body}=>self.send(&self.id(&id).await?,&body,"inbox").await,
             ThreadCommand::Create{workspace,title,provider,agent,model,reasoning_effort,approval_mode,body}=>{
                 ensure!(!body.notify_on_complete || body.text.is_some() || body.text_file.is_some(),"notification requires an initial prompt");
                 ensure!(!body.notify_on_complete || self.from.is_some(),"notification requires --from ID or managed thread context");
@@ -209,7 +215,7 @@ impl Client {
                 let mut result=self.request(input).await?;
                 if body.text.is_some() || body.text_file.is_some() {
                     let id=result["threadId"].as_str().context("create returned no thread ID")?.to_string();
-                    result["send"]=self.send(&id,&body).await.with_context(||format!("Thread {id} was created, but initial send failed; reuse this thread"))?;
+                    result["send"]=self.send(&id,&body,"queue").await.with_context(||format!("Thread {id} was created, but initial send failed; reuse this thread"))?;
                 }
                 Ok(result)
             }
@@ -217,5 +223,64 @@ impl Client {
     }
     pub async fn transcript(&self, q: Transcript) -> Result<Value> {
         self.request(json!({"operation":"transcript","threadId":self.id(&q.id).await?,"limit":q.limit,"beforeTurnId":q.before_turn,"turnId":q.turn,"itemId":q.item,"view":q.view,"offset":q.offset,"textOffset":q.text_offset,"raw":q.raw})).await
+    }
+}
+
+#[derive(Args)]
+pub struct Inbox {
+    /// Defaults to the managed caller's remoteCodex identity.
+    #[arg(long, global = true)]
+    pub thread: Option<String>,
+    #[command(subcommand)]
+    pub command: Option<InboxCommand>,
+}
+#[derive(Subcommand)]
+pub enum InboxCommand {
+    /// List bounded previews. Reading never marks mail as acknowledged.
+    List {
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long)]
+        before: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Read one message, expanding long text in bounded chunks.
+    Read {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        text_offset: u32,
+    },
+    /// Acknowledge messages after handling them; keep them accessible with list --all.
+    Ack {
+        #[arg(required=true,num_args=1..)]
+        ids: Vec<String>,
+    },
+    /// Explicitly move unconsumed peer prompts to the inbox, cancelling their completion subscriptions.
+    AdoptQueued,
+}
+impl Client {
+    pub async fn inbox(&self, args: Inbox) -> Result<Value> {
+        let thread = args
+            .thread
+            .or_else(|| self.from.clone())
+            .context("Current thread is unknown; pass --thread ID")?;
+        let thread = self.id(&thread).await?;
+        let mut input = match args.command.unwrap_or(InboxCommand::List {
+            limit: 20,
+            before: None,
+            all: false,
+        }) {
+            InboxCommand::List { limit, before, all } => {
+                json!({"operation":"inbox","limit":limit,"before":before,"all":all})
+            }
+            InboxCommand::Read { id, text_offset } => {
+                json!({"operation":"inboxRead","messageId":id,"textOffset":text_offset})
+            }
+            InboxCommand::Ack { ids } => json!({"operation":"inboxAck","messageIds":ids}),
+            InboxCommand::AdoptQueued => json!({"operation":"inboxAdoptQueued"}),
+        };
+        input["threadId"] = json!(thread);
+        self.request(input).await
     }
 }

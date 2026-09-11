@@ -18,6 +18,7 @@ type Job = {
   state?: string;
   phase?: string;
   action?: string;
+  rollingBack?: boolean;
   error?: string;
   targetVersion?: string;
 };
@@ -38,12 +39,29 @@ type Supervisor = {
   uptimeSeconds?: number;
   observedAt?: number;
   reason?: string;
-  job?: Job;
+  job?: Job | undefined;
 };
 const active = (job?: Job) =>
-  ['running', 'scheduled', 'preparing', 'installing', 'restarting'].includes(
+  ['running', 'scheduled', 'preparing', 'installing', 'restarting', 'verifying'].includes(
     job?.state ?? job?.phase ?? '',
   );
+function supervisorJobText(job: Job) {
+  const operation = job.action === 'restart' ? 'Restart' : 'Update';
+  if (job.rollingBack && active(job)) return `${operation} failed; restoring the previous service…`;
+  switch (job.phase) {
+    case 'scheduled': return `${operation} requested…`;
+    case 'preparing': return `Preparing ${operation.toLowerCase()}: saving active tasks…`;
+    case 'installing': return 'Installing Supervisor update…';
+    case 'restarting': return 'Restarting Supervisor…';
+    case 'verifying': return 'Supervisor started; verifying its connection…';
+    case 'completed': return `${operation} completed`;
+    case 'recovered': return 'Supervisor recovered';
+    case 'failed': return `Last ${operation.toLowerCase()} failed: ${job.error ?? 'Check the device logs.'}`;
+    case 'rolled-back': return `Last ${operation.toLowerCase()} failed; previous service restored. ${job.error ?? ''}`;
+    case 'rollback-failed': return `Last ${operation.toLowerCase()} and recovery failed: ${job.error ?? 'Check the device logs.'}`;
+    default: return job.error ?? job.phase;
+  }
+}
 const button =
   'host-secondary-button inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs disabled:opacity-50';
 export function RuntimeManagement() {
@@ -92,7 +110,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         api<Supervisor>('supervisor'),
         api<Harness[]>('harnesses'),
       ]);
-      setSupervisor((previous) => ({ ...previous, ...s, observedAt: performance.now() }));
+      setSupervisor((previous) => ({ ...previous, ...s, job: s.job, observedAt: performance.now() }));
       setHarnesses(h);
       setJobs(
         Object.fromEntries(
@@ -129,7 +147,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
   useEffect(() => {
     if (!pending) return;
     let stopped = false;
+    let loading = false;
     const timer = window.setInterval(async () => {
+      if (loading) return;
+      loading = true;
       try {
         const [j, s] = await Promise.all([
           api<Record<string, Job>>('jobs'),
@@ -137,10 +158,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         ]);
         if (stopped) return;
         setJobs(j);
-        setSupervisor((previous) => ({ ...previous, ...s, observedAt: performance.now() }));
+        setSupervisor((previous) => ({ ...previous, ...s, job: s.job, observedAt: performance.now() }));
         if (!Object.values(j).some(active) && !active(s.job)) await load();
       } catch {
         /* Temporary disconnect during supervisor replacement; keep polling. */
+      } finally {
+        loading = false;
       }
     }, 2500);
     return () => {
@@ -273,7 +296,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           <h3 className="text-sm font-semibold">Supervisor</h3>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
             {supervisor?.runningVersion
-              ? `Running ${supervisor.runningVersion}`
+              ? `${active(supervisor.job) ? 'Version' : 'Running'} ${supervisor.runningVersion}`
               : 'Loading version…'}
             {supervisor?.latestVersion &&
               ` · Latest ${supervisor.latestVersion}`}
@@ -322,8 +345,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       )}
       {supervisor?.job && (
         <p role="status" className="mt-2 text-xs">
-          {supervisor.job.error ??
-            `${supervisor.job.phase} · ${supervisor.job.targetVersion ?? ''}`}
+          {supervisorJobText(supervisor.job)}
+          {active(supervisor.job) && <span className="mt-1 block text-[var(--theme-fg-muted)]">
+            Controls are temporarily disabled until this operation finishes.
+          </span>}
         </p>
       )}
       <h3 className="mb-2 mt-6 text-sm font-semibold">Harnesses</h3>

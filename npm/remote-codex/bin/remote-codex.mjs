@@ -76,6 +76,7 @@ const command = aliases.get(rawCommand) ?? rawCommand;
 
 try {
   if (
+    ['start', 'stop', 'status', 'relay-supervisor'].includes(command) &&
     command !== '--help' &&
     command !== '-h' &&
     command !== 'help' &&
@@ -876,6 +877,10 @@ function printHelp() {
 Usage: remote-codex <command>
 
 Commands:
+  thread <command>              Create peers, send inbox/queue/steer messages, inspect status
+  inbox [command]               List, read, acknowledge, or adopt queued peer messages
+  transcript <thread-id>        Read conversation history progressively
+  skill                         Print the bundled thread-interaction guide
   start                         Start the managed local web app and supervisor
   status                        Show managed local service status
   stop                          Stop the managed local service

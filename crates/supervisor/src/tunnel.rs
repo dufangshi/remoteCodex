@@ -29,6 +29,16 @@ struct RelayClientSession {
     )>,
 }
 
+// Reset readiness on every exit, including timeout, errors and task cancellation.
+struct RelayReadiness(Arc<Supervisor>);
+impl Drop for RelayReadiness {
+    fn drop(&mut self) {
+        self.0
+            .relay_connected
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl Drop for RelayClientSession {
     fn drop(&mut self) {
         self.bridge.abort();
@@ -119,6 +129,7 @@ async fn run_connected_tunnel_with_deadline(
     receive_timeout: Duration,
 ) -> Result<()> {
     let (mut sink, mut stream) = socket.split();
+    let _readiness = RelayReadiness(state.clone());
     let mut last_received = tokio::time::Instant::now();
     let mut last_tick = SystemTime::now();
     let (outgoing, mut outbound) = mpsc::channel::<Value>();
@@ -152,6 +163,9 @@ async fn run_connected_tunnel_with_deadline(
                         let Ok(message) = serde_json::from_str::<Value>(&text) else {
                             continue;
                         };
+                        if message["type"] == "relay.connected" {
+                            state.relay_connected.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
                         handle_relay_message(
                             state.clone(),
                             &mut clients,
@@ -957,6 +971,15 @@ mod tests {
             .expect("reconnect without user intervention or process restart")
             .unwrap();
         let mut replacement = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        assert!(!state
+            .relay_connected
+            .load(std::sync::atomic::Ordering::SeqCst));
+        replacement
+            .send(Message::Text(
+                json!({"type":"relay.connected"}).to_string().into(),
+            ))
+            .await
+            .unwrap();
         replacement.send(Message::Text(json!({
             "type":"relay.request", "requestId":"health", "payload":{"method":"GET","path":"/healthz"}
         }).to_string().into())).await.unwrap();
@@ -978,8 +1001,13 @@ mod tests {
         let body: Value =
             serde_json::from_str(response["payload"]["body"].as_str().unwrap()).unwrap();
         assert_eq!(body["processId"], std::process::id());
+        assert_eq!(body["relayConnected"], true);
         assert!(!tunnel.is_finished());
         tunnel.abort();
+        let _ = tunnel.await;
+        assert!(!state
+            .relay_connected
+            .load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]

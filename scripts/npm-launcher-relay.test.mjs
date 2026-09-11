@@ -162,3 +162,20 @@ test('relay rejects invalid ports before saving configuration', t => {
     assert.equal(fs.existsSync(env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG), false);
   }
 });
+
+test('native subcommand help preserves every dispatch argument', () => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-help-'));
+  try {
+    for (const command of ['thread','transcript','inbox']) {
+      // Node is a portable fake native executable; its input script has the
+      // command's name, so arguments after the command remain observable.
+      fs.writeFileSync(path.join(root,command),'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
+      const args=command==='thread'?['send','--help']:command==='inbox'?['read','--help']:['--help'];
+      const result=spawnSync(process.execPath,[launcher,command,...args],{
+        cwd:root,encoding:'utf8',env:{...process.env,REMOTE_CODEX_NATIVE_BINARY:process.execPath,REMOTE_CODEX_SERVICE_DIR:path.join(root,'service')},
+      });
+      assert.equal(result.status,0,result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout),args);
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

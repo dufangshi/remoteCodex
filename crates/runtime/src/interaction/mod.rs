@@ -1,4 +1,5 @@
 //! Provider-independent local thread operations. Uses the existing prompt queue and KV store.
+mod inbox;
 mod transcript;
 pub use transcript::TranscriptQuery;
 
@@ -77,7 +78,18 @@ impl Supervisor {
 
     pub fn send_to_thread(&self, id: &str, input: SendInput) -> Result<Value> {
         let thread = self.get_thread(id)?;
-        self.ensure_prompt_allowed(&thread)?;
+        ensure!(
+            ["inbox", "queue", "steer"].contains(&input.delivery.as_str()),
+            "delivery must be inbox, queue or steer"
+        );
+        ensure!(
+            ["inbox", "queue"].contains(&input.notify_delivery.as_str()),
+            "notifyDelivery must be inbox or queue"
+        );
+        if input.delivery != "inbox" {
+            self.ensure_prompt_allowed(&thread)?;
+        }
+        ensure!(input.delivery != "inbox" || !input.notify_on_complete, "passive inbox messages have no execution turn; use queue or steer with notifyOnComplete");
         ensure!(
             !input.text.trim().is_empty() && input.text.len() <= 256 * 1024,
             "text must be nonempty and at most 256 KiB"
@@ -102,7 +114,7 @@ impl Supervisor {
             None => input.text.clone(),
         };
         let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&input)?));
-        let receipt = json!({"threadId":id,"pendingSteerId":pending_id,"clientRequestId":input.client_request_id,"delivery":"queued","acceptedAt":now});
+        let receipt = json!({"threadId":id,"pendingSteerId":if input.delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if input.delivery == "queue" {"queued"} else {input.delivery.as_str()},"acceptedAt":now,"messageId":pending_id});
         let result = self.db.with(|conn| {
             let tx = conn.unchecked_transaction()?;
             let retry_key = input.client_request_id.as_ref().map(|key| {
@@ -126,20 +138,51 @@ impl Supervisor {
                     return Ok(saved["receipt"].clone());
                 }
             }
-            enqueue(
-                &tx,
-                &pending_id,
-                id,
-                &prompt,
-                input.client_request_id.as_deref(),
-                &now,
-            )?;
+            if input.delivery == "steer" {
+                ensure!(
+                    thread.status == "running" && thread.active_turn_id.is_some(),
+                    "conflict: steering requires an active turn"
+                );
+                ensure!(
+                    self.runtime(thread.provider)?
+                        .negotiated_caps(thread.agent_id.as_deref())
+                        .turns
+                        .steer,
+                    "conflict: this backend does not support steering"
+                );
+            }
+            if input.delivery == "inbox" {
+                inbox::store(
+                    &tx,
+                    id,
+                    &pending_id,
+                    input.from_thread_id.as_deref(),
+                    &input.text,
+                    &now,
+                )?;
+            } else {
+                enqueue(
+                    &tx,
+                    &pending_id,
+                    id,
+                    &prompt,
+                    input.client_request_id.as_deref(),
+                    &now,
+                )?;
+                if input.delivery == "steer" {
+                    tx.execute(
+                        "UPDATE thread_pending_steers SET delivery='cli-steer' WHERE id=?1",
+                        [&pending_id],
+                    )?;
+                }
+            }
             if input.notify_on_complete {
                 tx.execute(
                     "INSERT INTO kv(key,value) VALUES(?1,?2)",
                     params![
                         format!("cli:notify:pending:{pending_id}"),
-                        input.from_thread_id
+                        json!({"threadId":input.from_thread_id,"delivery":input.notify_delivery})
+                            .to_string()
                     ],
                 )?;
             }
@@ -179,7 +222,7 @@ impl Supervisor {
             )?)
         })?;
         Ok(
-            json!({"threadId":id,"title":thread.title,"workspaceId":thread.workspace_id,"provider":thread.provider,"agentId":thread.agent_id,"model":thread.model,"reasoningEffort":thread.reasoning_effort,"status":thread.status,"activeTurnId":thread.active_turn_id,"updatedAt":thread.updated_at,"lastError":thread.last_error,"waitingForInput":!pending.is_empty(),"queuedCount":queued}),
+            json!({"threadId":id,"title":thread.title,"workspaceId":thread.workspace_id,"provider":thread.provider,"agentId":thread.agent_id,"model":thread.model,"reasoningEffort":thread.reasoning_effort,"status":thread.status,"activeTurnId":thread.active_turn_id,"updatedAt":thread.updated_at,"lastError":thread.last_error,"waitingForInput":!pending.is_empty(),"queuedCount":queued,"unreadMessageCount":self.inbox_unread_count(id)?}),
         )
     }
 
@@ -293,14 +336,24 @@ pub(crate) fn finish_notification(
             .collect::<std::result::Result<Vec<_>, _>>()?;
         rows
     };
-    for (key, from) in watchers {
+    for (key, target) in watchers {
+        // Before 0.12.32, subscriptions stored just the caller ID. Preserve that
+        // explicit wake-up request when completing a turn after upgrading.
+        let parsed: Value = serde_json::from_str(&target).unwrap_or(Value::Null);
+        let from = parsed["threadId"].as_str().unwrap_or(&target).to_owned();
+        let delivery = parsed["delivery"].as_str().unwrap_or("queue");
         let exists = conn
             .query_row("SELECT 1 FROM threads WHERE id=?1", [&from], |_| Ok(()))
             .optional()?
             .is_some();
         if exists {
             let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success. Read the result with: remote-codex transcript {thread} --turn {turn} --view overview");
-            enqueue(conn, &Uuid::new_v4().to_string(), &from, &text, None, now)?;
+            let message_id = Uuid::new_v4().to_string();
+            if delivery == "inbox" {
+                inbox::store(conn, &from, &message_id, Some(thread), &text, now)?;
+            } else {
+                enqueue(conn, &message_id, &from, &text, None, now)?;
+            }
         }
         conn.execute("DELETE FROM kv WHERE key=?1", [key])?;
     }
