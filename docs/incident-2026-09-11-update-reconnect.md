@@ -13,6 +13,10 @@ rollback. Installing a fixed package does not replace a worker already executing
 outside that package. The new readiness/rollback protection already included in
 0.12.32 therefore cannot protect an upgrade initiated by the old helper. This
 explains a briefly running new version followed by a previous npm version.
+The incident worker's `previous-package/package.json` specifically reports
+`0.12.30`, although its job reports the previous running binary as `0.12.31`.
+Its rollback therefore restored an npm launcher version different from the
+binary version, directly accounting for the user's later `.30` version check.
 
 The affected thread retained its native session and a durable `continuation`
 containing the user's follow-up, but startup reconciliation had marked the
@@ -82,3 +86,8 @@ synchronous resume-and-drain route. No thread, native session, or workspace was
 deleted. The incident backup is at
 `~/.remote-codex/recovery/thread-a14e7ae9-a9eAnH/` on the affected device. The last
 failed maintenance record was marked recovered with its prior phase/error retained.
+The resumed turn started at `21:23:58 UTC`. After native context compaction, new
+text and tool output were still being persisted at `21:27:19 UTC`, more than three
+minutes later and beyond the old 60-second request timeout. Health and thread
+snapshots confirmed the same native session, a connected Relay, and no current
+thread error. Before/after snapshots are included in the incident backup.
