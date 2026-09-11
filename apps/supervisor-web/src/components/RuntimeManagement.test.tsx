@@ -78,3 +78,42 @@ it('shared device access exposes no restart or update controls', async () => {
   expect(screen.queryByRole('button',{name:/Restart|Check updates|Update/})).not.toBeInTheDocument();
   expect(api.request.mock.calls.every(([,options])=>options.method!=='POST')).toBe(true);
 });
+
+it.each(['completed', 'missing'] as const)('unlocks controls after reconnect when the job is %s', async (terminal) => {
+  vi.useFakeTimers();
+  let polls = 0;
+  api.request.mockImplementation(async (path: string) => {
+    if(path.endsWith('/harnesses')) return [];
+    if(path.endsWith('/jobs')) return {};
+    polls++;
+    if(polls === 2) throw new Error('Device reconnecting');
+    return {runningVersion:'0.12.31',canUpdate:true,canRestart:true,uptimeSeconds:26,
+      job:polls < 3 ? {action:'restart',phase:'verifying'} : terminal === 'completed' ? {action:'restart',phase:'completed'} : undefined};
+  });
+  try {
+    await act(async () => { mount('/devices/a/workspaces'); });
+    expect(screen.getByText('Version 0.12.31')).toBeVisible();
+    expect(screen.queryByText('Running 0.12.31')).not.toBeInTheDocument();
+    expect(screen.getByText('Supervisor started; verifying its connection…')).toBeVisible();
+    expect(screen.getByText(/Controls are temporarily disabled/)).toBeVisible();
+    expect(screen.getByRole('button',{name:'Restart Supervisor'})).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(screen.getByRole('button',{name:'Restart Supervisor'})).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(screen.getByText('Running 0.12.31')).toBeVisible();
+    expect(screen.getByRole('button',{name:'Restart Supervisor'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'Check updates'})).toBeEnabled();
+    expect(screen.queryByText(/Controls are temporarily disabled/)).not.toBeInTheDocument();
+  } finally { vi.useRealTimers(); }
+});
+
+it('explains legacy restarting jobs without simultaneously labelling the process running', async () => {
+  api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
+    runningVersion:'0.12.31',canUpdate:true,canRestart:true,uptimeSeconds:26,job:{phase:'restarting',targetVersion:'0.12.31'},
+  });
+  mount('/devices/a/workspaces');
+  expect(await screen.findByText('Version 0.12.31')).toBeVisible();
+  expect(screen.getByText('Restarting Supervisor…')).toBeVisible();
+  expect(screen.queryByText('Running 0.12.31')).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Restart Supervisor'})).toBeDisabled();
+});

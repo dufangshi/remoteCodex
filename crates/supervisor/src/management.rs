@@ -156,7 +156,7 @@ async fn supervisor_action(state: Arc<Supervisor>, restart: bool) -> Response {
     if value["job"]["phase"].as_str().is_some_and(|phase| {
         matches!(
             phase,
-            "scheduled" | "preparing" | "installing" | "restarting"
+            "scheduled" | "preparing" | "installing" | "restarting" | "verifying"
         )
     }) {
         return (
@@ -196,7 +196,7 @@ async fn supervisor_action(state: Arc<Supervisor>, restart: bool) -> Response {
                     if launched["job"]["phase"].as_str().is_some_and(|phase| {
                         matches!(
                             phase,
-                            "scheduled" | "preparing" | "installing" | "restarting"
+                            "scheduled" | "preparing" | "installing" | "restarting" | "verifying"
                         )
                     }) {
                         let mut errors = 0;
@@ -266,7 +266,7 @@ pub(crate) async fn recover_after_update(state: Arc<Supervisor>) {
             status["job"]["phase"].as_str().is_some_and(|phase| {
                 matches!(
                     phase,
-                    "scheduled" | "preparing" | "installing" | "restarting"
+                    "scheduled" | "preparing" | "installing" | "restarting" | "verifying"
                 )
             })
         });

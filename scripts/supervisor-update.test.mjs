@@ -9,6 +9,7 @@ import {
   worker,
   npmInstallation,
   readJob,
+  relayLogFile,
 } from '../npm/remote-codex/bin/supervisor-update.mjs';
 
 function fixture() {
@@ -136,14 +137,15 @@ for (const failure of ['download', 'startup', 'new-turn'])
       assert.equal(
         JSON.parse(fs.readFileSync(path.join(plan.root, 'package.json')))
           .version,
-        '1.0.0',
+        failure === 'startup' ? '1.0.1' : '1.0.0',
       );
       assert.equal(
         JSON.parse(fs.readFileSync(plan.statusFile)).phase,
-        failure === 'startup' ? 'rolled-back' : 'failed',
+        'failed',
       );
       assert.equal(stops.length, failure === 'startup' ? 1 : 0);
-      assert.equal(launches.length, failure === 'startup' ? 2 : 0);
+      assert.equal(launches.length, failure === 'startup' ? 1 : 0);
+      if (failure === 'startup') assert.equal(JSON.parse(fs.readFileSync(plan.statusFile)).keptInstalledVersion, true);
     } finally {
       fs.rmSync(plan.directory, { recursive: true, force: true });
     }
@@ -214,6 +216,8 @@ test('scheduled and abandoned workers release their lock, live workers retain it
       [{ phase: 'scheduled', updatedAt: 1 }, true, true],
       [{ phase: 'installing', workerPid: 123, updatedAt: 1 }, false, true],
       [{ phase: 'installing', workerPid: 123, updatedAt: 1 }, true, false],
+      [{ phase: 'verifying', workerPid: 123, updatedAt: 1 }, false, true],
+      [{ phase: 'verifying', workerPid: 123, updatedAt: 1 }, true, false],
     ]) {
       fs.mkdirSync(plan.lock, { recursive: true });
       fs.writeFileSync(plan.statusFile, JSON.stringify(job));
@@ -279,3 +283,47 @@ test('manual restart preserves the running binary and never invokes npm or the r
     assert.equal(fs.existsSync(path.join(plan.directory,'previous-package')),false);
   } finally { fs.rmSync(plan.directory,{recursive:true,force:true}); }
 });
+
+
+test('empty and relative relay log settings match the launcher path', () => {
+  const cwd = path.resolve('fixture');
+  assert.equal(relayLogFile({REMOTE_CODEX_RELAY_SUPERVISOR_LOG:''}, cwd, cwd), path.join(cwd,'.remote-codex/logs/relay-supervisor.log'));
+  assert.equal(relayLogFile({REMOTE_CODEX_RELAY_SUPERVISOR_LOG:'logs/device.log'}, cwd), path.join(cwd,'logs/device.log'));
+});
+
+for (const scenario of ['connected-without-logs', 'disconnected-with-stale-log', 'legacy-byte-offset']) {
+  test(`relay verification: ${scenario}`, async () => {
+    const plan = fixture();
+    plan.mode = 'relay';
+    plan.env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG = 'relay.log';
+    const log = path.join(plan.directory,'relay.log');
+    const prefix = '旧连接日志'.repeat(10);
+    fs.writeFileSync(log, prefix);
+    let current = {processId:plan.pid, activeTurnCount:0};
+    const stops=[];
+    try {
+      await worker(plan, {
+        sleep:async()=>{}, alive:()=>false, health:async()=>current,
+        stop:pid=>stops.push(pid),
+        run:async(_exe,args)=>{
+          if(args.includes('install')) fs.writeFileSync(path.join(plan.root,'package.json'),JSON.stringify({version:plan.version}));
+          return args.includes('native-path') ? '/fixture/new' : plan.version;
+        },
+        start:()=>{
+          current={status:'ok',processId:99,runningVersion:plan.version};
+          if(scenario==='connected-without-logs') current.relayConnected=true;
+          else {
+            fs.appendFileSync(log,'relay tunnel connected');
+            if(scenario==='disconnected-with-stale-log') current.relayConnected=false;
+          }
+        },
+      });
+      const job=JSON.parse(fs.readFileSync(plan.statusFile));
+      assert.deepEqual(stops,[plan.pid], 'never stop the healthy new process on verification failure');
+      assert.equal(JSON.parse(fs.readFileSync(path.join(plan.root,'package.json'))).version,plan.version);
+      assert.equal(job.phase,scenario==='disconnected-with-stale-log'?'failed':'completed');
+      if(scenario==='disconnected-with-stale-log') assert.equal(job.keptInstalledVersion,true);
+      assert.equal(fs.existsSync(plan.lock),false);
+    } finally { fs.rmSync(plan.directory,{recursive:true,force:true}); }
+  });
+}
