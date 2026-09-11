@@ -24,6 +24,8 @@ enum Commands {
     },
     /// Read recent conversation text, then expand one turn or item.
     Transcript(threads::Transcript),
+    /// Read and acknowledge persistent peer messages without starting turns.
+    Inbox(threads::Inbox),
     /// Print the bundled thread interaction skill.
     Skill,
 
@@ -87,6 +89,10 @@ async fn main() -> Result<()> {
             let value = threads::Client::new(cli.connection)?
                 .thread(command)
                 .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Inbox(args) => {
+            let value = threads::Client::new(cli.connection)?.inbox(args).await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
         Commands::Transcript(query) => {

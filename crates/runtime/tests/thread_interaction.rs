@@ -71,6 +71,8 @@ async fn thread(s: &Supervisor, p: Provider) -> String {
 }
 fn send(from: &str, text: &str, notify: bool, key: &str) -> SendInput {
     SendInput {
+        delivery: "queue".into(),
+        notify_delivery: "queue".into(),
         text: text.into(),
         from_thread_id: Some(from.into()),
         notify_on_complete: notify,
@@ -375,4 +377,197 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
         })
         .await
     );
+}
+
+#[tokio::test]
+async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Acp).await;
+    state.start_interaction_worker();
+    let mut input = send(&a, &"你好".repeat(6000), false, "mail-1");
+    input.delivery = "inbox".into();
+    let receipt = state.send_to_thread(&b, input.clone()).unwrap();
+    assert_eq!(state.send_to_thread(&b, input).unwrap(), receipt);
+    assert!(receipt["pendingSteerId"].is_null());
+    let id = receipt["messageId"].as_str().unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let status = state.interaction_status(&b).await.unwrap();
+    assert_eq!(status["status"], "idle");
+    assert_eq!(status["queuedCount"], 0);
+    assert_eq!(status["unreadMessageCount"], 1);
+    let list = state.inbox_list(&b, &json!({})).unwrap();
+    assert!(list["messages"][0].get("text").is_none());
+    assert_eq!(
+        list["messages"][0]["preview"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count(),
+        240
+    );
+    let read = state.inbox_read(&b, &json!({"messageId":id})).unwrap();
+    assert_eq!(read["text"].as_str().unwrap().chars().count(), 8192);
+    assert_eq!(read["nextTextOffset"], 8192);
+    let tail = state
+        .inbox_read(&b, &json!({"messageId":id,"textOffset":8192}))
+        .unwrap();
+    assert_eq!(tail["text"].as_str().unwrap().chars().count(), 3808);
+    assert_eq!(state.inbox_unread_count(&b).unwrap(), 1);
+    assert!(state.inbox_read(&a, &json!({"messageId":id})).is_err());
+    assert!(state
+        .inbox_ack(&b, &json!({"messageIds":[id,"missing"]}))
+        .is_err());
+    assert_eq!(state.inbox_unread_count(&b).unwrap(), 1);
+    let db = rusqlite::Connection::open(&state.config.database_url).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM kv WHERE key GLOB 'cli:inbox:*'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    state.inbox_ack(&b, &json!({"messageIds":[id]})).unwrap();
+    state.inbox_ack(&b, &json!({"messageIds":[id]})).unwrap();
+    assert_eq!(state.inbox_unread_count(&b).unwrap(), 0);
+    assert_eq!(
+        state.inbox_list(&b, &json!({})).unwrap()["messages"],
+        json!([])
+    );
+    assert_eq!(
+        state.inbox_list(&b, &json!({"all":true})).unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn inbox_paginates_and_can_adopt_only_unconsumed_peer_queue() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Acp).await;
+    for n in 0..3 {
+        let mut input = send(&a, &format!("message {n}"), false, &format!("mail-{n}"));
+        input.delivery = "inbox".into();
+        state.send_to_thread(&b, input).unwrap();
+    }
+    let first = state.inbox_list(&b, &json!({"limit":2})).unwrap();
+    assert_eq!(first["messages"].as_array().unwrap().len(), 2);
+    let second = state
+        .inbox_list(&b, &json!({"limit":2,"before":first["nextBefore"]}))
+        .unwrap();
+    assert_eq!(second["messages"].as_array().unwrap().len(), 1);
+    assert!(first["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|m| m["id"] != second["messages"][0]["id"]));
+    state
+        .send_to_thread(&b, send(&a, "queued peer", true, "queued-peer"))
+        .unwrap();
+    let mut user = send(&a, "ordinary user prompt", false, "user");
+    user.from_thread_id = None;
+    state.send_to_thread(&b, user).unwrap();
+    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 1);
+    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 0);
+    assert_eq!(
+        state.interaction_status(&b).await.unwrap()["queuedCount"],
+        1
+    );
+    assert_eq!(state.inbox_unread_count(&b).unwrap(), 4);
+}
+
+#[tokio::test]
+async fn completion_can_go_to_inbox_without_waking_the_sender() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Acp).await;
+    let mut input = send(&a, "finish task", true, "finish");
+    input.notify_delivery = "inbox".into();
+    state.send_to_thread(&b, input).unwrap();
+    state.start_interaction_worker();
+    until(|| state.inbox_unread_count(&a).unwrap() == 1).await;
+    assert_eq!(
+        state.interaction_status(&a).await.unwrap()["queuedCount"],
+        0
+    );
+    assert_eq!(state.get_thread(&a).unwrap().status, "idle");
+    let list = state.inbox_list(&a, &json!({})).unwrap();
+    let id = &list["messages"][0]["id"];
+    assert!(
+        state.inbox_read(&a, &json!({"messageId":id})).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("ended with status completed")
+    );
+    let mut passive = send(&a, "cannot subscribe to a passive message", true, "invalid");
+    passive.delivery = "inbox".into();
+    assert!(state.send_to_thread(&b, passive).is_err());
+    let mut steer = send(&a, "no active turn", false, "no-steer");
+    steer.delivery = "steer".into();
+    assert!(state.send_to_thread(&b, steer).is_err());
+    assert_eq!(
+        state.interaction_status(&b).await.unwrap()["queuedCount"],
+        0
+    );
+}
+
+#[tokio::test]
+async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Codex).await;
+    state.start_interaction_worker();
+    state
+        .send_to_thread(&b, send(&a, "perform the original task", false, "task"))
+        .unwrap();
+    until(|| state.get_thread(&b).unwrap().status == "running").await;
+    let turn = state.get_thread(&b).unwrap().active_turn_id.unwrap();
+    let mut urgent = send(&a, "urgent correction", true, "urgent");
+    urgent.delivery = "steer".into();
+    urgent.notify_delivery = "inbox".into();
+    let receipt = state.send_to_thread(&b, urgent.clone()).unwrap();
+    state
+        .steer_pending_prompt(&b, receipt["pendingSteerId"].as_str().unwrap())
+        .await
+        .unwrap();
+    until(|| state.inbox_unread_count(&a).unwrap() == 1).await;
+    assert_eq!(
+        state.send_to_thread(&b, urgent).unwrap(),
+        receipt,
+        "retry remains valid after the active turn ends"
+    );
+    let transcript = state
+        .transcript(
+            &b,
+            &TranscriptQuery {
+                turn_id: Some(turn),
+                view: Some("overview".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(transcript.to_string().contains("urgent correction"));
+    state
+        .send_to_thread(&b, send(&a, "second task", false, "task2"))
+        .unwrap();
+    until(|| state.get_thread(&b).unwrap().status == "running").await;
+    let mut held = send(&a, "late steering request", false, "held");
+    held.delivery = "steer".into();
+    let receipt = state.send_to_thread(&b, held).unwrap();
+    until(|| state.get_thread(&b).unwrap().status != "running").await;
+    assert!(state
+        .steer_pending_prompt(&b, receipt["pendingSteerId"].as_str().unwrap())
+        .await
+        .is_err());
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(
+        state.interaction_status(&b).await.unwrap()["queuedCount"],
+        1
+    );
+    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 1);
 }

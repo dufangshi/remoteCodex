@@ -1294,7 +1294,7 @@ impl AgentRuntime for AcpRuntime {
             .map(|preamble| format!("{preamble}\n\n{}", input.prompt))
             .unwrap_or_else(|| input.prompt.clone());
         let prompt = if !crate::interaction::launch_env().is_empty() {
-            format!("[remoteCodex context: your thread ID is {}. This is a remoteCodex ID, not a native Codex session ID. Local peer thread CLI is available. Run `remote-codex skill` to discover creation, messaging, status, and progressive transcript commands. Credentials and current identity are in the process environment.]\n\n{prompt}", input.thread_id)
+            format!("[remoteCodex context: your thread ID is {}. This is a remoteCodex ID, not a native Codex session ID. Local peer thread CLI is available. Peer messages default to a passive inbox, not a new prompt. Check `remote-codex inbox` at collaboration checkpoints and before finishing when awaiting peers; read and acknowledge relevant messages. Run `remote-codex skill` to discover creation, messaging, status, and progressive transcript commands. Credentials and current identity are in the process environment.]\n\n{prompt}", input.thread_id)
         } else {
             prompt
         };

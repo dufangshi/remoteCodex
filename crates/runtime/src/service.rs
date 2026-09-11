@@ -2519,7 +2519,7 @@ impl Supervisor {
         let pending = self
             .find_pending_steer(thread_id, pending_steer_id)?
             .ok_or_else(|| anyhow!("Pending queued prompt was not found."))?;
-        if pending.delivery != "continuation" {
+        if !["continuation", "cli-steer"].contains(&pending.delivery.as_str()) {
             bail!("conflict: This prompt has already been steered.");
         }
         let active_turn_id = thread

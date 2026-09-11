@@ -25,7 +25,28 @@ pub(crate) async fn command(
                 )
             }
             "show" | "status" => state.interaction_status(id).await,
-            "send" => state.send_to_thread(id, serde_json::from_value::<SendInput>(input.clone())?),
+            "send" => {
+                let body = serde_json::from_value::<SendInput>(input.clone())?;
+                let steer = body.delivery == "steer";
+                let mut receipt = state.send_to_thread(id, body)?;
+                if steer {
+                    let pending = receipt["pendingSteerId"].as_str().unwrap();
+                    match state.steer_pending_prompt(id, pending).await {
+                        Ok(_) => receipt["delivery"] = json!("steered"),
+                        Err(error) => {
+                            // Kept as an explicitly held pending message; the
+                            // background continuation worker never runs it.
+                            receipt["delivery"] = json!("held");
+                            receipt["error"] = json!(error.to_string());
+                        }
+                    }
+                }
+                Ok(receipt)
+            }
+            "inbox" => state.inbox_list(id, &input),
+            "inboxRead" => state.inbox_read(id, &input),
+            "inboxAck" => state.inbox_ack(id, &input),
+            "inboxAdoptQueued" => state.inbox_adopt_queued(id),
             "transcript" => state.transcript(
                 id,
                 &serde_json::from_value::<TranscriptQuery>(input.clone())?,

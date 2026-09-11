@@ -1709,7 +1709,7 @@ async fn local_cli_requires_credentials_and_exposes_existing_threads() {
     let receipt: Value = client
         .post(format!("{base}/api/cli"))
         .bearer_auth(&token)
-        .json(&json!({"operation":"send","threadId":id,"text":"hello"}))
+        .json(&json!({"operation":"send","delivery":"queue","threadId":id,"text":"hello"}))
         .send()
         .await
         .unwrap()

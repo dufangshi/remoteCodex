@@ -57,3 +57,13 @@ Optional notification subscriptions and explicit retry receipts use the existing
 ## Validation
 
 See [the Docker E2E record](thread-interaction-e2e.md). The bundled [skill](../skills/thread-interaction/SKILL.md) teaches discovery, reuse, creation, messaging and reading only the relevant detail. `remote-codex skill` prints that same embedded file.
+
+## 0.12.32 delivery and inbox revision
+
+This section supersedes the earlier default-delivery examples above. Ordinary `thread send` defaults to `--delivery inbox`; the create command's initial prompt defaults to `queue`. Explicit `queue` submits execution and explicit `steer` requires a running capable backend. Steering failures after durable acceptance return a held receipt; held input is excluded from background draining.
+
+`inbox` / `inbox list` returns bounded unread previews; `inbox read ID` expands one message; `inbox ack ID...` marks handled messages while retaining history. `--thread ID` selects a mailbox. Listing and reading never trigger turns or mark messages processed. `status` includes `unreadMessageCount`. Mail uses namespaced records in the existing KV store, with no schema migration or new tables.
+
+Completion subscriptions on executable messages default to inbox delivery; `--notify-delivery queue` explicitly wakes the caller. Legacy subscription values remain queued for compatibility. Passive mail rejects completion subscriptions because there is no corresponding receiving turn.
+
+`inbox adopt-queued` transactionally moves unconsumed peer prompts/notifications and held CLI steering requests into the inbox, cancelling their pending completion subscriptions. Ordinary user input and update/restart markers remain unchanged. It never cancels a running turn. The detailed bundled skill documents how to choose delivery and reconcile backlogs.
