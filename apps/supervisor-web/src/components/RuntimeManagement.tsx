@@ -33,6 +33,10 @@ type Supervisor = {
   installedVersion?: string;
   latestVersion?: string;
   canUpdate: boolean;
+  canRestart?: boolean;
+  startedAt?: string;
+  uptimeSeconds?: number;
+  observedAt?: number;
   reason?: string;
   job?: Job;
 };
@@ -72,8 +76,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ownerDenied, setOwnerDenied] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const [confirm, setConfirm] = useState<{
     id?: string;
+    action?: 'restart';
     component?: string;
     name: string;
     command?: string | undefined;
@@ -84,7 +92,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         api<Supervisor>('supervisor'),
         api<Harness[]>('harnesses'),
       ]);
-      setSupervisor((previous) => ({ ...previous, ...s }));
+      setSupervisor((previous) => ({ ...previous, ...s, observedAt: performance.now() }));
       setHarnesses(h);
       setJobs(
         Object.fromEntries(
@@ -92,6 +100,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         ),
       );
     } catch (error) {
+      if (error instanceof ApiError && error.statusCode === 403) {
+        setOwnerDenied(true);
+        setSupervisor(null);
+        setHarnesses([]);
+        return;
+      }
       // Older devices may serve their SPA fallback for an unknown management route.
       if (
         !(error instanceof SyntaxError) &&
@@ -123,7 +137,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         ]);
         if (stopped) return;
         setJobs(j);
-        setSupervisor((previous) => ({ ...previous, ...s }));
+        setSupervisor((previous) => ({ ...previous, ...s, observedAt: performance.now() }));
         if (!Object.values(j).some(active) && !active(s.job)) await load();
       } catch {
         /* Temporary disconnect during supervisor replacement; keep polling. */
@@ -147,13 +161,13 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       setBusy(false);
     }
   }
-  async function supervisorAction(action: 'check' | 'update') {
+  async function supervisorAction(action: 'check' | 'update' | 'restart') {
     setBusy(true);
     setError('');
     try {
       const next = await api<Supervisor>(`supervisor/${action}`, {});
-      setSupervisor((previous) => ({ ...previous, ...next }));
-      if (action === 'update' && next.canUpdate) setConfirm(null);
+      setSupervisor((previous) => ({ ...previous, ...next, observedAt: performance.now() }));
+      if ((action === 'update' && next.canUpdate) || (action === 'restart' && next.canRestart)) setConfirm(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to update Supervisor');
     } finally {
@@ -246,6 +260,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       </div>
     );
   }
+  if (ownerDenied) return <section className="py-5" aria-label="Runtime management">
+    <h3 className="text-sm font-semibold">Supervisor</h3>
+    <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">Only the device owner can manage or restart this Supervisor.</p>
+  </section>;
+  const seconds = supervisor?.uptimeSeconds !== undefined ? supervisor.uptimeSeconds + Math.max(0, Math.floor((performance.now() - (supervisor.observedAt ?? performance.now())) / 1000)) : supervisor?.startedAt ? Math.max(0, Math.floor((clock - Date.parse(supervisor.startedAt)) / 1000)) : undefined;
+  const uptime = seconds === undefined ? null : `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
   return (
     <section className="py-5" aria-label="Runtime management">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -260,6 +280,11 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           </p>
         </div>
         <div className="flex gap-2">
+          {supervisor?.canRestart && <button className={button}
+            disabled={busy || active(supervisor.job)}
+            onClick={() => setConfirm({ name:'Supervisor', action:'restart' })}>
+            <RotateCw size={13} /> Restart Supervisor
+          </button>}
           <button
             className={button}
             disabled={busy || !supervisor?.canUpdate || active(supervisor?.job)}
@@ -282,6 +307,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             )}
         </div>
       </div>
+      {uptime && <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">Uptime {uptime}</p>}
       {supervisor?.installedVersion &&
         supervisor.installedVersion !== supervisor.runningVersion && (
           <p className="mt-2 text-xs">
@@ -320,13 +346,15 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       )}
       {confirm && (
         <FormDialog
-          title={`Update ${confirm.name}`}
+          title={`${confirm.action === 'restart' ? 'Restart' : 'Update'} ${confirm.name}`}
           busy={busy}
           onClose={() => setConfirm(null)}
           description={
-            confirm.id
+            confirm.action === 'restart'
+              ? 'The device will briefly disconnect. Running tasks will be paused and continued in their existing sessions after restart; queued messages will be preserved.'
+              : confirm.id
               ? 'Update the selected installation, then reload its configuration. Running turns must finish first.'
-              : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running turns must finish first.'
+              : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
           }
         >
           {confirm.command && (
@@ -343,10 +371,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             onClick={() =>
               void (confirm.id
                 ? act(confirm.id, 'update', confirm.component)
-                : supervisorAction('update'))
+                : supervisorAction(confirm.action ?? 'update'))
             }
           >
-            {busy ? 'Starting…' : 'Update'}
+            {busy ? 'Starting…' : confirm.action === 'restart' ? 'Restart' : 'Update'}
           </button>
         </FormDialog>
       )}

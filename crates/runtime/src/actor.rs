@@ -14,6 +14,13 @@ use tokio_util::sync::CancellationToken;
 pub struct EventBus {
     tx: broadcast::Sender<ThreadEventEnvelope>,
     persister: Arc<RwLock<Option<Arc<EventPersister>>>>,
+    scope: Option<Arc<EventScope>>,
+}
+
+struct EventScope {
+    thread_id: String,
+    turn_id: String,
+    open: std::sync::atomic::AtomicBool,
 }
 
 type EventPersister = dyn Fn(&mut ThreadEventEnvelope) -> Result<()> + Send + Sync;
@@ -24,6 +31,7 @@ impl EventBus {
         Self {
             tx,
             persister: Arc::new(RwLock::new(None)),
+            scope: None,
         }
     }
 
@@ -31,7 +39,35 @@ impl EventBus {
         self.tx.subscribe()
     }
 
+    pub fn for_turn(&self, thread_id: &str, turn_id: &str) -> Self {
+        let mut bus = self.clone();
+        bus.scope = Some(Arc::new(EventScope {
+            thread_id: thread_id.into(),
+            turn_id: turn_id.into(),
+            open: std::sync::atomic::AtomicBool::new(true),
+        }));
+        bus
+    }
+
+    pub fn close_turn(&self) {
+        if let Some(scope) = &self.scope {
+            scope.open.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     pub fn emit(&self, mut event: ThreadEventEnvelope) {
+        if let Some(scope) = &self.scope {
+            if !scope.open.load(std::sync::atomic::Ordering::SeqCst)
+                || event.thread_id != scope.thread_id
+                || event
+                    .payload
+                    .get("turnId")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|id| id != scope.turn_id)
+            {
+                return;
+            }
+        }
         // Persistence must finish before a websocket can expose the update. The
         // callback may emit a derived event (token usage), so release the lock first.
         let persister = self.persister.read().unwrap().clone();
@@ -43,9 +79,21 @@ impl EventBus {
                     thread_id = %event.thread_id,
                     "failed to persist runtime event before broadcast"
                 );
+                // Never expose output that a subsequent snapshot cannot recover.
+                let _ = self.tx.send(ThreadEventEnvelope {
+                    event_type: "thread.persistence.failed".into(),
+                    thread_id: event.thread_id,
+                    timestamp: event.timestamp,
+                    payload: serde_json::json!({"message":"Output could not be saved. Live updates are paused until storage recovers."}),
+                });
+                return;
             }
         }
+        let completed = event.event_type == "thread.turn.completed";
         let _ = self.tx.send(event);
+        if completed {
+            self.close_turn();
+        }
     }
 
     pub(crate) fn set_persister(&self, persister: Arc<EventPersister>) {
@@ -123,9 +171,25 @@ pub struct ImportSessionMeta {
     pub turns: Vec<ThreadTurnDto>,
 }
 
+/// Observed on the backend-owned connection, never inferred from transcript age.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionState {
+    Running { turn_id: String },
+    Idle,
+    Unknown,
+}
+
+/// The transport ended without a protocol completion. Do not call this a model failure.
+#[derive(Debug, thiserror::Error)]
+#[error("Backend connection lost before completion was confirmed: {0}")]
+pub struct ExecutionUncertain(pub String);
+
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     fn provider(&self) -> Provider;
+    async fn execution_state(&self, _session_id: &str) -> ExecutionState {
+        ExecutionState::Unknown
+    }
     fn descriptor(&self) -> AgentBackendDto;
     async fn start(&self) -> Result<()>;
     async fn restart(&self, _agent_id: &str) -> Result<usize> {
@@ -250,3 +314,43 @@ pub trait AgentRuntime: Send + Sync {
 }
 
 pub type SharedRuntime = Arc<dyn AgentRuntime>;
+
+#[cfg(test)]
+mod reliability_tests {
+    use super::*;
+    use serde_json::json;
+    fn event(kind: &str) -> ThreadEventEnvelope {
+        ThreadEventEnvelope {
+            event_type: kind.into(),
+            thread_id: "thread".into(),
+            timestamp: "now".into(),
+            payload: json!({"turnId":"turn"}),
+        }
+    }
+    #[test]
+    fn failed_persistence_is_visible_without_broadcasting_unsaved_output() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe();
+        bus.set_persister(Arc::new(|_| anyhow::bail!("disk full")));
+        bus.emit(event("thread.output.delta"));
+        assert_eq!(
+            rx.try_recv().unwrap().event_type,
+            "thread.persistence.failed"
+        );
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
+    fn completion_fences_late_events_from_the_previous_turn() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe();
+        let scoped = bus.for_turn("thread", "turn");
+        scoped.emit(event("thread.turn.completed"));
+        assert_eq!(rx.try_recv().unwrap().event_type, "thread.turn.completed");
+        scoped.emit(event("thread.output.delta"));
+        assert!(rx.try_recv().is_err());
+        let mut wrong = event("thread.output.delta");
+        wrong.payload["turnId"] = json!("other");
+        bus.for_turn("thread", "turn").emit(wrong);
+        assert!(rx.try_recv().is_err());
+    }
+}

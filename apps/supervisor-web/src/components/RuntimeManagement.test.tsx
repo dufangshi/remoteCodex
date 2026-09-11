@@ -57,3 +57,24 @@ describe('device-scoped runtime settings', () => {
     expect(api.request).toHaveBeenCalledWith('/api/management/supervisor', expect.anything());
   });
 });
+
+it('shows uptime and explicitly restarts only the route device', async () => {
+  api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
+    runningVersion:'0.12.30',canUpdate:true,canRestart:true,
+    startedAt:new Date(Date.now()-90061000).toISOString(),
+  });
+  mount('/devices/a/workspaces');
+  expect(await screen.findByText(/Uptime 1d 1h 1m/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Restart Supervisor'}));
+  expect(screen.getByText(/queued messages will be preserved/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Restart'}));
+  await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/relay/devices/a/api/management/supervisor/restart',expect.objectContaining({method:'POST'})));
+});
+it('shared device access exposes no restart or update controls', async () => {
+  const { ApiError } = await import('../lib/api');
+  api.request.mockRejectedValue(new ApiError(403,{code:'forbidden',message:'Owner only'}));
+  mount('/devices/a/threads/shared');
+  expect(await screen.findByText(/Only the device owner/)).toBeVisible();
+  expect(screen.queryByRole('button',{name:/Restart|Check updates|Update/})).not.toBeInTheDocument();
+  expect(api.request.mock.calls.every(([,options])=>options.method!=='POST')).toBe(true);
+});

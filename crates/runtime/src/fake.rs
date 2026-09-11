@@ -24,6 +24,7 @@ use crate::import_id::session_ids_match;
 
 pub struct FakeRuntime {
     provider: Provider,
+    active: Mutex<HashMap<String, String>>,
     sessions: Mutex<HashMap<String, String>>,
     started_at: Mutex<Option<String>>,
     goal: Mutex<Option<GoalState>>,
@@ -34,6 +35,7 @@ impl FakeRuntime {
     pub fn new(provider: Provider) -> Self {
         Self {
             provider,
+            active: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             started_at: Mutex::new(None),
             goal: Mutex::new(None),
@@ -223,6 +225,19 @@ impl AgentRuntime for FakeRuntime {
         })
     }
 
+    async fn execution_state(&self, session: &str) -> crate::actor::ExecutionState {
+        if let Some(turn) = self.active.lock().unwrap().get(session) {
+            return crate::actor::ExecutionState::Running {
+                turn_id: turn.clone(),
+            };
+        }
+        if self.sessions.lock().unwrap().contains_key(session) {
+            crate::actor::ExecutionState::Idle
+        } else {
+            crate::actor::ExecutionState::Unknown
+        }
+    }
+
     async fn start_turn(
         &self,
         input: StartTurnInput,
@@ -232,6 +247,17 @@ impl AgentRuntime for FakeRuntime {
         if input.hidden {
             return Ok(vec![]);
         }
+        self.active
+            .lock()
+            .unwrap()
+            .insert(input.provider_session_id.clone(), input.turn_id.clone());
+        struct ActiveGuard<'a>(&'a Mutex<HashMap<String, String>>, String);
+        impl Drop for ActiveGuard<'_> {
+            fn drop(&mut self) {
+                self.0.lock().unwrap().remove(&self.1);
+            }
+        }
+        let _active = ActiveGuard(&self.active, input.provider_session_id.clone());
         if let Some(argument) = input.prompt.strip_prefix("/goal ") {
             self.set_goal(
                 &input.provider_session_id,

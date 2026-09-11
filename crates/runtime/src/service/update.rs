@@ -2,7 +2,7 @@ use super::*;
 use std::sync::atomic::Ordering;
 use tokio::sync::OwnedRwLockWriteGuard;
 
-const RESUME_PROMPT: &str = "The Supervisor was updated and restarted, interrupting this task. Continue the previous task from the existing session and workspace state. First check whether interrupted commands completed or left partial changes; do not repeat completed side effects. Preserve the user's scope, budget, queued instructions, and permission settings.";
+const RESUME_PROMPT: &str = "The Supervisor was restarted for device maintenance, interrupting this task. Continue the previous task from the existing session and workspace state. First check whether interrupted commands completed or left partial changes; do not repeat completed side effects. Preserve the user's scope, budget, queued instructions, and permission settings.";
 
 impl Supervisor {
     /// Persist the restart intent before cancellation. Ordinary crashes and user interrupts
@@ -17,7 +17,7 @@ impl Supervisor {
                 tx.execute(
                     "INSERT OR IGNORE INTO thread_pending_steers(id,thread_id,turn_id,display_prompt,submitted_prompt,delivery,created_at,updated_at)
                      SELECT 'update-resume:'||id,thread_id,id,?1,?1,'update-resume',?2,?2
-                     FROM thread_turns WHERE thread_id=?3 AND status='inProgress'",
+                     FROM thread_turns WHERE thread_id=?3 AND status IN ('inProgress','recovering')",
                     params![RESUME_PROMPT, now_rfc3339(), thread_id],
                 )?;
             }

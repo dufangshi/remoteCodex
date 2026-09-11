@@ -190,9 +190,11 @@ async fn usage_is_priced_live_persisted_and_restored_without_double_counting() {
             Ok(())
         })
         .unwrap();
+    let config = supervisor.config.clone();
+    drop(supervisor);
     let reopened = Supervisor::new(
-        supervisor.config.clone(),
-        Database::open(&supervisor.config.database_url).unwrap(),
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
         vec![],
     );
     let completed = reopened
@@ -264,9 +266,11 @@ async fn old_completed_turn_hydrates_usage_from_the_native_rollout() {
             .join("\n"),
     )
     .unwrap();
+    let config = supervisor.config.clone();
+    drop(supervisor);
     let reopened = Supervisor::new(
-        supervisor.config.clone(),
-        Database::open(&supervisor.config.database_url).unwrap(),
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
         vec![],
     )
     .with_local_session_homes(remote_codex_runtime::local_sessions::LocalSessionHomes {

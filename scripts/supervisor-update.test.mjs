@@ -259,3 +259,23 @@ test('a supervisor that refuses to stop is kept running without a duplicate roll
     fs.rmSync(plan.directory, { recursive: true, force: true });
   }
 });
+
+test('manual restart preserves the running binary and never invokes npm or the registry', async () => {
+  const plan=fixture(); plan.action='restart';plan.version=plan.runningVersion;
+  let current={processId:plan.pid,activeTurnCount:0};
+  try {
+    await worker(plan,{
+      sleep:async()=>{},health:async()=>current,alive:()=>false,
+      run:async(exe,args)=>{ assert.equal(exe,plan.executable);assert.deepEqual(args,['version']);return plan.runningVersion; },
+      stop:pid=>assert.equal(pid,plan.pid),
+      start:(_exe,args,env)=>{
+        assert.deepEqual(args,[plan.launcher,'start']);
+        assert.equal(env.REMOTE_CODEX_NATIVE_BINARY,plan.executable);
+        current={status:'ok',processId:99,runningVersion:plan.runningVersion};
+      },
+    });
+    const status=JSON.parse(fs.readFileSync(plan.statusFile,'utf8'));
+    assert.equal(status.phase,'completed'); assert.equal(status.action,'restart');
+    assert.equal(fs.existsSync(path.join(plan.directory,'previous-package')),false);
+  } finally { fs.rmSync(plan.directory,{recursive:true,force:true}); }
+});

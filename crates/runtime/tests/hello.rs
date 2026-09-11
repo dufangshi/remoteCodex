@@ -424,21 +424,28 @@ async fn restart_reconciles_stale_turn_and_allows_another_prompt() {
     let runtime: SharedRuntime = Arc::new(FakeRuntime::new(Provider::Codex));
     let restarted = Supervisor::new(config, db, vec![runtime]);
     let recovered = restarted.get_thread(&thread.id).unwrap();
-    assert_eq!(recovered.status, "interrupted");
+    assert_eq!(recovered.status, "recovering");
     assert_eq!(recovered.active_turn_id, None);
     let recovered_detail = restarted.get_thread_detail(&thread.id, None).await.unwrap();
-    assert_eq!(recovered_detail.turns[0].status, "interrupted");
-    assert!(recovered_detail.turns[0].completed_at.is_some());
+    assert_eq!(recovered_detail.turns[0].status, "recovering");
+    assert!(recovered_detail.turns[0].completed_at.is_none());
     assert!(recovered_detail.turns[0]
         .error
         .as_deref()
         .unwrap_or_default()
-        .contains("supervisor restarted"));
+        .contains("not confirmed"));
 
     restarted
         .prompt(&thread.id, prompt_input("hello after restart"))
         .await
         .unwrap();
+    // New input is saved while status is uncertain; explicit reconnect confirms
+    // that this backend has no active turn before the queue may be delivered.
+    assert_eq!(
+        restarted.get_thread(&thread.id).unwrap().status,
+        "recovering"
+    );
+    restarted.resume_thread(&thread.id).await.unwrap();
     let completed = restarted.get_thread_detail(&thread.id, None).await.unwrap();
     assert_eq!(completed.thread.status, "idle");
     assert_eq!(completed.turns.len(), 2);
@@ -766,7 +773,7 @@ async fn verify_update_recovery(restart: bool) {
                     .unwrap()
                     .text
                     .as_str()
-                    .contains("Supervisor was updated"));
+                    .contains("Supervisor was restarted for device maintenance"));
                 assert_eq!(
                     detail.turns[2]
                         .items
@@ -849,4 +856,156 @@ async fn supervisor_update_recovery_respects_user_stop_and_ordinary_crashes() {
     // Without an update marker, a restart must leave this interrupted turn alone.
     state.spawn_update_recovery();
     assert_eq!(state.get_thread(&thread.id).unwrap().status, "interrupted");
+}
+
+#[tokio::test]
+async fn all_providers_reconcile_live_state_and_preserve_idempotent_inbox() {
+    for provider in [
+        Provider::Codex,
+        Provider::Claude,
+        Provider::Opencode,
+        Provider::Acp,
+    ] {
+        let (_dir, state, _ws, thread) = seeded_thread(provider).await;
+        let state = Arc::new(state);
+        let run = {
+            let state = state.clone();
+            let id = thread.id.clone();
+            tokio::spawn(async move {
+                state
+                    .prompt(&id, prompt_input("Inspect this repository in depth"))
+                    .await
+            })
+        };
+        for _ in 0..100 {
+            if state.get_thread(&thread.id).unwrap().status == "running" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        // Reproduce this incident without starting another production process.
+        state.db.with(|c| { c.execute("UPDATE threads SET status='interrupted',last_error='wrong snapshot' WHERE id=?1",[&thread.id])?;
+            c.execute("UPDATE thread_turns SET status='interrupted',completed_at='wrong' WHERE thread_id=?1",[&thread.id])?; Ok(()) }).unwrap();
+        state.observe_execution(&thread.id).await.unwrap();
+        assert_eq!(state.get_thread(&thread.id).unwrap().status, "running");
+        let mut input = prompt_input("one durable follow-up");
+        input.client_request_id = Some("unique-client-request".into());
+        state.accept_prompt(&thread.id, &input).await.unwrap();
+        state.accept_prompt(&thread.id, &input).await.unwrap();
+        let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+        assert_eq!(detail.pending_steers.len(), 1);
+        assert!(detail.turns.last().unwrap().completed_at.is_none());
+        state.interrupt(&thread.id).await.unwrap();
+        run.await.unwrap().unwrap();
+        // Retrying after consumption does not redeliver the same request.
+        state.prompt(&thread.id, input).await.unwrap();
+        let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+        assert_eq!(detail.turns.len(), 2);
+        assert!(detail.turns[1]
+            .items
+            .iter()
+            .any(|i| i.kind == "userMessage" && i.text == "one durable follow-up"));
+        assert_eq!(detail.thread.status, "idle");
+    }
+}
+
+#[test]
+fn db_owner_child() {
+    let Some(path) = std::env::var_os("REMOTE_CODEX_LOCK_TEST_PATH") else {
+        return;
+    };
+    assert!(Database::open(std::path::Path::new(&path)).is_err());
+}
+
+#[test]
+fn second_process_cannot_open_owned_database_and_lock_releases_on_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("owned.sqlite");
+    let db = Database::open(&path).unwrap();
+    db.set_kv("preserved", "yes").unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "db_owner_child", "--nocapture"])
+        .env("REMOTE_CODEX_LOCK_TEST_PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    #[cfg(unix)]
+    {
+        let alias = dir.path().join("alias.sqlite");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        assert!(Database::open(&alias).is_err());
+    }
+    drop(db);
+    let reopened = Database::open(&path).unwrap();
+    assert_eq!(
+        reopened.get_kv("preserved").unwrap().as_deref(),
+        Some("yes")
+    );
+}
+
+#[tokio::test]
+async fn acknowledged_input_survives_restart_before_dispatch() {
+    let (_dir, state, _ws, thread) = seeded_thread(Provider::Claude).await;
+    let config = state.config.clone();
+    let mut input = prompt_input("saved before dispatch");
+    input.client_request_id = Some("before-crash".into());
+    state.accept_prompt(&thread.id, &input).await.unwrap();
+    assert!(state
+        .get_thread_detail(&thread.id, None)
+        .await
+        .unwrap()
+        .turns
+        .is_empty());
+    drop(state);
+    // Other tests spawn ACP child processes concurrently. On Unix a fork can
+    // briefly inherit the lock descriptor until exec closes it. Wait for actual
+    // lock release instead of assuming no concurrent fork/exec overlaps the drop.
+    let reopened = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match Database::open(&config.database_url) {
+                Ok(db) => break db,
+                Err(error) => {
+                    assert!(error.to_string().contains("already owned"), "{error:#}");
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
+    })
+    .await
+    .expect("old Supervisor database ownership must be released");
+    let restarted = Supervisor::new(
+        config.clone(),
+        reopened,
+        vec![Arc::new(FakeRuntime::new(Provider::Claude))],
+    );
+    assert_eq!(
+        restarted
+            .get_thread_detail(&thread.id, None)
+            .await
+            .unwrap()
+            .pending_steers
+            .len(),
+        1
+    );
+    restarted.prompt(&thread.id, input.clone()).await.unwrap();
+    assert_eq!(
+        restarted
+            .get_thread_detail(&thread.id, None)
+            .await
+            .unwrap()
+            .turns
+            .len(),
+        1
+    );
+    input.prompt = "different payload".into();
+    assert!(restarted
+        .accept_prompt(&thread.id, &input)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("already used"));
 }

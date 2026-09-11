@@ -6960,6 +6960,26 @@ mod tests {
     }
 
     #[test]
+    fn supervisor_restart_requires_device_owner_even_for_control_grants() {
+        let mut access = owner_access();
+        let route = "/api/management/supervisor/restart";
+        assert!(access_allows(&access, &Method::POST, route));
+        access.kind = "shared".into();
+        access.thread_access = "control".into();
+        access.workspace_access = "write".into();
+        access.can_create_threads = true;
+        for scope in ["thread", "workspace", "device"] {
+            access.scope = scope.into();
+            assert!(!access_allows(&access, &Method::POST, route), "{scope}");
+            assert!(!access_allows(
+                &access,
+                &Method::POST,
+                &format!("{route}?owner=true")
+            ));
+        }
+    }
+
+    #[test]
     fn signed_sessions_round_trip_and_reject_tampering() {
         let dir = temporary_test_dir("signed-sessions");
         let store = RelayStore::open(dir.join("db"), "session-secret".into()).unwrap();
@@ -7044,6 +7064,7 @@ mod tests {
             "/api/management/supervisor",
             "/api/management/harnesses/codex",
             "/api/management/supervisor/update",
+            "/api/management/supervisor/restart",
         ] {
             assert!(!access_allows(&access, &Method::GET, route));
             assert!(!access_allows(&access, &Method::POST, route));

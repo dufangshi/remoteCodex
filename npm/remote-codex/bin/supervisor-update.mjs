@@ -148,6 +148,7 @@ export async function worker(plan, hooks = {}) {
   const stop = hooks.stop ?? ((pid) => process.kill(pid, 'SIGTERM'));
   const start = hooks.start ?? detachedService;
   const env = cleanEnvironment(plan.env);
+  if (plan.action === 'restart') env.REMOTE_CODEX_NATIVE_BINARY = plan.executable;
   const isAlive = hooks.alive ?? alive;
   if (plan.mode !== 'relay') {
     env.SERVICE_HOST = plan.host ?? '127.0.0.1';
@@ -160,6 +161,7 @@ export async function worker(plan, hooks = {}) {
   const status = (phase, extra = {}) =>
     write(plan.statusFile, {
       phase,
+      action: plan.action ?? 'update',
       targetVersion: plan.version,
       runningVersion: plan.runningVersion,
       logPath: path.join(plan.directory, 'update.log'),
@@ -186,6 +188,7 @@ export async function worker(plan, hooks = {}) {
     status('preparing');
     if ((await getHealth(plan.port, plan.host))?.processId !== plan.pid)
       throw Error('The running Supervisor changed; check for updates again');
+    if (plan.action !== 'restart') {
     fs.cpSync(plan.root, backup, { recursive: true });
     installed = true;
     status('installing');
@@ -214,6 +217,9 @@ export async function worker(plan, hooks = {}) {
     );
     if ((await execute(binary, ['version'], env, plan.cwd)) !== plan.version)
       throw Error('Native version mismatch');
+    } else if ((await execute(plan.executable, ['version'], env, plan.cwd)) !== plan.runningVersion) {
+      throw Error('Running native binary version mismatch');
+    }
     status('restarting');
     await pause(3000);
     const beforeStop = await getHealth(plan.port, plan.host);
@@ -424,20 +430,22 @@ async function main(action) {
     runningVersion,
     installedVersion: install.installedVersion,
     canUpdate: true,
+    canRestart: true,
     path: install.launcher,
     manager: 'npm',
     job: readJob(statusFile, lock),
   };
   if (action === 'status') return base;
-  const version = await latest();
+  const version = action === 'restart' ? runningVersion : await latest();
   if (action === 'check') return { ...base, latestVersion: version };
-  if (action !== 'launch') throw Error('Unknown update action');
-  if (version === runningVersion) return { ...base, latestVersion: version };
+  if (!['launch', 'restart'].includes(action)) throw Error('Unknown update action');
+  if (action !== 'restart' && version === runningVersion) return { ...base, latestVersion: version };
   fs.mkdirSync(lock, { mode: 0o700 }); // atomic cross-request lock
   try {
     const directory = fs.mkdtempSync(path.join(root, 'supervisor-'));
     const plan = {
       ...install,
+      action: action === 'restart' ? 'restart' : 'update',
       directory,
       statusFile,
       lock,
@@ -453,6 +461,7 @@ async function main(action) {
     };
     write(statusFile, {
       phase: 'scheduled',
+      action: action === 'restart' ? 'restart' : 'update',
       targetVersion: version,
       updatedAt: Date.now(),
     });

@@ -27,6 +27,23 @@ pub enum SessionSettingOp {
 /// Native extensions must reuse the ACP-owned connection, never a second writer.
 pub trait HarnessAdapter: Send + Sync {
     fn id(&self) -> &'static str;
+    /// ACP has prompt completion but no portable query for an outstanding turn.
+    /// All harnesses share the connection/request lifecycle fallback. An adapter
+    /// may refine this with a negotiated native read-only status extension.
+    fn execution_state(
+        &self,
+        connected: bool,
+        active_turn: Option<&str>,
+    ) -> crate::actor::ExecutionState {
+        use crate::actor::ExecutionState;
+        if !connected {
+            return ExecutionState::Unknown;
+        }
+        match active_turn {
+            Some(id) => ExecutionState::Running { turn_id: id.into() },
+            None => ExecutionState::Idle,
+        }
+    }
     fn compact_prompt(&self) -> Option<&'static str> {
         None
     }

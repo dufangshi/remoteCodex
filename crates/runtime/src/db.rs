@@ -56,6 +56,17 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 8,
+        name: "durable_prompt_payload",
+        apply: |conn| {
+            conn.execute(
+                "ALTER TABLE thread_pending_steers ADD COLUMN payload_json TEXT",
+                [],
+            )?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[
@@ -86,6 +97,8 @@ const NODE_0030_MIGRATIONS: &[&str] = &[
 pub struct Database {
     conn: Mutex<Connection>,
     pub host_id: String,
+    // Keep the OS lock until all SQLite use has ended; never unlink its inode.
+    _owner: std::fs::File,
 }
 
 pub fn validate_database_path(path: &Path) -> Result<()> {
@@ -113,6 +126,27 @@ impl Database {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        let absolute = if path.exists() {
+            std::fs::canonicalize(path)?
+        } else {
+            std::fs::canonicalize(
+                path.parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(Path::new(".")),
+            )?
+            .join(path.file_name().context("database filename missing")?)
+        };
+        let mut lock_path = absolute.as_os_str().to_os_string();
+        lock_path.push(".supervisor.lock");
+        let owner = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(std::path::PathBuf::from(lock_path))?;
+        owner.try_lock().map_err(|_| anyhow::anyhow!(
+            "This database is already owned by another Supervisor. Use an isolated database or stop its owner before starting another instance."
+        ))?;
         let mut conn =
             Connection::open(path).with_context(|| format!("open sqlite {}", path.display()))?;
 
@@ -151,6 +185,7 @@ impl Database {
         };
         Ok(Self {
             conn: Mutex::new(conn),
+            _owner: owner,
             host_id,
         })
     }
