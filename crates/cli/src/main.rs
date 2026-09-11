@@ -43,7 +43,7 @@ enum Commands {
     /// Show the device encryption fingerprint for independent browser verification.
     RelayFingerprint {
         /// Supervisor database path; defaults to relay-mode configuration.
-        #[arg(long, env = "DATABASE_URL")]
+        #[arg(long, env = "REMOTE_CODEX_DATABASE_PATH")]
         database: Option<std::path::PathBuf>,
     },
     /// Print version.

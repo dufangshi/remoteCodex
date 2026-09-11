@@ -1,7 +1,7 @@
 import workerUrl from './relayServiceWorker.ts?worker&url';
 import {
   exchange,
-  resetPinnedDevice,
+  trustPinnedDevice,
   scopeFromPage,
   setTransportReporter,
   SocketCipher,
@@ -15,7 +15,7 @@ export function getTransportStatus(deviceId: string) {
 function report(status: TransportStatus) {
   if (
     statuses.get(status.deviceId)?.state === 'identity-changed' &&
-    status.state !== 'identity-changed'
+    status.state !== 'identity-changed' && status.state !== 'encrypted'
   )
     return;
   statuses.set(status.deviceId, status);
@@ -29,8 +29,8 @@ if (typeof navigator !== 'undefined' && navigator.serviceWorker)
     if (event.data?.type === 'remote-codex-transport')
       report(event.data.status);
   });
-export async function forgetDeviceIdentity(deviceId: string) {
-  await resetPinnedDevice(deviceId);
+export async function trustDeviceIdentity(deviceId: string, identityKey: string, fingerprint: string) {
+  await trustPinnedDevice(deviceId, identityKey, fingerprint);
   statuses.delete(deviceId);
   navigator.serviceWorker?.controller?.postMessage({
     type: 'remote-codex-reset-transport',

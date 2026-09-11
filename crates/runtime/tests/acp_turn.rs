@@ -431,6 +431,102 @@ async fn restored_session_applies_advertised_effort_and_recovers_after_settings_
     }
 }
 
+#[tokio::test]
+async fn unadvertised_reasoning_does_not_block_creation_turns_or_resume() {
+    for args in ["--no-config", "--no-fast"] {
+        let dir = tempdir().unwrap();
+        let python = which_python();
+        let (runtime, _) = start_runtime_with_args(dir.path(), &python, args).await;
+        let session = runtime
+            .start_session(StartSessionInput {
+                cwd: dir.path().to_string_lossy().into_owned(),
+                agent_id: Some("custom".into()),
+                model: "default".into(),
+                reasoning_effort: Some("medium".into()),
+                approval_mode: "guarded".into(),
+                sandbox_mode: None,
+            })
+            .await
+            .expect("UI default effort must not require an unadvertised config method");
+        assert_eq!(session.reasoning_effort, None);
+        let command = format!(
+            r#"{python} "{}" {args}"#,
+            dir.path().join("fake_acp_agent.py").display()
+        );
+        let restored = AcpRuntime::catalog(Some(command), 5_000);
+        restored.start().await.unwrap();
+        restored
+            .resume_session(
+                &session.provider_session_id,
+                dir.path().to_str(),
+                remote_codex_runtime::actor::SessionSettings {
+                    effort: Some("medium".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("persisted default effort must not block session/load");
+        for (runtime, turn_id) in [(&runtime, "first"), (&restored, "restored")] {
+            let mut input = turn_input(&session.provider_session_id, "report-effort", turn_id);
+            input.reasoning_effort = Some("high".into());
+            let items = runtime
+                .start_turn(input, EventBus::new(), CancellationToken::new())
+                .await
+                .expect("follow-up must not send unadvertised reasoning settings");
+            assert!(items.iter().any(|item| item.text == "effort=medium"));
+        }
+        assert!(!dir.path().join("unexpected-config.json").exists());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires installed Gemini CLI and configured authentication; sends real prompts"]
+async fn installed_gemini_creates_and_follows_up_with_default_effort() {
+    let dir = tempdir().unwrap();
+    let runtime = AcpRuntime::catalog(None, 30_000);
+    runtime.start().await.unwrap();
+    let mut input = StartSessionInput {
+        cwd: dir.path().to_string_lossy().into_owned(),
+        agent_id: Some("gemini".into()),
+        model: "default".into(),
+        reasoning_effort: Some("medium".into()),
+        approval_mode: "guarded".into(),
+        sandbox_mode: None,
+    };
+    let default_session = runtime.start_session(input.clone()).await.unwrap();
+    assert_eq!(default_session.reasoning_effort, None);
+    let models = runtime
+        .list_models(Some("gemini"), dir.path().to_str())
+        .await
+        .unwrap();
+    assert!(!models.is_empty());
+    assert!(models
+        .iter()
+        .all(|model| model.supported_reasoning_efforts.is_empty()));
+    input.model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| default_session.model.unwrap());
+    let session = runtime.start_session(input).await.unwrap();
+    for turn_id in ["first", "follow-up"] {
+        let mut turn = turn_input(
+            &session.provider_session_id,
+            "Reply exactly GEMINI_ACP_OK. Do not use tools.",
+            turn_id,
+        );
+        turn.model = session.model.clone();
+        turn.reasoning_effort = Some("medium".into());
+        let items = tokio::time::timeout(
+            Duration::from_secs(90),
+            runtime.start_turn(turn, EventBus::new(), CancellationToken::new()),
+        )
+        .await
+        .expect("Gemini prompt timeout")
+        .expect("Gemini prompt succeeds");
+        assert!(items
+            .iter()
+            .any(|item| item.kind == "agentMessage" && item.text.contains("GEMINI_ACP_OK")));
+        eprintln!("Gemini {turn_id}: GEMINI_ACP_OK");
+    }
+}
+
 async fn start_runtime(dir: &std::path::Path, python: &str) -> (AcpRuntime, String) {
     start_runtime_with_args(dir, python, "").await
 }

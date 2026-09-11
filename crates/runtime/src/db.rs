@@ -88,8 +88,28 @@ pub struct Database {
     pub host_id: String,
 }
 
+pub fn validate_database_path(path: &Path) -> Result<()> {
+    let text = path.to_string_lossy();
+    if let Some((scheme, rest)) = text.split_once(':') {
+        let drive = scheme.len() == 1
+            && scheme.as_bytes()[0].is_ascii_alphabetic()
+            && (rest.starts_with('/') || rest.starts_with('\\'));
+        let uri = !scheme.is_empty()
+            && scheme.as_bytes()[0].is_ascii_alphabetic()
+            && scheme
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"+.-".contains(&c));
+        anyhow::ensure!(drive || !uri,
+            "DATABASE_URL must be a local SQLite file path, not a database URL; restore the original supervisor database path to retain its identity and workspaces");
+    }
+    Ok(())
+}
+
 impl Database {
     pub fn open(path: &Path) -> Result<Self> {
+        // DATABASE_URL is a file path. Never create a new SQLite database from
+        // another application's connection URI (which may also contain secrets).
+        validate_database_path(path)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

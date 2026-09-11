@@ -763,3 +763,48 @@ test('device cards expire silent health probes while portal stays online and rec
   sleeping = false;
   await expect(card.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled({ timeout: 6000 });
 });
+
+test('Workspaces exposes identity verification and pins only the confirmed replacement', async ({ page }) => {
+  await installAuthenticatedDevicesMocks(page);
+  await page.route('**/relay/devices/device-owned/api/**', route => new URL(route.request().url()).pathname.endsWith('/transport/key') ? json(route, {}, 404) : json(route, {
+    code: 'transport_identity_changed',
+    message: 'The device identity changed. Verify its fingerprint before trusting it again.',
+  }, 502));
+  await page.goto('/devices/device-owned/workspaces');
+  await expect(page.getByRole('alert')).toContainText('device identity changed');
+  const fingerprint = await page.evaluate(async () => {
+    const modulePath = '/src/lib/relayTransportCrypto.ts';
+    const transport = await import(/* @vite-ignore */ modulePath);
+    const key = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const raw = await crypto.subtle.exportKey('raw', key.publicKey);
+    const identityKey = transport.b64(raw);
+    const fingerprint = transport.b64(await crypto.subtle.digest('SHA-256', raw));
+    transport.reportTransport({ deviceId: 'device-owned', state: 'identity-changed', identityKey, fingerprint });
+    return fingerprint;
+  });
+  await page.getByRole('button', { name: 'Device identity changed', exact: true }).click();
+  await expect(page.getByLabel('Device fingerprint')).toContainText(fingerprint);
+  await page.getByRole('button', { name: 'Trust replacement identity…' }).click();
+  await expect(page.getByRole('dialog')).toContainText(fingerprint);
+  // A second report while the dialog is open must not change what is approved.
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('remote-codex-transport', {
+    detail: { deviceId: 'device-owned', state: 'identity-changed', fingerprint: 'different', identityKey: 'different' },
+  })));
+  await page.getByRole('button', { name: 'I verified the fingerprint' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const saved = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('remote-codex-transport-v1', 1);
+      req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+    });
+    const key = await new Promise<string>((resolve, reject) => {
+      const req = db.transaction('identities').objectStore('identities').get('device-owned');
+      req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+    });
+    db.close();
+    const modulePath = '/src/lib/relayTransportCrypto.ts';
+    const transport = await import(/* @vite-ignore */ modulePath);
+    return transport.b64(await crypto.subtle.digest('SHA-256', transport.unb64(key)));
+  });
+  expect(saved).toBe(fingerprint);
+});

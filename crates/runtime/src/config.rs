@@ -33,7 +33,7 @@ impl RuntimeConfig {
             _ => Mode::Local,
         };
         let port_names = if mode == Mode::Relay {
-            &["REMOTE_CODEX_RELAY_SUPERVISOR_PORT", "PORT"][..]
+            &["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"][..]
         } else {
             &["PORT"][..]
         };
@@ -42,17 +42,27 @@ impl RuntimeConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8787);
         let host_names = if mode == Mode::Relay {
-            &["REMOTE_CODEX_RELAY_SUPERVISOR_HOST", "HOST"][..]
+            &["REMOTE_CODEX_RELAY_SUPERVISOR_HOST"][..]
         } else {
             &["HOST"][..]
         };
         let host = first_env(host_names).unwrap_or_else(|_| "127.0.0.1".into());
-        let environment = env::var("NODE_ENV").unwrap_or_else(|_| "development".into());
+        let setting = |name, legacy| {
+            nonempty_env(name).or_else(|| {
+                (mode != Mode::Relay)
+                    .then(|| nonempty_env(legacy))
+                    .flatten()
+            })
+        };
+        let environment =
+            setting("REMOTE_CODEX_ENVIRONMENT", "NODE_ENV").unwrap_or_else(|| "development".into());
         let workspace_root = PathBuf::from(
-            nonempty_env("WORKSPACE_ROOT").unwrap_or_else(|| default_workspace_root()),
+            setting("REMOTE_CODEX_WORKSPACE_ROOT", "WORKSPACE_ROOT")
+                .unwrap_or_else(|| default_workspace_root()),
         );
         let database_url = PathBuf::from(
-            nonempty_env("DATABASE_URL").unwrap_or_else(|| default_database_path(&environment)),
+            setting("REMOTE_CODEX_DATABASE_PATH", "DATABASE_URL")
+                .unwrap_or_else(|| default_database_path(&environment, mode == Mode::Relay)),
         );
         let enabled_providers = parse_providers(
             env::var("REMOTE_CODEX_ENABLED_AGENT_PROVIDERS")
@@ -66,7 +76,8 @@ impl RuntimeConfig {
             port,
             workspace_root,
             database_url,
-            app_name: env::var("APP_NAME").unwrap_or_else(|_| "Remote Codex".into()),
+            app_name: setting("REMOTE_CODEX_APP_NAME", "APP_NAME")
+                .unwrap_or_else(|| "Remote Codex".into()),
             app_version: remote_codex_protocol::APP_VERSION.to_string(),
             environment,
             auth_required: mode != Mode::Local,
@@ -76,13 +87,14 @@ impl RuntimeConfig {
             relay_server_url: env::var("REMOTE_CODEX_RELAY_SERVER_URL").ok(),
             relay_agent_token: env::var("REMOTE_CODEX_RELAY_AGENT_TOKEN").ok(),
             enabled_providers,
-            acp_command: env::var("ACP_COMMAND")
-                .ok()
+            acp_command: setting("REMOTE_CODEX_ACP_COMMAND", "ACP_COMMAND")
                 .filter(|s| !s.trim().is_empty()),
-            acp_startup_timeout_ms: env::var("ACP_STARTUP_TIMEOUT_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(10_000),
+            acp_startup_timeout_ms: setting(
+                "REMOTE_CODEX_ACP_STARTUP_TIMEOUT_MS",
+                "ACP_STARTUP_TIMEOUT_MS",
+            )
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000),
             fake_runtime,
         }
     }
@@ -137,7 +149,14 @@ fn default_workspace_root() -> String {
     home_dir().to_string_lossy().into()
 }
 
-fn default_database_path(environment: &str) -> String {
+fn default_database_path(environment: &str, relay: bool) -> String {
+    if relay {
+        return home_dir()
+            .join(".remote-codex")
+            .join("relay-supervisor.sqlite")
+            .to_string_lossy()
+            .into();
+    }
     if environment == "production" {
         return home_dir()
             .join(".remote-codex")
@@ -181,15 +200,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn relay_database_is_stable_in_every_environment() {
+        let expected = home_dir().join(".remote-codex/relay-supervisor.sqlite");
+        for environment in ["development", "production", "test"] {
+            assert_eq!(
+                PathBuf::from(default_database_path(environment, true)),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn database_defaults_keep_node_layout() {
         assert_eq!(
-            default_database_path("development"),
+            default_database_path("development", false),
             PathBuf::from(".local")
                 .join("supervisor-dev.sqlite")
                 .to_string_lossy()
                 .into_owned()
         );
-        assert!(PathBuf::from(default_database_path("production"))
+        assert!(PathBuf::from(default_database_path("production", false))
             .ends_with(PathBuf::from(".remote-codex").join("supervisor.sqlite")));
     }
 

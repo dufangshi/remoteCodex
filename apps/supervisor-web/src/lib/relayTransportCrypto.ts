@@ -44,6 +44,7 @@ export interface TransportStatus {
   deviceId: string;
   state: 'encrypted' | 'legacy' | 'identity-changed' | 'error';
   fingerprint?: string;
+  identityKey?: string;
 }
 export let reportTransport = (_status: TransportStatus) => {};
 export function setTransportReporter(report: typeof reportTransport) {
@@ -114,6 +115,25 @@ export async function resetPinnedDevice(deviceId: string) {
   }
   keys.delete(deviceId);
 }
+// Pin exactly the public key whose fingerprint the user verified. Deleting the
+// old pin would trust whichever device answers next, including a different key.
+export async function trustPinnedDevice(deviceId: string, identityKey: string, fingerprint: string) {
+  const actual = b64(await crypto.subtle.digest('SHA-256', buffer(unb64(identityKey))));
+  if (actual !== fingerprint) throw new Error('The device fingerprint changed. Inspect it again.');
+  const db = await identityStore();
+  try {
+    await new Promise<void>((done, fail) => {
+      const tx = db.transaction('identities', 'readwrite');
+      tx.objectStore('identities').put(identityKey, deviceId);
+      tx.oncomplete = () => done();
+      tx.onerror = () => fail(tx.error);
+      tx.onabort = () => fail(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+  keys.delete(deviceId);
+}
 export function deviceRoute(url: URL) {
   const match = url.pathname.match(/^\/relay\/devices\/([^/]+)(\/api\/.*)$/);
   return match
@@ -131,8 +151,9 @@ async function keyFor(
   const cached = keys.get(deviceId);
   if (cached) {
     const key = await cached;
-    if (!key || key.descriptor.expiresAt > Date.now() + key.offset + 60000)
-      return key;
+    if (!key) return key;
+    if (key.descriptor.expiresAt > Date.now() + key.offset + 60000 &&
+        await pinned(deviceId) === key.descriptor.identityKey) return key;
     keys.delete(deviceId);
   }
   const task = (async () => {
@@ -240,9 +261,9 @@ async function keyFor(
         buffer(unb64(descriptor.identityKey)),
       ),
     );
-    const stored = previous ?? (await pinned(deviceId, descriptor.identityKey));
+    const stored = await pinned(deviceId, descriptor.identityKey);
     if (stored && stored !== descriptor.identityKey) {
-      reportTransport({ deviceId, state: 'identity-changed', fingerprint });
+      reportTransport({ deviceId, state: 'identity-changed', fingerprint, identityKey: descriptor.identityKey });
       throw new TransportError(
         'transport_identity_changed',
         'The device identity changed. Verify its fingerprint before trusting it again.',

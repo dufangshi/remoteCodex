@@ -4,13 +4,13 @@ import { DeviceEncryptionStatus } from './DeviceEncryptionStatus';
 
 vi.mock('../lib/relayTransport', () => ({
   getTransportStatus: () => undefined,
-  forgetDeviceIdentity: vi.fn(),
+  trustDeviceIdentity: vi.fn(),
 }));
 
 function report(state: string, fingerprint?: string) {
   act(() => {
     window.dispatchEvent(new CustomEvent('remote-codex-transport', {
-      detail: { deviceId: 'device-1', state, fingerprint },
+      detail: { deviceId: 'device-1', state, fingerprint, identityKey: 'replacement-key' },
     }));
   });
 }

@@ -31,6 +31,7 @@ startup_config = open("restart-config.txt").read() if os.path.exists("restart-co
 fast_enabled = False
 steering_prompt_id = None
 reasoning_effort = "medium"
+current_model = "gemini-pro"
 question_turn = None
 form_capability = False
 cancellable_prompt = None
@@ -69,7 +70,7 @@ def prompt_text(params):
 
 def handle(msg):
     global fast_enabled, steering_prompt_id, reasoning_effort, question_turn, form_capability
-    global cancellable_prompt, cancel_delay
+    global cancellable_prompt, cancel_delay, current_model
     method = msg.get("method")
     req_id = msg.get("id")
     params = msg.get("params") or {}
@@ -95,15 +96,20 @@ def handle(msg):
         )
         return
     if method in ("session/new", "session/load"):
+        result = {"sessionId": "fake-session", "configOptions": config_options()}
+        if "--no-config" in sys.argv or "--legacy-models" in sys.argv:
+            result.pop("configOptions")
+        if "--legacy-models" in sys.argv:
+            result["models"] = {"currentModelId": current_model, "availableModels": [
+                {"modelId": "gemini-pro", "name": "Pro"},
+                {"modelId": "gemini-flash", "name": "Flash"},
+            ]}
         send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":"fake-session", "update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"status", "description":"Session status"}]}}})
         send(
             {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {
-                    "sessionId": "fake-session",
-                    "configOptions": config_options(),
-                },
+                "result": result,
             }
         )
         return
@@ -145,6 +151,13 @@ def handle(msg):
         send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"waiting for cancellation"}}}})
         return
     if method == "session/set_config_option":
+        if "--no-config" in sys.argv or "--legacy-models" in sys.argv:
+            with open("unexpected-config.json", "w") as f:
+                json.dump(params, f)
+            send({"jsonrpc":"2.0", "id":req_id, "error":{"code":-32601,
+                "message":"\"Method not found\": session/set_config_option",
+                "data":{"method":method}}})
+            return
         if params.get("configId") == "reasoning_effort" and params.get("value") in ("medium", "high"):
             reasoning_effort = params["value"]
             send({"jsonrpc": "2.0", "id": req_id, "result": {"configOptions": config_options()}})
@@ -166,6 +179,15 @@ def handle(msg):
                     "error": {"code": -32602, "message": "unsupported config"},
                 }
             )
+        return
+    if method == "session/set_model" and "--legacy-models" in sys.argv:
+        if params.get("modelId") not in ("gemini-pro", "gemini-flash"):
+            send({"jsonrpc":"2.0", "id":req_id, "error":{"code":-32602, "message":"unsupported model"}})
+        else:
+            current_model = params["modelId"]
+            with open("selected-model.txt", "w") as f:
+                f.write(current_model)
+            send({"jsonrpc":"2.0", "id":req_id, "result":{}})
         return
     if method == "_session/steering":
         # Match codex-acp: this extension is a request and prompt is ContentBlock[].
