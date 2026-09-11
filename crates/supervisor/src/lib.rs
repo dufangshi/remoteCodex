@@ -2,6 +2,7 @@ mod auth;
 mod bounded_channel;
 mod export;
 mod http;
+mod interaction;
 mod linked_files;
 mod management;
 mod secure_transport;
@@ -24,6 +25,22 @@ pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
     state.spawn_live_item_persister();
     let addr: SocketAddr = format!("{}:{}", state.config.host, state.config.port).parse()?;
     let listener = TcpListener::bind(addr).await?;
+    let cli = state.configure_cli(format!(
+        "http://127.0.0.1:{}",
+        listener.local_addr()?.port()
+    ));
+    let path = state.config.database_url.with_extension("cli.json");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    options.open(&path)?.write_all(
+        serde_json::to_string(&serde_json::json!({"url":cli.url,"token":cli.token}))?.as_bytes(),
+    )?;
     tracing::info!("supervisor listening on {addr}");
     if state.config.mode == remote_codex_protocol::Mode::Relay {
         let tunnel_state = state.clone();

@@ -1145,19 +1145,41 @@ impl AgentRuntime for AcpRuntime {
         settings: SessionSettings,
     ) -> Result<StartSessionResult> {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        {
-            let sessions = self.inner.sessions.lock().await;
-            if let Some(existing) = sessions
+        let old_process = {
+            let mut sessions = self.inner.sessions.lock().await;
+            let existing = sessions
                 .keys()
                 .find(|key| session_ids_match(key, session_id))
-                .cloned()
-            {
-                return Ok(StartSessionResult {
-                    provider_session_id: existing,
-                    model: None,
-                    reasoning_effort: None,
-                });
+                .cloned();
+            if let Some(existing) = existing {
+                let live = &sessions[&existing];
+                if cli_context_matches(&live.process.cli_env) {
+                    return Ok(StartSessionResult {
+                        provider_session_id: existing,
+                        model: None,
+                        reasoning_effort: None,
+                    });
+                }
+                // A fork may share its parent's process. Load it independently before exposing
+                // process-level CLI identity; never replace the parent's environment or stop it.
+                if live.active.is_some() {
+                    bail!("conflict: Cannot rebind an active session");
+                }
+                let removed = sessions.remove(&existing).unwrap();
+                if sessions
+                    .values()
+                    .any(|other| Arc::ptr_eq(&other.process, &removed.process))
+                {
+                    None
+                } else {
+                    Some(removed.process)
+                }
+            } else {
+                None
             }
+        };
+        if let Some(process) = old_process {
+            process.shutdown().await?;
         }
         let (agent_id, raw) = match session_id.split_once("::") {
             Some((agent, rest)) if !agent.is_empty() && !rest.is_empty() => {
@@ -1258,6 +1280,11 @@ impl AgentRuntime for AcpRuntime {
             .prompt_preamble()
             .map(|preamble| format!("{preamble}\n\n{}", input.prompt))
             .unwrap_or_else(|| input.prompt.clone());
+        let prompt = if !crate::interaction::launch_env().is_empty() {
+            format!("[remoteCodex context: your thread ID is {}. This is a remoteCodex ID, not a native Codex session ID. Local peer thread CLI is available. Run `remote-codex skill` to discover creation, messaging, status, and progressive transcript commands. Credentials and current identity are in the process environment.]\n\n{prompt}", input.thread_id)
+        } else {
+            prompt
+        };
         let prompt_blocks = build_prompt_blocks(&prompt, &cwd, image_capable, &input.images)?;
         let mut updates = self.inner.updates.subscribe();
         {
@@ -1941,8 +1968,9 @@ impl AgentRuntime for AcpRuntime {
             .ok()
             .map(|sessions| {
                 sessions.iter().any(|(key, live)| {
-                    session_ids_match(key, session_id)
-                        || session_ids_match(&live.session_id, session_id)
+                    (session_ids_match(key, session_id)
+                        || session_ids_match(&live.session_id, session_id))
+                        && cli_context_matches(&live.process.cli_env)
                 })
             })
             .unwrap_or(false)
@@ -2205,7 +2233,7 @@ async fn handle_agent_request(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let env = params
+            let mut env = params
                 .get("env")
                 .and_then(Value::as_array)
                 .map(|entries| {
@@ -2220,6 +2248,7 @@ async fn handle_agent_request(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            env.extend(process.cli_env.clone());
             let output_byte_limit = params
                 .get("outputByteLimit")
                 .and_then(Value::as_u64)
@@ -2850,4 +2879,11 @@ fn emit_usage(bus: &EventBus, thread_id: &str, turn_id: &str, usage: Value, hidd
             payload: json!({"turnId":turn_id,"usage":usage}),
         });
     }
+}
+
+fn cli_context_matches(existing: &[(String, String)]) -> bool {
+    crate::interaction::launch_env()
+        .iter()
+        .filter(|(key, _)| key.starts_with("REMOTE_CODEX_"))
+        .all(|pair| existing.contains(pair))
 }

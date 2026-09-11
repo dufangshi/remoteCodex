@@ -1,6 +1,6 @@
 # 通用线程交互 CLI：设计讨论稿
 
-状态：第二版，待评审，尚未实现。本文中的新增命令与返回结构是设计提案。
+状态：已按评审方向实现。本文保留设计讨论；实际命令与边界以 [线程交互使用说明](thread-interaction.md) 为准，验证见 [Docker E2E 记录](thread-interaction-e2e.md)。
 
 工作目录：`/Users/mac/dev/remoteCodex-thread-messaging`  
 分支：`feat/local-thread-messaging`  
@@ -180,4 +180,4 @@ CLI 属于 `crates/cli`；必要 DTO 属于 `crates/protocol`；HTTP 适配属�
 
 修改 `crates/` 后执行 `cargo test --workspace`。隔离调用测试可在 Docker 中运行；涉及重启 / 恢复时按项目要求使用 Treer Apple container 测试机。若改 Web，再按 focused-e2e skill 选定 spec 和 browser project。
 
-本阶段只更新设计文档，不实施代码、创建新 skill、发布版本或修改活跃 Supervisor。
+本设计已进入实现阶段；功能、配套 skill 和隔离 Docker 验证在同一分支交付。

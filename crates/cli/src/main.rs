@@ -1,3 +1,4 @@
+mod threads;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -8,12 +9,24 @@ use clap::{Parser, Subcommand};
     about = "Remote Codex supervisor and relay"
 )]
 struct Cli {
+    #[command(flatten)]
+    connection: threads::Connection,
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create, contact, and inspect threads on the local Supervisor.
+    Thread {
+        #[command(subcommand)]
+        command: threads::ThreadCommand,
+    },
+    /// Read recent conversation text, then expand one turn or item.
+    Transcript(threads::Transcript),
+    /// Print the bundled thread interaction skill.
+    Skill,
+
     /// Run the local supervisor HTTP API.
     Supervisor,
     /// Alias for supervisor (local mode).
@@ -58,6 +71,7 @@ async fn main() -> Result<()> {
         return remote_codex_runtime::acp::run_codex_app_server_bridge().await;
     }
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,rusqlite=warn,hyper=warn".into()),
@@ -65,6 +79,23 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Skill => println!(
+            "{}",
+            include_str!("../../../skills/thread-interaction/SKILL.md")
+        ),
+        Commands::Thread { command } => {
+            let value = threads::Client::new(cli.connection)?
+                .thread(command)
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Transcript(query) => {
+            let value = threads::Client::new(cli.connection)?
+                .transcript(query)
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+
         Commands::Supervisor | Commands::Start => {
             let state = remote_codex_runtime::boot().await?;
             remote_codex_supervisor::serve(state).await?;

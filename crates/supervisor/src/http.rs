@@ -56,7 +56,9 @@ struct ExportTranscriptQuery {
 }
 
 pub fn router(state: AppState) -> Router {
+    state.start_interaction_worker();
     let router = Router::new()
+        .route("/api/cli", post(crate::interaction::command))
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
@@ -377,7 +379,7 @@ async fn spa_fallback(State(state): State<AppState>, request: Request) -> Respon
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-struct ApiErr(StatusCode, ApiError);
+pub(crate) struct ApiErr(StatusCode, ApiError);
 
 impl IntoResponse for ApiErr {
     fn into_response(self) -> Response {
@@ -389,7 +391,7 @@ fn err(status: StatusCode, code: &str, message: impl Into<String>) -> ApiErr {
     ApiErr(status, ApiError::new(code, message))
 }
 
-fn map_err(e: anyhow::Error) -> ApiErr {
+pub(crate) fn map_err(e: anyhow::Error) -> ApiErr {
     let message = e.to_string();
     if message.contains("database disk image is malformed") || message.contains("SQLITE_CORRUPT") {
         err(StatusCode::SERVICE_UNAVAILABLE, "harness_storage_corrupt",

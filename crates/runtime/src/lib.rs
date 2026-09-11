@@ -7,6 +7,7 @@ pub mod fake;
 pub mod files;
 pub mod history;
 pub mod import_id;
+pub mod interaction;
 pub mod local_sessions;
 pub mod management;
 pub mod service;

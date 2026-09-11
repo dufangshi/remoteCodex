@@ -60,6 +60,7 @@ impl Drop for PendingGuard {
 /// One ACP stdio process. stdin is locked only for the write, so multiple
 /// sessions on the same process can request/notify concurrently.
 pub struct AcpProcess {
+    pub(crate) cli_env: Vec<(String, String)>,
     pub(crate) id: String,
     stdin: Mutex<ChildStdin>,
     child: Arc<Mutex<Child>>,
@@ -145,6 +146,8 @@ impl AcpProcess {
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
+        let cli_env = crate::interaction::launch_env();
+        cmd.envs(cli_env.iter().cloned());
         let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn ACP `{command}`"))?;
@@ -184,6 +187,7 @@ impl AcpProcess {
         spawn_exit_monitor(child.clone(), state.clone());
         Ok((
             Self {
+                cli_env,
                 id: uuid::Uuid::new_v4().to_string(),
                 stdin: Mutex::new(stdin),
                 child,
