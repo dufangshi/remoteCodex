@@ -29,6 +29,7 @@ test('relay start overrides stale tmux server configuration', {
     REMOTE_CODEX_DATABASE_PATH: '/stale/database.sqlite',
     REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
     DATABASE_URL: 'postgres://stale:private@db/app',
+    RUST_LOG: 'off',
   };
   const expected = {
     url: 'wss://new.example.com',
@@ -60,6 +61,7 @@ fs.writeFileSync(${JSON.stringify(output)}, JSON.stringify({
   port: process.env.REMOTE_CODEX_RELAY_SUPERVISOR_PORT,
   genericDatabase: process.env.DATABASE_URL,
   fake: process.env.REMOTE_CODEX_E2E_FAKE_RUNTIME,
+  rustLog: process.env.RUST_LOG,
 }));
 setInterval(() => {}, 1000);
 `, { mode: 0o700 });
@@ -95,7 +97,7 @@ function isolatedLauncher(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-config-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const native = path.join(root, 'native');
-  fs.writeFileSync(native, `#!${process.execPath}\nconsole.log(JSON.stringify({ database: process.env.REMOTE_CODEX_DATABASE_PATH, generic: process.env.DATABASE_URL, host: process.env.REMOTE_CODEX_RELAY_SUPERVISOR_HOST, fake: process.env.REMOTE_CODEX_E2E_FAKE_RUNTIME, args: process.argv.slice(2) }));\n`, { mode: 0o700 });
+  fs.writeFileSync(native, `#!${process.execPath}\nconsole.log(JSON.stringify({ database: process.env.REMOTE_CODEX_DATABASE_PATH, generic: process.env.DATABASE_URL, rustLog: process.env.RUST_LOG, logLevel: process.env.LOG_LEVEL, host: process.env.REMOTE_CODEX_RELAY_SUPERVISOR_HOST, fake: process.env.REMOTE_CODEX_E2E_FAKE_RUNTIME, args: process.argv.slice(2) }));\n`, { mode: 0o700 });
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_') && !['DATABASE_URL', 'WORKSPACE_ROOT'].includes(key)));
   Object.assign(env, {
     HOME: root,
@@ -114,7 +116,7 @@ test('relay accepts only connection settings and keeps its database across cwd c
   fs.writeFileSync(path.join(root, '.env'), 'DATABASE_URL=postgres://user:private@db/workspace\nREMOTE_CODEX_RELAY_AGENT_TOKEN=wrong-device\n');
   const database = path.join(root, 'original.sqlite');
   fs.writeFileSync(env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG, JSON.stringify({ DATABASE_URL: database }));
-  const hostile = { DATABASE_URL: 'postgres://user:private@db/app', PORT: '1', HOST: '0.0.0.0', WORKSPACE_ROOT: '/wrong', ACP_COMMAND: 'wrong', REMOTE_CODEX_DATABASE_PATH: '/wrong.sqlite', REMOTE_CODEX_RELAY_SUPERVISOR_HOST: '0.0.0.0', REMOTE_CODEX_E2E_FAKE_RUNTIME: '1' };
+  const hostile = { RUST_LOG: 'off', LOG_LEVEL: 'error', DATABASE_URL: 'postgres://user:private@db/app', PORT: '1', HOST: '0.0.0.0', WORKSPACE_ROOT: '/wrong', ACP_COMMAND: 'wrong', REMOTE_CODEX_DATABASE_PATH: '/wrong.sqlite', REMOTE_CODEX_RELAY_SUPERVISOR_HOST: '0.0.0.0', REMOTE_CODEX_E2E_FAKE_RUNTIME: '1' };
   let result = run(['relay-supervisor', 'run'], root, hostile);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { database, host: '127.0.0.1', args: ['relay-supervisor'] });
