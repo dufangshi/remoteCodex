@@ -303,6 +303,62 @@ impl HarnessAdapter for DeepSeekAdapter {
     }
 }
 
+pub struct GeminiAdapter;
+
+impl HarnessAdapter for GeminiAdapter {
+    fn id(&self) -> &'static str {
+        "gemini"
+    }
+    fn project_session(&self, response: &Value) -> Option<HarnessProjection> {
+        // Gemini exposes the legacy ACP model selector, with no reasoning selector.
+        let state = response.get("models")?;
+        let current = state["currentModelId"].as_str();
+        let mut available = state["availableModels"].as_array()?.clone();
+        // The built-in catalog can omit a model configured through a custom gateway.
+        if let Some(id) =
+            current.filter(|id| !available.iter().any(|entry| entry["modelId"] == *id))
+        {
+            available.insert(0, json!({"modelId": id}));
+        }
+        let models = available
+            .iter()
+            .filter_map(|entry| {
+                let id = entry["modelId"].as_str()?;
+                Some(ModelOptionDto {
+                    id: id.into(),
+                    model: id.into(),
+                    display_name: entry["name"].as_str().unwrap_or(id).into(),
+                    description: entry["description"].as_str().unwrap_or_default().into(),
+                    is_default: current == Some(id),
+                    hidden: false,
+                    supported_reasoning_efforts: vec![],
+                    default_reasoning_effort: None,
+                    selection_kind: Some("model".into()),
+                    acp_agent: None,
+                })
+            })
+            .collect();
+        Some(HarnessProjection {
+            state: state.clone(),
+            models,
+            model: current.map(str::to_string),
+            reasoning_effort: None,
+        })
+    }
+    fn apply_model(&self, model: &str, _state: &Value) -> Option<SessionSettingOp> {
+        Some(SessionSettingOp::SetModel {
+            model_id: model.into(),
+        })
+    }
+    fn patch_capabilities(
+        &self,
+        caps: &mut AgentProviderCapabilitiesDto,
+        negotiated: &NegotiatedCaps,
+    ) {
+        apply_negotiated(caps, negotiated);
+    }
+}
+
 pub fn adapter_for(agent_id: &str) -> Box<dyn HarnessAdapter> {
     match agent_id {
         "codex" => Box::new(CodexAdapter),
@@ -310,6 +366,7 @@ pub fn adapter_for(agent_id: &str) -> Box<dyn HarnessAdapter> {
         "cursor" => Box::new(CursorAdapter),
         "grok" => Box::new(GrokAdapter),
         "deepseek" => Box::new(DeepSeekAdapter),
+        "gemini" => Box::new(GeminiAdapter),
         _ => Box::new(StandardAdapter),
     }
 }
@@ -472,6 +529,21 @@ mod tests {
         assert!(caps.turns.start);
         assert!(caps.management.models);
         assert!(!caps.branching.fork);
+    }
+
+    #[test]
+    fn gemini_preserves_a_configured_gateway_model_missing_from_the_catalog() {
+        let projection = GeminiAdapter
+            .project_session(&json!({"models": {
+                "currentModelId": "gateway-model",
+                "availableModels": [{"modelId":"auto", "name":"Auto"}]
+            }}))
+            .unwrap();
+        assert_eq!(projection.models.len(), 2);
+        assert_eq!(projection.models[0].model, "gateway-model");
+        assert!(projection.models[0].is_default);
+        assert!(projection.models[0].supported_reasoning_efforts.is_empty());
+        assert_eq!(projection.model.as_deref(), Some("gateway-model"));
     }
 
     #[test]

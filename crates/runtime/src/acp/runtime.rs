@@ -540,7 +540,7 @@ impl AcpRuntime {
                         }
                     }
                 }
-                if config_id == reasoning_config_id(&live.config_options) {
+                if Some(config_id.as_str()) == reasoning_config_id(&live.config_options) {
                     live.reasoning_effort = Some(value.clone());
                 }
                 if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
@@ -574,16 +574,13 @@ impl AcpRuntime {
                             "modelId": model_id
                         }),
                     )
-                    .await
-                    .ok();
+                    .await?;
                 live.model = Some(model_id.clone());
                 if let Some(obj) = live.harness_state.as_object_mut() {
                     obj.insert("currentModelId".into(), json!(model_id));
                 }
-                if let Some(response) = response {
-                    if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
-                        apply_projection(live, proj);
-                    }
+                if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
+                    apply_projection(live, proj);
                 }
             }
             SessionSettingOp::LoadWithMeta { meta } => {
@@ -692,12 +689,13 @@ impl AcpRuntime {
             if live.reasoning_effort.as_deref() != Some(effort) {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
                     Self::apply_setting_op(&live.process.clone(), live, op).await?;
-                } else {
+                } else if let Some(config_id) = reasoning_config_id(&live.config_options) {
+                    let config_id = config_id.to_string();
                     Self::apply_setting_op(
                         &live.process.clone(),
                         live,
                         SessionSettingOp::SetConfig {
-                            config_id: reasoning_config_id(&live.config_options).into(),
+                            config_id,
                             value: effort.to_string(),
                         },
                     )
@@ -1090,7 +1088,7 @@ impl AgentRuntime for AcpRuntime {
         let adapter = adapter_for(&live.adapter_id);
         if !input.model.is_empty() && input.model != "default" {
             if let Some(op) = adapter.apply_model(&input.model, &live.harness_state) {
-                let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
+                Self::apply_setting_op(&live.process.clone(), &mut live, op).await?;
             } else {
                 let _ = Self::apply_setting_op(
                     &live.process.clone(),
@@ -1112,8 +1110,8 @@ impl AgentRuntime for AcpRuntime {
             if live.reasoning_effort.as_deref() != Some(effort) {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
                     let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
-                } else {
-                    let config_id = reasoning_config_id(&live.config_options).to_string();
+                } else if let Some(config_id) = reasoning_config_id(&live.config_options) {
+                    let config_id = config_id.to_string();
                     Self::apply_setting_op(
                         &live.process.clone(),
                         &mut live,
@@ -2364,6 +2362,85 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn gemini_uses_legacy_models_without_sending_unadvertised_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let python = which::which("python3")
+            .or_else(|_| which::which("python"))
+            .unwrap();
+        let script = dir.path().join("gemini_fixture.py");
+        std::fs::write(
+            &script,
+            include_str!("../../tests/fixtures/fake_acp_agent.py"),
+        )
+        .unwrap();
+        let runtime = AcpRuntime::catalog(None, 5000);
+        let def = AcpAgentDef {
+            id: "gemini".into(),
+            display_name: "Gemini fixture".into(),
+            description: String::new(),
+            transport: "native".into(),
+            base_command: python.to_string_lossy().into(),
+            server_command: format!(
+                "\"{}\" \"{}\" --legacy-models",
+                python.display(),
+                script.display()
+            ),
+            install_command: None,
+            model_list_command: None,
+        };
+        let (session, live) = runtime
+            .spawn_session(
+                &def,
+                &dir.path().to_string_lossy(),
+                ProductSessionPolicy::default(),
+                None,
+                Some("medium"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(live.model.as_deref(), Some("gemini-pro"));
+        assert_eq!(live.harness_models.len(), 2);
+        assert!(live.harness_models[0].is_default);
+        assert_eq!(live.harness_models[1].display_name, "Flash");
+        assert!(live
+            .harness_models
+            .iter()
+            .all(|model| model.supported_reasoning_efforts.is_empty()));
+        runtime
+            .inner
+            .sessions
+            .lock()
+            .await
+            .insert(session.clone(), live);
+        for model in ["gemini-flash", "gemini-pro"] {
+            runtime
+                .apply_live_settings(
+                    &session,
+                    Some(model),
+                    Some("medium"),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("selected-model.txt")).unwrap(),
+                model
+            );
+            assert!(runtime
+                .apply_live_settings(&session, Some("invalid"), None, None, None, None, None)
+                .await
+                .is_err());
+            let sessions = runtime.inner.sessions.lock().await;
+            assert_eq!(sessions[&session].model.as_deref(), Some(model));
+            assert_eq!(sessions[&session].reasoning_effort, None);
+        }
+        assert!(!dir.path().join("unexpected-config.json").exists());
+    }
+
+    #[tokio::test]
     async fn codex_goal_command_uses_the_tracked_prompt_stream_for_both_provider_modes() {
         for provider in [Provider::Codex, Provider::Acp] {
             let dir = tempfile::tempdir().unwrap();
@@ -2575,26 +2652,22 @@ fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
 }
 
 // ACP config IDs are agent-defined; category is the portable semantic key.
-fn reasoning_config_id(options: &Value) -> &str {
-    options
-        .as_array()
-        .and_then(|options| {
-            options
-                .iter()
-                .find(|option| {
-                    option.get("category").and_then(Value::as_str) == Some("thought_level")
+// Missing options mean reasoning is agent-managed, not an implicit thought-level option.
+fn reasoning_config_id(options: &Value) -> Option<&str> {
+    options.as_array().and_then(|options| {
+        options
+            .iter()
+            .find(|option| option.get("category").and_then(Value::as_str) == Some("thought_level"))
+            .or_else(|| {
+                options.iter().find(|option| {
+                    matches!(
+                        option.get("id").and_then(Value::as_str),
+                        Some("reasoning_effort" | "thought_level" | "thought-level")
+                    )
                 })
-                .or_else(|| {
-                    options.iter().find(|option| {
-                        matches!(
-                            option.get("id").and_then(Value::as_str),
-                            Some("reasoning_effort" | "thought_level" | "thought-level")
-                        )
-                    })
-                })
-                .and_then(|option| option.get("id").and_then(Value::as_str))
-        })
-        .unwrap_or("thought-level")
+            })
+            .and_then(|option| option.get("id").and_then(Value::as_str))
+    })
 }
 
 pub(super) fn models_from_config_options(options: &Value) -> Vec<ModelOptionDto> {

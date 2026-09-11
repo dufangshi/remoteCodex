@@ -63,7 +63,7 @@ pub fn preferred_mode_ids(policy: &ProductSessionPolicy) -> Vec<&'static str> {
     } else if matches!(policy.sandbox_mode.as_deref(), Some("read-only")) {
         vec!["read-only", "readonly", "ask"]
     } else {
-        vec!["agent", "code", "build", "auto"]
+        vec!["agent", "code", "build", "auto", "default"]
     }
 }
 
@@ -326,6 +326,32 @@ mod tests {
         );
         assert!(policy.auto_approve());
         assert!(policy.allows_writes_outside_workspace());
+    }
+
+    #[test]
+    fn gemini_guarded_mode_uses_default_before_fuzzy_auto_edit_match() {
+        let available = vec![
+            SessionMode {
+                id: "default".into(),
+                name: Some("Default".into()),
+            },
+            SessionMode {
+                id: "autoEdit".into(),
+                name: Some("Auto Edit".into()),
+            },
+            SessionMode {
+                id: "yolo".into(),
+                name: Some("YOLO".into()),
+            },
+        ];
+        let policy = ProductSessionPolicy {
+            approval_mode: Some("guarded".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_mode(&available, &policy).as_deref(),
+            Some("default")
+        );
     }
 
     #[test]
