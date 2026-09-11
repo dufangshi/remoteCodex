@@ -961,9 +961,25 @@ async fn acknowledged_input_survives_restart_before_dispatch() {
         .turns
         .is_empty());
     drop(state);
+    // Other tests spawn ACP child processes concurrently. On Unix a fork can
+    // briefly inherit the lock descriptor until exec closes it. Wait for actual
+    // lock release instead of assuming no concurrent fork/exec overlaps the drop.
+    let reopened = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match Database::open(&config.database_url) {
+                Ok(db) => break db,
+                Err(error) => {
+                    assert!(error.to_string().contains("already owned"), "{error:#}");
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
+    })
+    .await
+    .expect("old Supervisor database ownership must be released");
     let restarted = Supervisor::new(
         config.clone(),
-        Database::open(&config.database_url).unwrap(),
+        reopened,
         vec![Arc::new(FakeRuntime::new(Provider::Claude))],
     );
     assert_eq!(
