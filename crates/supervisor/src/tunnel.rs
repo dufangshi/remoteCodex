@@ -773,10 +773,6 @@ mod tests {
     use remote_codex_runtime::fake::FakeRuntime;
     use tempfile::TempDir;
 
-    fn state() -> (TempDir, Arc<Supervisor>) {
-        state_with_relay_url("https://relay.example.test/base")
-    }
-
     fn state_with_relay_url(relay_url: &str) -> (TempDir, Arc<Supervisor>) {
         let directory = tempfile::tempdir().unwrap();
         let config = RuntimeConfig {
@@ -809,22 +805,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stalled_request_releases_capacity() {
-        let permits = Arc::new(tokio::sync::Semaphore::new(1));
-        let permit = permits.clone().try_acquire_owned().unwrap();
-        let result = bounded_forward(
-            async move {
-                let _permit = permit;
-                std::future::pending::<Value>().await
-            },
-            Duration::from_millis(10),
-        )
-        .await;
-        assert_eq!(result["statusCode"], 504);
-        assert!(permits.try_acquire().is_ok());
-    }
-
-    #[tokio::test]
     async fn forged_forward_header_is_denied_but_tunnel_dispatch_is_authorized() {
         let (_dir, state) = state_with_relay_url("http://localhost:8788");
         let response = crate::http::router(state.clone())
@@ -841,120 +821,6 @@ mod tests {
         let forwarded =
             forward_local(&state, json!({"method":"GET","path":"/api/workspaces"})).await;
         assert_eq!(forwarded["statusCode"], 200);
-    }
-
-    #[test]
-    fn builds_node_compatible_tunnel_url() {
-        let url = relay_tunnel_url("https://relay.example.test/base?old=1").unwrap();
-        assert_eq!(url.scheme(), "wss");
-        assert_eq!(url.path(), "/supervisor/tunnel");
-        assert!(url.query().is_none());
-    }
-
-    #[test]
-    fn restores_node_base64_request_body_without_utf8_loss() {
-        let expected = b"multipart-prefix\0\xff\x80binary";
-        let payload = json!({
-            "body": base64::engine::general_purpose::STANDARD.encode(expected),
-            "bodyEncoding": "base64"
-        });
-        assert_eq!(
-            decode_relay_request_body(&payload).unwrap().unwrap(),
-            expected
-        );
-        assert!(decode_relay_request_body(&json!({
-            "body": "not-base64!",
-            "bodyEncoding": "base64"
-        }))
-        .is_err());
-    }
-
-    #[tokio::test]
-    async fn relay_client_envelopes_use_the_shared_socket_session() {
-        let (_directory, state) = state();
-        let (outgoing, mut output) = mpsc::channel();
-        let mut clients = HashMap::new();
-        handle_relay_message(
-            state.clone(),
-            &mut clients,
-            &outgoing,
-            json!({
-                "type": "relay.client.connected",
-                "clientId": "client-1",
-                "timestamp": now_rfc3339()
-            }),
-        );
-        let connected = tokio::time::timeout(Duration::from_secs(1), output.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(connected["type"], "relay.server.message");
-        assert_eq!(connected["clientId"], "client-1");
-        assert_eq!(connected["payload"]["type"], "supervisor.connected");
-
-        handle_relay_message(
-            state,
-            &mut clients,
-            &outgoing,
-            json!({
-                "type": "relay.client.message",
-                "clientId": "client-1",
-                "payload": {
-                    "type": "supervisor.ping",
-                    "timestamp": "2026-09-03T12:00:00.000Z"
-                }
-            }),
-        );
-        let pong = tokio::time::timeout(Duration::from_secs(1), output.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(pong["payload"]["type"], "supervisor.pong");
-        assert_eq!(
-            pong["payload"]["payload"]["requestTimestamp"],
-            "2026-09-03T12:00:00.000Z"
-        );
-    }
-
-    #[tokio::test]
-    async fn unresponsive_peer_expires_even_when_socket_writes_succeed() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = format!("ws://{}", listener.local_addr().unwrap());
-        let (_dir, state) = state_with_relay_url(&address);
-        let server = tokio::spawn(async move {
-            let (tcp, _) = listener.accept().await.unwrap();
-            let socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
-            // Keep TCP open, but never read or acknowledge any messages.
-            let _socket = socket;
-            std::future::pending::<()>().await;
-        });
-        let (socket, _) = connect_async(&address).await.unwrap();
-        let error = tokio::time::timeout(
-            Duration::from_secs(2),
-            run_connected_tunnel_with_deadline(state, socket, Duration::from_millis(100)),
-        )
-        .await
-        .expect("half-open connection must not wait for the OS TCP timeout")
-        .unwrap_err();
-        assert!(error.to_string().contains("stopped responding"));
-        server.abort();
-    }
-
-    #[test]
-    fn wake_detection_uses_elapsed_wall_time_not_a_clock_adjustment_backwards() {
-        let before = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-        assert!(!resumed_after_pause(
-            before,
-            before + Duration::from_secs(3)
-        ));
-        assert!(resumed_after_pause(
-            before,
-            before + Duration::from_secs(60)
-        ));
-        assert!(!resumed_after_pause(
-            before,
-            before - Duration::from_secs(60)
-        ));
     }
 
     #[tokio::test]
@@ -1008,88 +874,5 @@ mod tests {
         assert!(!state
             .relay_connected
             .load(std::sync::atomic::Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn websocket_tunnel_routes_a_relay_client_session_end_to_end() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let relay_url = format!("ws://{}", listener.local_addr().unwrap());
-        let (_directory, state) = state_with_relay_url(&relay_url);
-        let tunnel = tokio::spawn(run_relay_tunnel(state));
-        let (tcp, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
-            .await
-            .unwrap()
-            .unwrap();
-        let mut relay = tokio_tungstenite::accept_async(tcp).await.unwrap();
-
-        let heartbeat = tokio::time::timeout(Duration::from_secs(2), relay.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let heartbeat: Value = serde_json::from_str(heartbeat.to_text().unwrap()).unwrap();
-        assert_eq!(heartbeat["type"], "relay.heartbeat");
-
-        relay
-            .send(Message::Text(
-                json!({
-                    "type": "relay.client.connected",
-                    "timestamp": now_rfc3339(),
-                    "clientId": "client-e2e"
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
-        let connected = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let message = relay.next().await.unwrap().unwrap();
-                let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-                if value["type"] == "relay.server.message"
-                    && value["payload"]["type"] == "supervisor.connected"
-                {
-                    break value;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(connected["clientId"], "client-e2e");
-
-        relay
-            .send(Message::Text(
-                json!({
-                    "type": "relay.client.message",
-                    "timestamp": now_rfc3339(),
-                    "clientId": "client-e2e",
-                    "payload": {
-                        "type": "supervisor.ping",
-                        "timestamp": "2026-09-03T12:00:00.000Z"
-                    }
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
-        let pong = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let message = relay.next().await.unwrap().unwrap();
-                let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-                if value["type"] == "relay.server.message"
-                    && value["payload"]["type"] == "supervisor.pong"
-                {
-                    break value;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(
-            pong["payload"]["payload"]["requestTimestamp"],
-            "2026-09-03T12:00:00.000Z"
-        );
-        tunnel.abort();
     }
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 const workspaceRoot = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright');
 
@@ -15,26 +15,6 @@ async function ensureWorkspaceDir(name: string) {
 
 function makeWorkspaceName(prefix: string) {
   return `${prefix}-${randomUUID().slice(0, 8)}`;
-}
-
-async function selectWorkspaceByLabelText(page: Page, labelText: string) {
-  const value = await page
-    .getByLabel('Workspace')
-    .evaluate((element, expected) => {
-      const select = element as HTMLSelectElement;
-      const option = [...select.options].find((entry) =>
-        entry.text.includes(expected as string),
-      );
-      return option?.value ?? '';
-    }, labelText);
-
-  if (!value) {
-    throw new Error(
-      `Unable to find workspace option containing "${labelText}".`,
-    );
-  }
-
-  await page.getByLabel('Workspace').selectOption(value);
 }
 
 test.describe('Phase 2 acceptance', () => {
@@ -52,14 +32,13 @@ test.describe('Phase 2 acceptance', () => {
 
     await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
     await expect(
-      page.getByRole('heading', { level: 2, name: workspaceName }),
+      page.getByRole('heading', { level: 1, name: workspaceName }),
     ).toBeVisible();
     await expect(
       page.getByText('No threads available in this workspace.'),
     ).toBeVisible();
 
-    await page.goto('/threads/new');
-    await selectWorkspaceByLabelText(page, workspaceName);
+    await page.getByRole('link', { name: 'New thread', exact: true }).click();
     await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
@@ -74,115 +53,9 @@ test.describe('Phase 2 acceptance', () => {
     await expect(page.getByText('hello', { exact: true })).toBeVisible({
       timeout: 30_000,
     });
-    const assistantContent = page
-      .locator('.thread-graph-message-content.is-assistant')
-      .last();
-    const assistantWidth = await assistantContent.evaluate((node) => {
-      const message = node.closest('.thread-graph-message');
-      return {
-        content: node.getBoundingClientRect().width,
-        available: message?.getBoundingClientRect().width ?? 0,
-      };
-    });
-    expect(assistantWidth.content).toBeGreaterThanOrEqual(
-      assistantWidth.available * 0.9,
-    );
     await expect(page.getByText('Showing 1 of 1 turns')).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeEnabled();
-  });
-
-  test('can interrupt a running turn and return to an interactive state', async ({
-    page,
-  }) => {
-    const workspaceName = makeWorkspaceName('phase2-interrupt');
-    const workspacePath = await ensureWorkspaceDir(workspaceName);
-
-    await page.goto('/workspaces/new');
-    await page.getByRole('button', { name: 'Existing path' }).click();
-    await page.getByLabel('Absolute path').fill(workspacePath);
-    await page.getByLabel('Display label').fill(workspaceName);
-    await page.getByRole('button', { name: 'Add workspace' }).click();
-
-    await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
-
-    await page.goto('/threads/new');
-    await selectWorkspaceByLabelText(page, workspaceName);
-    await page.getByLabel('Title').fill(`${workspaceName} thread`);
-    await page.getByRole('button', { name: 'Create Thread' }).click();
-
-    await expect(page).toHaveURL(/\/threads\/.+/);
-
-    await page
-      .getByRole('textbox', { name: 'Prompt' })
-      .fill(
-        'Inspect this repository in depth, enumerate every top-level source file group, and write a detailed multi-section report before giving a final summary.',
-      );
-    await page.getByRole('button', { name: 'Send Prompt' }).click();
-    await expect(
-      page.getByRole('button', { name: 'Stop Current Turn' }),
-    ).toBeEnabled({
-      timeout: 10_000,
-    });
-
-    await page
-      .getByRole('button', { name: 'Stop Current Turn' })
-      .evaluate((node) => (node as HTMLButtonElement).click());
-
-    await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeEnabled({
-      timeout: 20_000,
-    });
-    await expect(
-      page.getByRole('button', { name: 'Stop Current Turn' }),
-    ).toHaveCount(0);
-  });
-
-  test('uses a collapsible top sidebar on mobile thread detail', async ({
-    page,
-  }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'mobile-chromium',
-      'This layout check only applies to the mobile project.',
-    );
-
-    const workspaceName = makeWorkspaceName('phase2-mobile');
-    const workspacePath = await ensureWorkspaceDir(workspaceName);
-
-    await page.goto('/workspaces/new');
-    await page.getByRole('button', { name: 'Existing path' }).click();
-    await page.getByLabel('Absolute path').fill(workspacePath);
-    await page.getByLabel('Display label').fill(workspaceName);
-    await page.getByRole('button', { name: 'Add workspace' }).click();
-
-    await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
-
-    await page.goto('/threads/new');
-    await selectWorkspaceByLabelText(page, workspaceName);
-    await page.getByLabel('Title').fill(`${workspaceName} thread`);
-    await page.getByRole('button', { name: 'Create Thread' }).click();
-
-    await expect(page).toHaveURL(/\/threads\/.+/);
-    const threadNavButton = page.getByRole('button', { name: 'Open rooms' });
-    await expect(threadNavButton).toBeVisible();
-    const topbar = page.locator('.thread-topbar-row');
-    await expect(topbar.getByRole('button').first()).toHaveAccessibleName('Open rooms');
-    await expect(topbar.getByRole('button', { name: 'Open settings' })).toHaveCount(0);
-    await expect(topbar.locator('h1')).toHaveText(`${workspaceName} thread`);
-    await threadNavButton.click();
-
-    await expect(page.getByRole('button', { name: 'Close rooms' }).first()).toBeVisible();
-    const mobileSidebar = page.locator('aside:visible').first();
-    await expect(mobileSidebar.getByRole('link', { name: new RegExp(`${workspaceName} thread`) })).toBeVisible();
-    const settings = mobileSidebar.locator('.thread-rooms-rail-header').getByRole('button', { name: 'Open settings' });
-    await expect(settings).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath('mobile-expanded-settings.png'), animations: 'disabled' });
-    await settings.click();
-    await expect(page.getByTestId('settings-dialog')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
-    await mobileSidebar.getByRole('button', { name: 'Close rooms' }).click();
-    await expect(threadNavButton).toHaveAttribute('aria-expanded', 'false');
-    await page.screenshot({ path: testInfo.outputPath('mobile-topbar-navigation.png'), animations: 'disabled' });
   });
 });

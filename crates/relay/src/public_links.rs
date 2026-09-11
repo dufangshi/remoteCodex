@@ -24,27 +24,6 @@ fn owns(conn: &Connection, owner: &str, scope: &Scope) -> bool {
             .is_some()
 }
 
-// Strict projection: command output, reasoning, internal paths/IDs and future
-// DTO fields cannot leak into the public response, even if the UI changes.
-#[cfg(test)]
-fn messages(turn: &Value) -> Vec<Value> {
-    let Some(items) = turn["items"].as_array() else {
-        return vec![];
-    };
-    let final_index = if turn["status"] != "inProgress" {
-        items
-            .iter()
-            .rposition(|item| item["kind"] == "agentMessage" && item["phase"] != "commentary")
-    } else {
-        None
-    };
-    items.iter().enumerate().filter_map(|(index, item)| {
-        let user = item["kind"] == "userMessage";
-        if !user && Some(index) != final_index { return None; }
-        Some(json!({"role": if user {"user"} else {"assistant"}, "text": item["text"].as_str().unwrap_or(""), "createdAt": item["createdAt"].as_str()}))
-    }).collect()
-}
-
 fn numeric_fields(source: &Value, fields: &[&str]) -> Value {
     Value::Object(
         fields
@@ -247,27 +226,5 @@ pub(super) async fn revoke(
         Ok(1) => StatusCode::NO_CONTENT.into_response(),
         Ok(_) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn public_projection_omits_operations_and_intermediate_replies() {
-        let turn = json!({"status":"completed","items":[
-            {"kind":"userMessage","text":"prompt","artifact":{"secret":"path"}},
-            {"kind":"agentMessage","phase":"commentary","text":"thinking"},
-            {"kind":"commandExecution","text":"secret command output"},
-            {"kind":"userMessage","text":"steer"},
-            {"kind":"agentMessage","text":"answer","internal":"secret"}
-        ]});
-        let result = messages(&turn);
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[2]["text"], "answer");
-        assert!(!serde_json::to_string(&result).unwrap().contains("secret"));
-        let mut active = turn.clone();
-        active["status"] = json!("inProgress");
-        assert_eq!(messages(&active).len(), 2);
     }
 }

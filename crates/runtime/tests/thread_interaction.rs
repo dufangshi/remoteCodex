@@ -88,102 +88,6 @@ async fn until(mut check: impl FnMut() -> bool) {
     .await
     .unwrap();
 }
-fn count(s: &Supervisor, id: &str) -> i64 {
-    s.db.with(|c| {
-        Ok(c.query_row(
-            "SELECT count(*) FROM thread_turns WHERE thread_id=?1",
-            [id],
-            |r| r.get(0),
-        )?)
-    })
-    .unwrap()
-}
-
-#[tokio::test]
-async fn peers_send_repeatedly_and_notify_once_without_waiting_for_reply() {
-    let (_dir, s) = setup();
-    let a = thread(&s, Provider::Codex).await;
-    let b = thread(&s, Provider::Acp).await;
-    let before =
-        s.db.with(|c| {
-            Ok(c.query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE type='table'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )?)
-        })
-        .unwrap();
-    let first = s
-        .send_to_thread(&b, send(&a, "hello one", true, "retry-1"))
-        .unwrap();
-    assert_eq!(
-        first,
-        s.send_to_thread(&b, send(&a, "hello one", true, "retry-1"))
-            .unwrap()
-    );
-    assert!(s
-        .send_to_thread(&b, send(&a, "different", true, "retry-1"))
-        .is_err());
-    s.send_to_thread(&b, send(&a, "hello two", false, "retry-2"))
-        .unwrap();
-    assert_eq!(count(&s, &b), 0); // Receipt is durable queue acceptance, independent of execution.
-    s.start_interaction_worker();
-    until(|| {
-        count(&s, &b) == 2 && count(&s, &a) == 1 && s.get_thread(&b).unwrap().status == "idle"
-    })
-    .await;
-    let history = s.transcript(&a, &TranscriptQuery::default()).unwrap();
-    let text = history.to_string();
-    assert!(text.contains("turn notification"));
-    assert!(text.contains("status completed"));
-    s.send_to_thread(&a, send(&b, "hello manual reply", false, "reverse"))
-        .unwrap();
-    // The recipient is still running its notification turn; reverse prompt waits in the same queue.
-    assert_eq!(s.interaction_status(&a).await.unwrap()["queuedCount"], 1);
-    s.interrupt(&a).await.unwrap();
-    until(|| count(&s, &a) == 2 && s.get_thread(&a).unwrap().status == "idle").await;
-    assert_eq!(count(&s, &b), 2);
-    assert_eq!(count(&s, &a), 2);
-    let after =
-        s.db.with(|c| {
-            Ok(c.query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE type='table'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )?)
-        })
-        .unwrap();
-    assert_eq!(before, after);
-    let pending: i64 =
-        s.db.with(|c| {
-            Ok(c.query_row(
-                "SELECT count(*) FROM kv WHERE key LIKE 'cli:notify:%'",
-                [],
-                |r| r.get(0),
-            )?)
-        })
-        .unwrap();
-    assert_eq!(pending, 0);
-}
-
-#[tokio::test]
-async fn interrupted_turn_notifies_with_actual_terminal_status() {
-    let (_dir, s) = setup();
-    let a = thread(&s, Provider::Codex).await;
-    let b = thread(&s, Provider::Acp).await;
-    s.send_to_thread(&b, send(&a, "inspect this repository", true, "interrupt"))
-        .unwrap();
-    s.start_interaction_worker();
-    until(|| s.get_thread(&b).unwrap().status == "running").await;
-    s.interrupt(&b).await.unwrap();
-    until(|| count(&s, &a) == 1).await;
-    assert!(s
-        .transcript(&a, &TranscriptQuery::default())
-        .unwrap()
-        .to_string()
-        .contains("status interrupted"));
-    s.interrupt(&a).await.unwrap();
-}
 
 #[tokio::test]
 async fn conversation_is_recent_bounded_and_every_stored_detail_is_discoverable() {
@@ -273,46 +177,6 @@ async fn conversation_is_recent_bounded_and_every_stored_detail_is_discoverable(
             }
         )
         .is_err());
-}
-
-#[tokio::test]
-async fn notifications_follow_manual_steering_and_cancellation() {
-    let (_dir, s) = setup();
-    let a = thread(&s, Provider::Codex).await;
-    let b = thread(&s, Provider::Codex).await;
-    let cancelled = s
-        .send_to_thread(&b, send(&a, "cancel me", true, "cancel"))
-        .unwrap();
-    s.cancel_pending_steer(&b, cancelled["pendingSteerId"].as_str().unwrap())
-        .await
-        .unwrap();
-    assert!(s
-        .db
-        .get_kv(&format!(
-            "cli:notify:pending:{}",
-            cancelled["pendingSteerId"].as_str().unwrap()
-        ))
-        .unwrap()
-        .is_none());
-    s.send_to_thread(&b, send(&a, "inspect this repository", false, "long"))
-        .unwrap();
-    s.start_interaction_worker();
-    until(|| s.get_thread(&b).unwrap().status == "running").await;
-    for key in ["steer-one", "steer-two"] {
-        let receipt = s
-            .send_to_thread(&b, send(&a, "additional information", true, key))
-            .unwrap();
-        s.steer_pending_prompt(&b, receipt["pendingSteerId"].as_str().unwrap())
-            .await
-            .unwrap();
-    }
-    s.interrupt(&b).await.unwrap();
-    until(|| count(&s, &a) == 1).await;
-    assert_eq!(s.interaction_status(&a).await.unwrap()["queuedCount"], 1);
-    assert_eq!(count(&s, &b), 1);
-    s.interrupt(&a).await.unwrap();
-    until(|| count(&s, &a) == 2).await;
-    s.interrupt(&a).await.unwrap();
 }
 
 #[tokio::test]
@@ -443,29 +307,6 @@ async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
             .len(),
         1
     );
-}
-
-#[tokio::test]
-async fn inbox_paginates_unread_messages() {
-    let (_dir, state) = setup();
-    let a = thread(&state, Provider::Codex).await;
-    let b = thread(&state, Provider::Acp).await;
-    for n in 0..3 {
-        let mut input = send(&a, &format!("message {n}"), false, &format!("mail-{n}"));
-        input.delivery = "inbox".into();
-        state.send_to_thread(&b, input).unwrap();
-    }
-    let first = state.inbox_list(&b, &json!({"limit":2})).unwrap();
-    assert_eq!(first["messages"].as_array().unwrap().len(), 2);
-    let second = state
-        .inbox_list(&b, &json!({"limit":2,"before":first["nextBefore"]}))
-        .unwrap();
-    assert_eq!(second["messages"].as_array().unwrap().len(), 1);
-    assert!(first["messages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|m| m["id"] != second["messages"][0]["id"]));
 }
 
 #[tokio::test]

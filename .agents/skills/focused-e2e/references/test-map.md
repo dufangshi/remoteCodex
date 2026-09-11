@@ -1,84 +1,42 @@
-# 测试选择地图
+# 核心测试地图
 
-以下是当前项目的入口，不是要求每次执行的清单。先找最接近改动的行，再查看源码和 skip 条件；标题变化时用 `rg -n 'test\(|test\.describe|test\.skip' e2e/目标文件.spec.ts` 查找。
+套件已按用户要求收口：只保留高影响行为。不要根据历史 release 文档恢复已删除的大矩阵、真实模型验收脚本或细节 UI 回归。新增测试围绕明确的高影响失败机制，优先复用现有入口。
 
-## 按风险找用例
+## 浏览器：6 条核心链路
 
-| 风险 | Spec | `--grep` 标题片段 / 设备选择 |
+默认只跑 desktop-chromium。Relay spec 自建隔离 Relay 和 fake Supervisor，使用已构建的 apps/supervisor-web/dist；不需要真实模型凭据。
+
+| 风险 | 文件 | 场景 |
 | --- | --- | --- |
-| activity 展开状态 | `e2e/runtime-bubble-regressions.spec.ts` | `keeps expanded activity and command groups` |
-| 刷新后的文字、续流、旧快照 | 同上 | `preserves refreshed assistant text` |
-| 运行中/完成后的模型、effort、token、费用 | 同上 | `turn usage summary regressions` |
-| composer 运行中菜单点击和边界 | `e2e/composer-menus.spec.ts` | `composer menus stay in bounds`；按涉及的桌面/触摸行为选设备 |
-| 模型列表在窄屏、矮视口中可用 | 同上 | `an expanded model list` |
-| workspace → thread → 第一条回复接线 | `e2e/phase2.spec.ts` | `receive a hello response` |
-| UI 停止运行中的 turn | 同上 | `can interrupt a running turn` |
-| 手机 thread 导航 | 同上 | `collapsible top sidebar`；仅 mobile 有效 |
-| 文件浏览器并发加载、刷新恢复 | `e2e/files-browser.spec.ts` | `explorer loads nested directories`；文件 API 和下载限制由 Rust 测试覆盖 |
-| 插件、composer 权限、导出 | `e2e/product-ui-regressions.spec.ts` | 按需选 `terminal plugin` / `prompt toolbar` / `Full access` / `thread exports`；这些用例只跑 desktop |
-| workspace / thread / import 表单 | 同上 | 按需选 `workspace rows` / `new workspace` / `new thread` / `import supports` / `import blocks` |
-| 全站响应式布局 | 同上 | `core product routes reflow`；desktop 内已覆盖多宽度、多路由，勿再复制整套 mobile 矩阵 |
-| relay 页面、登录返回路径、菜单、错误恢复 | `e2e/relay-product-ui-regressions.spec.ts` | 按需选 `Portal restores` / `Portal rejects` / `logout fails` / `controlled retry` / `compatibility state` / `Devices keeps`；API mock，不需要真实 relay |
-| relay 响应式布局 | 同上 | `relay product routes reflow`；desktop 内已覆盖多宽度、多路由 |
-| relay 实际 HTTP 转发边界 | `e2e/relay-mode.spec.ts` | 一个 API 场景，只选 desktop；不能代替 WS 消息覆盖，先检查下方 fixture 条件 |
+| 创建 workspace/thread、发送首条 prompt | e2e/phase2.spec.ts | receive a hello response |
+| ACP 状态修复、队列跨刷新只执行一次 | e2e/session-state-recovery.spec.ts | queued composer input survives reload |
+| 两台设备、两个浏览器分别验证加密 | e2e/device-encryption-status.spec.ts | device locks are verified independently |
+| 附件、WS、Origin、会话撤销 | e2e/relay-security.spec.ts | 文件内唯一场景 |
+| 离线禁止降级、真实加密、多分块、防重放、公开快照 | e2e/relay-encryption.spec.ts | 两个场景按风险选择 |
 
-分组、文字合并、计费等组合问题，先定位这些便宜层级：
+从项目根目录运行：
 
-- 主 Web：`apps/supervisor-web/src/pages/threadDetailModel.test.ts`。
-- 共享 UI 独立仓库：`remote-codex-thread-ui/packages/thread-ui/src/components/ThreadTimeline.test.tsx`、`components/timeline/`、`components/composer/` 内对应测试。
-- Rust：`crates/runtime/tests/live_history.rs`、`usage.rs`、`acp_turn.rs`、`crates/supervisor/tests/http_e2e.rs`。保留 `AGENTS.md` 要求的 workspace 测试，但不用因此补全量浏览器测试。
+```sh
+E2E_API_PORT=19887 E2E_WEB_PORT=16173 \
+  E2E_DATABASE_URL=.local/core-e2e.sqlite E2E_WORKSPACE_ROOT=.local/core-e2e \
+  pnpm exec playwright test e2e/session-state-recovery.spec.ts --project=desktop-chromium
 
-## 可以直接缩小范围的命令
-
-从主仓库根目录执行。先确认 binary 和依赖就绪；例子里的端口不是项目固定端口，冲突时换成空闲端口。
-
-```bash
-# 只列出一个相关测试；不启动浏览器/服务，不代表测试通过
-pnpm test:e2e e2e/runtime-bubble-regressions.spec.ts --grep 'turn usage summary regressions' --project=desktop-chromium --list
-
-# 一条费用 UI 回归，桌面；没有响应式改动时无需再跑 mobile
-E2E_API_PORT=18887 E2E_WEB_PORT=15173 \
-  E2E_DATABASE_URL=.local/e2e-18887.sqlite E2E_WORKSPACE_ROOT=.local/e2e-18887 \
-  REMOTE_CODEX_E2E_FAKE_RUNTIME=1 \
-  pnpm test:e2e e2e/runtime-bubble-regressions.spec.ts \
-  --grep 'turn usage summary regressions' --project=desktop-chromium
-
-# 移动端模型菜单问题：直接验证问题设备和相关测试
-E2E_API_PORT=18887 E2E_WEB_PORT=15173 \
-  E2E_DATABASE_URL=.local/e2e-18887.sqlite E2E_WORKSPACE_ROOT=.local/e2e-18887 \
-  REMOTE_CODEX_E2E_FAKE_RUNTIME=1 \
-  pnpm test:e2e e2e/composer-menus.spec.ts \
-  --grep 'an expanded model list' --project=mobile-chromium
-
-# 仅数据合并逻辑：先用单元测试，无需启动 Web E2E
-pnpm --filter @remote-codex/supervisor-web test src/pages/threadDetailModel.test.ts
+# 仅在 Relay/加密边界需要时运行
+pnpm test:e2e:relay
 ```
 
-运行同一份测试在桌面和手机上确有必要时，显式加两个 `--project`；多场景共享同一 setup 时可一次指定多个相关文件和精确的 `--grep`，减少重复启动。多文件搭配 grep 时检查它没有意外排除应跑场景。
+pnpm test:e2e 现在默认选择 desktop。平时仍按文件/场景选择；验证整个保留集时才用该入口。需要触摸验证时用 pnpm exec playwright 加显式 mobile-chromium project，不重复所有纯 API 场景。
 
-## 特殊套件和启动陷阱
+## 更便宜的检查
 
-- **真实 ACP**：`harness-acp.spec.ts` 没有 opt-in gate，自启 supervisor 并强制 `REMOTE_CODEX_E2E_FAKE_RUNTIME=0`。包含 codex/claude/grok/deepseek 的真实短轮和中断场景，单测试 timeout 可达 10 分钟。CLI 存在不等于账号可用。只在该 harness 边界需要真实验证时选具体 harness/动作和一个 project；普通 UI 不进入此文件。
-- **独立 relay**：`relay-mode.spec.ts` 自启 relay + supervisor，使用 `E2E_RELAY_PORT` / `E2E_RELAY_SUPERVISOR_PORT`（默认 18788/18789），不同于通用 Web 端口。审计时 fixture 的 `admin/admin` 不满足密码规则，后续 `deviceApi` 请求及轮询也缺登录 token（`helpers.api` 不维护 cookie jar）。先修复必要 fixture 或报告阻断，不反复等待 healthz，不放宽产品校验。中断回归还需先确认运行已开始，再断言中断结果；现有「非 running」断言不足以排除未启动/失败。
-- **真实/定制环境开关**：通用 Playwright webServer 启动命令硬编码 fake=1。仅给测试加 REAL/ACP 开关不代表服务已切换到它需要的环境；需按该 spec 准备专用服务，不修改本机生产服务来凑环境。
+- Rust：cargo test --workspace。保留迁移/备份/原子回滚、鉴权加密、ACP 执行故障、更新恢复、存储排他锁、历史持久化、线程 CLI 投递。
+- Web：pnpm --filter @remote-codex/supervisor-web test。仅设备加密、设备作用域管理权限、投递结果确认。
+- Host agent：pnpm --filter @remote-codex/incus-host-agent test。仅鉴权、幂等、命令注入/秘密传递、加密存储。
+- Launcher/更新：pnpm npm:publish:test。下载校验、CLI 参数、数据库身份、不可变发布、升级失败回滚。
+- Docker CLI：e2e/thread-interaction/inbox.py 保留 CLI/HTTP/存储串联；启动方式见同目录 README。真实模型历史验收不属于默认测试。
 
-## 跳过的测试不算覆盖
+## 执行约束
 
-| 文件/分组 | 当前条件 |
-| --- | --- |
-| `acp-codex-parity.spec.ts` | 需 `REMOTE_CODEX_REAL_ACP_E2E=1`；真实多轮流程，10 分钟 timeout |
-| `harness-fork-ui.spec.ts` | 需 `RUN_REAL_FORK_UI=1` 和已认证的真实 Codex supervisor |
+保持主 skill 的隔离要求：覆盖高优先级数据库/工作目录环境变量，清除正式 Relay 配置，不对活动 Supervisor 运行恢复测试。纯测试删减不需要重建产品；产品代码变化才准备对应的新 binary/dist。
 
-旧 SDK 阶段验收、缺少 fixture 的 ACP/install 套件及无条件跳过的 UI 分组已删除。`relay-shared-actions.spec.ts` 的有效用例及 `runtime-bubble-regressions.spec.ts` 的 usage、刷新续流等回归仍保留。响应式页面矩阵保留 320、768、1440 三个代表宽度。
-
-发现地图与源码不一致时，以源码为准并只更新受影响的条目。
-
-## 明确要求全量时
-
-全量按所需服务环境分批覆盖，不能只把所有环境开关塞给通用 fake 服务。先用 `pnpm test:e2e --list` 清点当前用例与项目，再按源码中的 gate 分组：
-
-- 普通 fake/mock 浏览器用例：显式列出这组文件，按有效设备范围运行；API-only 不重复跑两个项目。
-- `harness-acp.spec.ts`、`relay-mode.spec.ts`：各自单独运行一个 desktop project；提前准备真实 harness 账号或修好 relay fixture。
-- ACP parity 和真实 fork UI：分别准备对应服务，启用该组开关后运行相关文件。若需要复用专用服务，确认端口、版本和环境一致。
-
-记录各组通过、失败、跳过及被前置条件阻断的范围。无条件 skip 或缺凭据/fixture 的必要场景仍是未验证，不称“全量通过”；已通过同一版本的组无需再次运行。
+缺少必要场景时明确覆盖缺口，不用大量无关测试代替，也不把跳过或仅列出测试称为通过。

@@ -47,13 +47,4 @@ describe('EncryptedFileSecretStore', () => {
       'reference is invalid',
     );
   });
-
-  it('ignores unrelated files when listing opaque references', async () => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rcd-secret-'));
-    tempDirs.push(directory);
-    await fs.writeFile(path.join(directory, 'notes.txt'), 'ignored');
-    await fs.writeFile(path.join(directory, 'rcc_invalid.json'), 'ignored');
-    const store = new EncryptedFileSecretStore(directory, Buffer.alloc(32, 7));
-    expect(await store.list()).toEqual([]);
-  });
 });

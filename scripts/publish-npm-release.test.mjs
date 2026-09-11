@@ -16,26 +16,6 @@ const manifest = {
   ],
 };
 
-test('promotes an existing matching package to latest', () => {
-  const npm = mockNpm({
-    'remote-codex@0.12.0': 'sha512-launcher',
-  });
-
-  publishRelease({
-    channel: 'latest',
-    inputDir: '/release',
-    manifest,
-    allowLatest: true,
-    runNpm: npm.run,
-    log() {},
-  });
-
-  assert.deepEqual(npm.commands('publish'), []);
-  assert.deepEqual(npm.commands('dist-tag'), [
-    ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
-  ]);
-});
-
 test('detects an integrity conflict before changing the registry', () => {
   const npm = mockNpm({
     'remote-codex@0.12.0': 'sha512-wrong',
@@ -54,53 +34,6 @@ test('detects an integrity conflict before changing the registry', () => {
     /already exists with different integrity/,
   );
   assert.deepEqual(npm.mutations(), []);
-});
-
-test('publishes and tags the launcher', () => {
-  const npm = mockNpm({});
-
-  publishRelease({
-    channel: 'latest',
-    inputDir: '/release',
-    manifest,
-    allowLatest: true,
-    runNpm: npm.run,
-    log() {},
-  });
-
-  assert.deepEqual(npm.commands('publish'), [
-    [
-      'publish',
-      path.join('/release', 'remote-codex-0.12.0.tgz'),
-      '--tag',
-      'latest',
-      '--access',
-      'public',
-    ],
-  ]);
-  assert.deepEqual(npm.commands('dist-tag'), [
-    ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
-  ]);
-});
-
-test('retries registry visibility after publishing', () => {
-  const npm = mockNpm({}, { notFoundViews: 8 });
-
-  publishRelease({
-    channel: 'latest',
-    inputDir: '/release',
-    manifest,
-    allowLatest: true,
-    registryRetryDelayMs: 0,
-    registryVisibilityAttempts: 10,
-    runNpm: npm.run,
-    log() {},
-  });
-
-  assert.equal(npm.commands('publish').length, 1);
-  assert.deepEqual(npm.commands('dist-tag'), [
-    ['dist-tag', 'add', 'remote-codex@0.12.0', 'latest'],
-  ]);
 });
 
 test('does not treat an npm view transport failure as an unpublished version', () => {

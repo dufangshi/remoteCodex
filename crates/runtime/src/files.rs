@@ -363,88 +363,6 @@ mod tests {
         assert!(err.to_string().contains("outside"));
     }
 
-    #[test]
-    fn unrestricted_write_allows_absolute_outside() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        let outside = dir.path().join("outside.txt");
-        fs::create_dir_all(&root).unwrap();
-        write_file_with_scope(
-            &root,
-            outside.to_str().unwrap(),
-            "ok",
-            WriteScope::Unrestricted,
-        )
-        .unwrap();
-        assert_eq!(fs::read_to_string(&outside).unwrap(), "ok");
-    }
-
-    #[test]
-    fn workspace_write_allows_missing_paths_inside_root() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        fs::create_dir_all(&root).unwrap();
-
-        write_file(&root, "new/nested/file.txt", "ok").unwrap();
-
-        assert_eq!(
-            fs::read_to_string(root.join("new/nested/file.txt")).unwrap(),
-            "ok"
-        );
-    }
-
-    #[test]
-    fn directory_download_creates_a_zip_with_the_selected_root() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        fs::create_dir_all(root.join("docs/empty")).unwrap();
-        fs::write(root.join("README.md"), "hello").unwrap();
-        fs::write(root.join("docs/notes.txt"), "notes").unwrap();
-
-        let WorkspaceDownload::DirectoryArchive { filename, archive } =
-            prepare_download(&root, ".").unwrap()
-        else {
-            panic!("expected a directory archive");
-        };
-        assert_eq!(filename, "ws.zip");
-        let mut zip = zip::ZipArchive::new(archive.reopen().unwrap()).unwrap();
-        let mut readme = String::new();
-        zip.by_name("ws/README.md")
-            .unwrap()
-            .read_to_string(&mut readme)
-            .unwrap();
-        assert_eq!(readme, "hello");
-        assert!(zip.by_name("ws/docs/empty/").is_ok());
-    }
-
-    #[test]
-    fn directory_download_rejects_one_thousand_files() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        fs::create_dir_all(&root).unwrap();
-        for index in 0..DIRECTORY_DOWNLOAD_MAX_FILES_EXCLUSIVE {
-            fs::write(root.join(format!("{index}.txt")), []).unwrap();
-        }
-
-        let error = prepare_download(&root, ".").err().unwrap();
-
-        assert!(error.to_string().contains("fewer than 1,000 files"));
-    }
-
-    #[test]
-    fn directory_download_rejects_one_gigabyte() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        fs::create_dir_all(&root).unwrap();
-        let file = File::create(root.join("large.bin")).unwrap();
-        file.set_len(DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE)
-            .unwrap();
-
-        let error = prepare_download(&root, ".").err().unwrap();
-
-        assert!(error.to_string().contains("less than 1 GB"));
-    }
-
     #[cfg(unix)]
     #[test]
     fn workspace_reads_reject_symlink_escape() {
@@ -479,21 +397,5 @@ mod tests {
 
         assert!(error.to_string().contains("outside"));
         assert!(!outside.join("new.txt").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn workspace_writes_allow_symlinks_that_resolve_inside_root() {
-        use std::os::unix::fs::symlink;
-
-        let dir = tempdir().unwrap();
-        let root = dir.path().join("ws");
-        let target = root.join("target");
-        fs::create_dir_all(&target).unwrap();
-        symlink(&target, root.join("linked")).unwrap();
-
-        write_file(&root, "linked/new.txt", "ok").unwrap();
-
-        assert_eq!(fs::read_to_string(target.join("new.txt")).unwrap(), "ok");
     }
 }

@@ -232,10 +232,6 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
     );
     await writeFile(join(work, 'private.txt'), 'ENCRYPTED_FILE_MARKER');
     await writeFile(
-      join(work, 'performance.bin'),
-      Buffer.alloc(1024 * 1024, 0x61),
-    );
-    await writeFile(
       join(work, 'chunked.bin'),
       Buffer.alloc(3 * 1024 * 1024 + 17, 0x42),
     );
@@ -331,44 +327,6 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
         true,
       );
     expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
-    const performanceResult = await page.evaluate(
-      async ({ encrypted, plain }) => {
-        const result: Record<string, number[]> = { encrypted: [], plain: [] };
-        for (let n = 0; n < 7; n++)
-          for (const [name, url] of Object.entries({ plain, encrypted })) {
-            const start = performance.now();
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('Benchmark fetch failed');
-            const bytes = await response.arrayBuffer();
-            if (bytes.byteLength !== 1024 * 1024)
-              throw new Error('Binary size mismatch');
-            if (n) result[name]!.push(performance.now() - start);
-          }
-        return Object.fromEntries(
-          Object.entries(result).map(([name, values]) => [
-            name,
-            {
-              medianMs: values.sort((a, b) => a - b)[
-                Math.floor(values.length / 2)
-              ],
-              samplesMs: values,
-            },
-          ]),
-        );
-      },
-      {
-        encrypted: `${api}/workspaces/${workspace.id}/files/raw?path=performance.bin`,
-        plain: `${base}/relay/api/workspaces/${workspace.id}/files/raw?path=performance.bin`,
-      },
-    );
-    await mkdir(resolve('.local/security-audit'), { recursive: true });
-    await writeFile(
-      resolve(
-        `.local/security-audit/performance-${test.info().project.name}-${process.env.E2E_SECURITY_BINARY?.includes('release') ? 'release' : 'debug'}.json`,
-      ),
-      JSON.stringify(performanceResult, null, 2),
-    );
-
     expect(replayRequest).toBeDefined();
     const replay = await fetch(replayRequest!.url, {
       headers: { ...replayRequest!.headers, authorization: `Bearer ${owner}` },
