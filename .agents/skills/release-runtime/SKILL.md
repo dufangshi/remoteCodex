@@ -39,10 +39,11 @@ remote-codex version
 
 按最终差异选择检查；独立检查可并行执行，每项结果都要核对：
 
-- 修改 crates 后按 AGENTS.md 跑 `cargo test --workspace`。
+- 修改 crates 后按 AGENTS.md 选择相关 crate/测试名及格式、编译检查；不默认跑 workspace 全量或跨平台矩阵。
 - 修改 launcher/发布脚本，跑相关 `node --test`；现成入口是 `pnpm npm:publish:test`。
 - UI 改动按 focused-e2e skill 选相关测试和显式浏览器项目。
-- 修改工作流用 actionlint 检查；涉及 job 依赖或 artifact 传递，再跑一次 `channel=dry-run` 验证完整打包。
+- 修改工作流用 actionlint 检查。只有用户明确要求完整打包验证，或已授权发布且需要验证发布 job/artifact 链路时，才运行 `channel=dry-run`；普通 CI 修改不自动触发完整打包。
+- 全量兼容性检查保留在手动 `platform-compatibility.yml`，仅在用户明确要求全量检查时调用；范围和命令见 [CI 说明](../../../docs/ci.md)。
 - 已在相同源码上通过的检查不重复跑，除非新差异、失败或未解决的问题使结果失效。
 
 检查通过后只提交本次相关文件。记录最终提交；后续需要修改源码时，更新记录并重跑受影响检查。工作流优化不需要单独提升 runtime/npm 版本。
@@ -69,6 +70,6 @@ gh workflow run npm-release.yml --ref <pushed-runtime-ref> \
 - 发布结果不确定时，先查询既有 run、GitHub 和 registry，再决定是否重试。网络查询失败不代表版本尚未发布。
 - 报告提交、版本、run 链接、关键验证及限制。记录本地准备、CI 各阶段和最终核验时间；并行平台按最慢完成时间计算。
 
-## CI 提速约束
+## 已授权发布的 CI 提速约束
 
 测试、四平台编译、Web 构建并行；package 必须依赖三者成功，之后才允许外部发布。UI 使用固定 SHA。Rust 缓存按工具链、平台和编译配置隔离，锁文件变化时可恢复兼容依赖中间产物；始终由 Cargo 判断重建本次源码。仅冷缓存成功不能证明暖缓存收益。不要为缩短等待而省略平台或复用旧版本最终二进制。
