@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const launcherPath = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(launcherPath), '..');
-for (const envFile of new Set([
+// Device commands must not import configuration from the workspace they manage.
+const deviceCommand = ['relay-supervisor', 'relay-fingerprint'].includes(process.argv[2]);
+for (const envFile of new Set(deviceCommand ? [] : [
   path.join(process.cwd(), '.env'),
   path.join(packageRoot, '.env'),
 ])) {
@@ -42,23 +44,25 @@ const relayTmuxSession =
   process.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION?.trim() ||
   'remote-codex-relay-supervisor';
 
-const relayConfigKeys = [
+// Only these user-supplied values configure the relay device connection.
+const relayConnectionKeys = [
   'REMOTE_CODEX_RELAY_SERVER_URL',
   'REMOTE_CODEX_RELAY_AGENT_TOKEN',
-  'REMOTE_CODEX_ADMIN_USERNAME',
-  'REMOTE_CODEX_ADMIN_PASSWORD',
-  'REMOTE_CODEX_SESSION_SECRET',
-  'REMOTE_CODEX_RELAY_SUPERVISOR_HOST',
   'REMOTE_CODEX_RELAY_SUPERVISOR_PORT',
-  'DATABASE_URL',
-  'WORKSPACE_ROOT',
-  'CODEX_HOME',
-  'CLAUDE_HOME',
-  'OPENCODE_HOME',
-  'GROK_HOME',
-  'ACP_COMMAND',
-  'REMOTE_CODEX_ENABLED_AGENT_PROVIDERS',
-  'LOG_LEVEL',
+];
+// Distribution/test plumbing; never accept arbitrary REMOTE_CODEX_* settings.
+const relayLauncherKeys = [
+  'REMOTE_CODEX_NATIVE_BINARY',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_STATE',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_LOG',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION',
+  'REMOTE_CODEX_RELAY_SUPERVISOR_TMUX',
+];
+const legacyRuntimeKeys = [
+  'DATABASE_URL', 'WORKSPACE_ROOT', 'HOST', 'PORT', 'NODE_ENV',
+  'APP_NAME', 'APP_VERSION', 'ACP_COMMAND', 'ACP_STARTUP_TIMEOUT_MS',
+  'CODEX_COMMAND', 'CLAUDE_COMMAND', 'OPENCODE_COMMAND', 'GROK_COMMAND',
 ];
 
 const aliases = new Map([
@@ -95,6 +99,10 @@ try {
     await stopService();
   } else if (command === 'relay') {
     await runForeground(['relay'], relayEnvironment());
+  } else if (command === 'relay-fingerprint') {
+    const saved = readJson(relayConfigPath) ?? {};
+    const database = savedRelayDatabase(saved);
+    await runForeground(process.argv.slice(2), relaySupervisorEnvironment({ REMOTE_CODEX_DATABASE_PATH: database }));
   } else if (command === 'relay-supervisor') {
     await relaySupervisor(process.argv[3] ?? 'start');
   } else {
@@ -236,14 +244,22 @@ function nativeEnvironment(extra = {}) {
 }
 
 function relaySupervisorEnvironment(extra = {}) {
-  const environment = nativeEnvironment(extra);
-  if (environment.REMOTE_CODEX_RELAY_SUPERVISOR_HOST) {
-    environment.HOST = environment.REMOTE_CODEX_RELAY_SUPERVISOR_HOST;
+  const environment = { ...process.env };
+  for (const name of Object.keys(environment)) {
+    if (legacyRuntimeKeys.includes(name) ||
+        (name.startsWith('REMOTE_CODEX_') && !relayLauncherKeys.includes(name)))
+      delete environment[name];
   }
-  if (environment.REMOTE_CODEX_RELAY_SUPERVISOR_PORT) {
-    environment.PORT = environment.REMOTE_CODEX_RELAY_SUPERVISOR_PORT;
-  }
-  return environment;
+  return {
+    ...environment,
+    ...extra,
+    REMOTE_CODEX_MODE: 'relay',
+    REMOTE_CODEX_RELAY_SUPERVISOR_HOST: '127.0.0.1',
+    REMOTE_CODEX_LAUNCHER_PATH: launcherPath,
+    REMOTE_CODEX_LAUNCHER_NODE: process.execPath,
+    REMOTE_CODEX_PACKAGE_ROOT: packageRoot,
+    REMOTE_CODEX_WEB_DIST_DIR: webDist,
+  };
 }
 
 function relayEnvironment() {
@@ -444,7 +460,11 @@ async function relaySupervisor(action) {
       .join(' ');
     const commandText = `${launch} 2>&1 | tee -a ${shellQuote(relayLogPath)}`;
     // An existing tmux server does not inherit the client's environment.
-    const sessionEnvironment = Object.entries(environment).flatMap(
+    // Explicitly clear absent launcher controls inherited from an old tmux server.
+    const sessionEnvironment = Object.entries({
+      ...Object.fromEntries(relayLauncherKeys.map(name => [name, ''])),
+      ...environment,
+    }).flatMap(
       ([name, value]) => ['-e', `${name}=${value}`],
     );
     const result = spawnSync(
@@ -503,61 +523,64 @@ async function relaySupervisor(action) {
   console.log(`Logs: ${relayLogPath}`);
 }
 
+function savedRelayDatabase(saved) {
+  const value = saved.REMOTE_CODEX_DATABASE_PATH ?? saved.DATABASE_URL;
+  const fallback = path.join(os.homedir(), '.remote-codex', 'relay-supervisor.sqlite');
+  if (!value) return fallback;
+  if (isDatabaseUrl(value)) {
+    // Older launchers imported workspace .env into this file. Recover the
+    // original database only if both it and its identity still exist.
+    const identity = fallback.replace(/\.[^.]*$/, '.transport-identity');
+    if (!fs.existsSync(fallback) || !fs.existsSync(identity))
+      throw new Error('Saved relay database config contains a database URL. Restore the original local SQLite path in REMOTE_CODEX_DATABASE_PATH before starting.');
+    console.error('Ignoring a database URL saved by an older launcher; restoring the original relay database and device identity.');
+    return fallback;
+  }
+  if (!path.isAbsolute(value))
+    throw new Error('Saved relay database path is relative. Set REMOTE_CODEX_DATABASE_PATH in the relay config to its original absolute path before starting.');
+  return value;
+}
+
+function isDatabaseUrl(value) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z]:[\\/]/i.test(value);
+}
+
 async function ensureRelayConfig() {
   const saved = readJson(relayConfigPath) ?? {};
-  const defaults = {
-    REMOTE_CODEX_ADMIN_USERNAME: 'admin',
-    REMOTE_CODEX_ADMIN_PASSWORD: crypto.randomBytes(24).toString('base64url'),
-    REMOTE_CODEX_SESSION_SECRET: crypto.randomBytes(32).toString('base64url'),
-    REMOTE_CODEX_RELAY_SUPERVISOR_HOST: '127.0.0.1',
-    DATABASE_URL: path.join(
-      os.homedir(),
-      '.remote-codex',
-      'relay-supervisor.sqlite',
-    ),
+  const persisted = {
+    REMOTE_CODEX_ADMIN_USERNAME: saved.REMOTE_CODEX_ADMIN_USERNAME || 'admin',
+    REMOTE_CODEX_ADMIN_PASSWORD: saved.REMOTE_CODEX_ADMIN_PASSWORD || crypto.randomBytes(24).toString('base64url'),
+    REMOTE_CODEX_SESSION_SECRET: saved.REMOTE_CODEX_SESSION_SECRET || crypto.randomBytes(32).toString('base64url'),
+    REMOTE_CODEX_DATABASE_PATH: savedRelayDatabase(saved),
   };
-  for (const [name, value] of Object.entries({ ...defaults, ...saved })) {
-    if (!nonempty(process.env[name])) process.env[name] = value;
+  for (const name of relayConnectionKeys) {
+    const value = process.env[name]?.trim() || saved[name]?.trim();
+    if (value) persisted[name] = value;
   }
   const missing = [
-    [
-      'REMOTE_CODEX_RELAY_SERVER_URL',
-      'Relay websocket URL (ws:// or wss://): ',
-    ],
+    ['REMOTE_CODEX_RELAY_SERVER_URL', 'Relay websocket URL (ws:// or wss://): '],
     ['REMOTE_CODEX_RELAY_AGENT_TOKEN', 'Relay device token: '],
-  ].filter(([name]) => !nonempty(process.env[name]));
+  ].filter(([name]) => !nonempty(persisted[name]));
   if (missing.length > 0 && process.stdin.isTTY && process.stderr.isTTY) {
-    const prompt = readline.createInterface({
-      input: process.stdin,
-      output: process.stderr,
-    });
+    const prompt = readline.createInterface({ input: process.stdin, output: process.stderr });
     try {
       for (const [name, question] of missing) {
         let value = '';
         while (!value) value = (await prompt.question(question)).trim();
-        process.env[name] = value;
+        persisted[name] = value;
       }
-    } finally {
-      prompt.close();
-    }
+    } finally { prompt.close(); }
   }
-  if (
-    !nonempty(process.env.REMOTE_CODEX_RELAY_SERVER_URL) ||
-    !/^wss?:\/\//.test(process.env.REMOTE_CODEX_RELAY_SERVER_URL)
-  ) {
-    throw new Error(
-      'REMOTE_CODEX_RELAY_SERVER_URL must start with ws:// or wss://',
-    );
-  }
-  if (!nonempty(process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN)) {
+  if (!/^wss?:\/\//.test(persisted.REMOTE_CODEX_RELAY_SERVER_URL ?? ''))
+    throw new Error('REMOTE_CODEX_RELAY_SERVER_URL must start with ws:// or wss://');
+  if (!nonempty(persisted.REMOTE_CODEX_RELAY_AGENT_TOKEN))
     throw new Error('REMOTE_CODEX_RELAY_AGENT_TOKEN is required');
-  }
-  const persisted = { ...saved };
-  for (const key of relayConfigKeys) {
-    if (nonempty(process.env[key])) persisted[key] = process.env[key];
-  }
+  persisted.REMOTE_CODEX_RELAY_SUPERVISOR_PORT ||= '8787';
+  const port = persisted.REMOTE_CODEX_RELAY_SUPERVISOR_PORT;
+  if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535))
+    throw new Error('REMOTE_CODEX_RELAY_SUPERVISOR_PORT must be an integer from 1 to 65535');
   writePrivateJson(relayConfigPath, persisted);
-  return relaySupervisorEnvironment({ REMOTE_CODEX_MODE: 'relay' });
+  return relaySupervisorEnvironment(persisted);
 }
 
 async function managedRelayStatus() {
@@ -859,6 +882,7 @@ Commands:
   relay                         Run the public relay in the foreground
   relay-migrate                 Inspect or migrate a relay data directory offline
   relay-supervisor [action]     start, run, status, stop, or reset
+  relay-fingerprint            show the saved relay device encryption fingerprint
   version                       Print the installed version
 
 The npm package downloads and verifies the matching Rust binary from the

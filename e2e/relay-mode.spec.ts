@@ -59,8 +59,8 @@ test.describe('relay mode fake runtime', () => {
       REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
       REMOTE_CODEX_RELAY_SERVER_URL: relayBase,
       REMOTE_CODEX_RELAY_AGENT_TOKEN: token,
-      DATABASE_URL: path.join(dataDir, 'supervisor.sqlite'),
-      WORKSPACE_ROOT: path.join(dataDir, 'workspaces'),
+      REMOTE_CODEX_DATABASE_PATH: path.join(dataDir, 'supervisor.sqlite'),
+      REMOTE_CODEX_WORKSPACE_ROOT: path.join(dataDir, 'workspaces'),
     });
     const start = Date.now();
     while (Date.now() - start < 20_000) {

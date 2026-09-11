@@ -66,7 +66,7 @@ try {
     PORT: '19879', REMOTE_CODEX_RELAY_SUPERVISOR_PORT: '19879',
     REMOTE_CODEX_RELAY_SERVER_URL: 'http://127.0.0.1:19878',
     REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token,
-    DATABASE_URL: `${root}/supervisor.sqlite`, WORKSPACE_ROOT: `${root}/workspaces`,
+    REMOTE_CODEX_DATABASE_PATH: `${root}/supervisor.sqlite`, REMOTE_CODEX_WORKSPACE_ROOT: `${root}/workspaces`,
   });
   const prefix = `/relay/devices/${device.device.id}`;
   await until(async () => (await api(`${prefix}/presence`)).connected);

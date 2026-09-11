@@ -1,3 +1,4 @@
+import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ProductHeader } from '../components/ProductHeader';
 import {
   useEffect,
@@ -285,6 +286,7 @@ export function WorkspacesPage() {
       {error ? (
         <div className="host-error flex min-h-11 flex-col gap-3 rounded-md border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between" role="alert">
           <span>{error}</span>
+          {relayDeviceId ? <DeviceEncryptionStatus deviceId={relayDeviceId} /> : null}
           {!editingWorkspaceId ? (
             <button
               className="host-secondary-button inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-xs font-semibold"

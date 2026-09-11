@@ -193,8 +193,8 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
       REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(sp),
       REMOTE_CODEX_RELAY_SERVER_URL: base,
       REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token,
-      DATABASE_URL: join(root, 'supervisor.sqlite'),
-      WORKSPACE_ROOT: join(root, 'workspaces'),
+      REMOTE_CODEX_DATABASE_PATH: join(root, 'supervisor.sqlite'),
+      REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces'),
     };
     const supervisor = start('relay-supervisor', supervisorEnv);
     await expect

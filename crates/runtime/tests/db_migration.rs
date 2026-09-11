@@ -1197,3 +1197,28 @@ fn upgrades_the_unversioned_rust_pending_steer_table() {
         })
         .unwrap();
 }
+
+#[test]
+fn rejects_database_uris_without_creating_files_or_exposing_credentials() {
+    for value in [
+        "postgres://user:secret@localhost/app",
+        "postgresql://localhost/app",
+        "sqlite:///tmp/app",
+        "file:remote.sqlite",
+    ] {
+        let error = remote_codex_runtime::Database::open(std::path::Path::new(value))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("local SQLite file path"));
+        assert!(!error.contains("secret"));
+    }
+    for value in [
+        "/tmp/app.sqlite",
+        "./app.sqlite",
+        "C:\\data\\app.sqlite",
+        "C:/data/app.sqlite",
+    ] {
+        remote_codex_runtime::db::validate_database_path(std::path::Path::new(value)).unwrap();
+    }
+}

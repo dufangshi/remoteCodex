@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   getTransportStatus,
-  forgetDeviceIdentity,
+  trustDeviceIdentity,
 } from '../lib/relayTransport';
 import { type TransportStatus } from '../lib/relayTransportCrypto';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -30,7 +30,8 @@ export function DeviceEncryptionStatus({
     deviceId ? getTransportStatus(deviceId) : undefined,
   );
   const [open, setOpen] = useState(false),
-    [confirm, setConfirm] = useState(false);
+    [confirm, setConfirm] = useState<TransportStatus | null>(null);
+  const [trustError, setTrustError] = useState<string | null>(null);
   useEffect(() => {
     setStatus(deviceId ? getTransportStatus(deviceId) : undefined);
     const update = (event: Event) => {
@@ -146,12 +147,14 @@ export function DeviceEncryptionStatus({
                 SHA-256 {status.fingerprint}
               </code>
             )}
-            {changed && (
+            {trustError && <span role="alert">{trustError}</span>}
+            {changed && status?.identityKey && (
               <button
                 className="relay-button-secondary px-3 py-2"
                 onClick={() => {
                   setOpen(false);
-                  setConfirm(true);
+                  setTrustError(null);
+                  setConfirm(status);
                 }}
               >
                 Trust replacement identity…
@@ -161,14 +164,21 @@ export function DeviceEncryptionStatus({
         </>
       )}
       <ConfirmDialog
-        open={confirm}
+        open={Boolean(confirm)}
         title="Trust the replacement device identity?"
-        description="Only continue after checking this fingerprint on your device. An unexpected change could indicate interception. This resets the saved identity for this browser."
+        description={`Compare SHA-256 ${confirm?.fingerprint ?? ""} with remote-codex relay-fingerprint on your device. Only this exact identity will be trusted.`}
         confirmLabel="I verified the fingerprint"
-        onCancel={() => setConfirm(false)}
+        onCancel={() => setConfirm(null)}
         onConfirm={async () => {
-          if (deviceId) await forgetDeviceIdentity(deviceId);
-          location.reload();
+          try {
+            if (!deviceId || !confirm?.identityKey || !confirm.fingerprint) return;
+            await trustDeviceIdentity(deviceId, confirm.identityKey, confirm.fingerprint);
+            location.reload();
+          } catch (error) {
+            setTrustError(error instanceof Error ? error.message : 'Unable to save device identity.');
+            setConfirm(null);
+            setOpen(true);
+          }
         }}
       />
     </span>
