@@ -95,21 +95,6 @@ test.describe('real ACP harnesses', () => {
     await stopProc(supervisorProc);
   });
 
-  test('file browser works on the real supervisor', async () => {
-    const tree = await api<any>(
-      apiBase,
-      `/api/workspaces/${workspaceId}/files/tree?path=.`,
-    );
-    expect((tree.children ?? []).some((node: any) => node.name === 'README.md')).toBe(
-      true,
-    );
-    const preview = await api<any>(
-      apiBase,
-      `/api/workspaces/${workspaceId}/files/preview?path=src/main.rs`,
-    );
-    expect(preview.content).toContain('fn main');
-  });
-
   for (const harness of harnesses) {
     test(`${harness.id} starts a session and completes a short turn`, async () => {
       test.skip(

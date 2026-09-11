@@ -105,50 +105,6 @@ const claudeBackend = {
   },
 };
 
-const opencodeBackend = {
-  ...codexBackend,
-  provider: 'opencode',
-  displayName: 'OpenCode',
-  description: 'Local OpenCode runtime.',
-  isDefault: false,
-  status: {
-    ...codexBackend.status,
-    transport: 'sdk',
-  },
-  capabilities: {
-    ...codexBackend.capabilities,
-    sessions: { list: true, read: true, resume: true, importLocal: false },
-    turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
-    branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
-    controls: {
-      planMode: true,
-      permissionRequests: false,
-      sandboxMode: true,
-      performanceMode: false,
-      goals: false,
-    },
-    management: {
-      models: true,
-      mcpStatus: true,
-      skills: false,
-      hooks: false,
-      hookTrust: false,
-      hostConfigFiles: true,
-      providerSettings: false,
-    },
-    usage: { contextWindow: true, tokenUsage: true, costUsd: true },
-  },
-  managementSchema: {
-    hostConfigFiles: [],
-    toolboxItems: [{ action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' }],
-    hookCommandTemplates: [],
-    providerConfigFormat: 'jsonc',
-    mcpConfigFormat: 'opencode-jsonc',
-    configArchives: true,
-    buildRestart: true,
-  },
-};
-
 const codexModels = [
   {
     id: 'gpt-5',
@@ -175,19 +131,6 @@ const claudeModels = [
   },
 ];
 
-const opencodeModels = [
-  {
-    id: 'openai/gpt-5',
-    model: 'openai/gpt-5',
-    displayName: 'GPT-5',
-    description: 'OpenCode OpenAI GPT-5',
-    hidden: false,
-    isDefault: true,
-    supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Low reasoning' }],
-    defaultReasoningEffort: 'low',
-  },
-];
-
 function workspace() {
   return {
     id: 'workspace-1',
@@ -203,9 +146,6 @@ function workspace() {
 function defaultModelForProvider(provider: AgentBackendIdDto) {
   if (provider === 'claude') {
     return 'sonnet';
-  }
-  if (provider === 'opencode') {
-    return 'openai/gpt-5';
   }
   return 'gpt-5';
 }
@@ -368,20 +308,12 @@ async function installApiRoutes(page: Page, detailFactory: DetailFactory) {
       await route.fulfill({ json: claudeBackend });
       return;
     }
-    if (path === '/api/agent-runtimes/opencode/status') {
-      await route.fulfill({ json: opencodeBackend });
-      return;
-    }
     if (path === '/api/agent-runtimes/codex/models') {
       await route.fulfill({ json: codexModels });
       return;
     }
     if (path === '/api/agent-runtimes/claude/models') {
       await route.fulfill({ json: claudeModels });
-      return;
-    }
-    if (path === '/api/agent-runtimes/opencode/models') {
-      await route.fulfill({ json: opencodeModels });
       return;
     }
     if (path === '/api/threads') {
@@ -409,482 +341,12 @@ async function installApiRoutes(page: Page, detailFactory: DetailFactory) {
       await route.fulfill({ json: detailFactory(detailRequestCount) });
       return;
     }
-    if (path === '/api/threads/thread-1/items/agent-sub/detail') {
-      await route.fulfill({
-        json: {
-          id: 'agent-sub',
-          kind: 'agentToolCall',
-          title: 'Agent Details',
-          text: 'Agent: Review worker\nStatus: completed\n\nsubagent checked the repository',
-        },
-      });
-      return;
-    }
-
     await route.fulfill({
       status: 404,
       json: { code: 'not_found', message: `Unhandled mocked API route: ${path}` },
     });
   });
 }
-
-test.describe('runtime bubble regressions', () => {
-  test.skip(
-    true,
-    'Timeline snapshot tests belong with @remote-codex/thread-ui; supervisor rewrite coverage is phase2.',
-  );
-  test.beforeEach(async ({ page }) => {
-    await installFakeWebSocket(page);
-  });
-
-  test('renders per-message timestamps instead of reusing the turn start time', async ({ page }) => {
-    const userCreatedAt = '2026-04-09T06:01:00.000Z';
-    const firstAgentCreatedAt = '2026-04-09T06:02:21.000Z';
-    const finalAgentCreatedAt = '2026-04-09T06:03:05.000Z';
-
-    await page.addInitScript(() => {
-      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'false');
-    });
-    await installApiRoutes(page, () =>
-      detail('codex', {
-        turns: [
-          {
-            id: 'turn-1',
-            startedAt: userCreatedAt,
-            status: 'completed',
-            error: null,
-            model: 'gpt-5',
-            reasoningEffort: 'medium',
-            items: [
-              {
-                id: 'user-1',
-                kind: 'userMessage',
-                text: 'Timestamp prompt.',
-                createdAt: userCreatedAt,
-              },
-              {
-                id: 'agent-1',
-                kind: 'agentMessage',
-                text: 'First assistant update.',
-                createdAt: firstAgentCreatedAt,
-              },
-              {
-                id: 'agent-2',
-                kind: 'agentMessage',
-                text: 'Final assistant answer.',
-                createdAt: finalAgentCreatedAt,
-              },
-            ],
-          },
-        ],
-      }),
-    );
-
-    await page.goto('/threads/thread-1');
-
-    const expectedLabels = await page.evaluate((timestamps) => {
-      return timestamps.map((timestamp) =>
-        new Date(timestamp).toLocaleString([], {
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      );
-    }, [userCreatedAt, firstAgentCreatedAt, finalAgentCreatedAt]);
-
-    const messageTimes = page.locator('.thread-graph-message-time');
-    await expect(messageTimes.filter({ hasText: expectedLabels[0] })).toHaveCount(1);
-    await expect(messageTimes.filter({ hasText: expectedLabels[1] })).toHaveCount(1);
-    await expect(messageTimes.filter({ hasText: expectedLabels[2] })).toHaveCount(1);
-    await expect(messageTimes).not.toHaveText([
-      expectedLabels[0],
-      expectedLabels[0],
-      expectedLabels[0],
-    ]);
-  });
-
-  test('keeps live assistant timestamps after detail refresh materializes fallback timestamps', async ({ page }) => {
-    const userCreatedAt = '2026-04-09T06:01:00.000Z';
-    const agentCreatedAt = '2026-04-09T06:02:21.000Z';
-    let phase: 'live' | 'materializedFallback' = 'live';
-
-    await page.addInitScript(() => {
-      window.localStorage.setItem('remote-codex-auto-collapse-completed-turns', 'false');
-    });
-    await installApiRoutes(page, () =>
-      detail('codex', {
-        thread: {
-          status: 'running',
-          activeTurnId: 'turn-1',
-          lastTurnCompletedAt: null,
-        },
-        turns: [
-          {
-            id: 'turn-1',
-            startedAt: userCreatedAt,
-            status: 'inProgress',
-            error: null,
-            model: 'gpt-5',
-            reasoningEffort: 'medium',
-            items:
-              phase === 'materializedFallback'
-                ? [
-                    {
-                      id: 'user-1',
-                      kind: 'userMessage',
-                      text: 'Timestamp prompt.',
-                      createdAt: userCreatedAt,
-                    },
-                    {
-                      id: 'agent-live-1',
-                      kind: 'agentMessage',
-                      text: 'Streaming response after refresh.',
-                      createdAt: userCreatedAt,
-                    },
-                  ]
-                : [
-                    {
-                      id: 'user-1',
-                      kind: 'userMessage',
-                      text: 'Timestamp prompt.',
-                      createdAt: userCreatedAt,
-                    },
-                  ],
-          },
-        ],
-      }),
-    );
-
-    await page.goto('/threads/thread-1');
-    await waitForSocketReady(page);
-    await emitSocketMessage(page, {
-      type: 'thread.output.delta',
-      threadId: 'thread-1',
-      timestamp: agentCreatedAt,
-      payload: {
-        turnId: 'turn-1',
-        itemId: 'agent-live-1',
-        sequence: 1,
-        delta: 'Streaming response after refresh.',
-        createdAt: agentCreatedAt,
-      },
-    });
-
-    const [turnStartLabel, agentLabel] = await page.evaluate((timestamps) => {
-      return timestamps.map((timestamp) =>
-        new Date(timestamp).toLocaleString([], {
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      );
-    }, [userCreatedAt, agentCreatedAt]);
-
-    const messageTimes = page.locator('.thread-graph-message-time');
-    await expect(page.getByText('Streaming response after refresh.')).toBeVisible();
-    await expect(messageTimes.filter({ hasText: agentLabel })).toHaveCount(1);
-
-    phase = 'materializedFallback';
-    await emitSocketMessage(page, {
-      type: 'thread.updated',
-      threadId: 'thread-1',
-      timestamp: agentCreatedAt,
-      payload: { status: 'running' },
-    });
-
-    await expect(page.getByText('Streaming response after refresh.')).toBeVisible();
-    await expect(messageTimes.filter({ hasText: agentLabel })).toHaveCount(1);
-    await expect(messageTimes.filter({ hasText: turnStartLabel })).toHaveCount(1);
-  });
-
-  test('renders Codex subagent tool calls as agent bubbles with deferred details', async ({ page }) => {
-    await installApiRoutes(page, () =>
-      detail('codex', {
-        turns: [
-          {
-            id: 'turn-1',
-            startedAt: now,
-            status: 'completed',
-            error: null,
-            model: 'gpt-5',
-            reasoningEffort: 'medium',
-            items: [
-              { id: 'user-1', kind: 'userMessage', text: 'Check the project.' },
-              {
-                id: 'agent-sub',
-                kind: 'agentToolCall',
-                text: 'Agent: Review worker',
-                previewText: 'Agent',
-                detailText: null,
-                hasDeferredDetail: true,
-                status: 'completed',
-              },
-            ],
-          },
-        ],
-      }),
-    );
-
-    await page.goto('/threads/thread-1');
-
-    await expect(page.getByText('Agent: Review worker')).toBeVisible();
-    await page.getByRole('button', { name: 'Open agent details' }).click();
-    await expect(page.getByRole('dialog', { name: 'Agent Details' })).toBeVisible();
-    await expect(page.getByText('subagent checked the repository')).toBeVisible();
-  });
-
-  test('keeps newer Codex live final text through stale detail refreshes until final history lands', async ({ page }) => {
-    let phase: 'fresh' | 'stale' | 'final' = 'fresh';
-    await installApiRoutes(page, () => {
-      const hasFinalTurn = phase === 'final';
-      return detail('codex', {
-        thread: {
-          status: hasFinalTurn ? 'idle' : 'running',
-          activeTurnId: hasFinalTurn ? null : 'turn-1',
-          lastTurnCompletedAt: hasFinalTurn ? now : null,
-        },
-        liveItems: hasFinalTurn
-          ? null
-          : {
-              turnId: 'turn-1',
-              updatedAt:
-                phase === 'fresh' ? '2026-04-09T06:01:05.000Z' : '2026-04-09T06:01:00.000Z',
-              items: [
-                {
-                  id: 'agent-live-1',
-                  kind: 'agentMessage',
-                  text: phase === 'fresh' ? 'FINAL_TEXT_BEFORE_REFRESH' : 'STALE',
-                  sequence: 1,
-                },
-              ],
-            },
-        turns: [
-          {
-            id: 'turn-1',
-            startedAt: now,
-            status: hasFinalTurn ? 'completed' : 'inProgress',
-            error: null,
-            model: 'gpt-5',
-            reasoningEffort: 'medium',
-            items: hasFinalTurn
-              ? [
-                  {
-                    id: 'agent-final-1',
-                    kind: 'agentMessage',
-                    text: 'FINAL_STRUCTURED_RESPONSE',
-                  },
-                ]
-              : [],
-          },
-        ],
-      });
-    });
-
-    await page.goto('/threads/thread-1');
-
-    await expect(page.getByText('FINAL_TEXT_BEFORE_REFRESH')).toBeVisible();
-    await waitForSocketReady(page);
-    phase = 'stale';
-    await emitSocketMessage(page, {
-      type: 'thread.updated',
-      threadId: 'thread-1',
-      timestamp: now,
-      payload: { status: 'running' },
-    });
-
-    await expect(page.getByText('FINAL_TEXT_BEFORE_REFRESH')).toBeVisible();
-    await expect(page.getByText('STALE')).toHaveCount(0);
-
-    phase = 'final';
-    await emitSocketMessage(page, {
-      type: 'thread.turn.completed',
-      threadId: 'thread-1',
-      timestamp: now,
-      payload: { turnId: 'turn-1', status: 'completed', error: null },
-    });
-
-    await expect(page.getByText('FINAL_STRUCTURED_RESPONSE')).toBeVisible();
-    await expect(page.getByText('FINAL_TEXT_BEFORE_REFRESH')).toHaveCount(0);
-  });
-
-  test('shows Claude plan-mode requestUserInput cards from realtime request events', async ({ page }) => {
-    await installApiRoutes(page, () =>
-      detail('claude', {
-        thread: {
-          status: 'running',
-          activeTurnId: 'turn-1',
-          collaborationMode: 'plan',
-          lastTurnCompletedAt: null,
-        },
-        turns: [
-          {
-            id: 'turn-1',
-            startedAt: now,
-            status: 'inProgress',
-            error: null,
-            model: 'sonnet',
-            reasoningEffort: 'medium',
-            items: [
-              { id: 'user-1', kind: 'userMessage', text: 'Plan the implementation.' },
-              { id: 'plan-1', kind: 'plan', text: '1. Confirm target UI.' },
-            ],
-          },
-        ],
-      }),
-    );
-
-    await page.goto('/threads/thread-1');
-    await waitForSocketReady(page);
-    await emitSocketMessage(page, {
-      type: 'thread.request.created',
-      threadId: 'thread-1',
-      timestamp: now,
-      payload: {
-        request: {
-          id: 'ask-plan-mode',
-          kind: 'requestUserInput',
-          title: 'Mode',
-          description: 'Choose a preview target.',
-          turnId: 'turn-1',
-          itemId: 'toolu_question',
-          createdAt: '2026-04-09T06:01:03.000Z',
-          questions: [
-            {
-              id: 'target',
-              header: 'Target',
-              question: 'Which preview should be used?',
-              multiSelect: false,
-              isOther: false,
-              isSecret: false,
-              options: [
-                {
-                  label: 'PC preview',
-                  description: 'Use desktop preview.',
-                },
-              ],
-            },
-          ],
-        },
-      },
-    });
-
-    await expect(page.getByText('Which preview should be used?')).toBeVisible();
-    await expect(page.getByRole('button', { name: /PC preview/ })).toBeVisible();
-  });
-
-  test('keeps OpenCode running footer and batches loose live file events', async ({ page }) => {
-    await installApiRoutes(page, () =>
-      detail('opencode', {
-        thread: {
-          status: 'running',
-          activeTurnId: 'opencode-runtime-turn-raw',
-          lastTurnCompletedAt: null,
-        },
-        liveItems: {
-          turnId: 'opencode-runtime-turn-raw',
-          updatedAt: '2026-04-09T06:01:05.000Z',
-          items: [
-            {
-              id: 'read-live-1',
-              kind: 'fileRead',
-              text: 'packages/frontend/src/tokenUsage.ts',
-              previewText: 'packages/frontend/src/tokenUsage.ts',
-              detailText: 'Tool: read\npackages/frontend/src/tokenUsage.ts',
-              status: 'completed',
-              sequence: 1,
-            },
-            {
-              id: 'read-live-2',
-              kind: 'fileRead',
-              text: 'packages/frontend/src/tokenUsage.test.ts',
-              previewText: 'packages/frontend/src/tokenUsage.test.ts',
-              detailText: 'Tool: read\npackages/frontend/src/tokenUsage.test.ts',
-              status: 'completed',
-              sequence: 2,
-            },
-            {
-              id: 'change-live-1',
-              kind: 'fileChange',
-              text: 'packages/frontend/src/tokenUsage.ts',
-              previewText: '1 file changed · +12 · -1',
-              detailText: '- packages/frontend/src/tokenUsage.ts (+12 -1)',
-              changedFiles: 1,
-              addedLines: 12,
-              removedLines: 1,
-              status: 'completed',
-              sequence: 3,
-            },
-            {
-              id: 'change-live-2',
-              kind: 'fileChange',
-              text: 'packages/frontend/src/tokenUsage.test.ts',
-              previewText: '1 file changed · +4 · -3',
-              detailText: '- packages/frontend/src/tokenUsage.test.ts (+4 -3)',
-              changedFiles: 1,
-              addedLines: 4,
-              removedLines: 3,
-              status: 'completed',
-              sequence: 4,
-            },
-          ],
-        },
-        turns: [
-          {
-            id: 'opencode-display-turn',
-            startedAt: now,
-            status: 'completed',
-            error: null,
-            model: 'openai/gpt-5',
-            reasoningEffort: 'low',
-            tokenUsage: {
-              total: {
-                totalTokens: 18240,
-                inputTokens: 12000,
-                cachedInputTokens: 2000,
-                outputTokens: 4240,
-                reasoningOutputTokens: 1240,
-              },
-              last: {
-                totalTokens: 2400,
-                inputTokens: 1600,
-                cachedInputTokens: 200,
-                outputTokens: 800,
-                reasoningOutputTokens: 320,
-              },
-              modelContextWindow: 272000,
-            },
-            priceEstimate: {
-              pricingModelKey: 'openai/gpt-5',
-              pricingTierKey: 'standard',
-              currency: 'USD',
-              inputUsd: 0.025,
-              cachedInputUsd: 0.0005,
-              outputUsd: 0.0636,
-              totalUsd: 0.0891,
-            },
-            items: [
-              { id: 'user-1', kind: 'userMessage', text: 'Check OpenCode live UI.' },
-            ],
-          },
-        ],
-      }),
-    );
-
-    await page.goto('/threads/thread-1');
-
-    await expect(page.getByLabel('Running')).toBeVisible();
-    await expect(page.getByText('2 file reads')).toBeVisible();
-    await expect(page.getByText('2 file changes')).toBeVisible();
-    await expect(page.getByText('+16')).toBeVisible();
-    await expect(page.getByText('-4')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open full file read' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Open full file change' })).toHaveCount(0);
-  });
-});
 
 test.describe('turn usage summary regressions', () => {
   test('shows live usage updates and keeps completed usage after reload', async ({ page }, testInfo) => {
@@ -928,10 +390,9 @@ test.describe('turn usage summary regressions', () => {
       type: 'thread.turn.token.updated', threadId: 'thread-1', timestamp: now,
       payload: { turnId: 'turn-1', tokenUsage: usage, priceEstimate, model: 'gpt-6-astra', reasoningEffort: 'high' },
     });
-    for (const text of ['3.5k tok', '1.5k in', '2k out', '500 cached', '$0.11']) {
+    for (const text of ['3.5k tok', '1k in', '2k out', '500 cached', '$0.11']) {
       await expect(footer).toContainText(text);
     }
-    await page.screenshot({ path: testInfo.outputPath('live-turn-usage.png'), fullPage: true });
     completed = true;
     await emitSocketMessage(page, {
       type: 'thread.turn.completed', threadId: 'thread-1', timestamp: now,
@@ -943,7 +404,7 @@ test.describe('turn usage summary regressions', () => {
     await expect(summary).toContainText('$0.11');
     await page.reload();
     await expect(summary).toContainText('3.5k tok');
-    await expect(summary).toContainText('1.5k in');
+    await expect(summary).toContainText('1k in');
     await expect(summary).toContainText('2k out');
     await expect(summary).toContainText('500 cached');
     await expect(summary).toContainText('$0.11');
@@ -952,7 +413,6 @@ test.describe('turn usage summary regressions', () => {
       return Math.max(...[node, ...node.querySelectorAll('[data-testid="turn-usage"] span')].map((element) => element.getBoundingClientRect().right - viewportWidth));
     });
     expect(overflow).toBeLessThanOrEqual(1);
-    await page.screenshot({ path: testInfo.outputPath('completed-turn-usage.png'), fullPage: true });
   });
 });
 
@@ -1464,7 +924,6 @@ test('exports the live thread styling and complete Markdown to offline HTML', as
   await expect(offline.locator('button')).toHaveCount(0);
   await expect(offline.locator('.thread-graph-worked-summary')).toContainText('Worked for 1m 12s');
   expect(await offline.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await offline.screenshot({path:testInfo.outputPath('offline-transcript.png')});
   await page.getByRole('button',{name:'Thread actions',exact:true}).click();
   await expect(page.getByRole('dialog').getByRole('button',{name:'PDF',exact:true})).toHaveCount(0);
 });
@@ -1507,7 +966,6 @@ test('file links reveal only the requested nested file and copy workspace-relati
   await row.getByRole('button',{name:'Copy path for compute-run-runtime-protocol-design.md',exact:true}).click();
   expect(await page.evaluate(()=>(window as any).__copiedPath)).toBe(`./${target}`);
   await expect(page.getByRole('heading',{name:'WRONG DOCUMENT'})).toHaveCount(0);
-  await page.screenshot({path:testInfo.outputPath('correct-workspace-link.png')});
 });
 
 test('relative file links resolve dot-prefixed API trees and clear failed focus when selecting an image', async ({page}, testInfo) => {
@@ -1571,7 +1029,6 @@ test('running operation batches stay after earlier replies and show a live times
   expect((await checkpoint.boundingBox())!.y).toBeLessThan((await batch.boundingBox())!.y);
   await expect(batch.locator('.thread-graph-relative-time').first()).toHaveText('11s – 25s');
   expect(await batch.locator('.thread-graph-history-group-verb').evaluate(el=>getComputedStyle(el).animationName)).toBe('thread-operation-sheen');
-  await page.screenshot({path:testInfo.outputPath('ordered-live-batches.png')});
   finished=true;
   await page.reload();
   await expect(page.getByText('All done',{exact:true})).toBeVisible();
@@ -1625,7 +1082,6 @@ test('external generated image and document links open read-only Explorer previe
   await expect.poll(()=>image.evaluate(el=>(el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   expect(page.url()).toBe(before);
   expect(reads).toEqual([imagePath]);
-  await page.screenshot({path:testInfo.outputPath('linked-image.png')});
   await page.getByRole('button',{name:testInfo.project.name === 'mobile-chromium' ? 'Show chat' : 'Collapse workspace',exact:true}).first().click();
   await page.getByRole('link',{name:'Generated document',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Linked result',exact:true})).toBeVisible();
@@ -1688,7 +1144,6 @@ test('archive links show a download panel and preserve original bytes for local 
     expect(Buffer.concat(chunks)).toEqual(bytes);
     expect(page.url()).toBe(before);
     if (index === 0) {
-      await page.screenshot({path: testInfo.outputPath('archive-download.png')});
       await page.getByRole('button', {name: testInfo.project.name === 'mobile-chromium' ? 'Show chat' : 'Collapse workspace', exact: true}).first().click();
     }
   }

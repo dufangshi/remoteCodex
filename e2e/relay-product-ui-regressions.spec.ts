@@ -375,7 +375,7 @@ test.describe('relay product UI regressions', () => {
     );
     await installAuthenticatedDevicesMocks(page);
 
-    for (const width of [320, 375, 390, 768, 1440]) {
+    for (const width of [320, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       for (const pathname of ['/', '/relay-guide', '/relay-devices', '/relay-account']) {
         await page.goto(pathname);

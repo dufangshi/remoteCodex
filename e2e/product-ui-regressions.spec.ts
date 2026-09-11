@@ -360,7 +360,7 @@ test.describe('non-thread product UI regressions', () => {
       '/relay-guide',
     ];
 
-    for (const width of [320, 375, 390, 768, 1440]) {
+    for (const width of [320, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       for (const pathname of paths) {
         await page.goto(pathname);

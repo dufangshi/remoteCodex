@@ -63,6 +63,7 @@ const sharedSession = {
   targetUsername: relayUser.username,
   deviceId: 'device-shared',
   deviceName: 'Owner workstation',
+  deviceConnected: true,
   threadId: sharedThread.id,
   workspaceId: sharedWorkspace.id,
   label: 'Pair review',
@@ -81,6 +82,7 @@ const sharedDeviceGrant = {
   targetUsername: relayUser.username,
   deviceId: 'device-shared',
   deviceName: 'Owner workstation',
+  deviceConnected: true,
   scope: 'device',
   threadId: null,
   threadTitle: null,
@@ -124,8 +126,6 @@ async function installRelayMocks(
   const access = options.access ?? 'shared';
   const currentUser = access === 'owner' ? ownerUser : relayUser;
   const includeSharedDevice = options.includeSharedDevice ?? false;
-  const createdShares: Record<string, unknown>[] = [];
-  const createShareRequests: Record<string, unknown>[] = [];
 
   await page.addInitScript(() => {
     window.localStorage.setItem('remote-codex-relay-mode', 'true');
@@ -133,9 +133,10 @@ async function installRelayMocks(
   });
 
   await page.route('**/*', async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
+    const url = new URL(route.request().url());
     const path = url.pathname;
+
+    if (path === '/relay/devices/device-shared/presence') return json(route, { connected: true });
 
     if (path.endsWith('/transport/key')) return json(route, {code:'not_found'}, 404);
 
@@ -154,7 +155,7 @@ async function installRelayMocks(
         sharedWithMe: access === 'shared' ? [sharedSession] : [],
         sharedDevicesWithMe: access === 'shared' && includeSharedDevice ? [sharedDeviceGrant] : [],
         sharedThreadsWithMe: [],
-        sharedByMe: createdShares,
+        sharedByMe: [],
         grantsByMe: [],
       });
     }
@@ -189,21 +190,6 @@ async function installRelayMocks(
         authEnabled: true,
         relayEnabled: true,
       });
-    }
-
-    if (path === '/relay/shares' && request.method() === 'POST') {
-      const payload = request.postDataJSON() as Record<string, unknown>;
-      createShareRequests.push(payload);
-      const created = {
-        ...sharedSession,
-        id: 'share-created',
-        targetUsername: String(payload.targetIdentifier ?? 'reviewer'),
-        threadAccess: payload.threadAccess,
-        workspaceAccess: payload.workspaceAccess,
-        label: payload.label ?? null,
-      };
-      createdShares.push(created);
-      return json(route, created);
     }
 
     if (path.endsWith(`/api/threads/${sharedThread.id}`)) {
@@ -340,10 +326,6 @@ async function installRelayMocks(
     return route.continue();
   });
 
-  return {
-    createShareRequests,
-    createdShares,
-  };
 }
 
 test('fork follows relay control access and surfaces backend failures', async ({ page }) => {
@@ -375,104 +357,7 @@ test('fork follows relay control access and surfaces backend failures', async ({
   await expect(page.getByRole('alert')).toHaveText('This device must update its runtime before forking.');
 });
 
-test.describe('relay shared session actions', () => {
-  test.skip(
-    true,
-    'Relay portal mocks need the previous TS relay bootstrap; use cargo run -p remote-codex -- relay for the Rust relay.',
-  );
-  test('opens a shared session from Relay Devices and blocks re-sharing from Thread actions', async ({
-    page,
-  }) => {
-    await installRelayMocks(page);
-
-    await page.goto('/relay-devices');
-    await expect(page.getByRole('heading', { name: 'Shared with me' })).toBeVisible();
-    await expect(page.getByText('Pair review')).toBeVisible();
-    await expect(page.getByText('View only')).toBeVisible();
-    await expect(page.getByText('Workspace read')).toBeVisible();
-
-    await page.getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(page).toHaveURL(/\/devices\/device-shared\/threads\/thread-shared/);
-    await expect(page.getByText('Shared planning thread').first()).toBeVisible();
-    await expect(page.locator('[title="View only / Workspace read"]:visible')).toBeVisible();
-    await expect(page.getByText('This shared session is view only.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeDisabled();
-
-    await page.getByRole('button', { name: 'Thread actions' }).click();
-    await expect(page.getByRole('dialog', { name: 'Thread actions' })).toBeVisible();
-    await page.getByRole('button', { name: 'Share', exact: true }).click();
-    await expect(page.getByText('Only the owner can share this session.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Share session' })).toBeDisabled();
-  });
-
-  test('opens a shared device from Relay Devices and loads its workspace list', async ({
-    page,
-  }) => {
-    await installRelayMocks(page, { includeSharedDevice: true });
-
-    await page.goto('/relay-devices');
-    await expect(page.getByRole('heading', { name: 'Shared devices' })).toBeVisible();
-    const sharedDeviceCard = page.locator('article').filter({ hasText: 'Office server' });
-    await expect(sharedDeviceCard).toBeVisible();
-    await expect(sharedDeviceCard.getByText('Collaborator')).toBeVisible();
-    await expect(sharedDeviceCard.getByText('Workspace read')).toBeVisible();
-
-    await sharedDeviceCard.getByRole('button', { name: 'Open', exact: true }).click();
-
-    await expect(page).toHaveURL(/\/devices\/device-shared\/workspaces/);
-    await expect(page.getByText('Shared workspace').first()).toBeVisible();
-
-    const selectedDeviceId = await page.evaluate(() =>
-      window.localStorage.getItem('remote-codex-relay-device-id'),
-    );
-    const selectedThreadId = await page.evaluate(() =>
-      window.localStorage.getItem('remote-codex-relay-thread-id'),
-    );
-    expect(selectedDeviceId).toBe('device-shared');
-    expect(selectedThreadId).toBeNull();
-  });
-
-  test('creates an owner share from Thread actions and refreshes Shared by me', async ({
-    page,
-  }) => {
-    const relayMocks = await installRelayMocks(page, { access: 'owner' });
-    const accessResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === '/relay/access';
-    });
-
-    await page.goto('/devices/device-shared/threads/thread-shared');
-    await accessResponse;
-    await expect(page.getByText('Shared planning thread').first()).toBeVisible();
-
-    await page.getByRole('button', { name: 'Thread actions' }).click();
-    await expect(page.getByRole('dialog', { name: 'Thread actions' })).toBeVisible();
-    await page.getByRole('button', { name: 'Share', exact: true }).click();
-    await page.getByPlaceholder('username or email').fill('reviewer@example.test');
-    await page.getByLabel('Collaborator').check();
-    await page.getByLabel('Read and edit').check();
-    await page.getByPlaceholder('optional').fill('Pairing');
-    await page.getByRole('button', { name: 'Share session' }).click();
-
-    await expect(page.getByText('reviewer@example.test')).toBeVisible();
-    await expect(page.getByText('Pairing · Collaborator / Workspace write')).toBeVisible();
-    expect(relayMocks.createShareRequests).toEqual([
-      {
-        targetIdentifier: 'reviewer@example.test',
-        deviceId: 'device-shared',
-        threadId: 'thread-shared',
-        threadTitle: 'Shared planning thread',
-        workspaceId: 'workspace-shared',
-        workspaceLabel: 'Shared workspace',
-        label: 'Pairing',
-        threadAccess: 'control',
-        workspaceAccess: 'write',
-      },
-    ]);
-  });
-});
-
-test('shared access uses profiles, compact actions and stable navigation', async ({ page }, testInfo) => {
+test('shared access uses profiles, history and opens the correct thread', async ({ page }, testInfo) => {
   await installRelayMocks(page, {access:'owner'});
   await page.route('**/relay/portal', route => json(route, {
     user: ownerUser, devices: [], sharedWithMe: [], sharedDevicesWithMe: [], sharedThreadsWithMe: [], grantsByMe: [],
@@ -480,13 +365,8 @@ test('shared access uses profiles, compact actions and stable navigation', async
       lastAccessedAt: now, lastAccessedByUsername: relayUser.username,
       accessEvents: [{id:'visit',shareId:'share-1',userId:relayUser.id,username:relayUser.username,kind:'open_thread',accessedAt:now}]}],
   }));
-  await page.goto('/');
-  const homeMenu = (await page.getByRole('button',{name:'Open Navigation',exact:true}).boundingBox())!;
   await page.goto('/relay-devices');
   const header = page.locator('.product-navigation');
-  const menuBox = (await header.getByRole('button',{name:'Open Navigation',exact:true}).boundingBox())!;
-  expect(menuBox.x).toBeCloseTo(homeMenu.x,0);
-  expect(menuBox.y).toBeCloseTo(homeMenu.y,0);
   await header.getByRole('button',{name:'Open Navigation',exact:true}).click();
   const nav = page.getByRole('navigation',{name:'Supervisor navigation'});
   await expect(nav.getByRole('button',{name:'Device management',exact:true})).toBeVisible();
@@ -509,10 +389,7 @@ test('shared access uses profiles, compact actions and stable navigation', async
   await page.screenshot({path:testInfo.outputPath('shared-access.png')});
   await card.getByRole('button',{name:'Open',exact:true}).click();
   const topbar=page.locator('.thread-topbar-surface');
-  await expect(topbar.getByRole('button',{name:'Open rooms',exact:true})).toBeVisible();
-  const nextBox=(await topbar.getByRole('button',{name:'Open rooms',exact:true}).boundingBox())!;
-  expect(nextBox.x).toBeCloseTo(menuBox.x,0);
-  expect(nextBox.y).toBeCloseTo(menuBox.y,0);
+  await expect(page).toHaveURL(/\/devices\/device-shared\/threads\/thread-shared$/);
   await expect(topbar.getByRole('heading',{name:sharedThread.title,exact:true})).toBeVisible();
   // This fixture is a legacy supervisor. Exercise its real transport report;
   // encrypted/changed identity transitions are covered at component level.

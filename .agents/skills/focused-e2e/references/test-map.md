@@ -14,8 +14,7 @@
 | workspace → thread → 第一条回复接线 | `e2e/phase2.spec.ts` | `receive a hello response` |
 | UI 停止运行中的 turn | 同上 | `can interrupt a running turn` |
 | 手机 thread 导航 | 同上 | `collapsible top sidebar`；仅 mobile 有效 |
-| 文件操作 | `e2e/files-browser.spec.ts` | `lists, previews, writes, and moves files` |
-| API interrupt | 同上 | `interrupts a long fake turn via API`；只选一个 project |
+| 文件浏览器并发加载、刷新恢复 | `e2e/files-browser.spec.ts` | `explorer loads nested directories`；文件 API 和下载限制由 Rust 测试覆盖 |
 | 插件、composer 权限、导出 | `e2e/product-ui-regressions.spec.ts` | 按需选 `terminal plugin` / `prompt toolbar` / `Full access` / `thread exports`；这些用例只跑 desktop |
 | workspace / thread / import 表单 | 同上 | 按需选 `workspace rows` / `new workspace` / `new thread` / `import supports` / `import blocks` |
 | 全站响应式布局 | 同上 | `core product routes reflow`；desktop 内已覆盖多宽度、多路由，勿再复制整套 mobile 矩阵 |
@@ -61,20 +60,16 @@ pnpm --filter @remote-codex/supervisor-web test src/pages/threadDetailModel.test
 
 - **真实 ACP**：`harness-acp.spec.ts` 没有 opt-in gate，自启 supervisor 并强制 `REMOTE_CODEX_E2E_FAKE_RUNTIME=0`。包含 codex/claude/grok/deepseek 的真实短轮和中断场景，单测试 timeout 可达 10 分钟。CLI 存在不等于账号可用。只在该 harness 边界需要真实验证时选具体 harness/动作和一个 project；普通 UI 不进入此文件。
 - **独立 relay**：`relay-mode.spec.ts` 自启 relay + supervisor，使用 `E2E_RELAY_PORT` / `E2E_RELAY_SUPERVISOR_PORT`（默认 18788/18789），不同于通用 Web 端口。审计时 fixture 的 `admin/admin` 不满足密码规则，后续 `deviceApi` 请求及轮询也缺登录 token（`helpers.api` 不维护 cookie jar）。先修复必要 fixture 或报告阻断，不反复等待 healthz，不放宽产品校验。中断回归还需先确认运行已开始，再断言中断结果；现有「非 running」断言不足以排除未启动/失败。
-- **文件操作的重 fixture**：`files-browser.spec.ts` 首个用例总是创建 1000 个文件，Files UI 断言却在可选分支里。精简此处时把大目录限制与普通文件操作分开准备；验证 Files UI 时必须断言入口存在、实际执行关键交互，不能把可选分支未执行算通过。
 - **真实/定制环境开关**：通用 Playwright webServer 启动命令硬编码 fake=1。仅给测试加 REAL/ACP 开关不代表服务已切换到它需要的环境；需按该 spec 准备专用服务，不修改本机生产服务来凑环境。
 
 ## 跳过的测试不算覆盖
 
 | 文件/分组 | 当前条件 |
 | --- | --- |
-| `composer-caret.spec.ts` | 整组无条件 skip；caret 优先在共享 thread-ui 包测试 |
-| `relay-shared-actions.spec.ts` | 整组无条件 skip，旧 TS bootstrap mock |
-| `runtime-bubble-regressions.spec.ts` 的 `runtime bubble regressions` | 仅这个旧 describe 无条件 skip；后面的 usage / live activity 两组可运行 |
-| `phase4-running-turn-queued-continuation.spec.ts`、`phase5-slash-command-parity.spec.ts` | 需 `REMOTE_CODEX_REAL_BACKEND_E2E=1` 及相应真实 backend |
 | `acp-codex-parity.spec.ts` | 需 `REMOTE_CODEX_REAL_ACP_E2E=1`；真实多轮流程，10 分钟 timeout |
-| `acp-core-capability.spec.ts` | 需 `REMOTE_CODEX_ACP_CORE_E2E=1` 和匹配 `fixture-fast` / `FAKE_ACP_PARTIAL_1` 的 custom ACP fixture，不能用普通 fake runtime 冒充 |
-| `runtime-install-availability.spec.ts` | 需 `REMOTE_CODEX_RUNTIME_INSTALL_E2E=1`、CLI/npm shims 和 state file；不用于普通 UI 回归 |
+| `harness-fork-ui.spec.ts` | 需 `RUN_REAL_FORK_UI=1` 和已认证的真实 Codex supervisor |
+
+旧 SDK 阶段验收、缺少 fixture 的 ACP/install 套件及无条件跳过的 UI 分组已删除。`relay-shared-actions.spec.ts` 的有效用例及 `runtime-bubble-regressions.spec.ts` 的 usage、刷新续流等回归仍保留。响应式页面矩阵保留 320、768、1440 三个代表宽度。
 
 发现地图与源码不一致时，以源码为准并只更新受影响的条目。
 
@@ -84,6 +79,6 @@ pnpm --filter @remote-codex/supervisor-web test src/pages/threadDetailModel.test
 
 - 普通 fake/mock 浏览器用例：显式列出这组文件，按有效设备范围运行；API-only 不重复跑两个项目。
 - `harness-acp.spec.ts`、`relay-mode.spec.ts`：各自单独运行一个 desktop project；提前准备真实 harness 账号或修好 relay fixture。
-- phase4/phase5、ACP parity、ACP core fixture、runtime install：分别准备对应服务/fixture，启用该组开关后运行相关文件。若需要复用专用服务，确认端口、版本和环境一致。
+- ACP parity 和真实 fork UI：分别准备对应服务，启用该组开关后运行相关文件。若需要复用专用服务，确认端口、版本和环境一致。
 
 记录各组通过、失败、跳过及被前置条件阻断的范围。无条件 skip 或缺凭据/fixture 的必要场景仍是未验证，不称“全量通过”；已通过同一版本的组无需再次运行。
