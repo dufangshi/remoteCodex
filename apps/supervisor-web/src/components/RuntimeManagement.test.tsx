@@ -24,6 +24,17 @@ beforeEach(() => {
     runningVersion: path.includes('/devices/b/') ? 'B-version' : 'A-version', canUpdate: true,
   });
 });
+
+it('offers repair when npm is old but the running process already matches latest', async () => {
+  api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
+    runningVersion: '0.12.32', installedVersion: '0.12.30', latestVersion: '0.12.32', canUpdate: true,
+  });
+  mount('/devices/a/workspaces');
+  expect(await screen.findByText(/Installed 0.12.30; running 0.12.32/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/relay/devices/a/api/management/supervisor/update', expect.objectContaining({method:'POST'})));
+});
 describe('device-scoped runtime settings', () => {
   it('does not load or expose runtime controls outside a device', () => {
     mount('/relay-devices');

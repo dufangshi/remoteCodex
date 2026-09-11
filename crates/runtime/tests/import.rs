@@ -193,6 +193,7 @@ async fn imports_selected_codex_agent_into_native_provider_and_requires_resume()
         .to_string();
     assert!(prompt_err.contains("Resume / Connect"));
 
+    let supervisor = Arc::new(supervisor);
     supervisor.resume_thread(&imported.thread.id).await.unwrap();
     supervisor
         .prompt(
