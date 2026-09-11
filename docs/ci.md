@@ -10,7 +10,7 @@ There is no duplicate push workflow after merging to `main`.
 | Supervisor Web, shared/plugin packages | Web typecheck and Vitest; build the external thread UI dependency required by Web |
 | Incus host agent | Its typecheck, Vitest, and shell syntax checks |
 | npm launcher or Node scripts | Launcher, updater, and publishing-script unit tests; no product installation or release build |
-| GitHub Actions workflows | actionlint |
+| GitHub Actions workflows | actionlint; ShellCheck warnings/errors (not style or informational suggestions) |
 | Documentation, agent instructions, browser-only E2E files, Windows Device Manager | No automatic product build; agents validate relevant changes locally |
 
 Root Node manifests/lockfiles and TypeScript configuration select their affected

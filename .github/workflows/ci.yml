@@ -69,7 +69,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Lint GitHub Actions workflows
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+        # Keep shell warnings/errors; style and informational suggestions are
+        # not a merge gate for unrelated deployment scripts.
+        run: docker run --rm -e SHELLCHECK_OPTS=--severity=warning -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
 
   rust:
     name: Rust check (Linux)
