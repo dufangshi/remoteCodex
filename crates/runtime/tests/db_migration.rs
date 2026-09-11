@@ -446,7 +446,7 @@ async fn migrates_node_0030_history_and_policies_idempotently() {
         .await
         .unwrap();
     assert_eq!(live_detail.thread.active_turn_id, None);
-    assert_eq!(live_detail.turns[0].status, "interrupted");
+    assert_eq!(live_detail.turns[0].status, "recovering");
     assert_eq!(live_detail.thread.approval_mode, "guarded");
 
     let settings: WorkspaceSettingsDto =
@@ -500,7 +500,7 @@ async fn migrates_node_0030_history_and_policies_idempotently() {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )?;
-            assert_eq!(runtime_migration_count, 7);
+            assert_eq!(runtime_migration_count, 8);
             assert_eq!(legacy_metadata_count, 2);
             assert_eq!(
                 migrated_metadata.0,
@@ -525,7 +525,7 @@ async fn migrates_node_0030_history_and_policies_idempotently() {
                 |row| row.get(0),
             )?;
             assert_eq!(turns, 3);
-            assert_eq!(migrations, 7);
+            assert_eq!(migrations, 8);
             Ok(())
         })
         .unwrap();

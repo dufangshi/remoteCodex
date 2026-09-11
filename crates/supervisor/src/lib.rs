@@ -23,6 +23,7 @@ pub use tunnel::run_relay_tunnel;
 pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
     auth::validate_config(&state.config)?;
     state.spawn_live_item_persister();
+    state.spawn_execution_observer();
     let addr: SocketAddr = format!("{}:{}", state.config.host, state.config.port).parse()?;
     let listener = TcpListener::bind(addr).await?;
     let cli = state.configure_cli(format!(
@@ -52,6 +53,8 @@ pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
     }
     if state.defer_update_recovery() {
         tokio::spawn(management::recover_after_update(state.clone()));
+    } else {
+        state.spawn_inbox_recovery();
     }
     axum::serve(listener, router(state)).await?;
     Ok(())

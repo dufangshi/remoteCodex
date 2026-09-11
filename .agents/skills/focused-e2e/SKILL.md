@@ -35,6 +35,7 @@ description: 为 Remote Codex 项目按改动范围选择、编写和精简 Play
 
 - 根 Playwright 配置始终启动/探测 API 和 Vite，且默认两个 project。只选 mock 用例仍有这层启动成本；不要另起第二套相同服务。
 - `reuseExistingServer: true` 只适合已确认版本、fake 模式和数据目录都正确的测试服务。不要误用正在运行真实任务的开发服务；冲突时配置独立 `E2E_API_PORT` / `E2E_WEB_PORT` 与测试数据目录。
+- Agent 内启动的测试会继承正式 Supervisor 的环境。启动测试 Supervisor 时必须覆盖 `REMOTE_CODEX_DATABASE_PATH`、`REMOTE_CODEX_WORKSPACE_ROOT`，不能只设置低优先级的 `DATABASE_URL` / `WORKSPACE_ROOT`；同时清除继承的 relay 连接参数。否则测试启动恢复逻辑会把正式数据库中的运行任务误标为 interrupted。
 - 改了 Rust 且本轮确实要跑依赖 supervisor 的 E2E，确保 `target/debug/remote-codex` 是新代码：需要时执行一次 `cargo build -p remote-codex`。仅 `cargo test` 不代表该可执行文件已更新。
 - 共享 UI 是独立仓库，Web 的 JS 消费其 `dist`：改了 `remote-codex-thread-ui/packages/thread-ui` 的 TS/TSX 时，先在该仓库执行一次 `pnpm --filter @remote-codex/thread-ui build`。CSS 直接导出 `src/styles.css`，纯 CSS 修改不必构建 JS。需要时在主仓库执行一次 `pnpm install --offline --frozen-lockfile` 刷新本地 file 依赖，确认消费到新文件。已有正确产物无需重做；仅主 Web 源码改动可由 Vite 加载。
 - 不为普通 UI E2E 执行根 `pnpm build`（包含 Rust release），不无条件重装依赖、清理所有缓存或构建所有包。

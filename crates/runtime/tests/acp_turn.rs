@@ -267,7 +267,7 @@ async fn cancelled_prompt_response_is_interrupted() {
 }
 
 #[tokio::test]
-async fn process_exit_fails_the_active_turn() {
+async fn process_exit_leaves_completion_unconfirmed() {
     let python = which_python();
     let dir = tempdir().unwrap();
     let (runtime, session_id) = start_runtime(dir.path(), &python).await;
@@ -290,8 +290,28 @@ async fn process_exit_fails_the_active_turn() {
         "{error:#}"
     );
     let completed = completed_event(&mut events);
-    assert_eq!(completed.payload["status"], "failed");
+    assert_eq!(completed.payload["status"], "recovering");
     assert!(!completed.payload["error"].is_null());
+    runtime
+        .resume_session(
+            &session_id,
+            Some(dir.path().to_str().unwrap()),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime.execution_state(&session_id).await,
+        remote_codex_runtime::actor::ExecutionState::Idle
+    );
+    runtime
+        .start_turn(
+            turn_input(&session_id, "hello after reconnect", "reconnected-turn"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

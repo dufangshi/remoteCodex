@@ -1153,7 +1153,9 @@ impl AgentRuntime for AcpRuntime {
                 .cloned();
             if let Some(existing) = existing {
                 let live = &sessions[&existing];
-                if cli_context_matches(&live.process.cli_env) {
+                if cli_context_matches(&live.process.cli_env)
+                    && live.process.connection_open().await
+                {
                     return Ok(StartSessionResult {
                         provider_session_id: existing,
                         model: None,
@@ -1222,6 +1224,17 @@ impl AgentRuntime for AcpRuntime {
             model: None,
             reasoning_effort: None,
         })
+    }
+
+    async fn execution_state(&self, session_id: &str) -> crate::actor::ExecutionState {
+        let sessions = self.inner.sessions.lock().await;
+        let Some(live) = sessions.get(session_id) else {
+            return crate::actor::ExecutionState::Unknown;
+        };
+        adapter_for(&live.adapter_id).execution_state(
+            live.process.connection_open().await,
+            live.active.as_ref().map(|turn| turn.turn_id.as_str()),
+        )
     }
 
     async fn start_turn(
@@ -1376,7 +1389,12 @@ impl AgentRuntime for AcpRuntime {
                                 session_id = %session_id,
                                 "ACP session/prompt failed"
                             );
-                            break TurnOutcome::Failed(anyhow!("ACP session/prompt failed: {err}"));
+                            let failure = if process.connection_open().await {
+                                anyhow!("ACP session/prompt failed: {err}")
+                            } else {
+                                crate::actor::ExecutionUncertain(err.to_string()).into()
+                            };
+                            break TurnOutcome::Failed(failure);
                         }
                     }
                 }
@@ -1427,7 +1445,7 @@ impl AgentRuntime for AcpRuntime {
                             break if prompt_done {
                                 TurnOutcome::Completed
                             } else {
-                                TurnOutcome::Failed(anyhow!("ACP update channel closed during session/prompt"))
+                                TurnOutcome::Failed(crate::actor::ExecutionUncertain("ACP update channel closed".into()).into())
                             };
                         }
                     }
@@ -1439,7 +1457,7 @@ impl AgentRuntime for AcpRuntime {
                     match process.exited().await {
                         Ok(true) => {
                             if cancel_sent { discard_session = true; break TurnOutcome::Interrupted; }
-                            break TurnOutcome::Failed(anyhow!("ACP process exited before session/prompt completed"));
+                            break TurnOutcome::Failed(crate::actor::ExecutionUncertain("ACP process exited".into()).into());
                         }
                         Ok(false) => {}
                         Err(err) => {
@@ -1479,7 +1497,14 @@ impl AgentRuntime for AcpRuntime {
         let (status, error) = match &outcome {
             TurnOutcome::Completed => ("completed", None),
             TurnOutcome::Interrupted => ("interrupted", None),
-            TurnOutcome::Failed(error) => ("failed", Some(error.to_string())),
+            TurnOutcome::Failed(error) => (
+                if error.is::<crate::actor::ExecutionUncertain>() {
+                    "recovering"
+                } else {
+                    "failed"
+                },
+                Some(error.to_string()),
+            ),
         };
         let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
         for item in &mut items {

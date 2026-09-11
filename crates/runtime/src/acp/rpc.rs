@@ -111,6 +111,11 @@ fn resolves_to_windows_batch_script(program: &str) -> bool {
 }
 
 impl AcpProcess {
+    pub async fn connection_open(&self) -> bool {
+        let open = self.state.lock().await.closed_reason.is_none();
+        open && !self.exited().await.unwrap_or(true)
+    }
+
     pub async fn shutdown(&self) -> Result<()> {
         close_rpc_state(&self.state, "Harness restarted".into()).await;
         let mut child = self.child.lock().await;

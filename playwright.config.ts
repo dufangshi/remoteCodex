@@ -21,7 +21,24 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `REMOTE_CODEX_MODE=local REMOTE_CODEX_E2E_FAKE_RUNTIME=1 PORT=${apiPort} DATABASE_URL=${e2eDatabaseUrl} WORKSPACE_ROOT=${e2eWorkspaceRoot} ./target/debug/remote-codex supervisor`,
+      command: './target/debug/remote-codex supervisor',
+      // Harness subprocesses inherit the live Supervisor's environment. Clear its
+      // settings and set both aliases: the prefixed database path takes priority.
+      env: {
+        ...Object.fromEntries(
+          Object.keys(process.env)
+            .filter((key) => key.startsWith('REMOTE_CODEX_'))
+            .map((key) => [key, '']),
+        ),
+        REMOTE_CODEX_MODE: 'local',
+        REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
+        HOST: '127.0.0.1',
+        PORT: String(apiPort),
+        REMOTE_CODEX_DATABASE_PATH: e2eDatabaseUrl,
+        DATABASE_URL: e2eDatabaseUrl,
+        REMOTE_CODEX_WORKSPACE_ROOT: e2eWorkspaceRoot,
+        WORKSPACE_ROOT: e2eWorkspaceRoot,
+      },
       url: `${apiBaseUrl}/healthz`,
       reuseExistingServer: true,
       timeout: 180_000,

@@ -1,3 +1,4 @@
+mod reliability;
 mod update;
 
 use std::collections::{HashMap, HashSet};
@@ -50,13 +51,14 @@ struct GoalSubmission {
 }
 
 const RESTART_INTERRUPTED_ERROR: &str =
-    "Turn interrupted because the supervisor restarted before it completed.";
+    "Backend completion was not confirmed before the Supervisor connection ended. Reconnect to verify before continuing.";
 
 fn goal_status_is_terminal(status: &str) -> bool {
     matches!(status, "complete" | "terminated")
 }
 
 struct LiveTurn {
+    turn_id: String,
     cancel: CancellationToken,
 }
 
@@ -282,6 +284,8 @@ pub struct UploadedPromptAttachment {
 
 pub struct Supervisor {
     pub interaction: crate::interaction::InteractionState,
+    pub started_at: String,
+    pub started_instant: std::time::Instant,
     pub config: RuntimeConfig,
     pub db: Database,
     pub bus: EventBus,
@@ -323,6 +327,8 @@ impl Supervisor {
             .map(|runtime| (runtime.provider(), runtime))
             .collect();
         let supervisor = Self {
+            started_at: now_rfc3339(),
+            started_instant: std::time::Instant::now(),
             interaction: Default::default(),
             config,
             db,
@@ -361,6 +367,20 @@ impl Supervisor {
                 return Ok(());
             };
             match event.event_type.as_str() {
+                "thread.turn.completed" => {
+                    let Some(turn_id) = event.payload["turnId"].as_str() else {
+                        return Ok(());
+                    };
+                    let status = event.payload["status"].as_str().unwrap_or("recovering");
+                    supervisor.persist_turn_result(
+                        &event.thread_id,
+                        turn_id,
+                        status,
+                        event.payload["error"].as_str(),
+                        &[],
+                        &event.timestamp,
+                    )
+                }
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
                 "thread.context.updated" => supervisor.db.with(|conn| {
                     if let Some(context) = event
@@ -625,6 +645,11 @@ impl Supervisor {
         include_disconnected: bool,
     ) -> Result<usize> {
         let now = now_rfc3339();
+        let turn_status = if only_thread_id.is_some() {
+            "interrupted"
+        } else {
+            "recovering"
+        };
         self.db.with(|conn| {
             let tx = conn.unchecked_transaction()?;
             let thread_ids = {
@@ -633,9 +658,9 @@ impl Supervisor {
                      WHERE (?1 IS NULL OR t.id=?1)
                        AND (?2=1 OR COALESCE(t.is_connected, 1)=1)
                        AND (
-                         t.status='running' OR EXISTS (
+                         t.status IN ('running','recovering') OR EXISTS (
                            SELECT 1 FROM thread_turns tt
-                           WHERE tt.thread_id=t.id AND tt.status='inProgress'
+                           WHERE tt.thread_id=t.id AND tt.status IN ('inProgress','recovering')
                          )
                        )",
                 )?;
@@ -650,17 +675,17 @@ impl Supervisor {
             for thread_id in &thread_ids {
                 tx.execute(
                     "UPDATE thread_turns
-                     SET status='interrupted', error=COALESCE(error, ?1),
-                         completed_at=COALESCE(completed_at, ?2)
-                     WHERE thread_id=?3 AND status='inProgress'",
-                    params![RESTART_INTERRUPTED_ERROR, now, thread_id],
+                     SET status=?4, error=COALESCE(error, ?1),
+                         completed_at=CASE WHEN ?4='interrupted' THEN COALESCE(completed_at, ?2) ELSE NULL END
+                     WHERE thread_id=?3 AND status IN ('inProgress','recovering')",
+                    params![RESTART_INTERRUPTED_ERROR, now, thread_id, turn_status],
                 )?;
                 tx.execute(
                     "UPDATE threads
-                     SET status='interrupted', last_error=?1, updated_at=?2,
-                         last_turn_completed_at=COALESCE(last_turn_completed_at, ?2)
+                     SET status=?4, last_error=?1, updated_at=?2,
+                         last_turn_completed_at=CASE WHEN ?4='interrupted' THEN ?2 ELSE last_turn_completed_at END
                      WHERE id=?3",
-                    params![RESTART_INTERRUPTED_ERROR, now, thread_id],
+                    params![RESTART_INTERRUPTED_ERROR, now, thread_id, turn_status],
                 )?;
             }
             tx.commit()?;
@@ -1566,6 +1591,7 @@ impl Supervisor {
         before_turn_id: Option<&str>,
         summary_only: bool,
     ) -> Result<ThreadDetailDto> {
+        self.observe_execution(id).await?;
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;
         let (mut turns, total) = if summary_only {
@@ -1942,61 +1968,9 @@ impl Supervisor {
         thread_id: &str,
         input: SendThreadPromptInput,
     ) -> Result<ThreadDetailDto> {
-        let thread = self.get_thread(thread_id)?;
-        self.ensure_prompt_allowed(&thread)?;
-        let SendThreadPromptInput {
-            prompt,
-            client_request_id,
-            model,
-            reasoning_effort,
-            collaboration_mode: _,
-            images,
-        } = input;
-        let images: Vec<PromptImage> = images
-            .into_iter()
-            .map(|image| PromptImage {
-                mime_type: image.mime_type,
-                data: image.data,
-            })
-            .collect();
-        if thread.status == "running" {
-            self.enqueue_steer(
-                thread_id,
-                thread.active_turn_id.as_deref().unwrap_or(""),
-                client_request_id.as_deref(),
-                &prompt,
-            )?;
-            return self.thread_action_detail(thread_id).await;
-        }
-        self.run_turn(thread, prompt, model, reasoning_effort, images, None, None)
-            .await?;
-        self.get_thread_detail_view(thread_id, Some(3), true).await
-    }
-
-    fn enqueue_steer(
-        &self,
-        thread_id: &str,
-        turn_id: &str,
-        client_request_id: Option<&str>,
-        prompt: &str,
-    ) -> Result<()> {
-        let id = Uuid::new_v4().to_string();
-        let now = now_rfc3339();
-        self.db.with(|conn| {
-            conn.execute(
-                "INSERT INTO thread_pending_steers(
-                   id, thread_id, turn_id, client_request_id, display_prompt,
-                   submitted_prompt, delivery, created_at, updated_at
-                 ) VALUES (?1,?2,?3,?4,?5,?5,'continuation',?6,?6)",
-                params![id, thread_id, turn_id, client_request_id, prompt, now],
-            )?;
-            Ok(())
-        })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
-            event_type: "thread.updated".into(), thread_id: thread_id.into(), timestamp: now,
-            payload: json!({"reason":"pending_steer_updated", "pendingSteers":self.load_steers(thread_id)?}),
-        });
-        Ok(())
+        self.accept_prompt(thread_id, &input).await?;
+        self.drain_steers(thread_id).await?;
+        self.thread_action_detail(thread_id).await
     }
 
     fn ensure_not_updating(&self) -> Result<()> {
@@ -2046,6 +2020,9 @@ impl Supervisor {
         goal_submission: Option<GoalSubmission>,
     ) -> Result<()> {
         self.ensure_not_updating()?;
+        if self.get_thread(&thread.id)?.status == "recovering" {
+            bail!("conflict: Reconnect to confirm backend state before starting another turn");
+        }
         let provider = thread.provider;
         let _maintenance = self
             .maintenance_gate
@@ -2170,7 +2147,7 @@ impl Supervisor {
                 ],
             )?;
             conn.execute(
-                "UPDATE threads SET status='running', updated_at=?1, last_turn_started_at=?1, title=COALESCE(?2,title) WHERE id=?3",
+                "UPDATE threads SET status='running', last_error=NULL, updated_at=?1, last_turn_started_at=?1, title=COALESCE(?2,title) WHERE id=?3",
                 params![now, title, thread.id],
             )?;
             upsert_legacy_turn_metadata(
@@ -2196,6 +2173,7 @@ impl Supervisor {
         live_turns.insert(
             thread.id.clone(),
             LiveTurn {
+                turn_id: turn_id.clone(),
                 cancel: cancel.clone(),
             },
         );
@@ -2212,7 +2190,7 @@ impl Supervisor {
         } else {
             prompt
         };
-        let bus = self.bus.clone();
+        let bus = self.bus.for_turn(&thread.id, &turn_id);
         let result = runtime
             .start_turn(
                 StartTurnInput {
@@ -2229,13 +2207,18 @@ impl Supervisor {
                     hidden: false,
                     images,
                 },
-                bus,
+                bus.clone(),
                 cancel.clone(),
             )
             .await;
-        self.live.lock().await.remove(&thread.id);
+        bus.close_turn();
+        let mut live = self.live.lock().await;
         let completed_at = now_rfc3339();
         let result_failed = result.is_err();
+        let uncertain = result
+            .as_ref()
+            .err()
+            .is_some_and(|err| err.is::<crate::actor::ExecutionUncertain>());
         match result {
             Ok(items) => {
                 let interrupted = cancel.is_cancelled();
@@ -2260,6 +2243,8 @@ impl Supervisor {
                     &turn_id,
                     if cancel.is_cancelled() {
                         "interrupted"
+                    } else if uncertain {
+                        "recovering"
                     } else {
                         "failed"
                     },
@@ -2273,8 +2258,12 @@ impl Supervisor {
                 )?;
             }
         }
+        live.remove(&thread.id);
+        drop(live);
         let thread_status = if cancel.is_cancelled() {
             "interrupted"
+        } else if uncertain {
+            "recovering"
         } else if result_failed {
             "failed"
         } else {
@@ -2307,7 +2296,7 @@ impl Supervisor {
             let tx = conn.unchecked_transaction()?;
             let conn = &tx;
             conn.execute(
-                "UPDATE thread_turns SET status=?1, error=?2, completed_at=?3 WHERE id=?4",
+                "UPDATE thread_turns SET status=?1, error=?2, completed_at=CASE WHEN ?1='recovering' THEN NULL ELSE ?3 END WHERE id=?4",
                 params![status, error, now, turn_id],
             )?;
             for item in items {
@@ -2372,30 +2361,68 @@ impl Supervisor {
     }
 
     pub(crate) async fn drain_steers(&self, thread_id: &str) -> Result<()> {
-        if self
-            .update_draining
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
+        let lock = {
+            let mut locks = self.steer_locks.lock().await;
+            let key = format!("inbox:{thread_id}");
+            let lock = locks
+                .get(&key)
+                .and_then(std::sync::Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            locks.insert(key, Arc::downgrade(&lock));
+            lock
+        };
+        let Ok(_delivery) = lock.try_lock() else {
             return Ok(());
-        }
-        let next = self.db.with(|conn| {
-            let row: Option<(String, String)> = conn
-                .query_row(
-                    "SELECT id, submitted_prompt FROM thread_pending_steers
-                     WHERE thread_id=?1 AND delivery='continuation'
-                     ORDER BY created_at ASC, rowid ASC LIMIT 1",
-                    params![thread_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            Ok(row)
-        })?;
-        if let Some((id, prompt)) = next {
+        };
+        loop {
+            if self
+                .update_draining
+                .load(std::sync::atomic::Ordering::SeqCst)
+                || self.live.lock().await.contains_key(thread_id)
+            {
+                return Ok(());
+            }
             let thread = self.get_thread(thread_id)?;
-            Box::pin(self.run_turn(thread, prompt, None, None, Vec::new(), Some(&id), None))
-                .await?;
+            if matches!(thread.status.as_str(), "running" | "recovering") {
+                return Ok(());
+            }
+            let next = self.db.with(|conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT id,submitted_prompt,payload_json FROM thread_pending_steers
+                 WHERE thread_id=?1 AND delivery='continuation' ORDER BY created_at,rowid LIMIT 1",
+                        params![thread_id],
+                        |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()?)
+            })?;
+            let Some((id, prompt, payload)) = next else {
+                return Ok(());
+            };
+            let input = payload
+                .map(|raw| serde_json::from_str::<SendThreadPromptInput>(&raw))
+                .transpose()?;
+            let model = input.as_ref().and_then(|i| i.model.clone());
+            let effort = input.as_ref().and_then(|i| i.reasoning_effort.clone());
+            let images = input
+                .map(|i| {
+                    i.images
+                        .into_iter()
+                        .map(|i| PromptImage {
+                            mime_type: i.mime_type,
+                            data: i.data,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Box::pin(self.run_turn(thread, prompt, model, effort, images, Some(&id), None)).await?;
         }
-        Ok(())
     }
 
     fn find_pending_steer(
@@ -2979,6 +3006,8 @@ impl Supervisor {
                 )
                 .await?;
         }
+        self.settle_reconnected_execution(id).await?;
+        self.drain_steers(id).await?;
         self.get_thread_detail_view(id, Some(3), true).await
     }
 

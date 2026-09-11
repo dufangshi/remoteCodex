@@ -117,12 +117,23 @@ async fn updater(state: &Supervisor, action: &str) -> anyhow::Result<Value> {
     Ok(serde_json::from_slice(&result.stdout)?)
 }
 pub async fn supervisor_status(State(state): State<Arc<Supervisor>>) -> Json<Value> {
-    Json(updater(&state, "status").await.unwrap_or_else(|error| json!({"runningVersion":env!("CARGO_PKG_VERSION"),"canUpdate":false,"reason":error.to_string()})))
+    let mut value = updater(&state, "status").await.unwrap_or_else(|error| json!({"runningVersion":env!("CARGO_PKG_VERSION"),"canUpdate":false,"canRestart":false,"reason":error.to_string()}));
+    value["startedAt"] = json!(state.started_at);
+    value["uptimeSeconds"] = json!(state.started_instant.elapsed().as_secs());
+    value["processId"] = json!(std::process::id());
+    Json(value)
 }
+
 pub async fn supervisor_check(State(state): State<Arc<Supervisor>>) -> Response {
     update_response(&state, "check").await
 }
+pub async fn supervisor_restart(State(state): State<Arc<Supervisor>>) -> Response {
+    supervisor_action(state, true).await
+}
 pub async fn supervisor_update(State(state): State<Arc<Supervisor>>) -> Response {
+    supervisor_action(state, false).await
+}
+async fn supervisor_action(state: Arc<Supervisor>, restart: bool) -> Response {
     let Ok(update_lock) = state.update_lock.clone().try_lock_owned() else {
         return (
             StatusCode::CONFLICT,
@@ -132,7 +143,7 @@ pub async fn supervisor_update(State(state): State<Arc<Supervisor>>) -> Response
         )
             .into_response();
     };
-    let mut value = match updater(&state, "check").await {
+    let mut value = match updater(&state, if restart { "status" } else { "check" }).await {
         Ok(value) => value,
         Err(error) => {
             return (
@@ -156,10 +167,13 @@ pub async fn supervisor_update(State(state): State<Arc<Supervisor>>) -> Response
         )
             .into_response();
     }
-    if value["canUpdate"] != true || value["latestVersion"] == value["runningVersion"] {
+    if (restart && value["canRestart"] != true)
+        || (!restart
+            && (value["canUpdate"] != true || value["latestVersion"] == value["runningVersion"]))
+    {
         return Json(value).into_response();
     }
-    value["job"] = json!({"phase":"preparing","targetVersion":value["latestVersion"]});
+    value["job"] = json!({"phase":"preparing","action":if restart {"restart"} else {"update"},"targetVersion":if restart {&value["runningVersion"]} else {&value["latestVersion"]}});
     *state.supervisor_update_status.lock().unwrap() = Some(value.clone());
     let response = value.clone();
     // Own the orchestration independently of the browser/relay HTTP request.
@@ -167,7 +181,7 @@ pub async fn supervisor_update(State(state): State<Arc<Supervisor>>) -> Response
         let _update_lock = update_lock;
         let result = async {
             let guard = state.prepare_update_restart().await?;
-            let launch = updater(&state, "launch").await;
+            let launch = updater(&state, if restart { "restart" } else { "launch" }).await;
             match launch {
                 Ok(launched) => {
                     if launched["canUpdate"] != true {

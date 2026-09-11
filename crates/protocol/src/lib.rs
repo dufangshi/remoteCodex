@@ -384,7 +384,7 @@ pub struct ImportThreadCandidateDto {
     pub history_status: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendThreadPromptInput {
     pub prompt: String,
@@ -400,7 +400,7 @@ pub struct SendThreadPromptInput {
     pub images: Vec<PromptImageDto>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImageDto {
     pub mime_type: String,

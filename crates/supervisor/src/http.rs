@@ -80,6 +80,10 @@ pub fn router(state: AppState) -> Router {
             post(crate::management::supervisor_check),
         )
         .route(
+            "/api/management/supervisor/restart",
+            post(crate::management::supervisor_restart),
+        )
+        .route(
             "/api/management/supervisor/update",
             post(crate::management::supervisor_update),
         )
@@ -1265,32 +1269,8 @@ async fn thread_prompt(
         serde_json::from_slice::<SendThreadPromptInput>(&bytes)
             .map_err(|e| err(StatusCode::BAD_REQUEST, "bad_request", e.to_string()))?
     };
-    let thread = state.get_thread(&id).map_err(map_err)?;
-    state.ensure_prompt_allowed(&thread).map_err(map_err)?;
-    if thread.status == "running" {
-        // A queued prompt is acknowledged only after its durable insert.
-        let detail = state.prompt(&id, input).await.map_err(map_err)?;
-        return Ok(Json(serde_json::to_value(detail.thread).unwrap()));
-    }
-    let background = state.clone();
-    let background_id = id.clone();
-    tokio::spawn(async move {
-        if let Err(err) = background.prompt(&background_id, input).await {
-            tracing::warn!(error = %err, "prompt failed");
-        }
-    });
-    for _ in 0..100 {
-        if let Ok(thread) = state.get_thread(&id) {
-            if matches!(
-                thread.status.as_str(),
-                "running" | "idle" | "interrupted" | "failed"
-            ) && (thread.status != "idle" || thread.last_turn_started_at.is_some())
-            {
-                return Ok(Json(serde_json::to_value(thread).unwrap()));
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    state.accept_prompt(&id, &input).await.map_err(map_err)?;
+    state.dispatch_inbox(id.clone());
     Ok(Json(
         serde_json::to_value(state.get_thread(&id).map_err(map_err)?).unwrap(),
     ))

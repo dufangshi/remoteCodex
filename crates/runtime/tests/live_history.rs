@@ -387,6 +387,7 @@ async fn accepted_steer_survives_queue_cleanup_completion_and_reopen() {
         })
         .unwrap();
     let config = supervisor.config.clone();
+    drop(supervisor);
     let reopened = Supervisor::new(
         config.clone(),
         Database::open(&config.database_url).unwrap(),

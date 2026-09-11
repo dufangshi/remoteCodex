@@ -236,7 +236,7 @@ interface OptimisticTurnState {
   id: string;
   serverTurnId: string | null;
   startedAt: string;
-  status: 'sending' | 'inProgress' | 'completed' | 'interrupted' | 'failed';
+  status: 'sending' | 'inProgress' | 'completed' | 'interrupted' | 'failed' | 'recovering';
   error: string | null;
   prompt: string;
   attachmentPreviews: OptimisticAttachmentPreview[];
@@ -1699,6 +1699,9 @@ export function ThreadDetailPage() {
         );
       }
 
+      if (event.type === 'thread.persistence.failed') {
+        setError(String(event.payload.message ?? 'Unable to save output.'));
+      }
       if (event.type === 'thread.updated' && Array.isArray(event.payload.pendingSteers)) {
         const pendingSteers = event.payload.pendingSteers as ThreadDetailDto['pendingSteers'];
         setDetail(current => current ? {...current, pendingSteers} : current);
@@ -1831,7 +1834,7 @@ export function ThreadDetailPage() {
                         ? {
                             ...turn,
                             status: terminalStatus,
-                            completedAt: event.timestamp,
+                            completedAt: terminalStatus === 'recovering' ? null : event.timestamp,
                             error: terminalError,
                           }
                         : turn,
@@ -2240,7 +2243,7 @@ export function ThreadDetailPage() {
 
     try {
       let currentDetail = detailRef.current;
-      if (currentDetail && !currentDetail.thread.isLoaded) {
+      if (currentDetail && !currentDetail.thread.isLoaded && currentDetail.thread.status !== 'recovering') {
         const resumeSeedThread = {
           ...currentDetail.thread,
           ...(pendingThreadSettingsRef.current ?? {}),
@@ -2627,7 +2630,7 @@ export function ThreadDetailPage() {
     setLiveOutput('');
 
     try {
-      if (detail.thread.isLoaded) {
+      if (detail.thread.isLoaded && detail.thread.status !== 'recovering') {
         const disconnected = await disconnectThread(id);
         setDetail((current) =>
           current
@@ -3197,10 +3200,10 @@ export function ThreadDetailPage() {
   const realtimeConnectionLabel = threadConnectionSummary(threadLoaded, realtimeConnection);
   const sessionConnectionIndicator = (
     <DeviceEncryptionStatus deviceId={relayRouteDeviceId ?? undefined} connection={{
-      loaded: threadLoaded,
+      loaded: threadLoaded && detail?.thread.status !== 'recovering',
       busy: busy || !detail,
       state: realtimeConnection.status,
-      label: realtimeConnectionLabel,
+      label: detail?.thread.status === 'recovering' ? 'Status unconfirmed · Reconnect to verify' : realtimeConnectionLabel,
       onConnect: () => void handleThreadConnectionToggle(),
     }} />
   );
@@ -3585,7 +3588,7 @@ export function ThreadDetailPage() {
       detail={detail}
       status={status}
       loading={loading}
-      error={loading ? null : error}
+      error={loading ? null : error ?? detail?.thread.lastError ?? null}
       plugins={plugins}
       adapter={surfaceAdapter}
       metaContent={metaContent}

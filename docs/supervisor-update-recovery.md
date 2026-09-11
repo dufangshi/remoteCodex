@@ -3,8 +3,11 @@
 When a Supervisor is already running, prefer its device-scoped management API (the same API as Settings → Supervisor → Check updates / Update). See [AGENTS.md](../AGENTS.md). Do not replace its npm package and kill its process independently when this API is available.
 
 - `POST /api/management/supervisor/check`: installed/running/latest versions and update availability.
+- `POST /api/management/supervisor/restart`: restart the currently running version without downloading or installing a package, then continue only tasks paused by this restart.
 - `POST /api/management/supervisor/update`: check availability, return `202` with a preparing job, then continue independently of the HTTP connection.
-- `GET /api/management/supervisor`: progress, resulting version, or failure details.
+- `GET /api/management/supervisor`: progress, resulting version, failure details, process identity and uptime.
+
+See [execution reliability](execution-reliability.md) for owner-only access, state authority, uncertain execution and durable input.
 
 Through a relay, use the selected device's `/relay/devices/<deviceId>` prefix and existing authenticated owner access. These are device-specific operations. Local mode remains bound to the configured local interface. Update errors and progress are available after a browser refresh; keep polling through the brief restart disconnect.
 
