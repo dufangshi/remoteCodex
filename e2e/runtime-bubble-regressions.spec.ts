@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { api } from './helpers';
 
 import type { AgentBackendIdDto } from '../packages/shared/src/index';
 
@@ -1507,6 +1508,44 @@ test('file links reveal only the requested nested file and copy workspace-relati
   expect(await page.evaluate(()=>(window as any).__copiedPath)).toBe(`./${target}`);
   await expect(page.getByRole('heading',{name:'WRONG DOCUMENT'})).toHaveCount(0);
   await page.screenshot({path:testInfo.outputPath('correct-workspace-link.png')});
+});
+
+test('relative file links resolve dot-prefixed API trees and clear failed focus when selecting an image', async ({page}, testInfo) => {
+  const {mkdir, writeFile} = await import('node:fs/promises');
+  const root = testInfo.outputPath('workspace');
+  await mkdir(`${root}/docs`, {recursive:true});
+  await writeFile(`${root}/AGENTS.md`, '# AGENT NOTES VERIFIED');
+  await writeFile(`${root}/docs/policy.md`, '# POLICY VERIFIED');
+  await writeFile(`${root}/image.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=', 'base64'));
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const workspace = await api<{id:string}>(base, '/api/workspaces', {method:'POST', body:JSON.stringify({label:'Relative path regression',absPath:root})});
+  const actualTree = await api<{path:string;children:{path:string}[]}>(base, `/api/workspaces/${workspace.id}/files/tree`);
+  expect(actualTree.path).toBe('.');
+  expect(actualTree.children.map(node => node.path)).toContain('./AGENTS.md');
+  await installFakeWebSocket(page);
+  await installApiRoutes(page, () => detail('codex', {thread:{status:'idle',activeTurnId:null},turns:[{id:'turn-1',status:'completed',startedAt:now,items:[
+    {id:'answer',kind:'agentMessage',text:'[Agent notes](<./AGENTS.md >)\n\n[Documentation](./docs/policy.md)\n\n[Missing](./docs/missing.md)'},
+  ]}]}));
+  const reads: string[] = [];
+  await page.route('**/api/workspaces/workspace-1/files/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/preview')) reads.push(url.searchParams.get('path') ?? '');
+    // Only the conversation is synthetic. Tree, previews and image bytes come
+    // from the isolated real Rust supervisor and files created above.
+    await route.fulfill({response:await route.fetch({url:`${base}${url.pathname.replace('/workspace-1/', `/${workspace.id}/`)}${url.search}`})});
+  });
+  await page.goto('/threads/thread-1');
+  await page.getByRole('link',{name:'Agent notes',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'AGENT NOTES VERIFIED'})).toBeVisible();
+  await expect(page.getByRole('treeitem').filter({hasText:'AGENTS.md'})).toHaveAttribute('aria-selected','true');
+  await page.getByRole('link',{name:'Documentation',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'POLICY VERIFIED'})).toBeVisible();
+  expect(reads).toEqual(['AGENTS.md','docs/policy.md']);
+  await page.getByRole('link',{name:'Missing',exact:true}).click();
+  await expect(page.getByText('File not found: ./docs/missing.md', {exact:true})).toBeVisible();
+  await page.getByRole('treeitem').filter({hasText:'image.png'}).click();
+  await expect(page.getByText('File not found: ./docs/missing.md', {exact:true})).toHaveCount(0);
+  await expect.poll(() => page.locator('img[src*="files/raw"]').first().evaluate((image:HTMLImageElement) => image.naturalWidth)).toBe(1);
 });
 
 test('running operation batches stay after earlier replies and show a live timestamp range', async ({page},testInfo) => {
