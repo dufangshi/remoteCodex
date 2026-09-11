@@ -184,6 +184,18 @@ impl Supervisor {
             return Ok(());
         }
         self.reconcile_stale_turns(Some(id), true)?;
+        // The old turn remains interrupted, but the current connection has now
+        // been verified. Do not keep asking the user to reconnect successfully.
+        self.db.with(|conn| {
+            conn.execute("UPDATE threads SET last_error=NULL WHERE id=?1", [id])?;
+            Ok(())
+        })?;
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(),
+            thread_id: id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({"status":"interrupted","lastError":null}),
+        });
         Ok(())
     }
 }

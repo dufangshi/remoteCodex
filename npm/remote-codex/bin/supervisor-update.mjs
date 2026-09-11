@@ -405,6 +405,10 @@ export function launchWorker(
     );
 }
 
+export function needsUpdate(version, runningVersion, installedVersion) {
+  return version !== runningVersion || version !== installedVersion;
+}
+
 export function readJob(statusFile, lock, now = Date.now(), isAlive = alive) {
   const job = read(statusFile);
   if (
@@ -461,7 +465,7 @@ async function main(action) {
   const version = action === 'restart' ? runningVersion : await latest();
   if (action === 'check') return { ...base, latestVersion: version };
   if (!['launch', 'restart'].includes(action)) throw Error('Unknown update action');
-  if (action !== 'restart' && version === runningVersion) return { ...base, latestVersion: version };
+  if (action !== 'restart' && !needsUpdate(version, runningVersion, install.installedVersion)) return { ...base, latestVersion: version };
   fs.mkdirSync(lock, { mode: 0o700 }); // atomic cross-request lock
   try {
     const directory = fs.mkdtempSync(path.join(root, 'supervisor-'));
