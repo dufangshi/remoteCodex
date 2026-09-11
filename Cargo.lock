@@ -1929,7 +1929,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-codex"
-version = "0.12.29"
+version = "0.12.30"
 dependencies = [
  "anyhow",
  "clap",
@@ -1941,11 +1941,12 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
 name = "remote-codex-protocol"
-version = "0.12.29"
+version = "0.12.30"
 dependencies = [
  "chrono",
  "serde",
@@ -1955,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-relay"
-version = "0.12.29"
+version = "0.12.30"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1988,13 +1989,14 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-runtime"
-version = "0.12.29"
+version = "0.12.30"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "hex",
  "hostname",
  "libc",
  "remote-codex-protocol",
@@ -2002,6 +2004,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "shell-words",
  "tempfile",
  "thiserror 2.0.20",
@@ -2018,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-supervisor"
-version = "0.12.29"
+version = "0.12.30"
 dependencies = [
  "aes-gcm",
  "anyhow",

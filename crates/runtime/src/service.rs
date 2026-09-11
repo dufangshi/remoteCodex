@@ -281,6 +281,7 @@ pub struct UploadedPromptAttachment {
 }
 
 pub struct Supervisor {
+    pub interaction: crate::interaction::InteractionState,
     pub config: RuntimeConfig,
     pub db: Database,
     pub bus: EventBus,
@@ -322,6 +323,7 @@ impl Supervisor {
             .map(|runtime| (runtime.provider(), runtime))
             .collect();
         let supervisor = Self {
+            interaction: Default::default(),
             config,
             db,
             bus: EventBus::new(),
@@ -1027,17 +1029,20 @@ impl Supervisor {
             .try_read()
             .map_err(|_| anyhow!("conflict: Harness maintenance in progress"))?;
         let runtime = self.runtime(provider)?;
-        let started = runtime
-            .start_session(StartSessionInput {
-                cwd: workspace.abs_path.clone(),
-                agent_id: input.agent_id.clone(),
-                model: input.model.clone(),
-                reasoning_effort: input.reasoning_effort.clone(),
-                approval_mode: approval_mode.into(),
-                sandbox_mode: Some(sandbox_mode.into()),
-            })
-            .await?;
         let id = Uuid::new_v4().to_string();
+        let started = self
+            .with_cli_context(
+                &id,
+                runtime.start_session(StartSessionInput {
+                    cwd: workspace.abs_path.clone(),
+                    agent_id: input.agent_id.clone(),
+                    model: input.model.clone(),
+                    reasoning_effort: input.reasoning_effort.clone(),
+                    approval_mode: approval_mode.into(),
+                    sandbox_mode: Some(sandbox_mode.into()),
+                }),
+            )
+            .await?;
         let now = now_rfc3339();
         let title = input
             .title
@@ -2014,6 +2019,32 @@ impl Supervisor {
         pending_steer_id: Option<&str>,
         goal_submission: Option<GoalSubmission>,
     ) -> Result<()> {
+        let id = thread.id.clone();
+        self.with_cli_context(
+            &id,
+            self.run_turn_inner(
+                thread,
+                prompt,
+                model,
+                effort,
+                images,
+                pending_steer_id,
+                goal_submission,
+            ),
+        )
+        .await
+    }
+
+    async fn run_turn_inner(
+        &self,
+        thread: ThreadDto,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        images: Vec<PromptImage>,
+        pending_steer_id: Option<&str>,
+        goal_submission: Option<GoalSubmission>,
+    ) -> Result<()> {
         self.ensure_not_updating()?;
         let provider = thread.provider;
         let _maintenance = self
@@ -2040,13 +2071,15 @@ impl Supervisor {
                 .get_workspace(&thread.workspace_id)
                 .ok()
                 .map(|ws| ws.abs_path);
-            runtime
-                .resume_session(
+            self.with_cli_context(
+                &thread.id,
+                runtime.resume_session(
                     &session_id,
                     cwd.as_deref(),
                     thread_session_settings(&thread),
-                )
-                .await?;
+                ),
+            )
+            .await?;
             runtime
                 .apply_session_settings(
                     session_id.as_str(),
@@ -2084,6 +2117,7 @@ impl Supervisor {
             let tx = conn.unchecked_transaction()?;
             let conn = &tx;
             if let Some(id) = pending_steer_id {
+                crate::interaction::bind_notification(conn, id, &turn_id)?;
                 if conn.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2", params![id, thread.id])? != 1 {
                     bail!("conflict: Queued prompt was already consumed or cancelled");
                 }
@@ -2270,6 +2304,8 @@ impl Supervisor {
         now: &str,
     ) -> Result<()> {
         self.db.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let conn = &tx;
             conn.execute(
                 "UPDATE thread_turns SET status=?1, error=?2, completed_at=?3 WHERE id=?4",
                 params![status, error, now, turn_id],
@@ -2322,6 +2358,8 @@ impl Supervisor {
                  WHERE thread_id=?1 AND turn_id=?2 AND delivery='steer'",
                 params![thread_id, turn_id],
             )?;
+            crate::interaction::finish_notification(conn, thread_id, turn_id, status, now)?;
+            tx.commit()?;
             Ok(())
         })?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -2333,7 +2371,7 @@ impl Supervisor {
         Ok(())
     }
 
-    async fn drain_steers(&self, thread_id: &str) -> Result<()> {
+    pub(crate) async fn drain_steers(&self, thread_id: &str) -> Result<()> {
         if self
             .update_draining
             .load(std::sync::atomic::Ordering::SeqCst)
@@ -2345,7 +2383,7 @@ impl Supervisor {
                 .query_row(
                     "SELECT id, submitted_prompt FROM thread_pending_steers
                      WHERE thread_id=?1 AND delivery='continuation'
-                     ORDER BY created_at ASC LIMIT 1",
+                     ORDER BY created_at ASC, rowid ASC LIMIT 1",
                     params![thread_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -2392,10 +2430,19 @@ impl Supervisor {
     ) -> Result<ThreadDetailDto> {
         self.get_thread(thread_id)?;
         let removed = self.db.with(|conn| {
-            Ok(conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            let removed = tx.execute(
                 "DELETE FROM thread_pending_steers WHERE thread_id=?1 AND id=?2",
                 params![thread_id, pending_steer_id],
-            )?)
+            )?;
+            if removed > 0 {
+                tx.execute(
+                    "DELETE FROM kv WHERE key=?1",
+                    [format!("cli:notify:pending:{pending_steer_id}")],
+                )?;
+            }
+            tx.commit()?;
+            Ok(removed)
         })?;
         if removed == 0 {
             bail!("Pending queued prompt was not found.");
@@ -2492,6 +2539,8 @@ impl Supervisor {
             extra: Default::default(),
         };
         self.db.with(|conn| {
+            let tx=conn.unchecked_transaction()?;
+            let conn=&tx;
             conn.execute(
                 "INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7)
@@ -2503,6 +2552,8 @@ impl Supervisor {
                 "UPDATE thread_pending_steers SET delivery='steer',turn_id=?1,updated_at=?2 WHERE thread_id=?3 AND id=?4",
                 params![active_turn_id, now, thread_id, pending.id],
             )?;
+            crate::interaction::bind_notification(conn, &pending.id, &active_turn_id)?;
+            tx.commit()?;
             Ok(())
         })?;
         self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
@@ -2733,13 +2784,15 @@ impl Supervisor {
             .provider_session_id
             .as_deref()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
-        runtime
-            .resume_session(
+        self.with_cli_context(
+            &detail.thread.id,
+            runtime.resume_session(
                 session,
                 Some(&detail.workspace.abs_path),
                 thread_session_settings(&detail.thread),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
             bail!("this harness does not support session/fork");
@@ -2772,13 +2825,15 @@ impl Supervisor {
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         let runtime = self.runtime(detail.thread.provider)?;
-        runtime
-            .resume_session(
+        self.with_cli_context(
+            &detail.thread.id,
+            runtime.resume_session(
                 &session,
                 Some(&detail.workspace.abs_path),
                 thread_session_settings(&detail.thread),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         let caps = runtime.negotiated_caps(detail.thread.agent_id.as_deref());
         if !caps.branching.fork {
             bail!("this harness does not support session/fork");
@@ -2905,9 +2960,11 @@ impl Supervisor {
             .map(|ws| ws.abs_path);
         if let Some(session) = &thread.provider_session_id {
             let runtime = self.runtime(thread.provider)?;
-            runtime
-                .resume_session(session, cwd.as_deref(), thread_session_settings(&thread))
-                .await?;
+            self.with_cli_context(
+                &thread.id,
+                runtime.resume_session(session, cwd.as_deref(), thread_session_settings(&thread)),
+            )
+            .await?;
             runtime
                 .apply_session_settings(
                     session,
@@ -2998,13 +3055,15 @@ impl Supervisor {
         }
         if !runtime.session_loaded(session) {
             let workspace = self.get_workspace(&thread.workspace_id)?;
-            runtime
-                .resume_session(
+            self.with_cli_context(
+                &thread.id,
+                runtime.resume_session(
                     session,
                     Some(&workspace.abs_path),
                     thread_session_settings(&thread),
-                )
-                .await?;
+                ),
+            )
+            .await?;
         }
         let argument = objective.as_deref().unwrap_or("resume").trim();
         let Some(wire_prompt) = runtime.goal_prompt(session, argument).await? else {
@@ -3208,13 +3267,15 @@ impl Supervisor {
             return runtime.capabilities(thread.agent_id.as_deref()).await;
         };
         let workspace = self.get_workspace(&thread.workspace_id)?;
-        runtime
-            .resume_session(
+        self.with_cli_context(
+            &thread.id,
+            runtime.resume_session(
                 session,
                 Some(&workspace.abs_path),
                 thread_session_settings(&thread),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         runtime
             .session_capabilities(thread.agent_id.as_deref(), session)
             .await

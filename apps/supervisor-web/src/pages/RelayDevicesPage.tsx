@@ -2102,7 +2102,7 @@ function DeviceRow({
       </div>
       <div className="min-w-0 text-xs text-[var(--theme-fg-muted)]">
         <p>{activityText}</p>
-        <DeviceEncryptionStatus deviceId={device.id} />
+        <DeviceEncryptionStatus deviceId={device.id} online={device.connected} />
 
         {copiedSetup ? (
           <p

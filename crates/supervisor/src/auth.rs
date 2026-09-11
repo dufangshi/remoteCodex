@@ -73,6 +73,32 @@ pub async fn require_auth(
     request: Request,
     next: Next,
 ) -> Response {
+    if request.uri().path() == "/api/cli" {
+        let valid = request.extensions().get::<TrustedRelayForward>().is_none()
+            && state
+                .interaction
+                .context
+                .read()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|context| {
+                    bearer_token(request.headers()).is_some_and(|token| {
+                        constant_time_equal(token.as_bytes(), context.token.as_bytes())
+                    })
+                });
+        return if valid {
+            next.run(request).await
+        } else {
+            (
+                axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiError::new(
+                    "unauthorized",
+                    "Local CLI credentials are required.",
+                )),
+            )
+                .into_response()
+        };
+    }
     if !state.config.auth_required || is_public_path(request.uri().path()) {
         return next.run(request).await;
     }

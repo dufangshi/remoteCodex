@@ -67,6 +67,8 @@ async fn spawn_supervisor_seeded(
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    let cli = state.configure_cli(format!("http://127.0.0.1:{port}"));
+    std::fs::write(dir.path().join("cli-token"), cli.token).unwrap();
     tokio::spawn(async move {
         axum::serve(listener, remote_codex_supervisor::router(state))
             .await
@@ -1674,4 +1676,78 @@ async fn linked_files_preview_external_bytes_without_relaxing_workspace_paths() 
             .status(),
         401
     );
+}
+
+#[tokio::test]
+async fn local_cli_requires_credentials_and_exposes_existing_threads() {
+    let (dir, port, root) = spawn_supervisor(vec![Provider::Codex, Provider::Acp]).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let denied = client
+        .post(format!("{base}/api/cli"))
+        .json(&json!({"operation":"list"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let token = std::fs::read_to_string(dir.path().join("cli-token")).unwrap();
+    let path = root.join("cli-project");
+    std::fs::create_dir_all(&path).unwrap();
+    let ws: Value = client
+        .post(format!("{base}/api/workspaces"))
+        .json(&json!({"absPath":path,"label":"cli-project"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let created:Value=client.post(format!("{base}/api/cli")).bearer_auth(&token).json(&json!({"operation":"create","workspaceId":ws["id"],"provider":"acp","agentId":"grok","model":"ios-e2e-stream","approvalMode":"yolo"})).send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+    let id = created["threadId"].as_str().unwrap();
+    let receipt: Value = client
+        .post(format!("{base}/api/cli"))
+        .bearer_auth(&token)
+        .json(&json!({"operation":"send","threadId":id,"text":"hello"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(receipt["delivery"], "queued");
+    assert!(receipt["pendingSteerId"].is_string());
+    for _ in 0..80 {
+        let status: Value = client
+            .post(format!("{base}/api/cli"))
+            .bearer_auth(&token)
+            .json(&json!({"operation":"status","threadId":id}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(status.get("turns").is_none());
+        if status["status"] == "idle" && status["queuedCount"] == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let transcript: Value = client
+        .post(format!("{base}/api/cli"))
+        .bearer_auth(&token)
+        .json(&json!({"operation":"transcript","threadId":id}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(transcript["turns"][0]["items"][1]["text"], "hello");
 }
