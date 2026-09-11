@@ -9,15 +9,18 @@ import {
 } from 'lucide-react';
 import {
   getTransportStatus,
+  probeDeviceEncryption,
   trustDeviceIdentity,
 } from '../lib/relayTransport';
 import { type TransportStatus } from '../lib/relayTransportCrypto';
 import { ConfirmDialog } from './ConfirmDialog';
 export function DeviceEncryptionStatus({
   deviceId,
+  online,
   connection,
 }: {
   deviceId?: string | undefined;
+  online?: boolean;
   connection?: {
     loaded: boolean;
     busy: boolean;
@@ -41,7 +44,10 @@ export function DeviceEncryptionStatus({
     window.addEventListener('remote-codex-transport', update);
     return () => window.removeEventListener('remote-codex-transport', update);
   }, [deviceId]);
-  if (!status && !connection) return null;
+  useEffect(() => {
+    if (deviceId && online) void probeDeviceEncryption(deviceId);
+  }, [deviceId, online]);
+  if (!deviceId && !connection) return null;
   const encrypted = status?.state === 'encrypted',
     changed = status?.state === 'identity-changed';
   const label = !deviceId ? 'Local device connection' : encrypted

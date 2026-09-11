@@ -12,6 +12,33 @@ const statuses = new Map<string, TransportStatus>();
 export function getTransportStatus(deviceId: string) {
   return statuses.get(deviceId);
 }
+const probes = new Map<string, Promise<void>>();
+// Verify a small encrypted response for every online device on the portal.
+// Visiting a thread must not be a prerequisite for its device's lock indicator.
+export function probeDeviceEncryption(deviceId: string): Promise<void> {
+  const pending = probes.get(deviceId);
+  if (pending) return pending;
+  const task = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const { response } = await exchange(new Request(
+        new URL(`/relay/devices/${encodeURIComponent(deviceId)}/api/version`, window.location.href),
+        { credentials: 'same-origin', signal: controller.signal },
+      ));
+      if (!response.ok) throw new Error('Device encryption check failed');
+    } catch {
+      // report() preserves identity-change warnings, including those emitted
+      // by the handshake. Unreachable devices must never be called plaintext.
+      report({ deviceId, state: 'error' });
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+  probes.set(deviceId, task);
+  void task.finally(() => probes.delete(deviceId));
+  return task;
+}
 function report(status: TransportStatus) {
   if (
     statuses.get(status.deviceId)?.state === 'identity-changed' &&

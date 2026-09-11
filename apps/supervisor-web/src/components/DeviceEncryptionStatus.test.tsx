@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceEncryptionStatus } from './DeviceEncryptionStatus';
+import { probeDeviceEncryption } from '../lib/relayTransport';
 
 vi.mock('../lib/relayTransport', () => ({
   getTransportStatus: () => undefined,
+  probeDeviceEncryption: vi.fn().mockResolvedValue(undefined),
   trustDeviceIdentity: vi.fn(),
 }));
 
@@ -16,6 +18,18 @@ function report(state: string, fingerprint?: string) {
 }
 
 describe('combined device connection indicator', () => {
+  it('checks each online device without needing a previous thread visit', () => {
+    vi.mocked(probeDeviceEncryption).mockClear();
+    const { rerender } = render(<>
+      <DeviceEncryptionStatus deviceId="mac" online />
+      <DeviceEncryptionStatus deviceId="wsl" online />
+      <DeviceEncryptionStatus deviceId="sleeping" online={false} />
+    </>);
+    expect(screen.getAllByRole('button', { name: 'Device encryption not verified' })).toHaveLength(3);
+    expect(vi.mocked(probeDeviceEncryption).mock.calls).toEqual([['mac'], ['wsl']]);
+    rerender(<DeviceEncryptionStatus deviceId="sleeping" online />);
+    expect(probeDeviceEncryption).toHaveBeenLastCalledWith('sleeping');
+  });
   it('shows encrypted identity details and warns about plaintext transport', () => {
     render(<DeviceEncryptionStatus deviceId="device-1" connection={{
       loaded: true, busy: false, state: 'connected', label: 'Connected', onConnect: vi.fn(),
