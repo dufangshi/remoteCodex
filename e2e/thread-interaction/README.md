@@ -47,6 +47,6 @@ The verifier is read-only and prints no credentials or full history. Keep live s
 python3 /src/e2e/thread-interaction/inbox.py
 ```
 
-The candidate native binary defaults to `/build/debug/remote-codex` (`E2E_BINARY` overrides it); `/src` must contain the candidate launcher and `/test-state` must be a disposable writable directory. The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail without a turn, explicit acknowledgement, idempotent sends, initial-task execution, passive and queued completion notifications, adoption of a busy peer's queue, steering within the same active turn, and real launcher subcommand help. No model credentials or real model calls are used. It writes `/test-state/result.json`.
+The candidate native binary defaults to `/build/debug/remote-codex` (`E2E_BINARY` overrides it); `/src` must contain the candidate launcher and `/test-state` must be a disposable writable directory. The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail without a turn, explicit acknowledgement, idempotent sends, initial-task execution, passive and queued completion notifications, steering within the same active turn, and real launcher subcommand help. No model credentials or real model calls are used. It writes `/test-state/result.json`.
 
 Earlier real-model scenarios above describe 0.12.30 defaults. When repeating a task-dispatch scenario on 0.12.32, use `--delivery queue` and opt into waking callbacks with `--notify-delivery queue`; ordinary replies now default to the inbox.

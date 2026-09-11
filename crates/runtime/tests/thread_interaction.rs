@@ -446,7 +446,7 @@ async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
 }
 
 #[tokio::test]
-async fn inbox_paginates_and_can_adopt_only_unconsumed_peer_queue() {
+async fn inbox_paginates_unread_messages() {
     let (_dir, state) = setup();
     let a = thread(&state, Provider::Codex).await;
     let b = thread(&state, Provider::Acp).await;
@@ -466,19 +466,6 @@ async fn inbox_paginates_and_can_adopt_only_unconsumed_peer_queue() {
         .unwrap()
         .iter()
         .all(|m| m["id"] != second["messages"][0]["id"]));
-    state
-        .send_to_thread(&b, send(&a, "queued peer", true, "queued-peer"))
-        .unwrap();
-    let mut user = send(&a, "ordinary user prompt", false, "user");
-    user.from_thread_id = None;
-    state.send_to_thread(&b, user).unwrap();
-    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 1);
-    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 0);
-    assert_eq!(
-        state.interaction_status(&b).await.unwrap()["queuedCount"],
-        1
-    );
-    assert_eq!(state.inbox_unread_count(&b).unwrap(), 4);
 }
 
 #[tokio::test]
@@ -569,5 +556,4 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
         state.interaction_status(&b).await.unwrap()["queuedCount"],
         1
     );
-    assert_eq!(state.inbox_adopt_queued(&b).unwrap()["movedCount"], 1);
 }

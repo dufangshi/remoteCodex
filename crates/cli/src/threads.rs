@@ -256,8 +256,6 @@ pub enum InboxCommand {
         #[arg(required=true,num_args=1..)]
         ids: Vec<String>,
     },
-    /// Explicitly move unconsumed peer prompts to the inbox, cancelling their completion subscriptions.
-    AdoptQueued,
 }
 impl Client {
     pub async fn inbox(&self, args: Inbox) -> Result<Value> {
@@ -278,7 +276,6 @@ impl Client {
                 json!({"operation":"inboxRead","messageId":id,"textOffset":text_offset})
             }
             InboxCommand::Ack { ids } => json!({"operation":"inboxAck","messageIds":ids}),
-            InboxCommand::AdoptQueued => json!({"operation":"inboxAdoptQueued"}),
         };
         input["threadId"] = json!(thread);
         self.request(input).await

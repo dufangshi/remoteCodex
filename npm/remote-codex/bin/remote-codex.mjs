@@ -878,7 +878,7 @@ Usage: remote-codex <command>
 
 Commands:
   thread <command>              Create peers, send inbox/queue/steer messages, inspect status
-  inbox [command]               List, read, acknowledge, or adopt queued peer messages
+  inbox [command]               List, read, and acknowledge peer messages
   transcript <thread-id>        Read conversation history progressively
   skill                         Print the bundled thread-interaction guide
   start                         Start the managed local web app and supervisor

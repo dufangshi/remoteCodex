@@ -46,7 +46,6 @@ pub(crate) async fn command(
             "inbox" => state.inbox_list(id, &input),
             "inboxRead" => state.inbox_read(id, &input),
             "inboxAck" => state.inbox_ack(id, &input),
-            "inboxAdoptQueued" => state.inbox_adopt_queued(id),
             "transcript" => state.transcript(
                 id,
                 &serde_json::from_value::<TranscriptQuery>(input.clone())?,

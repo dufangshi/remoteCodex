@@ -48,13 +48,10 @@ assert c in cli('inbox','read',notice,caller=a)['text']
 cli('thread','send',b,'--delivery','queue','--text','Finish a short task','--notify-on-complete','--notify-delivery','queue',caller=a)
 until(lambda:len(cli('transcript',a)['turns'])>0)
 until(lambda:cli('thread','status',a)['status']=='idle')
-# Use a slow fake turn to ensure queue migration and steering happen while busy.
+# Use a slow fake turn to exercise steering while busy.
 cli('thread','send',a,'--delivery','queue','--text','long task '+('x'*200),caller=b)
 until(lambda:cli('thread','status',a)['status']=='running')
 turn=cli('thread','status',a)['activeTurnId']
-queued=cli('thread','send',a,'--delivery','queue','--text','Pending peer follow-up',caller=b)
-assert cli('inbox','adopt-queued',caller=a)['movedCount']==1
-assert cli('inbox','read',queued['messageId'],caller=a)['text'].endswith('Pending peer follow-up')
 steer=cli('thread','send',a,'--delivery','steer','--text','Immediate correction',caller=b)
 assert steer['delivery']=='steered',steer
 assert cli('thread','status',a)['activeTurnId']==turn
@@ -65,6 +62,6 @@ env=dict(os.environ,REMOTE_CODEX_NATIVE_BINARY=binary)
 for args,expected in [(['thread','send','--help'],'--delivery'),(['inbox','read','--help'],'--text-offset'),(['transcript','--help'],'--before-turn')]:
     help_text=subprocess.check_output(['node','/src/npm/remote-codex/bin/remote-codex.mjs',*args],env=env,text=True)
     assert expected in help_text
-result={'passed':True,'sender':a,'recipient':b,'createdTask':c,'scenarios':['passive mail and ack','idempotent send','create task','inbox completion','queued wakeup','queue adoption','active steer','launcher subcommand help']}
+result={'passed':True,'sender':a,'recipient':b,'createdTask':c,'scenarios':['passive mail and ack','idempotent send','create task','inbox completion','queued wakeup','active steer','launcher subcommand help']}
 pathlib.Path('/test-state/result.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))

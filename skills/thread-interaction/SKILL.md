@@ -43,7 +43,7 @@ remote-codex thread send PEER_ID --delivery steer --text 'Pause publication: use
 
 Do not use queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Mail is not automatically pushed into an active model's context: the receiver must check its inbox. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
 
-Use queue to wake an idle peer or delegate a task without relying on inbox polling. Use steer only when the current task needs the input promptly. A provider without steering rejects the request; it is not silently downgraded to queue. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement, or move the held message to the inbox. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
+Use queue to wake an idle peer or delegate a task without relying on inbox polling. Use steer only when the current task needs the input promptly. A provider without steering rejects the request; it is not silently downgraded to queue. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
 
 ## Read and acknowledge your inbox
 
@@ -110,17 +110,7 @@ remote-codex thread send PEER_ID --delivery queue --text-file /tmp/task.txt \
 
 An idle caller starts a new turn; a busy caller receives queued input. This choice deliberately retains a queue and can accumulate if overused. Prefer passive notifications when you are already doing independent work and can check the inbox. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit peer replies and automatic notifications together can intentionally produce two messages.
 
-## Reconcile an old backlog
-
-Before 0.12.32, CLI sends and completion callbacks defaulted to queue. Existing entries and already-created subscriptions preserve their old behavior after upgrade; nothing is silently deleted or reinterpreted.
-
-```bash
-remote-codex thread status THREAD_ID
-remote-codex inbox adopt-queued --thread THREAD_ID
-remote-codex inbox list --thread THREAD_ID
-```
-
-`adopt-queued` explicitly moves unconsumed peer prompts, completion notices, and held CLI steering requests to passive mail. Ordinary user prompts, already-steered messages, and update/restart markers are excluded. Moved task messages lose their pending completion subscriptions because they no longer promise an execution turn. A message already consumed before the transaction is not moved. This does not cancel an active turn. Read and decide what still needs work; dispatch a new explicit task only when appropriate.
+Existing queued input and pre-upgrade completion subscriptions retain their original delivery behavior; changing delivery defaults does not cancel queued work.
 
 ## Retries and progressive transcript reads
 
