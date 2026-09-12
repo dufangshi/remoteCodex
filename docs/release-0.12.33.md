@@ -16,3 +16,11 @@
 - Rust formatting, diff checks and skill structural validation passed. Main's included recovery/updater/component checks passed during integration; the release workflow runs its workspace gate and builds all four supported native platforms.
 
 No active host Supervisor restart is part of release verification. Release and public Relay deployment use the same pinned shared UI SHA.
+
+## Publication
+
+[PR #20](https://github.com/dufangshi/remoteCodex/pull/20) merged as `994095300315d145357416067f35c3bd86fe4c95`. [Runtime/npm release](https://github.com/dufangshi/remoteCodex/actions/runs/34661487436) succeeded on attempt 2, and [public Relay deployment](https://github.com/dufangshi/remoteCodex/actions/runs/34661488729) succeeded on the same runtime commit and pinned UI. npm latest is 0.12.33; [GitHub v0.12.33](https://github.com/dufangshi/remoteCodex/releases/tag/v0.12.33) contains four native assets plus SHA256SUMS.
+
+The registry launcher tarball matches the original CI tarball byte-for-byte and its registry SHA-512. Its four-platform native manifest matches every GitHub checksum entry. The downloaded macOS native executable reports 0.12.33; its embedded skill matches the source (the CLI adds one terminal newline). The actual packaged launcher exposes direct and notification flags in thread send help, and no longer exposes adopt-queued in inbox help. The two relevant upstream UI status-label regressions also passed locally. The isolated Docker Supervisor was stopped; the active host Supervisor was not restarted.
+
+Timing (UTC, 2026-09-12): final candidate committed before 00:22; release dispatched at 00:23:49. Web took 39 seconds, Rust gate 1m27s, and the slowest parallel native build (Windows) 4m22s. Packaging took 20 seconds. Relay deployment completed at 00:26:03; GitHub assets completed at 00:28:55. npm accepted the launcher at 00:29:07 but reported it was still processing. The visibility timeout at 00:30:14 was incorrectly reported by the existing script as an integrity mismatch. Once registry visibility and original artifact integrity were confirmed, only the failed npm job was rerun; it completed at 00:33:12 without rebuilding or overwriting assets. Final downloaded-artifact checks completed by 00:33:45.
