@@ -2,22 +2,23 @@ import { useEffect } from 'react';
 import type { ThreadDto } from '@remote-codex/shared';
 
 export function tabState(status: string, completed: number, seen: number) {
-  if (status === 'running')
-    return { label: 'Working', color: '#e9ab3c', symbol: '◌' };
-  if (status === 'recovering')
-    return { label: 'Checking status', color: '#e9ab3c', symbol: '?' };
-  if (completed > seen)
-    return {
-      label: status === 'failed' ? 'Failed · Unread' : 'Unread',
-      color: '#58a6ff',
-      symbol: '●',
-    };
-  return {
-    label: status === 'failed' ? 'Failed · Read' : 'Idle',
-    color: '#8c959f',
-    symbol: '✓',
-  };
+  if (status === 'running') return 'working';
+  if (status === 'recovering') return 'recovering';
+  if (completed > seen) return 'unread';
+  return status === 'failed' ? 'failed' : 'idle';
 }
+
+const iconShapes = {
+  working:
+    '<path d="M25 16a9 9 0 1 1-9-9" fill="none" stroke="#e9ab3c" stroke-width="4" stroke-linecap="round"/>',
+  unread: '<circle cx="16" cy="16" r="9" fill="#f85149"/>',
+  idle: '<path d="m8 16 5 5 11-11" fill="none" stroke="#a6b2bd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
+  failed:
+    '<path d="m10 10 12 12m0-12L10 22" stroke="#f85149" stroke-width="4" stroke-linecap="round"/>',
+  recovering:
+    '<path d="M11 11a5 5 0 0 1 10 0c0 4-5 4-5 8" fill="none" stroke="#e9ab3c" stroke-width="3" stroke-linecap="round"/><circle cx="16" cy="24" r="2" fill="#e9ab3c"/>',
+};
+
 export function useThreadTabStatus(thread: ThreadDto | null) {
   useEffect(() => {
     if (!thread || !window.location.pathname.endsWith('/' + thread.id)) return;
@@ -56,11 +57,11 @@ export function useThreadTabStatus(thread: ThreadDto | null) {
         }
       }
       const state = tabState(thread!.status, completed, seen);
-      document.title = `${state.symbol} ${state.label} · ${thread!.title}`;
+      document.title = thread!.title;
       icon.href =
         'data:image/svg+xml,' +
         encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#171713"/><circle cx="16" cy="16" r="10" fill="${state.color}"/>${state.label === 'Working' ? '<circle cx="16" cy="16" r="5" fill="#171713"/>' : ''}</svg>`,
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#171713"/>${iconShapes[state]}</svg>`,
         );
     }
     update();

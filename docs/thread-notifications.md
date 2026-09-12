@@ -21,16 +21,16 @@ worker asks tabs for their live route: `WindowClient.url` can retain an older UR
 after SPA navigation. A closed or unresponsive tab cannot reliably be focused;
 after a short route-response timeout a new tab is the fallback.
 
-Thread tabs use both a title prefix and favicon:
+Thread tab titles contain only the thread name. Their favicon carries the state:
 
-| State | Title | Favicon |
-| --- | --- | --- |
-| Working | `◌ Working · <title>` | Amber ring |
-| Completed, unread | `● Unread · <title>` | Blue dot |
-| Read, idle | `✓ Idle · <title>` | Gray dot |
+| State | Favicon |
+| --- | --- |
+| Working | Amber open ring |
+| Completed, unread | Red dot |
+| Read, idle | Gray checkmark |
 
-Failed turns also say `Failed`; recovering threads say `Checking status` rather
-than claiming completion. Read markers advance only when the thread page is
+Read failures use a red cross; recovering threads use an amber question mark
+rather than claiming completion. Read markers advance only when the thread page is
 visible and focused after completion. They persist in this browser's local
 storage and synchronize between its tabs. Other browsers have independent read
 markers. Running state always takes precedence over older unread completions.

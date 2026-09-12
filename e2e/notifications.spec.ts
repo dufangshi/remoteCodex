@@ -179,25 +179,39 @@ test('account push registration, durable completion and background tab read stat
     });
     const id = created.id ?? created.thread.id;
     const url = `${base}/devices/${device.device.id}/threads/${id}`;
+    const expectTab = async (shape: string) => {
+      await expect(page).toHaveTitle('Notification fixture');
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() =>
+              decodeURIComponent(
+                document.querySelector<HTMLLinkElement>(
+                  'link[type="image/svg+xml"]',
+                )?.href ?? '',
+              ),
+            ),
+          { timeout: 40000 },
+        )
+        .toContain(shape);
+    };
     await page.goto(url);
     await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
-    await expect(page).toHaveTitle('✓ Idle · Notification fixture');
+    await expectTab('m8 16 5 5 11-11');
     await page
       .getByRole('textbox', { name: 'Prompt' })
       .fill('Inspect this repository in depth');
     await page
       .getByRole('button', { name: 'Send Prompt', exact: true })
       .click();
-    await expect(page).toHaveTitle('◌ Working · Notification fixture');
+    await expectTab('M25 16a9');
     const foreground = await context.newPage();
     await foreground.goto(base + '/relay-account');
     await foreground.bringToFront();
     await expect
       .poll(() => page.evaluate(() => document.hasFocus()))
       .toBe(false);
-    await expect(page).toHaveTitle('● Unread · Notification fixture', {
-      timeout: 40000,
-    });
+    await expectTab('fill="#f85149"');
     const detail = await api(`${prefix}/threads/${id}`);
     const turn = detail.turns.at(-1).id;
     // No browser subscription exists now, so no synthetic endpoint is contacted.
@@ -233,9 +247,9 @@ test('account push registration, durable completion and background tab read stat
       supervisorDb.close();
     }
     await page.bringToFront();
-    await expect(page).toHaveTitle('✓ Idle · Notification fixture');
+    await expectTab('m8 16 5 5 11-11');
     await page.reload();
-    await expect(page).toHaveTitle('✓ Idle · Notification fixture');
+    await expectTab('m8 16 5 5 11-11');
 
     // Deliver through Chromium's actual Service Worker push dispatcher. This
     // verifies display/data with our built worker, not an external push vendor.
