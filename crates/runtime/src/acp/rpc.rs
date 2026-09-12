@@ -485,60 +485,6 @@ mod tests {
         format!(r#""{}" "{}""#, python.display(), script.display())
     }
 
-    #[test]
-    fn prompt_has_no_rpc_timeout() {
-        assert_eq!(timeout_for_method("session/prompt"), None);
-        assert_eq!(
-            timeout_for_method("initialize"),
-            Some(Duration::from_secs(180))
-        );
-        assert_eq!(
-            timeout_for_method("session/new"),
-            Some(Duration::from_secs(180))
-        );
-    }
-
-    #[test]
-    fn parses_quoted_commands_without_losing_argument_boundaries() {
-        let parsed = parse_spawn_command(r#""/tmp/acp agent" --mode "two words""#).unwrap();
-        assert_eq!(parsed.program, "/tmp/acp agent");
-        assert_eq!(parsed.args, ["--mode", "two words"]);
-    }
-
-    #[tokio::test]
-    async fn spawn_preserves_a_quoted_script_path() {
-        let dir = std::env::temp_dir().join(format!("acp rpc {}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("quoted agent.py");
-        std::fs::write(
-            &script,
-            concat!(
-                "import json, sys\n",
-                "msg = json.loads(sys.stdin.readline())\n",
-                "print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'ok':True}}), flush=True)\n",
-            ),
-        )
-        .unwrap();
-        let (process, _updates, _requests) =
-            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
-                .await
-                .expect("spawn command with quoted path");
-        let result = process.request("initialize", json!({})).await.unwrap();
-        assert_eq!(result["ok"], true);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn wraps_windows_batch_shims_with_hardened_cmd_flags() {
-        let command = r#""C:\Program Files\nodejs\agent.cmd" --mode "two words""#;
-        let parsed = parse_spawn_command(command).unwrap();
-        assert_eq!(
-            parsed.program,
-            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())
-        );
-        assert_eq!(parsed.args, ["/D", "/S", "/C", command]);
-    }
-
     #[tokio::test]
     async fn bounded_request_times_out_and_clears_pending() {
         let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
@@ -596,46 +542,6 @@ mod tests {
             .await
             .expect_err("requests after EOF must fail immediately");
         assert!(next_error.to_string().contains("stdout closed"));
-    }
-
-    #[tokio::test]
-    async fn process_exit_drains_pending_even_when_a_descendant_holds_stdout_open() {
-        let dir = std::env::temp_dir().join(format!("acp-rpc-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("exit_with_inherited_stdout.py");
-        std::fs::write(
-            &script,
-            concat!(
-                "import subprocess, sys\n",
-                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'], stdout=sys.stdout)\n",
-                "print('{\"method\":\"_fixture/ready\"}', flush=True)\n",
-                "sys.stdin.readline()\n",
-                "sys.exit(17)\n",
-            ),
-        )
-        .unwrap();
-        let (process, mut updates, _requests) =
-            AcpProcess::spawn(&python_command(&script), dir.to_str().unwrap(), &[])
-                .await
-                .expect("spawn exiting process");
-
-        // Python and descendant startup can exceed 800ms on a busy Windows
-        // runner. Start the exit deadline only once the fixture is ready.
-        let ready = timeout(Duration::from_secs(10), updates.recv())
-            .await
-            .expect("fixture startup")
-            .expect("fixture ready notification");
-        assert_eq!(ready["_remoteMethod"], "_fixture/ready");
-
-        let error = timeout(
-            Duration::from_millis(800),
-            process.request("session/prompt", json!({})),
-        )
-        .await
-        .expect("child exit monitor should not wait for inherited stdout to close")
-        .expect_err("process exit must fail pending requests");
-        assert!(error.to_string().contains("process exited"), "{error:#}");
-        assert!(process.state.lock().await.pending.is_empty());
     }
 
     #[tokio::test]

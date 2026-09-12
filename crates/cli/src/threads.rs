@@ -21,8 +21,8 @@ pub struct Connection {
 }
 #[derive(Args)]
 pub struct Body {
-    /// inbox stores passive mail (send default); queue starts a continuation (create default); steer targets an active supported turn.
-    #[arg(long, value_parser=["inbox","queue","steer"])]
+    /// inbox stores passive mail (send default); direct starts when idle or steers when running; queue waits for a continuation (create default); steer requires an active supported turn. Direct/steer never silently fall back on steering failure.
+    #[arg(long, value_parser=["inbox","direct","queue","steer"])]
     pub delivery: Option<String>,
     /// Where the terminal-turn notification is delivered (requires --notify-on-complete).
     #[arg(long, default_value="inbox", value_parser=["inbox","queue"], requires="notify_on_complete")]
@@ -93,7 +93,7 @@ pub enum ThreadCommand {
         #[command(flatten)]
         body: Body,
     },
-    /// Submit a prompt and return immediately after durable acceptance.
+    /// Send passive mail or request execution; direct/steer also await the steering acknowledgement when running.
     Send {
         id: String,
         #[command(flatten)]
@@ -256,8 +256,6 @@ pub enum InboxCommand {
         #[arg(required=true,num_args=1..)]
         ids: Vec<String>,
     },
-    /// Explicitly move unconsumed peer prompts to the inbox, cancelling their completion subscriptions.
-    AdoptQueued,
 }
 impl Client {
     pub async fn inbox(&self, args: Inbox) -> Result<Value> {
@@ -278,7 +276,6 @@ impl Client {
                 json!({"operation":"inboxRead","messageId":id,"textOffset":text_offset})
             }
             InboxCommand::Ack { ids } => json!({"operation":"inboxAck","messageIds":ids}),
-            InboxCommand::AdoptQueued => json!({"operation":"inboxAdoptQueued"}),
         };
         input["threadId"] = json!(thread);
         self.request(input).await

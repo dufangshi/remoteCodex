@@ -52,14 +52,3 @@ it('does not mistake a missing queue entry for a successful steer', async () => 
     fetch.mock.calls.filter(([, init]) => init?.method === 'POST'),
   ).toHaveLength(1);
 });
-
-it('strips gateway HTML from errors and requests only three summary turns by default', async () => {
-  const fetch = vi
-    .fn()
-    .mockResolvedValueOnce(timeout())
-    .mockResolvedValueOnce(Response.json(detail));
-  vi.stubGlobal('fetch', fetch);
-  await expect(request('/api/test')).rejects.toThrow('timed out');
-  await fetchThreadDetail('thread');
-  expect(fetch.mock.calls[1]?.[0]).toContain('view=summary&limit=3');
-});

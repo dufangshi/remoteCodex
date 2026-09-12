@@ -110,25 +110,4 @@ impl Supervisor {
             Ok(json!({"threadId":thread,"acknowledged":ids}))
         })
     }
-    /// Explicitly move only unconsumed peer input out of the execution queue.
-    /// Ordinary user prompts and update/restart markers are never touched.
-    pub fn inbox_adopt_queued(&self, thread: &str) -> Result<Value> {
-        self.get_thread(thread)?;
-        self.db.with(|c| {
-            let tx=c.unchecked_transaction()?;
-            let rows={
-                let mut stmt=tx.prepare("SELECT id,submitted_prompt,created_at FROM thread_pending_steers WHERE thread_id=?1 AND delivery IN ('continuation','cli-steer') AND (instr(submitted_prompt,'[Message from remoteCodex thread ')=1 OR instr(submitted_prompt,'[remoteCodex turn notification]')=1)")?;
-                let rows=stmt.query_map([thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;rows
-            };
-            for (id,text,created) in &rows {
-                let from=text.strip_prefix("[Message from remoteCodex thread ").and_then(|s|s.split(']').next());
-                store(&tx,thread,id,from,text,created)?;
-                tx.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2",params![id,thread])?;
-                // A passive message no longer promises an automatic execution turn.
-                tx.execute("DELETE FROM kv WHERE key=?1",[format!("cli:notify:pending:{id}")])?;
-            }
-            tx.commit()?;
-            Ok(json!({"threadId":thread,"movedCount":rows.len(),"completionSubscriptionsCancelled":true}))
-        })
-    }
 }

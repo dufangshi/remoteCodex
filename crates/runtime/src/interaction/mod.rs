@@ -79,8 +79,8 @@ impl Supervisor {
     pub fn send_to_thread(&self, id: &str, input: SendInput) -> Result<Value> {
         let thread = self.get_thread(id)?;
         ensure!(
-            ["inbox", "queue", "steer"].contains(&input.delivery.as_str()),
-            "delivery must be inbox, queue or steer"
+            ["inbox", "direct", "queue", "steer"].contains(&input.delivery.as_str()),
+            "delivery must be inbox, direct, queue or steer"
         );
         ensure!(
             ["inbox", "queue"].contains(&input.notify_delivery.as_str()),
@@ -89,7 +89,7 @@ impl Supervisor {
         if input.delivery != "inbox" {
             self.ensure_prompt_allowed(&thread)?;
         }
-        ensure!(input.delivery != "inbox" || !input.notify_on_complete, "passive inbox messages have no execution turn; use queue or steer with notifyOnComplete");
+        ensure!(input.delivery != "inbox" || !input.notify_on_complete, "passive inbox messages have no execution turn; use direct, queue or steer with notifyOnComplete");
         ensure!(
             !input.text.trim().is_empty() && input.text.len() <= 256 * 1024,
             "text must be nonempty and at most 256 KiB"
@@ -114,7 +114,6 @@ impl Supervisor {
             None => input.text.clone(),
         };
         let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&input)?));
-        let receipt = json!({"threadId":id,"pendingSteerId":if input.delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if input.delivery == "queue" {"queued"} else {input.delivery.as_str()},"acceptedAt":now,"messageId":pending_id});
         let result = self.db.with(|conn| {
             let tx = conn.unchecked_transaction()?;
             let retry_key = input.client_request_id.as_ref().map(|key| {
@@ -138,9 +137,24 @@ impl Supervisor {
                     return Ok(saved["receipt"].clone());
                 }
             }
-            if input.delivery == "steer" {
+            // Resolve only after deduplication, inside the acceptance transaction.
+            // A retry must keep its original route even when the peer changes state.
+            let (status, active_turn): (String, Option<String>) = tx.query_row(
+                "SELECT status,(SELECT id FROM thread_turns WHERE thread_id=?1 AND status='inProgress' ORDER BY ordinal DESC LIMIT 1) FROM threads WHERE id=?1", [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let delivery = if input.delivery == "direct" {
+                match status.as_str() {
+                    "idle" if active_turn.is_none() => "queue",
+                    "running" => "steer",
+                    _ => anyhow::bail!("conflict: direct requires an idle or running thread; inspect its status before retrying"),
+                }
+            } else {
+                input.delivery.as_str()
+            };
+            if delivery == "steer" {
                 ensure!(
-                    thread.status == "running" && thread.active_turn_id.is_some(),
+                    status == "running" && active_turn.is_some(),
                     "conflict: steering requires an active turn"
                 );
                 ensure!(
@@ -151,7 +165,8 @@ impl Supervisor {
                     "conflict: this backend does not support steering"
                 );
             }
-            if input.delivery == "inbox" {
+            let receipt = json!({"threadId":id,"pendingSteerId":if delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if delivery == "queue" {"queued"} else {delivery},"requestedDelivery":input.delivery,"acceptedAt":now,"messageId":pending_id});
+            if delivery == "inbox" {
                 inbox::store(
                     &tx,
                     id,
@@ -169,10 +184,10 @@ impl Supervisor {
                     input.client_request_id.as_deref(),
                     &now,
                 )?;
-                if input.delivery == "steer" {
+                if delivery == "steer" {
                     tx.execute(
-                        "UPDATE thread_pending_steers SET delivery='cli-steer' WHERE id=?1",
-                        [&pending_id],
+                        "UPDATE thread_pending_steers SET delivery='cli-steer',turn_id=?2 WHERE id=?1",
+                        params![pending_id, active_turn],
                     )?;
                 }
             }

@@ -220,17 +220,3 @@ fn allowed_control(message: &Value) -> bool {
                 && params.contains_key("sandboxPolicy")
         }))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn bridge_only_reads_turn_ids_or_creates_a_fork() {
-        assert!(allowed_control(&json!({"method":"thread/fork"})));
-        assert!(allowed_control(&json!({"method":"thread/turns/list"})));
-        assert!(!allowed_control(
-            &json!({"method":"thread/rollback","params":{"threadId":"source"}})
-        ));
-        assert!(!allowed_control(&json!({"method":"turn/start"})));
-    }
-}

@@ -39,7 +39,7 @@ description: 为 Remote Codex 项目按改动范围选择、编写和精简 Play
 - 改了 Rust 且本轮确实要跑依赖 supervisor 的 E2E，确保 `target/debug/remote-codex` 是新代码：需要时执行一次 `cargo build -p remote-codex`。仅 `cargo test` 不代表该可执行文件已更新。
 - 共享 UI 是独立仓库，Web 的 JS 消费其 `dist`：改了 `remote-codex-thread-ui/packages/thread-ui` 的 TS/TSX 时，先在该仓库执行一次 `pnpm --filter @remote-codex/thread-ui build`。CSS 直接导出 `src/styles.css`，纯 CSS 修改不必构建 JS。需要时在主仓库执行一次 `pnpm install --offline --frozen-lockfile` 刷新本地 file 依赖，确认消费到新文件。已有正确产物无需重做；仅主 Web 源码改动可由 Vite 加载。
 - 不为普通 UI E2E 执行根 `pnpm build`（包含 Rust release），不无条件重装依赖、清理所有缓存或构建所有包。
-- `REMOTE_CODEX_E2E_FAKE_RUNTIME=1` **不会使所有 spec 都变成 fake**。`harness-acp.spec.ts` 自行启动真实运行时；真实调用前只检查所选 harness 的可用性及凭据配置，不打印密钥。relay spec 也会自行起额外进程，单独处理端口和 fixture。
+- 当前保留的浏览器套件使用 fake harness；Relay spec 自行起隔离 Rust 服务，单独处理端口和 fixture。若以后新增真实 harness 验证，先检查其可用性和凭据，不打印密钥；不能仅凭外部 `REMOTE_CODEX_E2E_FAKE_RUNTIME=1` 假定所有自启进程都是 fake。
 
 ## 编写和精简测试
 

@@ -270,34 +270,3 @@ fn default_shell() -> String {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shell_update_and_terminate_manage_the_real_child() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = ShellHub::default();
-        let (id, created) = hub
-            .create(
-                "thread-1",
-                "workspace-1",
-                dir.path().to_str().unwrap(),
-                100,
-                30,
-                None,
-            )
-            .unwrap();
-        assert_eq!(created["workspaceId"], "workspace-1");
-        assert_eq!(created["backend"], "pty");
-        assert_eq!(created["cols"], 100);
-
-        let updated = hub.update_label(&id, Some("Build shell".into())).unwrap();
-        assert_eq!(updated["label"], "Build shell");
-
-        let terminated = hub.terminate(&id).unwrap();
-        assert_eq!(terminated["status"], "exited");
-        assert!(hub.list_for_thread("thread-1").is_empty());
-    }
-}

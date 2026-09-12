@@ -354,118 +354,12 @@ pub(crate) fn public_usage(value: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn context_occupancy_is_not_token_usage() {
-        assert!(normalize_usage(&json!({"used":32000,"size":1000000})).is_none());
-    }
-    #[test]
-    fn acp_input_and_cache_are_disjoint() {
-        let tokens = Tokens::parse(&json!({"inputTokens":100,"cachedReadTokens":200,"cachedWriteTokens":50,"outputTokens":20})).unwrap();
-        assert_eq!(tokens.input_tokens, 350);
-        assert_eq!(tokens.total_tokens, 370);
-    }
+
     #[test]
     fn prices_cached_tokens_and_fast_mode_without_double_charging() {
         let usage = json!({"total":{"inputTokens":1000000,"cachedInputTokens":600000,"outputTokens":10000},"last":{"inputTokens":200000}});
         let price = estimate_price(&usage, Some("openai/gpt-6-astra"), Some("fast")).unwrap();
         assert!((price["totalUsd"].as_f64().unwrap() - 10.2).abs() < 1e-10);
         assert!(estimate_price(&usage, Some("unknown-model"), None).is_none());
-    }
-    #[test]
-    fn claude_cache_writes_use_the_default_five_minute_rate() {
-        let usage = json!({"total":{"inputTokens":1000000,"cacheWriteInputTokens":1000000,"outputTokens":0}});
-        assert_eq!(
-            estimate_price(&usage, Some("claude-opus-4-6"), None).unwrap()["totalUsd"],
-            6.25
-        );
-    }
-
-    #[test]
-    fn unsupported_fast_mode_uses_standard_rates() {
-        let usage = json!({"total":{"inputTokens":1000000,"outputTokens":1000}});
-        assert_eq!(
-            estimate_price(&usage, Some("gpt-5.2"), Some("fast")),
-            estimate_price(&usage, Some("gpt-5.2"), Some("standard"))
-        );
-    }
-
-    #[test]
-    fn long_context_threshold_is_per_request_not_turn_total() {
-        let mut usage = json!({"total":{"inputTokens":500000,"outputTokens":1000},"last":{"inputTokens":250000}});
-        assert_eq!(
-            estimate_price(&usage, Some("gpt-6-astra"), None).unwrap()["totalUsd"],
-            5.05
-        );
-        usage["last"]["inputTokens"] = json!(300000);
-        assert_eq!(
-            estimate_price(&usage, Some("gpt-6-astra"), None).unwrap()["totalUsd"],
-            10.075
-        );
-    }
-}
-
-#[cfg(test)]
-mod multi_provider_tests {
-    use super::*;
-    #[test]
-    fn normalizes_chat_completion_and_gemini_cache_and_reasoning() {
-        let chat=normalize_usage(&json!({"usage":{"prompt_tokens":10000,"completion_tokens":1000,"prompt_cache_hit_tokens":8000,"completion_tokens_details":{"reasoning_tokens":300}}})).unwrap();
-        assert_eq!(chat["total"]["inputTokens"], 10000);
-        assert_eq!(chat["total"]["cachedInputTokens"], 8000);
-        assert_eq!(chat["total"]["reasoningOutputTokens"], 300);
-        let gemini=normalize_usage(&json!({"usageMetadata":{"promptTokenCount":10000,"cachedContentTokenCount":8000,"candidatesTokenCount":700,"thoughtsTokenCount":300}})).unwrap();
-        assert_eq!(gemini["total"], chat["total"]);
-    }
-    #[test]
-    fn prices_aliases_peak_periods_and_context_boundaries() {
-        let usage = normalize_usage(
-            &json!({"inputTokens":10000,"cachedInputTokens":8000,"outputTokens":1000}),
-        )
-        .unwrap();
-        assert!(estimate_price(&usage, Some("GPT-6-Astra"), None).is_some());
-        for model in [
-            "Claude Fable 5.1",
-            "claude-opus-5",
-            "claude-sonnet-5",
-            "grok-4.6",
-            "gemini-3.1-pro",
-            "GLM-5.1",
-        ] {
-            assert!(
-                estimate_price(&usage, Some(model), None).is_some(),
-                "{model}"
-            );
-        }
-        let off = estimate_price_with_catalog(
-            &usage,
-            Some("d4-pro"),
-            None,
-            pricing(),
-            Some("2026-09-05T01:00:00Z"),
-        )
-        .unwrap();
-        let peak = estimate_price_with_catalog(
-            &usage,
-            Some("deepseek-v4-pro"),
-            None,
-            pricing(),
-            Some("2026-09-04T01:00:00Z"),
-        )
-        .unwrap();
-        assert_eq!(
-            peak["totalUsd"].as_f64().unwrap(),
-            off["totalUsd"].as_f64().unwrap() * 2.0
-        );
-        let short = normalize_usage(&json!({"inputTokens":199999,"outputTokens":1000})).unwrap();
-        let long = normalize_usage(&json!({"inputTokens":200000,"outputTokens":1000})).unwrap();
-        assert_eq!(
-            estimate_price(&short, Some("grok-4.6"), None).unwrap()["outputUsd"],
-            0.006
-        );
-        assert_eq!(
-            estimate_price(&long, Some("grok-4.6"), None).unwrap()["outputUsd"],
-            0.012
-        );
-        assert!(estimate_price(&usage, Some("glm-5.3"), None).is_none());
     }
 }

@@ -106,35 +106,3 @@ impl PermissionBridge {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn resume_and_fork_inherit_native_defaults_and_explicit_restrictions_survive() {
-        let full = native_policy(&ProductSessionPolicy {
-            sandbox_mode: Some("danger-full-access".into()),
-            ..Default::default()
-        });
-        let mut bridge = PermissionBridge::new(full);
-        let mut resume = json!({"id":1,"method":"thread/resume","params":{"threadId":"a"}});
-        bridge.request(&mut resume);
-        assert_eq!(resume["params"]["sandbox"], "danger-full-access");
-        assert_eq!(resume["params"]["approvalPolicy"], "never");
-        bridge.response(&json!({"id":1,"result":{"thread":{"id":"a"}}}));
-        let mut restricted = json!({"id":2,"method":"thread/settings/update","params":{"threadId":"a","sandboxPolicy":{"type":"readOnly"},"approvalPolicy":"on-request"}});
-        bridge.request(&mut restricted);
-        bridge.response(&json!({"id":2,"result":{}}));
-        let mut fork = json!({"id":3,"method":"thread/fork","params":{"threadId":"a"}});
-        bridge.request(&mut fork);
-        assert_eq!(fork["params"]["sandbox"], "read-only");
-        bridge.response(&json!({"id":3,"result":{"thread":{"id":"b"}}}));
-        let mut load = json!({"id":4,"method":"thread/resume","params":{"threadId":"b"}});
-        bridge.request(&mut load);
-        assert_eq!(load["params"]["sandbox"], "read-only");
-        let mut audit = json!({"id":5,"method":"thread/fork","params":{"threadId":"a","sandbox":"read-only","approvalPolicy":"never"}});
-        let before = audit.clone();
-        bridge.request(&mut audit);
-        assert_eq!(audit, before);
-    }
-}

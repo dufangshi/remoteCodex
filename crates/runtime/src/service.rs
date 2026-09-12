@@ -2529,6 +2529,12 @@ impl Supervisor {
             .ok_or_else(|| {
                 anyhow!("conflict: The active turn finished before this prompt could be steered.")
             })?;
+        if pending.delivery == "cli-steer"
+            && !pending.turn_id.is_empty()
+            && pending.turn_id != active_turn_id
+        {
+            bail!("conflict: The targeted turn ended; this message is held and cannot steer a different turn.");
+        }
         let provider_session_id = thread
             .provider_session_id
             .as_deref()
