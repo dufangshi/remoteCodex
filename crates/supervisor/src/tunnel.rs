@@ -163,6 +163,10 @@ async fn run_connected_tunnel_with_deadline(
                         let Ok(message) = serde_json::from_str::<Value>(&text) else {
                             continue;
                         };
+                        if message["type"] == "relay.notification.ack" {
+                            if let Some(turn) = message["turnId"].as_str() { let _ = state.acknowledge_relay_notification(turn); }
+                            continue;
+                        }
                         if message["type"] == "relay.connected" {
                             state.relay_connected.store(true, std::sync::atomic::Ordering::SeqCst);
                         }
@@ -185,6 +189,9 @@ async fn run_connected_tunnel_with_deadline(
                 }
             }
             _ = heartbeat.tick() => {
+                if let Ok(notices) = state.pending_relay_notifications() {
+                    for payload in notices { let _ = outgoing.send(json!({"type":"relay.notification","payload":payload})); }
+                }
                 let now = SystemTime::now();
                 if resumed_after_pause(last_tick, now) {
                     return Err(anyhow!("supervisor resumed after a pause; reconnecting relay"));

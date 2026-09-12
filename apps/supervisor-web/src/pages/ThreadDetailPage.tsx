@@ -1,3 +1,4 @@
+import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1137,12 +1138,7 @@ export function ThreadDetailPage() {
     detailRef.current = detail;
   }, [detail]);
 
-  useEffect(() => {
-    if (!detail?.thread.title) {
-      return;
-    }
-    document.title = detail.thread.title;
-  }, [detail?.thread.title]);
+  useThreadTabStatus(detail?.thread ?? null);
 
   useEffect(() => {
     const provider = detail?.thread.provider;

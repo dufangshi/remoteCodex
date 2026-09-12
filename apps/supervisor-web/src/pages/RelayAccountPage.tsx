@@ -1,3 +1,4 @@
+import { RelayNotifications } from '../components/RelayNotifications';
 import {
   RelaySecurityPanel,
   SecurityVerification,
@@ -334,6 +335,7 @@ export function RelayAccountSettingsPanel({
           </form>
         </FormDialog>
       )}
+      <RelayNotifications />
       <RelaySecurityPanel />
       {verification && (
         <SecurityVerification

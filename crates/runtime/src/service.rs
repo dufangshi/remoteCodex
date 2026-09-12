@@ -2350,6 +2350,9 @@ impl Supervisor {
                 params![thread_id, turn_id],
             )?;
             crate::interaction::finish_notification(conn, thread_id, turn_id, status, now)?;
+            if self.config.relay_server_url.is_some() {
+                crate::relay_notifications::record(conn, thread_id, turn_id, status, now)?;
+            }
             tx.commit()?;
             Ok(())
         })?;

@@ -1,3 +1,4 @@
+import { installNotificationRouteResponder } from './lib/relayPush';
 import { PublicThreadPage } from './pages/PublicThreadPage';
 import {
   BrowserRouter,
@@ -172,6 +173,7 @@ function routeDocumentTitle(pathname: string) {
 }
 
 function DocumentTitleUpdater() {
+  useEffect(installNotificationRouteResponder, []);
   const location = useLocation();
 
   useEffect(() => {

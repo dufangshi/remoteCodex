@@ -23,7 +23,7 @@ fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
         admin_username: None,
         admin_password: None,
         session_secret: None,
-        relay_server_url: None,
+        relay_server_url: Some("https://relay.example.test".into()),
         relay_agent_token: None,
         enabled_providers: vec![Provider::Codex, Provider::Acp],
         acp_command: None,
@@ -253,6 +253,7 @@ async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
     input.delivery = "inbox".into();
     let receipt = state.send_to_thread(&b, input.clone()).unwrap();
     assert_eq!(state.send_to_thread(&b, input).unwrap(), receipt);
+    assert!(state.pending_relay_notifications().unwrap().is_empty());
     assert!(receipt["pendingSteerId"].is_null());
     let id = receipt["messageId"].as_str().unwrap();
     tokio::time::sleep(Duration::from_millis(400)).await;
@@ -323,6 +324,14 @@ async fn completion_can_go_to_inbox_without_waking_the_sender() {
     state.start_interaction_worker();
     until(|| state.inbox_unread_count(&a).unwrap() == 1).await;
     assert_eq!(state.send_to_thread(&b, input).unwrap(), receipt);
+    let pending = state.pending_relay_notifications().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["threadId"], b);
+    assert_eq!(state.pending_relay_notifications().unwrap(), pending);
+    state
+        .acknowledge_relay_notification(pending[0]["turnId"].as_str().unwrap())
+        .unwrap();
+    assert!(state.pending_relay_notifications().unwrap().is_empty());
     assert_eq!(
         state.interaction_status(&a).await.unwrap()["queuedCount"],
         0

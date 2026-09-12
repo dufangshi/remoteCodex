@@ -37,4 +37,5 @@ mod usage_history;
 
 mod pricing;
 
+mod relay_notifications;
 pub mod subscription;

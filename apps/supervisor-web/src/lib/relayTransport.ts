@@ -65,7 +65,7 @@ export async function trustDeviceIdentity(deviceId: string, identityKey: string,
   });
 }
 let workerReady: Promise<void> | undefined;
-async function ensureWorker() {
+export async function ensureRelayWorker() {
   if (!navigator.serviceWorker || !window.isSecureContext)
     throw new Error(
       'HTTPS and service worker support are required for encrypted device files.',
@@ -102,6 +102,7 @@ async function ensureWorker() {
   })();
   try {
     await workerReady;
+    return await navigator.serviceWorker.ready;
   } catch (e) {
     workerReady = undefined;
     throw e;
@@ -112,7 +113,7 @@ export async function encryptedBrowserFetch(url: string, init: RequestInit) {
     await exchange(
       new Request(new URL(url, window.location.href), init),
       scopeFromPage(window.location.href),
-      ensureWorker,
+      async () => { await ensureRelayWorker(); },
     )
   ).response;
 }
@@ -150,7 +151,7 @@ class EncryptedRelaySocket extends EventTarget {
       const result = await exchange(
         request,
         threadId ?? undefined,
-        ensureWorker,
+        async () => { await ensureRelayWorker(); },
         true,
       );
       if (result.sendKey && result.receiveKey) {

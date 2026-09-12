@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { installPushHandlers } from './notificationWorker';
 import {
   clearTransportKeyCache,
   deviceRoute,
@@ -8,6 +9,7 @@ import {
   TransportError,
 } from './relayTransportCrypto';
 const worker = self as unknown as ServiceWorkerGlobalScope;
+installPushHandlers(worker);
 worker.addEventListener('install', (event) => {
   event.waitUntil(worker.skipWaiting());
 });

@@ -2,6 +2,7 @@ mod auth_api;
 mod auth_factors;
 mod device_tokens;
 mod hosted;
+mod notifications;
 mod oauth;
 mod public_links;
 mod security;
@@ -471,6 +472,7 @@ impl RelayStore {
         device_tokens::migrate(&conn, &session_secret)?;
         auth_factors::ensure_schema(&conn)?;
         share_activity::ensure_schema(&conn)?;
+        notifications::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             session_secret,
@@ -803,8 +805,10 @@ pub async fn serve() -> Result<()> {
         admission: security::Admission::default(),
     });
     state.hosted.start_background().await;
+    notifications::start(&state)?;
     let app = Router::new()
         .merge(auth_api::routes())
+        .merge(notifications::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
@@ -5514,7 +5518,7 @@ async fn handle_supervisor_with_timeout(
     state.sockets.write().await.insert(
         device_id.clone(),
         DeviceSocket {
-            tx,
+            tx: tx.clone(),
             connection_id,
             connected_at: connected_at.clone(),
             last_heartbeat_at: connected_at.clone(),
@@ -5595,6 +5599,12 @@ async fn handle_supervisor_with_timeout(
                                         if socket.connection_id == connection_id {
                                             socket.last_heartbeat_at = timestamp;
                                         }
+                                    }
+                                }
+                                Some("relay.notification") => {
+                                    let result = notifications::accept(&*state.store.conn.lock().await, &device_id, &msg["payload"]);
+                                    if let Ok(turn_id) = result {
+                                        let _ = tx.try_send(json!({"type":"relay.notification.ack","turnId":turn_id}).to_string());
                                     }
                                 }
                                 Some("relay.activity") => {
