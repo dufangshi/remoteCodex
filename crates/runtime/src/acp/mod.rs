@@ -5,6 +5,7 @@ mod codex_bridge;
 mod codex_models;
 mod codex_permissions;
 pub use codex_bridge::run as run_codex_app_server_bridge;
+mod deepseek;
 mod elicitation;
 mod grok;
 pub(crate) use grok::billing_usage as grok_billing_usage;

@@ -2,6 +2,9 @@ import path from 'node:path';
 
 import { defineConfig, devices } from '@playwright/test';
 
+const realDsh = process.env.E2E_REAL_DSH === '1';
+if (realDsh && !process.env.E2E_DSH_HOME) throw new Error('Real DSH E2E requires an isolated E2E_DSH_HOME');
+
 const apiPort = Number(process.env.E2E_API_PORT ?? 8787);
 const webPort = Number(process.env.E2E_WEB_PORT ?? 5173);
 const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
@@ -31,7 +34,8 @@ export default defineConfig({
             .map((key) => [key, '']),
         ),
         REMOTE_CODEX_MODE: 'local',
-        REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
+        REMOTE_CODEX_E2E_FAKE_RUNTIME: realDsh ? '' : '1',
+        ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
         HOST: '127.0.0.1',
         PORT: String(apiPort),
         REMOTE_CODEX_DATABASE_PATH: e2eDatabaseUrl,

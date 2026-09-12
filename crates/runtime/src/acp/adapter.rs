@@ -311,12 +311,21 @@ impl HarnessAdapter for DeepSeekAdapter {
     fn id(&self) -> &'static str {
         "deepseek"
     }
+    fn apply_model(&self, model: &str, _state: &Value) -> Option<SessionSettingOp> {
+        Some(SessionSettingOp::SetConfig {
+            config_id: "model".into(),
+            value: model.into(),
+        })
+    }
+
     fn patch_capabilities(
         &self,
         caps: &mut AgentProviderCapabilitiesDto,
         negotiated: &NegotiatedCaps,
     ) {
         apply_negotiated(caps, negotiated);
+        // Web presets and plan mode are not exposed by the ACP profile.
+        caps.controls.plan_mode = false;
     }
 }
 

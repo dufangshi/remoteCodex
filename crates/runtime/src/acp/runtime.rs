@@ -54,6 +54,8 @@ enum TurnOutcome {
 struct LiveSession {
     process: Arc<AcpProcess>,
     codex_bridge: Option<Arc<super::codex_bridge::CodexBridge>>,
+    _discovery_directory: Option<tempfile::TempDir>,
+    harness_info: Option<Value>,
     session_id: String,
     cwd: PathBuf,
     yolo: bool,
@@ -183,7 +185,12 @@ impl AcpRuntime {
         } else {
             None
         };
-        let server_command = agent_server_command(def, yolo);
+        let mut server_command = agent_server_command(def, yolo);
+        let discovery = if def.id == "deepseek" {
+            Some(super::deepseek::Discovery::prepare(&mut server_command).await?)
+        } else {
+            None
+        };
         let (process, updates_rx, requests_rx) = tokio::time::timeout(
             self.startup_timeout,
             AcpProcess::spawn(&server_command, cwd, &extra_env),
@@ -191,6 +198,17 @@ impl AcpRuntime {
         .await
         .map_err(|_| anyhow!("ACP spawn timeout"))??;
         let process = Arc::new(process);
+        let harness_info = if let Some(discovery) = &discovery {
+            match tokio::time::timeout(self.startup_timeout, discovery.receive()).await {
+                Ok(Ok(info)) => Some(info),
+                result => {
+                    let _ = process.shutdown().await;
+                    bail!("DSH startup discovery failed (requires DSH 0.1.5-rc.1 or newer): {result:?}");
+                }
+            }
+        } else {
+            None
+        };
         let init = process
             .request(
                 "initialize",
@@ -312,11 +330,29 @@ impl AcpRuntime {
             } else {
                 (json!({}), Vec::new(), None, None)
             };
+        let (model, reasoning_effort) = if def.id == "deepseek" {
+            let current = |category: &str| {
+                config_options
+                    .as_array()
+                    .and_then(|options| {
+                        options
+                            .iter()
+                            .find(|option| option["category"].as_str() == Some(category))
+                    })
+                    .and_then(|option| option["currentValue"].as_str())
+                    .map(str::to_string)
+            };
+            (current("model"), current("thought_level"))
+        } else {
+            (model, reasoning_effort)
+        };
         let (current_mode_id, available_modes) = parse_available_modes(&raw_session);
         let scoped = Self::scoped_id(&def.id, &session_id);
         let mut live = LiveSession {
             process,
             codex_bridge,
+            _discovery_directory: discovery.map(|discovery| discovery.directory),
+            harness_info: harness_info.clone(),
             session_id,
             cwd: PathBuf::from(cwd),
             yolo,
@@ -329,9 +365,23 @@ impl AcpRuntime {
             reasoning_effort,
             active: None,
             operation: Arc::new(Mutex::new(())),
-            config_options,
+            config_options: config_options.clone(),
             harness_state,
-            harness_models,
+            harness_models: if let Some(info) = &harness_info {
+                let mut models: Vec<ModelOptionDto> =
+                    serde_json::from_value(info["models"].clone())?;
+                let current = models_from_config_options(&config_options)
+                    .into_iter()
+                    .find(|model| model.is_default);
+                for model in &mut models {
+                    model.is_default = current
+                        .as_ref()
+                        .is_some_and(|current| current.model == model.model);
+                }
+                models
+            } else {
+                harness_models
+            },
             available_modes,
             current_mode_id,
         };
@@ -497,17 +547,22 @@ impl AcpRuntime {
                 None,
             )
             .await?;
-        if !live.harness_models.is_empty() {
-            return Ok(live.harness_models);
-        }
-        let configured = models_from_config_options(&live.config_options);
-        if !configured.is_empty() {
-            return Ok(configured);
-        }
-        Ok(self
-            .request_adapter_models(&def.id, &live.process)
-            .await
-            .unwrap_or_default())
+        let models = if !live.harness_models.is_empty() {
+            live.harness_models
+        } else {
+            let configured = models_from_config_options(&live.config_options);
+            if !configured.is_empty() {
+                configured
+            } else {
+                self.request_adapter_models(&def.id, &live.process)
+                    .await
+                    .unwrap_or_default()
+            }
+        };
+        // The notification mux also owns an Arc. Dropping this probe alone
+        // would leave its process running every time a creation form loads.
+        live.process.shutdown().await?;
+        Ok(models)
     }
 
     async fn apply_setting_op(
@@ -529,6 +584,9 @@ impl AcpRuntime {
                     .await?;
                 if let Some(options) = response.get("configOptions") {
                     live.config_options = options.clone();
+                    if live.adapter_id == "deepseek" {
+                        live.reasoning_effort = None;
+                    }
                     if let Some(options) = options.as_array() {
                         for option in options {
                             let value = option["currentValue"].as_str().map(str::to_string);
@@ -685,7 +743,9 @@ impl AcpRuntime {
                 }
             }
         }
-        if let Some(effort) = effort.filter(|value| !value.is_empty() && *value != "auto") {
+        if let Some(effort) = effort.filter(|value| {
+            *value != "auto" && (!value.is_empty() || live.adapter_id == "deepseek")
+        }) {
             if live.reasoning_effort.as_deref() != Some(effort) {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
                     Self::apply_setting_op(&live.process.clone(), live, op).await?;
@@ -1065,6 +1125,17 @@ impl AgentRuntime for AcpRuntime {
             apply_config_option_caps(&mut caps, &live.config_options);
             snapshot.toolbox_items = adapter.toolbox_items(&caps, &negotiated);
             snapshot.effective_capabilities = Some(caps);
+            if let Some(info) = &live.harness_info {
+                snapshot.negotiated =
+                    Some(json!({"harness":info,"configOptions":live.config_options}));
+                snapshot.toolbox_items.push(ToolboxItemDto {
+                    action: "harness".into(),
+                    command: "/harness".into(),
+                    label: "Harness settings".into(),
+                    description: Some("Session configuration and loaded plugins".into()),
+                    panel: None,
+                });
+            }
         }
         Ok(snapshot)
     }
@@ -1088,7 +1159,12 @@ impl AgentRuntime for AcpRuntime {
         let adapter = adapter_for(&live.adapter_id);
         if !input.model.is_empty() && input.model != "default" {
             if let Some(op) = adapter.apply_model(&input.model, &live.harness_state) {
-                Self::apply_setting_op(&live.process.clone(), &mut live, op).await?;
+                if let Err(error) =
+                    Self::apply_setting_op(&live.process.clone(), &mut live, op).await
+                {
+                    let _ = live.process.shutdown().await;
+                    return Err(error);
+                }
             } else {
                 let _ = Self::apply_setting_op(
                     &live.process.clone(),
@@ -1102,11 +1178,9 @@ impl AgentRuntime for AcpRuntime {
                 live.model = Some(input.model.clone());
             }
         }
-        if let Some(effort) = input
-            .reasoning_effort
-            .as_deref()
-            .filter(|value| !value.is_empty() && *value != "auto")
-        {
+        if let Some(effort) = input.reasoning_effort.as_deref().filter(|value| {
+            *value != "auto" && (!value.is_empty() || live.adapter_id == "deepseek")
+        }) {
             if live.reasoning_effort.as_deref() != Some(effort) {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
                     let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
@@ -1775,6 +1849,8 @@ impl AgentRuntime for AcpRuntime {
             LiveSession {
                 process,
                 codex_bridge,
+                _discovery_directory: None,
+                harness_info: None,
                 session_id: new_id,
                 cwd,
                 yolo,

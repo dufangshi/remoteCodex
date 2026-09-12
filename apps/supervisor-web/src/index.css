@@ -2547,3 +2547,11 @@ main:has(.product-navigation) { padding-top: 0 !important; }
 .shared-supervisor-presence > span { width:6px; height:6px; border-radius:50%; background:currentColor; }
 .shared-supervisor-presence[data-online="true"] { color:var(--status-success-fg); }
 .shared-access-open:disabled { opacity:.45; cursor:not-allowed; background:var(--theme-muted); color:var(--theme-fg-muted); }
+
+/* The host form is the single outer scroll owner. A grid auto min-size must
+   not push the dialog beyond its viewport cap as asynchronous agents load. */
+.thread-graph-create-thread-dialog:has(.thread-create-form) {
+  display: flex;
+  flex-direction: column;
+  max-height: min(calc(100dvh - 2rem), 48rem);
+}

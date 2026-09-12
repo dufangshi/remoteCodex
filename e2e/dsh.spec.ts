@@ -1,0 +1,89 @@
+import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+// Explicit opt-in: real external model calls. The config requires an isolated DSH home.
+test.skip(process.env.E2E_REAL_DSH !== '1', 'Use E2E_REAL_DSH=1 and E2E_DSH_HOME');
+const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+const modelId = process.env.E2E_DSH_MODEL ?? '["grok-sub2api","grok-4.6"]';
+
+test('DSH New Chat, native catalog, toolbox, tools and resume', async ({page, request}, testInfo) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(15_000);
+  const dir = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `dsh-${Date.now()}`);
+  await mkdir(dir, { recursive: true });
+  const workspaceResponse = await request.post(`${base}/api/workspaces`, {data:{absPath:dir,label:'DSH browser test'}});
+  expect(workspaceResponse.ok()).toBeTruthy();
+  const workspace = await workspaceResponse.json();
+  const catalogResponse = await request.get(`${base}/api/agent-runtimes/acp/models`, { params: {agentId:'deepseek',cwd:dir}});
+  expect(catalogResponse.ok(), await catalogResponse.text()).toBeTruthy();
+  const models = await catalogResponse.json();
+  const selected = models.find((model:any) => model.model === modelId);
+  expect(selected, 'Custom provider model must be discovered').toBeTruthy();
+  expect(selected.supportedReasoningEfforts.map((effort:any)=>effort.reasoningEffort)).toContain('xhigh');
+  expect(models.find((model:any)=>model.model.includes('deepseek-v4-flash\"')).defaultReasoningEffort).toBe('high');
+
+  // Reach the shared New Chat modal from an existing thread, as in the report.
+  const seed = await (await request.post(`${base}/api/threads/start`, {data:{workspaceId:workspace.id,provider:'acp',agentId:'deepseek',model:modelId,title:'DSH seed',approvalMode:'yolo'}})).json();
+  await page.goto(`/threads/${seed.id}`);
+  await page.getByRole('button',{name:'New Chat',exact:true}).first().click();
+  const dialog = page.getByTestId('create-thread-dialog');
+  await dialog.locator('select[id$="thread-backend"]').selectOption('acp');
+  await dialog.locator('label').filter({hasText:'DeepSeek Harness'}).click();
+  const picker = dialog.getByLabel('Model',{exact:true});
+  await expect(picker.locator('option')).toHaveCount(models.length);
+  await picker.selectOption(modelId);
+  await dialog.getByLabel('Reasoning effort',{exact:true}).selectOption('xhigh');
+  await dialog.getByLabel('Title',{exact:true}).fill('DSH verified creation');
+  const submit = dialog.getByRole('button',{name:'Create Thread',exact:true});
+  await expect(submit).toBeInViewport();
+  await expect(dialog.getByRole('heading',{name:'Create New Chat'})).toBeInViewport();
+  // The dialog itself must never scroll out its header or retain a blank bottom.
+  expect(await dialog.evaluate(el => el.scrollTop)).toBe(0);
+  const box = await dialog.boundingBox();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  const form = dialog.locator('form');
+  expect(await form.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({path:testInfo.outputPath('new-chat.png')});
+  await dialog.getByRole('button',{name:'Create Thread',exact:true}).click();
+  await expect(dialog).toHaveCount(0);
+  const id = page.url().split('/threads/')[1];
+  expect(id).not.toBe(seed.id);
+  const detail = async () => (await request.get(`${base}/api/threads/${id}`)).json();
+  expect((await detail()).thread.reasoningEffort).toBe('xhigh');
+  await page.getByRole('button',{name:'Open slash toolbox'}).click();
+  await page.getByRole('button',{name:'/harness View',exact:true}).click();
+  const settings = page.getByRole('dialog',{name:'Harness settings'});
+  await settings.getByLabel('Filter plugins').fill('dsh-acp');
+  await expect(settings.getByRole('region',{name:'Harness plugins'})).toContainText('@deepseek-ai/dsh-acp');
+  await settings.getByLabel('Harness reasoning effort').selectOption('high');
+  await expect.poll(async()=>(await detail()).thread.reasoningEffort).toBe('high');
+  await page.screenshot({path:testInfo.outputPath('harness-settings.png')});
+  await settings.getByRole('button',{name:'Close',exact:true}).click();
+  const prompt = page.getByRole('textbox',{name:'Prompt'});
+  await prompt.fill('Use shell tools to write dsh-check.c: a minimal C program printing DSH_BROWSER_OK. Compile it with cc -o dsh-check dsh-check.c and execute it. Report its actual output. Work only in the current directory.');
+  await page.getByRole('button',{name:'Send Prompt',exact:true}).click();
+  await expect.poll(async()=>(await detail()).turns.at(-1)?.status,{timeout:120_000}).toBe('completed');
+  const completed = await detail();
+  expect(completed.turns.at(-1).items.some((item:any)=>item.kind==='toolCall' && item.status==='completed')).toBeTruthy();
+  expect(completed.turns.at(-1).items.some((item:any)=>item.kind==='agentMessage' && item.text.includes('DSH_BROWSER_OK'))).toBeTruthy();
+  expect(await readFile(path.join(dir,'dsh-check.c'),'utf8')).toContain('DSH_BROWSER_OK');
+  // No model call: disconnect/resume preserves the session, model, and history.
+  expect((await request.post(`${base}/api/threads/${id}/disconnect`)).ok()).toBeTruthy();
+  expect((await request.post(`${base}/api/threads/${id}/resume`)).ok()).toBeTruthy();
+  await page.reload();
+  await expect(prompt).toBeVisible();
+  expect((await detail()).thread.model).toBe(modelId);
+  expect((await detail()).turns.at(-1).status).toBe('completed');
+  const resumeToken = randomUUID();
+  await writeFile(path.join(dir, 'resume-input.txt'), resumeToken);
+  await prompt.fill('A new file resume-input.txt was just created externally. Use your shell to copy its exact contents into resume-output.txt, then report the contents. You must read this new file; it was not present in the previous turn.');
+  await page.getByRole('button',{name:'Send Prompt',exact:true}).click();
+  await expect.poll(async()=>(await detail()).turns.filter((turn:any)=>turn.status==='completed').length,{timeout:90_000}).toBe(2);
+  expect((await detail()).turns.at(-1).items.some((item:any)=>item.kind==='toolCall' && item.status==='completed')).toBeTruthy();
+  expect(await readFile(path.join(dir,'resume-output.txt'),'utf8')).toBe(resumeToken);
+  expect((await request.post(`${base}/api/threads/${id}/disconnect`)).ok()).toBeTruthy();
+  await request.post(`${base}/api/threads/${seed.id}/disconnect`);
+});

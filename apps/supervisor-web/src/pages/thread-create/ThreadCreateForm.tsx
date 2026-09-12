@@ -351,7 +351,7 @@ export function ThreadCreateForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className={compact ? 'max-h-[min(76vh,36rem)] space-y-3 overflow-y-auto pr-1 text-sm' : 'space-y-5'}
+      className={compact ? 'thread-create-form min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1 text-sm' : 'space-y-5'}
     >
       {compact ? (
         <div className="pr-8">
@@ -390,7 +390,7 @@ export function ThreadCreateForm({
               const selected = backend.provider === provider;
               return (
                 <label
-                  className="product-segment min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="product-segment relative min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-45"
                   key={backend.provider}
                 >
                   <input
@@ -409,7 +409,7 @@ export function ThreadCreateForm({
           </div>
         )}
 
-        {selectedBackend ? (
+        {selectedBackend && provider !== 'acp' ? (
           <div className="mt-3 flex flex-col gap-2 border-b border-[var(--theme-border)] pb-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="min-w-0 text-xs leading-5 text-[var(--theme-fg-muted)]">
               {selectedBackend.installation.installed
@@ -476,7 +476,7 @@ export function ThreadCreateForm({
         <fieldset>
           <legend className="host-form-label text-xs font-medium">Agent</legend>
           <div
-            className="mt-2 max-h-64 divide-y divide-[var(--theme-border)] overflow-y-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]"
+            className={`mt-2 ${compact ? 'max-h-32' : 'max-h-64'} divide-y divide-[var(--theme-border)] overflow-y-auto overscroll-contain rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]`}
             role="radiogroup"
             aria-label="Agent"
           >
@@ -498,7 +498,7 @@ export function ThreadCreateForm({
                 <div key={entry.id} className="flex min-w-0 items-stretch gap-2 px-2 py-2">
                   <label
                     title={meta?.statusMessage}
-                    className={`product-radio-option min-w-0 flex-1 rounded-md px-2.5 py-2 text-left outline-none transition ${
+                    className={`product-radio-option relative min-w-0 flex-1 rounded-md px-2.5 py-2 text-left outline-none transition ${
                       selected
                         ? 'bg-[var(--theme-surface-strong)] text-[var(--theme-fg)]'
                         : ready
@@ -579,7 +579,7 @@ export function ThreadCreateForm({
             >
               {selectedModel.supportedReasoningEfforts.map((entry) => (
                 <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
-                  {entry.reasoningEffort}
+                  {entry.reasoningEffort || 'Provider default'}
                 </option>
               ))}
             </select>

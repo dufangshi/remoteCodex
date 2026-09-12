@@ -1,3 +1,4 @@
+import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
@@ -466,6 +467,7 @@ export function ThreadDetailPage() {
     (workspaceId?: string | null) => currentNewThreadHref(workspaceId),
     [],
   );
+  const [harnessSettingsOpen, setHarnessSettingsOpen] = useState(false);
   const renderNewThreadDialogContent = useCallback(
     ({
       close,
@@ -3321,6 +3323,7 @@ export function ThreadDetailPage() {
         subscriptionUsage,
         capabilities: backendCapabilities,
         toolboxItems: backendManagementSchema?.toolboxItems ?? [],
+        onOpenHarness: () => setHarnessSettingsOpen(true),
         hookCommandTemplates:
           backendManagementSchema?.hookCommandTemplates ?? [],
         mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
@@ -3410,6 +3413,7 @@ export function ThreadDetailPage() {
         followTail: false,
         capabilities: backendCapabilities,
         toolboxItems: backendManagementSchema?.toolboxItems ?? [],
+        onOpenHarness: () => setHarnessSettingsOpen(true),
         hookCommandTemplates:
           backendManagementSchema?.hookCommandTemplates ?? [],
         mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
@@ -3622,7 +3626,10 @@ export function ThreadDetailPage() {
           Unable to resolve this thread.
         </div>
       }
-      dialogs={dialogs}
+      dialogs={<>{dialogs}{harnessSettingsOpen && detail && <HarnessSettingsDialog
+        key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}
+        onChange={handleUpdateThreadSettings} onClose={() => setHarnessSettingsOpen(false)}
+      />}</>}
       {...(chatComposerProps ? { composerProps: chatComposerProps } : {})}
       {...(shellComposerProps ? { shellComposerProps } : {})}
     />
