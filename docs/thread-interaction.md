@@ -65,3 +65,11 @@ This section supersedes the earlier default-delivery examples above. Ordinary `t
 `inbox` / `inbox list` returns bounded unread previews; `inbox read ID` expands one message; `inbox ack ID...` marks handled messages while retaining history. `--thread ID` selects a mailbox. Listing and reading never trigger turns or mark messages processed. `status` includes `unreadMessageCount`. Mail uses namespaced records in the existing KV store, with no schema migration or new tables.
 
 Completion subscriptions on executable messages default to inbox delivery; `--notify-delivery queue` explicitly wakes the caller. Legacy subscription values remain queued for compatibility. Passive mail rejects completion subscriptions because there is no corresponding receiving turn.
+
+## Direct delivery (0.12.33)
+
+`thread send ID --delivery direct --text TEXT` requests immediate handling. The server resolves idle to a durable continuation and running to steering within the acceptance transaction, after request-ID deduplication. Other states are rejected. The receipt includes `requestedDelivery` and the actual `delivery` (`queued`, `steered`, or `held`); a queued receipt is not proof that execution has started. An idle-route continuation keeps its original route if other work starts first.
+
+Unsupported active steering is rejected without enqueueing. Accepted steering targets that specific turn; failures or a replaced/finished turn remain held, never silently becoming a continuation or steering a replacement turn. Retries reuse the original route. Existing unpinned steering from older versions retains its previous behavior.
+
+Inbox remains passive by default. Use direct for immediate correction or to wake an idle collaborator; use queue when processing after current work is intentional. Completion notification delivery remains inbox or queue; a peer can send an explicit direct reply when immediate handling is needed.

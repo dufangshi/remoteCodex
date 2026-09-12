@@ -315,10 +315,14 @@ async fn completion_can_go_to_inbox_without_waking_the_sender() {
     let a = thread(&state, Provider::Codex).await;
     let b = thread(&state, Provider::Acp).await;
     let mut input = send(&a, "finish task", true, "finish");
+    input.delivery = "direct".into();
     input.notify_delivery = "inbox".into();
-    state.send_to_thread(&b, input).unwrap();
+    let receipt = state.send_to_thread(&b, input.clone()).unwrap();
+    assert_eq!(receipt["delivery"], "queued");
+    assert_eq!(receipt["requestedDelivery"], "direct");
     state.start_interaction_worker();
     until(|| state.inbox_unread_count(&a).unwrap() == 1).await;
+    assert_eq!(state.send_to_thread(&b, input).unwrap(), receipt);
     assert_eq!(
         state.interaction_status(&a).await.unwrap()["queuedCount"],
         0
@@ -356,9 +360,10 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
     until(|| state.get_thread(&b).unwrap().status == "running").await;
     let turn = state.get_thread(&b).unwrap().active_turn_id.unwrap();
     let mut urgent = send(&a, "urgent correction", true, "urgent");
-    urgent.delivery = "steer".into();
+    urgent.delivery = "direct".into();
     urgent.notify_delivery = "inbox".into();
     let receipt = state.send_to_thread(&b, urgent.clone()).unwrap();
+    assert_eq!(receipt["delivery"], "steer");
     state
         .steer_pending_prompt(&b, receipt["pendingSteerId"].as_str().unwrap())
         .await
@@ -385,9 +390,13 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
         .unwrap();
     until(|| state.get_thread(&b).unwrap().status == "running").await;
     let mut held = send(&a, "late steering request", false, "held");
-    held.delivery = "steer".into();
+    held.delivery = "direct".into();
     let receipt = state.send_to_thread(&b, held).unwrap();
     until(|| state.get_thread(&b).unwrap().status != "running").await;
+    state
+        .send_to_thread(&b, send(&a, "replacement task", false, "task3"))
+        .unwrap();
+    until(|| state.get_thread(&b).unwrap().status == "running").await;
     assert!(state
         .steer_pending_prompt(&b, receipt["pendingSteerId"].as_str().unwrap())
         .await
@@ -397,4 +406,48 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
         state.interaction_status(&b).await.unwrap()["queuedCount"],
         1
     );
+}
+
+#[tokio::test]
+async fn direct_rejects_unavailable_state_and_unsupported_steering_without_queueing() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Acp).await;
+    // Use the real ACP capability fallback before a steering extension has
+    // been negotiated; the fake runtime advertises steering for every provider.
+    let state = Arc::try_unwrap(state).ok().unwrap();
+    let state = Supervisor::new(
+        state.config,
+        state.db,
+        vec![Arc::new(remote_codex_runtime::acp::AcpRuntime::catalog(
+            None, 1000,
+        ))],
+    );
+    let mut input = send(&a, "act now", false, "direct-rejected");
+    input.delivery = "direct".into();
+    for status in ["recovering", "interrupted", "failed", "running"] {
+        state
+            .db
+            .with(|c| {
+                c.execute(
+                    "UPDATE threads SET status=?1 WHERE id=?2",
+                    params![status, b],
+                )?;
+                if status == "running" {
+                    c.execute("INSERT INTO thread_turns(id,thread_id,status,started_at,ordinal) VALUES ('active',?1,'inProgress','2026-09-11',1)", [&b])?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let error = state.send_to_thread(&b, input.clone()).unwrap_err();
+        assert!(error.to_string().contains(if status == "running" {
+            "does not support steering"
+        } else {
+            "direct requires an idle or running thread"
+        }));
+        assert_eq!(
+            state.interaction_status(&b).await.unwrap()["queuedCount"],
+            0
+        );
+    }
 }

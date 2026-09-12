@@ -32,18 +32,19 @@ Model IDs and effort options come from local discovery. Preserve explicitly requ
 | Intent | Delivery | Behavior |
 | --- | --- | --- |
 | Report, question, result, intermediate finding | `inbox` (send default) | Durable passive mail. Does not start, queue, or interrupt a turn. Receiver reads it via CLI. |
-| Assign work and have the peer execute | `queue` | Durable continuation. Starts when idle; waits behind active execution. |
+| Wake an idle peer or correct a running task promptly | `direct` | Server selects a new turn when idle or steering when running. Use only when immediate handling is needed. |
+| Intentionally execute after current work | `queue` | Durable continuation. Starts when idle; waits behind active execution. |
 | Correct an active task immediately | `steer` | Requires an active turn and backend steering capability. Requests input in that turn; not a guaranteed interruption of a blocking tool. |
 
 ```bash
 remote-codex thread send PEER_ID --text 'Build artifact is ready at /path/to/artifact.'
 remote-codex thread send PEER_ID --delivery queue --text-file /tmp/task.txt
-remote-codex thread send PEER_ID --delivery steer --text 'Pause publication: use the corrected version number.'
+remote-codex thread send PEER_ID --delivery direct --text 'Pause publication: use the corrected version number.'
 ```
 
-Do not use queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Mail is not automatically pushed into an active model's context: the receiver must check its inbox. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
+Do not use direct, queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Mail is not automatically pushed into an active model's context: the receiver must check its inbox. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
 
-Use queue to wake an idle peer or delegate a task without relying on inbox polling. Use steer only when the current task needs the input promptly. A provider without steering rejects the request; it is not silently downgraded to queue. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
+Use direct when the peer must act now, including an idle peer that will not check its inbox. The server chooses the route in the acceptance transaction, so callers need not check status first. Only idle and running states qualify: recovering, interrupted or failed peers require inspection before another deliberate action. Use queue when work should wait behind any active turn; use steer when only the current active turn should receive it. A provider without steering rejects the request; it is not silently downgraded to queue. Direct returns `requestedDelivery: "direct"` plus the resolved `delivery`: `queued` for an idle peer (durable new-turn dispatch, not proof of execution), or `steered` after an active backend acknowledges. The idle route keeps its accepted continuation if other work starts before dispatch; it does not later change into steering. Active direct/steer messages target the turn selected at acceptance and cannot move to a replacement turn. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
 
 ## Read and acknowledge your inbox
 
@@ -68,7 +69,7 @@ remote-codex thread send SENDER_ID --text-file /tmp/result.txt
 remote-codex inbox ack MESSAGE_ID
 ```
 
-An idle sender will not wake for that default passive reply. If a wake-up is needed and authorized, use `--delivery queue`. Include the concrete response destination and delivery expectation in delegated instructions. Avoid reflexive mutual acknowledgements or reciprocal completion subscriptions.
+An idle sender will not wake for that default passive reply. If immediate handling is needed and authorized, use `--delivery direct`; it wakes an idle sender or steers a running sender. Use queue only when the reply should wait behind current work. Include the concrete response destination and delivery expectation in delegated instructions. Avoid reflexive mutual acknowledgements or reciprocal completion subscriptions.
 
 ## Create and dispatch a task
 
@@ -97,7 +98,7 @@ Replace placeholders before sending. Provide goal, checkout, relevant files, con
 
 ## Completion notifications
 
-`--notify-on-complete` subscribes to the receiving **execution turn**, so it requires queue/steer delivery plus a caller identity. Passive inbox messages have no execution turn and reject this flag. It is a per-send subscription, not a permanent watch of future activity.
+`--notify-on-complete` subscribes to the receiving **execution turn**, so it requires direct/queue/steer delivery plus a caller identity. Passive inbox messages have no execution turn and reject this flag. It is a per-send subscription, not a permanent watch of future activity.
 
 The default completion notification goes to the caller's inbox. It includes peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. It does not automatically wake the caller.
 
@@ -114,7 +115,7 @@ Existing queued input and pre-upgrade completion subscriptions retain their orig
 
 ## Retries and progressive transcript reads
 
-Use a stable `--request-id` for a send that might need retrying. Exact same target/sender/key/text/delivery/notification choices return its durable receipt; conflicting input is rejected. New messages need new keys. Without a key, inspect before resending after a lost connection. Deduplication applies to sends, not thread creation. Delivery defaults changed in 0.12.32: preserve explicit delivery choices in automation; inspect older receipts rather than blindly retrying a pre-upgrade request with new defaults.
+Use a stable `--request-id` for a send that might need retrying. Exact same target/sender/key/text/delivery/notification choices reuse its durable receipt and originally chosen route, even if the peer has since changed state; conflicting input is rejected. New messages need new keys. Without a key, inspect before resending after a lost connection. Deduplication applies to sends, not thread creation. Delivery defaults changed in 0.12.32: preserve explicit delivery choices in automation; inspect older receipts rather than blindly retrying a pre-upgrade request with new defaults.
 
 ```bash
 remote-codex transcript THREAD_ID

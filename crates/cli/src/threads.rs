@@ -21,8 +21,8 @@ pub struct Connection {
 }
 #[derive(Args)]
 pub struct Body {
-    /// inbox stores passive mail (send default); queue starts a continuation (create default); steer targets an active supported turn.
-    #[arg(long, value_parser=["inbox","queue","steer"])]
+    /// inbox stores passive mail (send default); direct starts when idle or steers when running; queue waits for a continuation (create default); steer requires an active supported turn. Direct/steer never silently fall back on steering failure.
+    #[arg(long, value_parser=["inbox","direct","queue","steer"])]
     pub delivery: Option<String>,
     /// Where the terminal-turn notification is delivered (requires --notify-on-complete).
     #[arg(long, default_value="inbox", value_parser=["inbox","queue"], requires="notify_on_complete")]
@@ -93,7 +93,7 @@ pub enum ThreadCommand {
         #[command(flatten)]
         body: Body,
     },
-    /// Submit a prompt and return immediately after durable acceptance.
+    /// Send passive mail or request execution; direct/steer also await the steering acknowledgement when running.
     Send {
         id: String,
         #[command(flatten)]

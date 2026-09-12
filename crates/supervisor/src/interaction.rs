@@ -27,9 +27,8 @@ pub(crate) async fn command(
             "show" | "status" => state.interaction_status(id).await,
             "send" => {
                 let body = serde_json::from_value::<SendInput>(input.clone())?;
-                let steer = body.delivery == "steer";
                 let mut receipt = state.send_to_thread(id, body)?;
-                if steer {
+                if receipt["delivery"] == "steer" {
                     let pending = receipt["pendingSteerId"].as_str().unwrap();
                     match state.steer_pending_prompt(id, pending).await {
                         Ok(_) => receipt["delivery"] = json!("steered"),
