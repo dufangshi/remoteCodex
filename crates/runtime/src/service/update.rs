@@ -55,9 +55,13 @@ impl Supervisor {
     }
 
     pub fn spawn_update_recovery(self: &Arc<Self>) {
+        self.spawn_update_recovery_for(None);
+    }
+
+    pub(super) fn spawn_update_recovery_for(self: &Arc<Self>, only_thread_id: Option<&str>) {
         let records = self.db.with(|conn| {
-            let mut stmt = conn.prepare("SELECT id,thread_id,turn_id,submitted_prompt FROM thread_pending_steers WHERE delivery='update-resume' ORDER BY created_at")?;
-            let rows = stmt.query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut stmt = conn.prepare("SELECT id,thread_id,turn_id,submitted_prompt FROM thread_pending_steers WHERE delivery='update-resume' AND (?1 IS NULL OR thread_id=?1) ORDER BY created_at")?;
+            let rows = stmt.query_map(params![only_thread_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         });
         let records = match records {
@@ -86,6 +90,17 @@ impl Supervisor {
                     }
                     let exists = state.db.with(|conn| Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM thread_pending_steers WHERE id=?1)",params![id],|r| r.get::<_,bool>(0))?))?;
                     if !exists { return Ok(()); } // A user stop wins over automatic recovery.
+                    // A crash between journaling and cancellation settlement leaves
+                    // a recovering turn. Verify its backend before consuming the intent.
+                    let latest_id: Option<String> = state.db.with(|conn| Ok(conn.query_row(
+                        "SELECT id FROM thread_turns WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
+                        params![thread_id], |row| row.get(0)).optional()?))?;
+                    if latest_id.as_deref() == Some(source_turn.as_str()) && state.get_thread(&thread_id)?.status == "recovering" {
+                        state.reconnect_thread(&thread_id).await?;
+                        if state.get_thread(&thread_id)?.status == "recovering" {
+                            bail!("Backend status is still unconfirmed; reconnect before retrying recovery");
+                        }
+                    }
                     let thread = state.get_thread(&thread_id)?;
                     let latest: Option<(String,String)> = state.db.with(|conn| Ok(conn.query_row(
                         "SELECT id,status FROM thread_turns WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
@@ -103,10 +118,13 @@ impl Supervisor {
                 if let Err(error) = result {
                     tracing::error!(%thread_id,%error,"update thread recovery failed");
                     let _ = state.db.with(|conn| {
-                        if conn
-                            .execute("DELETE FROM thread_pending_steers WHERE id=?1", params![id])?
-                            == 0
-                        {
+                        // Preserve unconsumed recovery intent across transient
+                        // connection failures. User stop still removes it explicitly.
+                        if !conn.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM thread_pending_steers WHERE id=?1)",
+                            params![id],
+                            |r| r.get::<_, bool>(0),
+                        )? {
                             return Ok(());
                         }
                         conn.execute(

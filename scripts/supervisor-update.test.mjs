@@ -6,7 +6,14 @@ import path from 'node:path';
 import {
   worker,
   readJob,
+  needsUpdate,
 } from '../npm/remote-codex/bin/supervisor-update.mjs';
+
+test('update eligibility includes a rolled-back npm installation under a newer running binary', () => {
+  assert.equal(needsUpdate('0.12.32', '0.12.32', '0.12.30'), true);
+  assert.equal(needsUpdate('0.12.32', '0.12.30', '0.12.32'), true);
+  assert.equal(needsUpdate('0.12.32', '0.12.32', '0.12.32'), false);
+});
 
 function fixture() {
   const directory = fs.mkdtempSync(

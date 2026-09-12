@@ -1,0 +1,158 @@
+name: PR checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  RUST_VERSION: 1.89.0
+
+jobs:
+  changes:
+    name: Select relevant checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
+      incus: ${{ steps.filter.outputs.incus }}
+      npm: ${{ steps.filter.outputs.npm }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '.cargo/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain*'
+              - 'rustfmt.toml'
+              - '.rustfmt.toml'
+              - 'crates/**'
+              - 'migrations/**'
+            web:
+              - 'apps/supervisor-web/**'
+              - 'packages/shared/**'
+              - 'packages/plugin-*/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+            incus:
+              - 'packages/incus-host-agent/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+            npm:
+              - 'npm/**'
+              - 'scripts/*.mjs'
+              - 'package.json'
+            workflows:
+              - '.github/workflows/**'
+
+  workflows:
+    name: Workflow syntax
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint GitHub Actions workflows
+        # Keep shell warnings/errors; style and informational suggestions are
+        # not a merge gate for unrelated deployment scripts.
+        run: docker run --rm -e SHELLCHECK_OPTS=--severity=warning -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+
+  rust:
+    name: Rust check (Linux)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting and compilation
+        run: |
+          cargo +"${RUST_VERSION}" fmt --all --check
+          cargo +"${RUST_VERSION}" check --workspace --locked
+
+  node:
+    name: Relevant TypeScript packages
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.incus == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+      # The workspace lockfile includes this local file dependency, even when
+      # only installing to validate Incus. Only Web needs its build output.
+      - name: Check out thread UI dependency
+        run: git clone --depth 1 --branch main https://github.com/dufangshi/remote-codex-thread-ui-rust.git ./remote-codex-thread-ui
+      - name: Install thread UI dependencies
+        if: needs.changes.outputs.web == 'true'
+        run: pnpm --dir ./remote-codex-thread-ui install --frozen-lockfile
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck and test Web
+        if: needs.changes.outputs.web == 'true'
+        run: |
+          pnpm --dir ./remote-codex-thread-ui --filter @remote-codex/thread-ui build
+          pnpm --filter @remote-codex/supervisor-web typecheck
+          pnpm --filter @remote-codex/supervisor-web test
+      - name: Typecheck and test Incus host agent
+        if: needs.changes.outputs.incus == 'true'
+        run: |
+          pnpm --filter @remote-codex/incus-host-agent typecheck
+          pnpm --filter @remote-codex/incus-host-agent test
+          bash -n packages/incus-host-agent/deploy/*.sh
+          bash -n packages/incus-host-agent/guest/*.sh packages/incus-host-agent/guest/remote-codex-provision
+
+  npm:
+    name: npm launcher and updater unit tests
+    needs: changes
+    if: needs.changes.outputs.npm == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test npm scripts without building or installing the product
+        run: node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs scripts/npm-launcher-relay.test.mjs scripts/supervisor-update.test.mjs
+
+  result:
+    name: PR checks complete
+    needs: [changes, workflows, rust, node, npm]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require selected checks to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          case ",$RESULTS," in
+            *,failure,*|*,cancelled,*) exit 1 ;;
+          esac

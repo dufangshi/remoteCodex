@@ -317,7 +317,8 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             Check updates
           </button>
           {supervisor?.latestVersion &&
-            supervisor.latestVersion !== supervisor.runningVersion &&
+            (supervisor.latestVersion !== supervisor.runningVersion ||
+              (supervisor.installedVersion && supervisor.latestVersion !== supervisor.installedVersion)) &&
             supervisor.canUpdate && (
               <button
                 className={button}
@@ -334,8 +335,8 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       {supervisor?.installedVersion &&
         supervisor.installedVersion !== supervisor.runningVersion && (
           <p className="mt-2 text-xs">
-            Installed {supervisor.installedVersion}; the running process has not
-            switched yet.
+            Installed {supervisor.installedVersion}; running {supervisor.runningVersion}.
+            {' '}Check updates to bring the installation and running service to the same version.
           </p>
         )}
       {supervisor?.reason && (

@@ -2981,7 +2981,29 @@ impl Supervisor {
         self.get_thread(id)
     }
 
-    pub async fn resume_thread(&self, id: &str) -> Result<ThreadDetailDto> {
+    pub async fn resume_thread(self: &Arc<Self>, id: &str) -> Result<ThreadDetailDto> {
+        let state = self.clone();
+        let id = id.to_string();
+        // Reconnection and accepted work belong to the Supervisor. A browser or
+        // relay request timing out must not drop an owned backend operation.
+        tokio::spawn(async move {
+            state.reconnect_thread(&id).await?;
+            let detail = state.get_thread_detail_view(&id, Some(3), true).await?;
+            let maintenance_pending = state.db.with(|conn| Ok(conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM thread_pending_steers WHERE thread_id=?1 AND delivery='update-resume')",
+                [&id], |r| r.get::<_, bool>(0),
+            )?))?;
+            if maintenance_pending {
+                state.spawn_update_recovery_for(Some(&id));
+            } else {
+                state.dispatch_inbox(id);
+            }
+            Ok(detail)
+        })
+        .await?
+    }
+
+    async fn reconnect_thread(&self, id: &str) -> Result<()> {
         let thread = self.get_thread(id)?;
         let cwd = self
             .get_workspace(&thread.workspace_id)
@@ -3008,9 +3030,7 @@ impl Supervisor {
                 )
                 .await?;
         }
-        self.settle_reconnected_execution(id).await?;
-        self.drain_steers(id).await?;
-        self.get_thread_detail_view(id, Some(3), true).await
+        self.settle_reconnected_execution(id).await
     }
 
     pub fn prepare_prompt_attachments(

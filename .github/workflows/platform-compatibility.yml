@@ -1,19 +1,15 @@
-name: Platform compatibility
+name: Full compatibility (manual)
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - rust/acp-rewrite
+  # Agents dispatch this only when the user explicitly requests full validation.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: platform-compatibility-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: platform-compatibility-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   RUST_VERSION: 1.89.0
@@ -21,48 +17,8 @@ env:
   THREAD_UI_REF: main
 
 jobs:
-  changes:
-    name: Detect relevant changes
-    runs-on: ubuntu-24.04
-    outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-      web: ${{ steps.filter.outputs.web }}
-      windows_manager: ${{ steps.filter.outputs.windows_manager }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            rust:
-              - '.cargo/**'
-              - 'Cargo.lock'
-              - 'Cargo.toml'
-              - 'crates/**'
-              - 'migrations/**'
-            web:
-              - 'apps/supervisor-web/**'
-              - 'e2e/**'
-              - 'npm/**'
-              - 'package.json'
-              - 'packages/**'
-              - 'playwright.config.*'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - 'scripts/*.mjs'
-              - 'tsconfig*.json'
-            windows_manager:
-              - '.github/workflows/platform-compatibility.yml'
-              - 'apps/windows-device-manager/**'
-              - 'scripts/windows/**'
-
   rust:
     name: Rust (${{ matrix.os }})
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -94,8 +50,6 @@ jobs:
 
   windows-manager:
     name: Windows Device Manager
-    needs: changes
-    if: needs.changes.outputs.windows_manager == 'true'
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
@@ -127,8 +81,6 @@ jobs:
 
   web:
     name: Web and npm package
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:

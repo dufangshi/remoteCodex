@@ -104,6 +104,158 @@ async fn seeded_thread(
     (dir, supervisor, workspace, thread)
 }
 
+#[tokio::test]
+async fn reconnect_returns_before_queued_work_and_keeps_it_owned() {
+    let (_dir, state, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    insert_stale_turn(&state, &thread.id, "unconfirmed");
+    state
+        .db
+        .with(|c| {
+            c.execute(
+                "UPDATE threads SET status='recovering' WHERE id=?1",
+                [&thread.id],
+            )?;
+            c.execute(
+                "UPDATE thread_turns SET status='recovering' WHERE thread_id=?1",
+                [&thread.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let state = Arc::new(state);
+    let mut input = prompt_input("Inspect this repository in depth");
+    input.client_request_id = Some("reconnect-queued-request".into());
+    state.accept_prompt(&thread.id, &input).await.unwrap();
+    // Drop the initiating request after it has launched reconnect, as a relay
+    // disconnect would do. The subsequent retry must share the saved work.
+    {
+        use std::future::Future;
+        let mut request = Box::pin(state.resume_thread(&thread.id));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(request.as_mut().poll(&mut context).is_pending());
+    }
+    let detail = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        state.resume_thread(&thread.id),
+    )
+    .await
+    .expect("reconnect must not wait for the 25-second queued turn")
+    .unwrap();
+    assert_ne!(detail.thread.status, "recovering");
+    assert!(detail.thread.last_error.is_none());
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while state.get_thread(&thread.id).unwrap().status != "running" {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // Retrying both the message receipt and reconnect cannot duplicate execution.
+    state.accept_prompt(&thread.id, &input).await.unwrap();
+    state.resume_thread(&thread.id).await.unwrap();
+    let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+    assert_eq!(
+        state
+            .db
+            .with(|c| Ok(c.query_row(
+                "SELECT count(*) FROM thread_turns WHERE thread_id=?1",
+                [&thread.id],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .unwrap(),
+        2
+    );
+    assert!(detail.pending_steers.is_empty());
+    assert_eq!(
+        detail.thread.provider_session_id,
+        thread.provider_session_id
+    );
+    state.interrupt(&thread.id).await.unwrap();
+    assert_eq!(state.get_thread(&thread.id).unwrap().status, "interrupted");
+}
+
+#[tokio::test]
+async fn update_intent_survives_crash_before_cancellation_and_failed_reconnect() {
+    let (_dir, state, _workspace, thread) = seeded_thread(Provider::Codex).await;
+    insert_stale_turn(&state, &thread.id, "journaled-before-crash");
+    state.db.with(|c| {
+        c.execute("INSERT INTO thread_pending_steers(id,thread_id,turn_id,display_prompt,submitted_prompt,delivery,created_at,updated_at) VALUES ('maintenance-intent',?1,'journaled-before-crash','continue maintenance','continue maintenance','update-resume','2026-09-11','2026-09-11')",[&thread.id])?;
+        Ok(())
+    }).unwrap();
+    let config = state.config.clone();
+    drop(state);
+    // Missing backend represents a reconnect preflight failure. Its intent must
+    // survive and must not be silently turned into success or discarded.
+    let state = Arc::new(Supervisor::new(
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
+        vec![],
+    ));
+    state.finish_update_attempt();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if state
+                .get_thread(&thread.id)
+                .unwrap()
+                .last_error
+                .unwrap_or_default()
+                .contains("Automatic recovery")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        state
+            .db
+            .with(|c| Ok(c.query_row(
+                "SELECT count(*) FROM thread_pending_steers WHERE id='maintenance-intent'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .unwrap(),
+        1
+    );
+    // Wait for the failed background attempt to release database ownership.
+    while Arc::strong_count(&state) > 1 {
+        tokio::task::yield_now().await;
+    }
+    drop(state);
+    let state = Arc::new(Supervisor::new(
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
+        vec![Arc::new(FakeRuntime::new(Provider::Codex))],
+    ));
+    assert!(state.defer_update_recovery());
+    state.finish_update_attempt();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while state.get_thread(&thread.id).unwrap().status != "idle" {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let detail = state.get_thread_detail(&thread.id, None).await.unwrap();
+    assert_eq!(detail.turns.len(), 2);
+    assert_eq!(detail.turns[0].status, "interrupted");
+    assert_eq!(detail.turns[1].status, "completed");
+    assert_eq!(
+        detail.thread.provider_session_id,
+        thread.provider_session_id
+    );
+    assert_eq!(
+        state
+            .db
+            .with(|c| Ok(c
+                .query_row("SELECT count(*) FROM thread_pending_steers", [], |r| r
+                    .get::<_, i64>(0))?))
+            .unwrap(),
+        0
+    );
+}
 async fn verify_update_recovery(restart: bool) {
     let (_dir, supervisor, _workspace, thread) = seeded_thread(Provider::Codex).await;
     let supervisor = Arc::new(supervisor);
