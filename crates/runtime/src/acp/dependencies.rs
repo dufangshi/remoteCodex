@@ -25,7 +25,20 @@ pub fn package(id: &str) -> Option<&'static str> {
 }
 
 pub fn install_command(id: &str) -> Option<String> {
-    Some(shell_words::join(install_args(id).ok()?))
+    Some(command_line(&install_args(id).ok()?))
+}
+
+fn command_line(args: &[String]) -> String {
+    if cfg!(windows) {
+        // npm.cmd is dispatched through cmd.exe; POSIX single quotes would
+        // become literal characters in --prefix and --cache paths.
+        args.iter()
+            .map(|arg| format!("\"{}\"", arg.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        shell_words::join(args)
+    }
 }
 
 fn install_args(id: &str) -> Result<Vec<String>> {
@@ -87,7 +100,7 @@ pub async fn ensure(def: &AcpAgentDef, update: bool) -> Result<()> {
 
 async fn install(def: &AcpAgentDef) -> Result<()> {
     let args = install_args(&def.id)?;
-    let parsed = super::rpc::parse_spawn_command(&shell_words::join(&args))?;
+    let parsed = super::rpc::parse_spawn_command(&command_line(&args))?;
     tokio::fs::create_dir_all(prefix())
         .await
         .context("Create user-owned ACP adapter directory")?;
