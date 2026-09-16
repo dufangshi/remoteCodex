@@ -52,11 +52,10 @@ pub async fn harness_action(
     let Ok(guard) = state.harness_gate(&id).try_write_owned() else {
         return (StatusCode::CONFLICT, Json(json!({"code":"conflict","message":"This harness is busy. Wait for its turns to finish or stop them before maintenance."}))).into_response();
     };
-    state
-        .management_jobs
-        .lock()
-        .unwrap()
-        .insert(id.clone(), json!({"state":"running","action":body.action}));
+    state.management_jobs.lock().unwrap().insert(
+        id.clone(),
+        json!({"state":"running","action":body.action,"component":body.component}),
+    );
     tokio::spawn(async move {
         let _guard = guard;
         let _maintenance = maintenance;
@@ -66,8 +65,12 @@ pub async fn harness_action(
             management::update_harness(&state, &id, &body.component).await
         };
         let value = match result {
-            Ok(()) => json!({"state":"completed","action":body.action}),
-            Err(error) => json!({"state":"failed","action":body.action,"error":error.to_string()}),
+            Ok(()) => {
+                json!({"state":"completed","action":body.action,"component":body.component,"connectionVerified":body.action=="update" && body.component=="adapter"})
+            }
+            Err(error) => {
+                json!({"state":"failed","action":body.action,"component":body.component,"error":format!("{error:#}")})
+            }
         };
         state.management_jobs.lock().unwrap().insert(id, value);
     });

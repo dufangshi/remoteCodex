@@ -41,7 +41,7 @@ function pickModel(models: ModelOptionDto[]) {
 }
 
 function pickReadyAgent(agents: ModelOptionDto[], preferred?: string) {
-  const ready = (entry: ModelOptionDto) => entry.acpAgent?.availability === 'ready';
+  const ready = (entry: ModelOptionDto) => (entry.acpAgent?.availability === 'ready' || entry.acpAgent?.availability === 'adapter_missing');
   return (
     agents.find((entry) => entry.model === preferred && ready(entry)) ??
     agents.find((entry) => entry.isDefault && ready(entry)) ??
@@ -482,7 +482,7 @@ export function ThreadCreateForm({
           >
             {agentOptions.map((entry) => {
               const meta = entry.acpAgent;
-              const ready = meta?.availability === 'ready';
+              const ready = meta?.availability === 'ready' || meta?.availability === 'adapter_missing';
               const adapterMissing = meta?.availability === 'adapter_missing';
               const installing = installingAgentId === entry.id || meta?.busy === true;
               const selected = entry.model === agentId;
@@ -493,7 +493,7 @@ export function ThreadCreateForm({
                     ? 'Adapter needed'
                     : meta?.availability === 'server_unavailable'
                       ? 'ACP unavailable'
-                      : 'Ready';
+                      : meta?.statusMessage === 'Ready' ? 'Ready' : meta?.statusMessage?.startsWith('ACP verification failed:') ? 'Connection failed' : 'Installed';
               return (
                 <div key={entry.id} className="flex min-w-0 items-stretch gap-2 px-2 py-2">
                   <label
@@ -610,7 +610,7 @@ export function ThreadCreateForm({
             !workspaceId ||
             !model ||
             !selectedModel ||
-            (provider === 'acp' && selectedAgent?.acpAgent?.availability !== 'ready')
+            (provider === 'acp' && !['ready', 'adapter_missing'].includes(selectedAgent?.acpAgent?.availability ?? ''))
           }
           className={
             compact

@@ -64,3 +64,29 @@ it('shared device access exposes no restart or update controls', async () => {
   expect(screen.queryByRole('button',{name:/Restart|Check updates|Update/})).not.toBeInTheDocument();
   expect(api.request.mock.calls.every(([,options])=>options.method!=='POST')).toBe(true);
 });
+
+it('shows a missing adapter and its install action after a successful base update', async () => {
+  api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{
+    id:'codex', name:'OpenAI Codex', transport:'adapter',
+    base:{path:'/usr/local/bin/codex',resolvedPath:'/usr/local/bin/codex',version:'0.154.0',manager:'npm',canUpdate:true},
+    adapter:{installed:false,canInstall:true,canUpdate:false,reason:'Executable not found: codex-acp',updateCommand:'npm install --prefix /home/u/.local/share/remote-codex/adapters'},
+    job:{state:'completed',action:'update'},
+  }] : {}));
+  mount('/devices/a/threads/thread-a');
+  expect(await screen.findByText('ACP adapter')).toBeVisible();
+  expect(screen.getByText(/Not installed/)).toBeVisible();
+  expect(screen.queryByText(/^Ready/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Install OpenAI Codex adapter'}));
+  fireEvent.click(screen.getByRole('button',{name:/^Install$/}));
+  await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/relay/devices/a/api/management/harnesses/codex',expect.objectContaining({method:'POST',body:JSON.stringify({action:'update',component:'adapter'})})));
+});
+
+it('keeps the repair entry visible for an older device returning adapter null', async () => {
+  api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{id:'codex',name:'OpenAI Codex',transport:'adapter',base:null,adapter:null}] : {}));
+  mount('/devices/a/threads/thread-a');
+  const install=await screen.findByRole('button',{name:'Install OpenAI Codex adapter'});
+  expect(install).toBeVisible();
+  fireEvent.click(install);
+  fireEvent.click(screen.getByRole('button',{name:/^Install$/}));
+  await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/relay/devices/a/api/agent-runtimes/acp/install?agentId=codex',expect.objectContaining({method:'POST'})));
+});

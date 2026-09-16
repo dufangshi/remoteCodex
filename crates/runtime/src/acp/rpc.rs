@@ -76,17 +76,32 @@ pub(crate) struct ParsedCommand {
 pub(crate) fn parse_spawn_command(command: &str) -> Result<ParsedCommand> {
     let parts =
         shell_words::split(command).with_context(|| format!("parse ACP command `{command}`"))?;
-    let program = parts
+    let mut program = parts
         .first()
         .filter(|program| !program.is_empty())
         .cloned()
         .ok_or_else(|| anyhow!("empty ACP command"))?;
 
+    if let Some(path) = super::catalog::resolve_executable(&shell_words::quote(&program)) {
+        program = path.to_string_lossy().into_owned();
+    }
+
     #[cfg(windows)]
     if resolves_to_windows_batch_script(&program) {
         return Ok(ParsedCommand {
             program: std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()),
-            args: vec!["/D".into(), "/S".into(), "/C".into(), command.into()],
+            args: vec![
+                "/D".into(),
+                "/S".into(),
+                "/C".into(),
+                // Preserve the existing cmd.exe argument quoting. POSIX
+                // shell_words::join would single-quote Windows paths with spaces.
+                if command.trim_start().starts_with('"') {
+                    command.replacen(&parts[0], &program, 1)
+                } else {
+                    command.replacen(&parts[0], &format!("\"{program}\""), 1)
+                },
+            ],
         });
     }
 
@@ -142,6 +157,7 @@ impl AcpProcess {
         #[cfg(unix)]
         cmd.process_group(0);
         crate::child_process::hide_tokio(&mut cmd);
+        cmd.env("PATH", super::catalog::child_path());
         cmd.args(&parsed.args)
             .current_dir(cwd)
             .stdin(Stdio::piped())

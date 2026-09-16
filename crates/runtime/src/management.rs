@@ -1,8 +1,5 @@
 //! Resolve the installation actually selected by the harness, never a second PATH copy.
-use crate::{
-    acp::{builtin_agents, command_program},
-    Supervisor,
-};
+use crate::{acp::builtin_agents, Supervisor};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::{
@@ -25,6 +22,7 @@ pub async fn output(program: &Path, args: &[String], timeout: u64) -> Result<Str
     let mut command = tokio::process::Command::new(program);
     crate::child_process::hide_tokio(&mut command);
     command
+        .env("PATH", crate::acp::child_path())
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -38,8 +36,8 @@ pub async fn output(program: &Path, args: &[String], timeout: u64) -> Result<Str
 }
 
 pub fn resolve(command: &str) -> Result<PathBuf> {
-    which::which(command_program(command).ok_or_else(|| anyhow!("Empty harness command"))?)
-        .map_err(|_| anyhow!("Executable not found"))
+    crate::acp::resolve_executable(command)
+        .ok_or_else(|| anyhow!("Executable not found: {command}"))
 }
 
 fn text_path(path: &Path) -> String {
@@ -161,6 +159,7 @@ pub fn installation(path: PathBuf, agent: &str) -> Installation {
         } else {
             parent
         };
+        found.version = package["version"].as_str().map(str::to_owned);
         let mut npm = modules.join("npm/bin/npm-cli.js");
         let node = if cfg!(windows) {
             let local = prefix.join("node.exe");
@@ -231,7 +230,7 @@ fn dto(found: Installation) -> Value {
 pub async fn inventory(state: &Supervisor) -> Value {
     let rows = futures_util::future::join_all(builtin_agents(state.config.acp_command.as_deref()).into_iter().map(|def| async move {
         let (base, adapter) = tokio::join!(inspect(&def.base_command, &def.id), async {
-            if def.transport == "adapter" { inspect(&def.server_command, "adapter").await.ok().map(dto) } else { None }
+            if def.transport == "adapter" { Some(adapter_inventory(&def).await) } else { None }
         });
         let job = state.management_jobs.lock().unwrap().get(&def.id).cloned();
         json!({"id":def.id,"name":def.display_name,"transport":def.transport,"base":base.ok().map(dto),"adapter":adapter,"job":job})
@@ -249,6 +248,30 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
         "adapter" if def.transport == "adapter" => &def.server_command,
         _ => bail!("Unknown component"),
     };
+    if component == "adapter" {
+        crate::acp::dependencies::ensure(&def, true).await?;
+        state.restart_harness(id).await?;
+        let provider = if state
+            .config
+            .enabled_providers
+            .contains(&remote_codex_protocol::Provider::Acp)
+        {
+            remote_codex_protocol::Provider::Acp
+        } else {
+            serde_json::from_value(json!(id))?
+        };
+        state
+            .list_models(
+                provider,
+                Some(id),
+                Some(&state.config.workspace_root.to_string_lossy()),
+            )
+            .await
+            .map_err(|error| {
+                anyhow!("Adapter installed, but ACP verification failed: {error:#}")
+            })?;
+        return Ok(());
+    }
     let found = inspect(command, id).await?;
     let Some((program, args)) = found.update.split_first() else {
         bail!("{}", found.reason.unwrap_or_default());
@@ -260,4 +283,26 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
     }
     state.restart_harness(id).await?;
     Ok(())
+}
+
+async fn adapter_inventory(def: &crate::acp::catalog::AcpAgentDef) -> Value {
+    let mut value = match inspect(&def.server_command, "adapter").await {
+        Ok(found) => {
+            let found_managed = found.path.starts_with(crate::acp::dependencies::prefix());
+            let mut value = dto(found);
+            value["installed"] = json!(true);
+            value["reason"] = Value::Null;
+            if found_managed {
+                value["manager"] = json!("remote-codex");
+            }
+            value
+        }
+        Err(error) => {
+            json!({"installed":false,"version":null,"path":null,"reason":error.to_string()})
+        }
+    };
+    value["canInstall"] = json!(crate::acp::dependencies::package(&def.id).is_some());
+    value["canUpdate"] = value["installed"].clone();
+    value["updateCommand"] = json!(crate::acp::dependencies::install_command(&def.id));
+    value
 }

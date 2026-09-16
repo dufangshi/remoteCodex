@@ -1079,7 +1079,7 @@ export function installOrUpdateAgentBackend(
   modelId?: string,
 ) {
   return request<AgentBackendDto>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/install`,
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/install${modelId ? `?agentId=${encodeURIComponent(modelId)}` : ''}`,
     {
       method: 'POST',
       body: JSON.stringify({

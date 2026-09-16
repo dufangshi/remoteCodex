@@ -1,11 +1,12 @@
 mod adapter;
 mod capabilities;
-mod catalog;
+pub(crate) mod catalog;
 mod codex_bridge;
 mod codex_models;
 mod codex_permissions;
 pub use codex_bridge::run as run_codex_app_server_bridge;
 mod deepseek;
+pub(crate) mod dependencies;
 mod elicitation;
 mod grok;
 pub(crate) use grok::billing_usage as grok_billing_usage;
@@ -29,4 +30,4 @@ pub use runtime::AcpRuntime;
 
 mod usage;
 
-pub(crate) use catalog::command_program;
+pub(crate) use catalog::{child_path, resolve_executable};

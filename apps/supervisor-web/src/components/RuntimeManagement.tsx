@@ -6,6 +6,9 @@ import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 import { FormDialog } from './FormDialog';
 
 type Installation = {
+  installed?: boolean;
+  legacyInstall?: boolean;
+  canInstall?: boolean;
   path: string;
   resolvedPath: string;
   version?: string;
@@ -18,6 +21,8 @@ type Job = {
   state?: string;
   phase?: string;
   action?: string;
+  component?: string;
+  connectionVerified?: boolean;
   rollingBack?: boolean;
   error?: string;
   targetVersion?: string;
@@ -25,6 +30,7 @@ type Job = {
 type Harness = {
   id: string;
   name: string;
+  transport?: string;
   base: Installation | null;
   adapter: Installation | null;
   job?: Job;
@@ -100,6 +106,8 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
   const [confirm, setConfirm] = useState<{
     id?: string;
     action?: 'restart';
+    installing?: boolean;
+    legacyInstall?: boolean;
     component?: string;
     name: string;
     command?: string | undefined;
@@ -197,30 +205,45 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       setBusy(false);
     }
   }
+  async function installLegacyAdapter(id: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await request(`${apiRoot}/agent-runtimes/acp/install?agentId=${encodeURIComponent(id)}`, {
+        method: 'POST', body: JSON.stringify({}),
+      });
+      setConfirm(null);
+      await load();
+    } catch (error) {
+      setError(`${error instanceof Error ? error.message : 'Adapter installation failed'}. Older Supervisors install through the system npm prefix; update the Supervisor to use managed adapter installation.`);
+    } finally { setBusy(false); }
+  }
   function installation(row: Harness, data: Installation, component: string) {
     return (
       <div className="mt-2 min-w-0 text-xs text-[var(--theme-fg-muted)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>
             {component === 'adapter' ? 'ACP adapter · ' : ''}
-            {data.version ?? 'Version unavailable'} · {data.manager}
+            {data.installed === false ? 'Not installed' : `${data.version ?? 'Version unavailable'} · ${data.manager ?? 'managed'}`}
           </span>
-          {data.canUpdate && (
+          {(data.canUpdate || data.canInstall) && (
             <button
               className={button}
               disabled={busy || active(jobs[row.id])}
-              aria-label={`Update ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
+              aria-label={`${data.installed === false ? 'Install' : 'Update'} ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
               onClick={() =>
                 setConfirm({
                   id: row.id,
                   name: row.name,
                   component,
+                  installing: data.installed === false,
+                  legacyInstall: data.legacyInstall ?? false,
                   command: data.updateCommand,
                 })
               }
             >
               <Download size={13} />
-              Update
+              {data.installed === false ? 'Install' : 'Update'}
             </button>
           )}
         </div>
@@ -261,12 +284,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             Not installed
           </p>
         )}
-        {h.adapter && (
-          <details className="mt-2">
+        {(h.adapter || h.transport === 'adapter') && (
+          <details className="mt-2" open={!h.adapter || h.adapter.installed === false}>
             <summary className="cursor-pointer text-xs text-[var(--theme-fg-muted)]">
               ACP adapter
             </summary>
-            {installation(h, h.adapter, 'adapter')}
+            {installation(h, h.adapter ?? {installed:false,canInstall:true,legacyInstall:true,path:'',resolvedPath:'',manager:'',canUpdate:false,reason:'Adapter not detected. This older Supervisor uses its existing npm installer; update the Supervisor for user-owned dependency management.'}, 'adapter')}
           </details>
         )}
         {job && (
@@ -277,7 +300,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             {job.error ??
               (active(job)
                 ? `${job.action === 'update' ? 'Updating' : 'Restarting'}…`
-                : 'Ready · configuration reloads on the next turn')}
+                : job.connectionVerified ? 'ACP connection verified' : `${job.action === 'update' && job.component === 'base' ? 'Base component update completed' : 'Completed'} · configuration reloads on the next turn`)}
           </p>
         )}
       </div>
@@ -372,14 +395,14 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       )}
       {confirm && (
         <FormDialog
-          title={`${confirm.action === 'restart' ? 'Restart' : 'Update'} ${confirm.name}`}
+          title={`${confirm.action === 'restart' ? 'Restart' : confirm.installing ? 'Install' : 'Update'} ${confirm.name}`}
           busy={busy}
           onClose={() => setConfirm(null)}
           description={
             confirm.action === 'restart'
               ? 'The device will briefly disconnect. Running tasks will be paused and continued in their existing sessions after restart; queued messages will be preserved.'
               : confirm.id
-              ? 'Update the selected installation, then reload its configuration. Running turns must finish first.'
+              ? confirm.installing ? 'Install the adapter in this device’s user-owned Remote Codex directory and verify its ACP connection.' : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
               : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
           }
         >
@@ -396,11 +419,11 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             disabled={busy}
             onClick={() =>
               void (confirm.id
-                ? act(confirm.id, 'update', confirm.component)
+                ? confirm.legacyInstall ? installLegacyAdapter(confirm.id) : act(confirm.id, 'update', confirm.component)
                 : supervisorAction(confirm.action ?? 'update'))
             }
           >
-            {busy ? 'Starting…' : confirm.action === 'restart' ? 'Restart' : 'Update'}
+            {busy ? 'Starting…' : confirm.action === 'restart' ? 'Restart' : confirm.installing ? 'Install' : 'Update'}
           </button>
         </FormDialog>
       )}

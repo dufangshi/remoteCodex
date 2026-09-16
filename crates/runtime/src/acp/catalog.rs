@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use which::which;
-
 #[derive(Clone, Debug)]
 pub struct AcpAgentDef {
     pub id: String,
@@ -158,13 +156,14 @@ fn def(
         transport: transport.into(),
         base_command: base.into(),
         server_command: server.into(),
-        install_command: install.map(str::to_string),
+        install_command: super::dependencies::install_command(id)
+            .or_else(|| install.map(str::to_string)),
         model_list_command: model_list.map(str::to_string),
     }
 }
 
 pub fn extra_bin_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
+    let mut dirs = vec![super::dependencies::bin_dir()];
     let home = crate::config::home_dir();
     dirs.extend([
         home.join(".local/bin"),
@@ -201,22 +200,18 @@ pub fn augment_path() {
     }
 }
 
+pub fn child_path() -> std::ffi::OsString {
+    let mut dirs = vec![super::dependencies::bin_dir()];
+    if let Some(path) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    dirs.extend(extra_bin_dirs());
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
 pub fn resolve_executable(command: &str) -> Option<PathBuf> {
     let exe = command_program(command)?;
-    let path = PathBuf::from(&exe);
-    if path.is_file() {
-        return Some(path);
-    }
-    if path.is_absolute() {
-        return None;
-    }
-    if let Ok(path) = which(&exe) {
-        return Some(path);
-    }
-    extra_bin_dirs().into_iter().find_map(|dir| {
-        let candidate = dir.join(&exe);
-        candidate.is_file().then_some(candidate)
-    })
+    which::which_in(&exe, Some(child_path()), std::env::current_dir().ok()?).ok()
 }
 
 pub(crate) fn command_program(command: &str) -> Option<String> {

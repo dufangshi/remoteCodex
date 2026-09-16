@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use remote_codex_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
@@ -38,6 +38,18 @@ use super::modes::{
 use super::prompt::build_prompt_blocks;
 use super::rpc::{parse_spawn_command, AcpProcess};
 use super::terminal::AgentTerminals;
+
+// Startup and cancelled probes must not leave the notification mux holding a child alive.
+struct StartupProcess(Option<Arc<AcpProcess>>);
+impl Drop for StartupProcess {
+    fn drop(&mut self) {
+        if let Some(process) = self.0.take() {
+            tokio::spawn(async move {
+                let _ = process.shutdown().await;
+            });
+        }
+    }
+}
 
 struct ActiveTurn {
     thread_id: String,
@@ -88,6 +100,7 @@ struct PendingInput {
 
 struct Inner {
     sessions: Mutex<HashMap<String, LiveSession>>,
+    health: std::sync::Mutex<HashMap<String, Option<String>>>,
     commands: Mutex<HashMap<(String, String), Vec<NegotiatedCommand>>>,
     lifecycle: Mutex<()>,
     pending_permissions: Mutex<HashMap<String, PendingPermission>>,
@@ -132,6 +145,7 @@ impl AcpRuntime {
             started_at: Mutex::new(None),
             inner: Arc::new(Inner {
                 sessions: Mutex::new(HashMap::new()),
+                health: Default::default(),
                 commands: Mutex::new(HashMap::new()),
                 lifecycle: Mutex::new(()),
                 pending_permissions: Mutex::new(HashMap::new()),
@@ -168,9 +182,28 @@ impl AcpRuntime {
         load_id: Option<&str>,
         reasoning_effort: Option<&str>,
     ) -> Result<(String, LiveSession)> {
+        let result = self
+            .spawn_session_inner(def, cwd, policy, load_id, reasoning_effort)
+            .await;
+        self.inner.health.lock().unwrap().insert(
+            def.id.clone(),
+            result.as_ref().err().map(|error| format!("{error:#}")),
+        );
+        result
+    }
+
+    async fn spawn_session_inner(
+        &self,
+        def: &AcpAgentDef,
+        cwd: &str,
+        policy: ProductSessionPolicy,
+        load_id: Option<&str>,
+        reasoning_effort: Option<&str>,
+    ) -> Result<(String, LiveSession)> {
         let cwd = harness_cwd(cwd);
         let cwd = cwd.as_ref();
         let yolo = policy.auto_approve();
+        super::dependencies::ensure(def, false).await?;
         let availability = classify_availability(def);
         if availability != "ready" {
             bail!("{} is not available ({availability})", def.display_name);
@@ -198,6 +231,7 @@ impl AcpRuntime {
         .await
         .map_err(|_| anyhow!("ACP spawn timeout"))??;
         let process = Arc::new(process);
+        let mut startup_process = StartupProcess(Some(process.clone()));
         let harness_info = if let Some(discovery) = &discovery {
             match tokio::time::timeout(self.startup_timeout, discovery.receive()).await {
                 Ok(Ok(info)) => Some(info),
@@ -386,6 +420,7 @@ impl AcpRuntime {
             current_mode_id,
         };
         Self::apply_product_mode(&live.process.clone(), &mut live).await?;
+        startup_process.0 = None;
         Ok((scoped, live))
     }
 
@@ -547,6 +582,7 @@ impl AcpRuntime {
                 None,
             )
             .await?;
+        let _probe_process = StartupProcess(Some(live.process.clone()));
         let models = if !live.harness_models.is_empty() {
             live.harness_models
         } else {
@@ -868,7 +904,23 @@ impl AgentRuntime for AcpRuntime {
             .as_ref()
             .map(classify_availability)
             .unwrap_or("base_missing");
-        let installed = availability == "ready";
+        let installed = availability == "ready" || self.provider == Provider::Acp;
+        let verified = {
+            let health = self.inner.health.lock().unwrap();
+            if self.provider == Provider::Acp {
+                health.values().any(Option::is_none)
+            } else {
+                health.get(&bound) == Some(&None)
+            }
+        };
+        let last_error = self.inner.health.lock().unwrap().get(&bound).cloned().flatten().or_else(|| {
+            def.as_ref().and_then(|def| match availability {
+                "adapter_missing" => Some(format!("Missing executable {} (package {}). Install in Settings > Harnesses > ACP adapter; it is also prepared automatically before execution.", def.server_command, super::dependencies::package(&def.id).unwrap_or("unknown"))),
+                "base_missing" => Some(format!("Missing base executable: {}", def.base_command)),
+                "server_unavailable" => Some(format!("Missing ACP executable: {}", def.server_command)),
+                _ => None,
+            })
+        });
         let caps = self
             .inner
             .caps_by_agent
@@ -891,13 +943,20 @@ impl AgentRuntime for AcpRuntime {
                 .map(|d| d.display_name.clone())
                 .unwrap_or_else(|| "ACP Agent".into()),
             description: "Generic ACP runtime with per-harness adapters.".into(),
-            enabled: installed || self.provider == Provider::Acp,
+            enabled: installed || availability == "adapter_missing",
             is_default: self.provider == Provider::Codex || self.provider == Provider::Acp,
             status: AgentRuntimeStatusDto {
-                state: if installed { "ready" } else { "stopped" }.into(),
+                state: if last_error.is_some() {
+                    "degraded"
+                } else if verified {
+                    "ready"
+                } else {
+                    "stopped"
+                }
+                .into(),
                 transport: "stdio".into(),
                 last_started_at: started,
-                last_error: None,
+                last_error: last_error.clone(),
                 restart_count: 0,
             },
             capabilities: caps,
@@ -910,7 +969,7 @@ impl AgentRuntime for AcpRuntime {
                 install_command: def.and_then(|d| d.install_command),
                 update_command: None,
                 busy: false,
-                last_error: None,
+                last_error: last_error.clone(),
             },
         }
     }
@@ -1000,6 +1059,7 @@ impl AgentRuntime for AcpRuntime {
             Ok(def) => def,
             Err(_) => return Ok(default_model_stub(agent_id.or(self.bound_agent.as_deref()))),
         };
+        super::dependencies::ensure(&def, false).await?;
         if classify_availability(&def) != "ready" {
             return Ok(default_model_stub(Some(&def.id)));
         }
@@ -1012,7 +1072,7 @@ impl AgentRuntime for AcpRuntime {
             let models = self
                 .probe_models(&def, cwd)
                 .await
-                .with_context(|| format!("probe {} models", def.display_name))?;
+                .map_err(|error| anyhow!("Probe {} models: {error:#}", def.display_name))?;
             if !models.is_empty() {
                 return Ok(models);
             }
@@ -1028,10 +1088,15 @@ impl AgentRuntime for AcpRuntime {
         if self.bound_agent.is_some() {
             return Ok(vec![]);
         }
-        Ok(builtin_agents(self.custom_command.as_deref())
+        Ok(futures_util::future::join_all(builtin_agents(self.custom_command.as_deref())
             .into_iter()
-            .map(|entry| {
+            .map(|entry| async move {
                 let availability = classify_availability(&entry);
+                let (base, server) = tokio::join!(
+                    crate::management::inspect(&entry.base_command, &entry.id),
+                    crate::management::inspect(&entry.server_command, &entry.id));
+                let health = self.inner.health.lock().unwrap().get(&entry.id).cloned();
+                let verified = availability == "ready" && matches!(health, Some(None));
                 ModelOptionDto {
                     id: entry.id.clone(),
                     model: entry.id.clone(),
@@ -1051,12 +1116,16 @@ impl AgentRuntime for AcpRuntime {
                         "baseProbeCommand": format!("{} --version", entry.base_command),
                         "serverCommand": entry.server_command,
                         "serverProbeCommand": format!("{} --help", entry.server_command),
-                        "baseVersion": Value::Null,
-                        "serverVersion": Value::Null,
+                        "baseVersion": base.as_ref().ok().and_then(|found| found.version.clone()),
+                        "basePath": base.as_ref().ok().map(|found| &found.path),
+                        "serverVersion": server.as_ref().ok().and_then(|found| found.version.clone()),
+                        "serverPath": server.as_ref().ok().map(|found| &found.path),
+                        "connectionStatus": if availability != "ready" { "unavailable" } else if verified { "verified" } else if health.is_some() { "failed" } else { "unverified" },
+                        "connectionError": health.clone().flatten(),
                         "installCommand": entry.install_command,
                         "busy": false,
                         "statusMessage": match availability {
-                            "ready" => "Ready".to_string(),
+                            "ready" => match health { Some(Some(error)) => format!("ACP verification failed: {error}"), Some(None) => "Ready".into(), None => "Installed · ACP connection is checked when selecting a model".into() },
                             "adapter_missing" => format!(
                                 "Base agent detected. Install its ACP adapter: {}",
                                 entry.install_command.as_deref().unwrap_or(entry.server_command.as_str())
@@ -1067,7 +1136,7 @@ impl AgentRuntime for AcpRuntime {
                     })),
                 }
             })
-            .collect())
+            ).await)
     }
 
     async fn capabilities(&self, agent_id: Option<&str>) -> Result<AgentCapabilitySnapshotDto> {
@@ -2032,16 +2101,13 @@ impl AgentRuntime for AcpRuntime {
 
     async fn install(&self, agent_id: Option<&str>) -> Result<AgentBackendDto> {
         let def = self.agent_def(agent_id)?;
-        if let Some(cmd) = def.install_command.clone() {
-            let parsed = parse_spawn_command(&cmd)?;
-            let mut command = tokio::process::Command::new(&parsed.program);
-            command.args(&parsed.args);
-            crate::child_process::hide_tokio(&mut command);
-            let status = command.status().await?;
-            if !status.success() {
-                bail!("install failed for {}", def.display_name);
-            }
-        }
+        super::dependencies::ensure(&def, true).await?;
+        let cwd = std::env::current_dir()?;
+        self.probe_models(&def, &cwd.to_string_lossy())
+            .await
+            .map_err(|error| {
+                anyhow!("Adapter installed, but ACP verification failed: {error:#}")
+            })?;
         Ok(self.descriptor())
     }
 
@@ -2530,7 +2596,9 @@ fn list_command_models(def: &AcpAgentDef) -> Vec<ModelOptionDto> {
         return Vec::new();
     };
     let mut command = std::process::Command::new(&parsed.program);
-    command.args(&parsed.args);
+    command
+        .env("PATH", super::catalog::child_path())
+        .args(&parsed.args);
     crate::child_process::hide_std(&mut command);
     let output = command.output().ok();
     let Some(output) = output.filter(|output| output.status.success()) else {

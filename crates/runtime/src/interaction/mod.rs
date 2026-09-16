@@ -277,7 +277,7 @@ impl Supervisor {
                                 let _ = state.db.with(|c| {
                                     c.execute(
                                         "UPDATE threads SET last_error=?1 WHERE id=?2",
-                                        params![error.to_string(), id],
+                                        params![format!("{error:#}"), id],
                                     )?;
                                     Ok(())
                                 });
