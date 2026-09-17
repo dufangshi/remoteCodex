@@ -1,6 +1,7 @@
 //! Narrow control bridge to the app-server already owned by codex-acp.
 //! ACP owns prompt/resume/cancel; model catalog compatibility is applied in transit.
 //! The private control pipe also synchronizes native permission defaults before ACP prompts.
+//! Fork history is copied in a short-lived app-server so it cannot retain a writer.
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashSet, process::Stdio, time::Duration};
@@ -12,6 +13,7 @@ use tokio::{
 };
 
 pub(super) struct CodexBridge {
+    command: String,
     listener: TcpListener,
     token: String,
     stream: Mutex<Option<BufReader<TcpStream>>>,
@@ -38,6 +40,7 @@ impl CodexBridge {
             .to_string(),
         ));
         Ok(Self {
+            command: command.to_string(),
             listener,
             token,
             stream: Mutex::new(None),
@@ -72,43 +75,55 @@ impl CodexBridge {
         }).await.context("Codex permission synchronization timed out")?
     }
 
-    pub async fn fork(&self, source: &str, rollback_count: u32) -> Result<String> {
+    pub async fn fork(
+        &self,
+        source: &str,
+        rollback_count: u32,
+        cwd: &str,
+        policy: &super::modes::ProductSessionPolicy,
+    ) -> Result<String> {
         tokio::time::timeout(Duration::from_secs(60), async {
-            let mut guard = self.stream.lock().await;
-            if guard.is_none() {
-                loop {
-                    let (stream, _) = self.listener.accept().await?;
-                    let mut reader = BufReader::new(stream);
-                    let mut hello = String::new();
-                    if matches!(tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut hello)).await, Ok(Ok(_)))
-                        && hello.trim() == self.token {
-                        *guard = Some(reader);
-                        break;
+            // thread/fork loads a writer in the process that handles it. Using the
+            // parent's app-server strands that writer when ACP later loads the fork
+            // with its own CLI identity. A dedicated process reads the persisted
+            // source without resuming it, then exits before the fork is exposed.
+            let (process, _, _) = super::rpc::AcpProcess::spawn(
+                &format!("{} app-server", self.command), cwd, &[],
+            ).await?;
+            let result = async {
+                process.request("initialize", json!({
+                    "clientInfo":{"name":"remote-codex-fork","version":env!("CARGO_PKG_VERSION")},
+                    "capabilities":{"experimentalApi":true}
+                })).await?;
+                process.notify("initialized", json!({})).await?;
+                let native = super::codex_permissions::native_policy(policy);
+                let mut params = json!({"threadId": source, "persistExtendedHistory": true,
+                    "deferGoalContinuation":true, "cwd":cwd,
+                    "sandbox":native["sandbox"], "approvalPolicy":native["approvalPolicy"],
+                    "approvalsReviewer":native["approvalsReviewer"]});
+                if rollback_count > 0 {
+                    let mut remaining = rollback_count as usize;
+                    let mut cursor = Value::Null;
+                    loop {
+                        let turns = process.request("thread/turns/list", json!({"threadId":source,"sortDirection":"desc","limit":100,"itemsView":"summary","cursor":cursor})).await?;
+                        let data = turns["data"].as_array().context("Codex returned no turn list")?;
+                        if let Some(turn) = data.get(remaining) {
+                            params["lastTurnId"] = turn.get("id").filter(|id| id.is_string()).context("Codex turn id missing")?.clone();
+                            break;
+                        }
+                        remaining = remaining.saturating_sub(data.len());
+                        let next = turns.get("nextCursor").filter(|value| value.is_string()).context("The selected Codex turn was not found")?;
+                        if next == &cursor { bail!("Codex turn pagination did not advance"); }
+                        cursor = next.clone();
                     }
                 }
-            }
-            let stream = guard.as_mut().unwrap();
-            let mut params = json!({"threadId": source, "persistExtendedHistory": true});
-            if rollback_count > 0 {
-                let mut remaining = rollback_count as usize;
-                let mut cursor = Value::Null;
-                loop {
-                    let turns = request(stream, "thread/turns/list", json!({"threadId":source,"sortDirection":"desc","limit":100,"itemsView":"summary","cursor":cursor})).await?;
-                    let data = turns["data"].as_array().context("Codex returned no turn list")?;
-                    if let Some(turn) = data.get(remaining) {
-                        params["lastTurnId"] = turn.get("id").filter(|id| id.is_string()).context("Codex turn id missing")?.clone();
-                        break;
-                    }
-                    remaining = remaining.saturating_sub(data.len());
-                    let next = turns.get("nextCursor").filter(|value| value.is_string()).context("The selected Codex turn was not found")?;
-                    if next == &cursor { bail!("Codex turn pagination did not advance"); }
-                    cursor = next.clone();
-                }
-            }
-            let result = request(stream, "thread/fork", params).await?;
-            let id = result.pointer("/thread/id").and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("Codex fork returned no thread id"))?.to_string();
-            Ok(id)
+                let result = process.request("thread/fork", params).await?;
+                let id = result.pointer("/thread/id").and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("Codex fork returned no thread id"))?.to_string();
+                Ok(id)
+            }.await;
+            process.shutdown().await.context("release Codex fork writer")?;
+            result
         }).await.context("Codex fork bridge timed out")?
     }
 }
@@ -206,10 +221,7 @@ pub async fn run() -> Result<()> {
 }
 
 fn allowed_control(message: &Value) -> bool {
-    matches!(
-        message["method"].as_str(),
-        Some("thread/fork" | "thread/turns/list")
-    ) || (message["method"] == "thread/settings/update"
+    message["method"] == "thread/settings/update"
         && message["params"].as_object().is_some_and(|params| {
             params.keys().all(|key| {
                 matches!(
@@ -218,5 +230,5 @@ fn allowed_control(message: &Value) -> bool {
                 )
             }) && params.get("threadId").is_some_and(Value::is_string)
                 && params.contains_key("sandboxPolicy")
-        }))
+        })
 }

@@ -39,6 +39,10 @@ use super::prompt::build_prompt_blocks;
 use super::rpc::{parse_spawn_command, AcpProcess};
 use super::terminal::AgentTerminals;
 
+#[cfg(all(test, unix))]
+#[path = "fork_tests.rs"]
+mod fork_tests;
+
 // Startup and cancelled probes must not leave the notification mux holding a child alive.
 struct StartupProcess(Option<Arc<AcpProcess>>);
 impl Drop for StartupProcess {
@@ -1865,17 +1869,28 @@ impl AgentRuntime for AcpRuntime {
                 live.current_mode_id.clone(),
             )
         };
-        let response = if let Some(bridge) = &codex_bridge {
-            let id = bridge.fork(&raw_session, rollback_count).await?;
-            let mut loaded = process
-                .request(
-                    "session/load",
-                    json!({"sessionId":id, "cwd":cwd, "mcpServers":[]}),
+        if let Some(bridge) = &codex_bridge {
+            let id = bridge
+                .fork(
+                    &raw_session,
+                    rollback_count,
+                    &cwd.to_string_lossy(),
+                    &ProductSessionPolicy {
+                        collaboration_mode,
+                        sandbox_mode,
+                        approval_mode: Some(if yolo { "yolo" } else { "guarded" }.into()),
+                    },
                 )
                 .await?;
-            loaded["sessionId"] = json!(id);
-            loaded
-        } else {
+            // The fork's Remote Codex id does not exist yet. Leave it unloaded so
+            // resume_session starts ACP with the new thread's own CLI environment.
+            return Ok(StartSessionResult {
+                provider_session_id: Self::scoped_id(&adapter_id, &id),
+                model,
+                reasoning_effort: effort,
+            });
+        }
+        let response = {
             if rollback_count != 0 {
                 bail!("conflict: This backend supports latest-session fork only.");
             }
