@@ -3234,8 +3234,8 @@ export function ThreadDetailPage() {
     [relayAccess],
   );
   const threadActionsButton = <div>
-    {relayThreadCanShare && relayRouteDeviceId && <button aria-label="Share as link" title="Share as link" onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>}
-    {relayThreadCanShare && <button aria-label="Sharing permissions" title="Sharing permissions" onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>}
+    <button aria-label="Share as link" title="Create and copy read-only link" onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>
+    <button aria-label="Sharing permissions" title="Sharing permissions" onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>
     <button aria-label="Download transcript" title="Download transcript" disabled={!detail} onClick={() => { setActionMode('html'); setExportDialogOpen(true); }}><Download /></button>
   </div>;
   const mobileSessionConnectionButton = useMemo(
@@ -3510,15 +3510,16 @@ export function ThreadDetailPage() {
     () => (
       <>
         <ThreadActionsDialog
+          appearance="matter"
           initialMode={actionMode}
-          {...(relayThreadCanShare && relayRouteDeviceId && id ? {linkContent: <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} />} : {})}
+          linkContent={relayThreadCanShare && relayRouteDeviceId && id
+            ? <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} createOnOpen />
+            : <p className="matter-sharing-unavailable" role="status"><Link2 size={20} />{relayDeviceRouteActive ? 'Only the owner can create a public link for this thread.' : 'Open this device through your Relay account to create a read-only share link.'}</p>}
           open={exportDialogOpen}
           busy={exportBusy || shareBusy}
           turnsState={exportTurnsState}
           shareAvailable={relayThreadCanShare}
-          {...(relayDeviceRouteActive && relayAccess?.kind === 'shared'
-            ? { shareUnavailableMessage: 'Only the owner can share this session.' }
-            : {})}
+          shareUnavailableMessage={relayDeviceRouteActive ? 'Only the owner can share this session.' : 'Open this device through your Relay account to invite other users.'}
           shareState={threadShareState}
           onCancel={() => {
             if (!exportBusy && !shareBusy) {

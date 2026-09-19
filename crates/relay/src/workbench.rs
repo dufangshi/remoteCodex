@@ -10,6 +10,14 @@ pub(super) fn ensure_schema(conn: &Connection) -> Result<()> {
         favorite INTEGER NOT NULL DEFAULT 0, visited_at TEXT NOT NULL,
         PRIMARY KEY(user_id,device_id,thread_id));",
     )?;
+    let has_read_marker: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('relay_thread_navigation') WHERE name='read_completed_at')", [], |row| row.get(0),
+    )?;
+    if !has_read_marker {
+        conn.execute_batch(
+            "ALTER TABLE relay_thread_navigation ADD COLUMN read_completed_at TEXT",
+        )?;
+    }
     Ok(())
 }
 
@@ -26,14 +34,16 @@ struct Visit {
     workspace_label: String,
     workspace_id: Option<String>,
     favorite: Option<bool>,
+    read_completed_at: Option<String>,
 }
 
 fn upsert(conn: &Connection, user: &str, visit: &Visit) -> Result<()> {
-    conn.execute("INSERT INTO relay_thread_navigation(user_id,device_id,thread_id,title,workspace_label,favorite,visited_at,workspace_id)
-        VALUES (?1,?2,?3,?4,?5,COALESCE(?6,0),?7,?8)
+    conn.execute("INSERT INTO relay_thread_navigation(user_id,device_id,thread_id,title,workspace_label,favorite,visited_at,workspace_id,read_completed_at)
+        VALUES (?1,?2,?3,?4,?5,COALESCE(?6,0),?7,?8,?9)
         ON CONFLICT(user_id,device_id,thread_id) DO UPDATE SET title=excluded.title,
-        workspace_label=excluded.workspace_label,workspace_id=excluded.workspace_id,favorite=COALESCE(?6,relay_thread_navigation.favorite),visited_at=excluded.visited_at",
-        params![user,visit.device_id,visit.thread_id,visit.title,visit.workspace_label,visit.favorite,now_rfc3339(),visit.workspace_id])?;
+        workspace_label=excluded.workspace_label,workspace_id=excluded.workspace_id,favorite=COALESCE(?6,relay_thread_navigation.favorite),visited_at=excluded.visited_at,
+        read_completed_at=CASE WHEN ?9 IS NOT NULL AND (relay_thread_navigation.read_completed_at IS NULL OR julianday(?9)>julianday(relay_thread_navigation.read_completed_at)) THEN ?9 ELSE relay_thread_navigation.read_completed_at END",
+        params![user,visit.device_id,visit.thread_id,visit.title,visit.workspace_label,visit.favorite,now_rfc3339(),visit.workspace_id,visit.read_completed_at])?;
     conn.execute("DELETE FROM relay_thread_navigation WHERE user_id=?1 AND favorite=0 AND rowid NOT IN
         (SELECT rowid FROM relay_thread_navigation WHERE user_id=?1 ORDER BY visited_at DESC LIMIT 100)", [user])?;
     Ok(())
@@ -54,11 +64,11 @@ fn accessible(
 }
 
 fn snapshot(conn: &Connection, user: &str) -> Result<Value> {
-    let mut stmt = conn.prepare("SELECT n.device_id,n.thread_id,n.title,n.workspace_label,n.favorite,n.visited_at,d.name,n.workspace_id
+    let mut stmt = conn.prepare("SELECT n.device_id,n.thread_id,n.title,n.workspace_label,n.favorite,n.visited_at,d.name,n.workspace_id,n.read_completed_at
         FROM relay_thread_navigation n JOIN relay_devices d ON d.id=n.device_id WHERE n.user_id=?1 ORDER BY n.visited_at DESC LIMIT 300")?;
     let rows = stmt.query_map([user], |r| Ok(json!({
         "deviceId":r.get::<_,String>(0)?, "threadId":r.get::<_,String>(1)?, "title":r.get::<_,String>(2)?,
-        "workspaceLabel":r.get::<_,String>(3)?, "favorite":r.get::<_,bool>(4)?, "visitedAt":r.get::<_,String>(5)?, "deviceName":r.get::<_,String>(6)?, "workspaceId":r.get::<_,Option<String>>(7)?
+        "workspaceLabel":r.get::<_,String>(3)?, "favorite":r.get::<_,bool>(4)?, "visitedAt":r.get::<_,String>(5)?, "deviceName":r.get::<_,String>(6)?, "workspaceId":r.get::<_,Option<String>>(7)?, "readCompletedAt":r.get::<_,Option<String>>(8)?
     })))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let threads: Vec<Value> = rows
         .into_iter()
@@ -131,6 +141,10 @@ async fn save(
         return unauthorized();
     };
     if Uuid::parse_str(&visit.thread_id).is_err()
+        || visit
+            .read_completed_at
+            .as_ref()
+            .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_err())
         || visit.title.len() > 1024
         || visit.workspace_label.len() > 1024
         || visit
@@ -176,6 +190,7 @@ mod tests {
             workspace_label: "project".into(),
             workspace_id: Some("project".into()),
             favorite: Some(true),
+            read_completed_at: None,
         };
         upsert(&conn, "reader", &visit).unwrap();
         conn.execute(
@@ -248,9 +263,11 @@ mod tests {
             workspace_label: "project".into(),
             workspace_id: Some("project".into()),
             favorite: Some(true),
+            read_completed_at: Some("2026-09-19T12:00:00Z".into()),
         };
         upsert(&conn, "alice", &v).unwrap();
         v.favorite = None;
+        v.read_completed_at = None;
         upsert(&conn, "alice", &v).unwrap();
         upsert(&conn, "bob", &v).unwrap();
         v.device_id = "wsl".into();
@@ -263,5 +280,10 @@ mod tests {
         assert_eq!(count, 3);
         let favorites:i64=conn.query_row("SELECT count(*) FROM relay_thread_navigation WHERE favorite=1 AND user_id='alice' AND device_id='mac'",[],|r|r.get(0)).unwrap();
         assert_eq!(favorites, 1);
+        let marker: Option<String> = conn.query_row("SELECT read_completed_at FROM relay_thread_navigation WHERE user_id='alice' AND device_id='mac'", [], |r| r.get(0)).unwrap();
+        assert_eq!(marker.as_deref(), Some("2026-09-19T12:00:00Z"));
+        let other_marker: Option<String> = conn.query_row("SELECT read_completed_at FROM relay_thread_navigation WHERE user_id='bob' AND device_id='mac'", [], |r| r.get(0)).unwrap();
+        assert!(other_marker.is_none());
+        ensure_schema(&conn).unwrap(); // Reopening an upgraded database preserves the marker.
     }
 }

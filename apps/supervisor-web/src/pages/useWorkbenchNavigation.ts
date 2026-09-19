@@ -16,6 +16,17 @@ interface ThreadReference {
   deviceName?: string;
   favorite: boolean;
   visitedAt: string;
+  readCompletedAt?: string | null;
+}
+type ThreadActivity = { status: string; lastTurnCompletedAt?: string | null };
+export function workbenchThreadStatus(activity: ThreadActivity | undefined, readCompletedAt?: string | null) {
+  if (!activity) return 'unknown';
+  if (['running', 'inProgress', 'recovering'].includes(activity.status)) return 'running';
+  if (['failed', 'error', 'system_error'].includes(activity.status)) return 'failed';
+  if (['unknown', 'not_loaded'].includes(activity.status)) return 'unknown';
+  if (activity.status === 'interrupted') return 'interrupted';
+  if (activity.lastTurnCompletedAt && (!readCompletedAt || Date.parse(activity.lastTurnCompletedAt) > Date.parse(readCompletedAt))) return 'unread';
+  return 'idle';
 }
 interface NavigationSnapshot {
   threads: ThreadReference[];
@@ -50,7 +61,7 @@ export function useWorkbenchNavigation(
     threads: [],
     notifications: [],
   });
-  const [statuses, setStatuses] = useState<Record<string, string>>({});
+  const [statuses, setStatuses] = useState<Record<string, ThreadActivity>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [readAt, setReadAt] = useState(Date.now());
@@ -81,7 +92,7 @@ export function useWorkbenchNavigation(
         if (relay) {
           // Explicit device + thread paths: never switch the browser's selected device to poll.
           const pending = next.threads.filter((r) => r.deviceId !== deviceId);
-          const updates: Record<string, string> = {};
+          const updates: Record<string, ThreadActivity> = {};
           await Promise.all(
             Array.from({ length: Math.min(6, pending.length) }, async () => {
               while (alive && pending.length) {
@@ -96,9 +107,9 @@ export function useWorkbenchNavigation(
                       ]),
                     },
                   );
-                  updates[referenceKey(r)] = value.thread.status;
+                  updates[referenceKey(r)] = value.thread;
                 } catch {
-                  updates[referenceKey(r)] = 'unknown';
+                  updates[referenceKey(r)] = { status: 'unknown' };
                 }
               }
             }),
@@ -131,7 +142,7 @@ export function useWorkbenchNavigation(
   }, [relay, deviceId]);
 
   const save = useCallback(
-    async (favorite?: boolean) => {
+    async (favorite?: boolean, markRead = false) => {
       const value = current.current;
       if (!value) return;
       const writeRevision = ++revision.current;
@@ -142,6 +153,7 @@ export function useWorkbenchNavigation(
         workspaceId: value.thread.workspaceId,
         workspaceLabel: value.workspace.label,
         ...(favorite !== undefined ? { favorite } : {}),
+        ...(markRead && value.thread.lastTurnCompletedAt ? { readCompletedAt: value.thread.lastTurnCompletedAt } : {}),
       };
       if (relay) {
         const next = await request<NavigationSnapshot>(
@@ -158,6 +170,7 @@ export function useWorkbenchNavigation(
           ...reference,
           favorite: favorite ?? previous?.favorite ?? false,
           visitedAt: new Date().toISOString(),
+          readCompletedAt: reference.readCompletedAt ?? previous?.readCompletedAt ?? null,
         };
         next.threads = [
           record,
@@ -173,12 +186,22 @@ export function useWorkbenchNavigation(
   );
   useEffect(() => {
     if (!threadId) return;
-    void save().catch((e) =>
+    const visit = () => {
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) return;
+      void save(undefined, true).catch((e) =>
       setError(
         e instanceof ApiError ? e.message : 'Could not save recent thread.',
       ),
     );
-  }, [threadId, detail?.thread.title, save]);
+    };
+    visit();
+    window.addEventListener('focus', visit);
+    document.addEventListener('visibilitychange', visit);
+    return () => {
+      window.removeEventListener('focus', visit);
+      document.removeEventListener('visibilitychange', visit);
+    };
+  }, [threadId, detail?.thread.title, detail?.thread.lastTurnCompletedAt, save]);
 
   const favorite =
     snapshot.threads.find((t) => referenceKey(t) === currentKey)?.favorite ??
@@ -208,7 +231,7 @@ export function useWorkbenchNavigation(
   const items: WorkbenchThread[] = refs.map((r) => {
     const local =
       r.deviceId === deviceId
-        ? threads.find((t) => t.id === r.threadId)
+        ? (r.threadId === detail?.thread.id ? detail.thread : threads.find((t) => t.id === r.threadId))
         : undefined;
     return {
       key: referenceKey(r),
@@ -216,7 +239,7 @@ export function useWorkbenchNavigation(
       subtitle: [r.deviceName, r.workspaceLabel].filter(Boolean).join(' · '),
       href: threadHref(r.threadId, r.deviceId),
       favorite: r.favorite,
-      status: local?.status ?? statuses[referenceKey(r)] ?? 'unknown',
+      status: workbenchThreadStatus(local ?? statuses[referenceKey(r)], r.readCompletedAt),
     };
   });
   items.sort((a, b) =>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Copy, Link2, Trash2, Check } from 'lucide-react';
 import { request } from '../lib/api';
 import { loadExportSnapshot } from '../lib/transcriptExport';
@@ -10,20 +10,23 @@ interface SnapshotLink {
 export function ThreadPublicLinks({
   deviceId,
   threadId,
+  createOnOpen = false,
 }: {
   deviceId: string;
   threadId: string;
+  createOnOpen?: boolean;
 }) {
   const [links, setLinks] = useState<SnapshotLink[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const createdFor = useRef<string | null>(null);
   const path = `/relay/thread-links?${new URLSearchParams({ deviceId, threadId })}`;
   useEffect(() => {
     let live = true;
     request<SnapshotLink[]>(path)
       .then((value) => {
-        if (live) setLinks(value);
+        if (live) setLinks((current) => [...current, ...value.filter((link) => !current.some((existing) => existing.id === link.id))]);
       })
       .catch((e) => {
         if (live) setError(e.message);
@@ -32,6 +35,19 @@ export function ThreadPublicLinks({
       live = false;
     };
   }, [path]);
+  useEffect(() => {
+    if (!createOnOpen || createdFor.current === path) return;
+    createdFor.current = path;
+    void create();
+  }, [createOnOpen, path]);
+  async function copy(id: string) {
+    try {
+      await navigator.clipboard.writeText(`${location.origin}/s/${id}`);
+      setCopied(id);
+    } catch {
+      setError('Link created. Copy it using the copy button, or select the URL.');
+    }
+  }
   async function create() {
     setBusy(true);
     setError('');
@@ -44,13 +60,14 @@ export function ThreadPublicLinks({
           threadId,
           snapshot,
           theme:
-            document.documentElement.getAttribute('data-theme-effective') ===
+            document.querySelector('.thread-ui-shell')?.getAttribute('data-theme-effective') ===
             'light'
               ? 'light'
               : 'dark',
         }),
       });
       setLinks((current) => [link, ...current]);
+      await copy(link.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to create link.');
     } finally {
@@ -70,7 +87,7 @@ export function ThreadPublicLinks({
     }
   }
   return (
-    <section className="mt-4 space-y-4">
+    <section className="thread-public-links space-y-4">
       <p className="thread-export-dialog-subtitle text-sm">
         Anyone with the link can read the prompts and final replies captured
         now. Later messages stay private.
@@ -79,11 +96,12 @@ export function ThreadPublicLinks({
         type="button"
         disabled={busy}
         onClick={() => void create()}
-        className="thread-export-dialog-secondary-button flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
+        className="thread-public-link-create thread-export-dialog-secondary-button flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
       >
         <Link2 size={17} />
-        {busy ? 'Working…' : 'Create share link'}
+        {busy ? 'Creating link…' : 'Create & copy link'}
       </button>
+      {copied && <p role="status" className="thread-export-dialog-subtitle flex items-center gap-2"><Check size={14} />Read-only link copied</p>}
       {error && (
         <p role="alert" className="text-sm text-red-500">
           {error}
@@ -119,14 +137,7 @@ export function ThreadPublicLinks({
             <button
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[var(--theme-bg)]"
               aria-label="Copy share link"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(`${location.origin}/s/${link.id}`)
-                  .then(() => setCopied(link.id))
-                  .catch(() =>
-                    setError('Copy failed. Select and copy the URL.'),
-                  )
-              }
+              onClick={() => void copy(link.id)}
             >
               {copied === link.id ? <Check size={18} /> : <Copy size={18} />}
             </button>

@@ -117,6 +117,19 @@ test('Matter workbench floats the composer, persists shortcuts, searches history
   await expect(
     page.getByRole('dialog', { name: 'Thread actions', exact: true }),
   ).toBeVisible();
+  await expect(page.locator('.thread-export-dialog-title')).toHaveText('Download HTML');
+  await expect(page.locator('.matter-actions-dialog')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export HTML', exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.html$/);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Share as link', exact: true }).click();
+  await expect(page.locator('.thread-export-dialog-title')).toHaveText('Share read-only link');
+  await expect(page.getByRole('status').filter({ hasText: 'Open this device through your Relay account' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Sharing permissions', exact: true }).click();
+  await expect(page.locator('.thread-export-dialog-title')).toHaveText('Sharing permissions');
+  await expect(page.getByRole('status').filter({ hasText: 'invite other users' })).toBeVisible();
   await page.keyboard.press('Escape');
   // Preserve the user's plugin settings: this API belongs only to the isolated test server.
   const plugins = await (await request.get(`${base}/api/plugins`)).json();
@@ -319,6 +332,13 @@ test('execution timeline expands deferred work and keeps the last reply above th
   await expect(
     page.getByText('Verify responsive layout', { exact: true }),
   ).toBeVisible();
+  await expect(page.locator('.matter-command-step')).toHaveCount(3);
+  await expect(page.locator('.matter-step-status[aria-label="Completed"]')).toHaveCount(3);
+  await expect(page.locator('.matter-step-time')).toHaveCount(3);
+  await expect(page.locator('.matter-command-step').first()).not.toContainText('completed');
+  expect((await page.locator('.matter-command-step').first().boundingBox())!.height).toBeLessThanOrEqual(36);
+  expect((await page.locator('.matter-thread-tabs').boundingBox())!.height).toBeLessThanOrEqual(36);
+  await expect(page.locator('.matter-workspace-path')).toHaveText(/^~\/.*….*$/);
   await page.locator('.thread-graph-scroll-container').evaluate((e) => {
     e.scrollTop = e.scrollHeight;
   });
