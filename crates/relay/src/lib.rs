@@ -8,6 +8,7 @@ mod public_links;
 mod security;
 mod share_activity;
 mod share_presence;
+mod workbench;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -473,6 +474,7 @@ impl RelayStore {
         auth_factors::ensure_schema(&conn)?;
         share_activity::ensure_schema(&conn)?;
         notifications::ensure_schema(&conn)?;
+        workbench::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             session_secret,
@@ -809,6 +811,7 @@ pub async fn serve() -> Result<()> {
     let app = Router::new()
         .merge(auth_api::routes())
         .merge(notifications::routes())
+        .merge(workbench::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))

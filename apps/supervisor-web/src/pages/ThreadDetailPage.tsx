@@ -1,10 +1,12 @@
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
+import { ConversationSearch } from '../components/ConversationSearch';
+import { useWorkbenchNavigation } from './useWorkbenchNavigation';
 import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Share2 } from 'lucide-react';
+import { Download, Link2, Users } from 'lucide-react';
 
 import {
   AgentProviderCapabilitiesDto,
@@ -433,11 +435,14 @@ export function ThreadDetailPage() {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [actionMode, setActionMode] = useState<'share' | 'link' | 'html'>('share');
   const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] =
     useState<WorkspaceFocusPathRequest | null>(null);
   const terminalPluginEnabled = plugins.getThreadPanels().some(
     (panel) => panel.kind === 'terminal',
   );
+  useEffect(() => { if (!terminalPluginEnabled) setActiveView('chat'); }, [terminalPluginEnabled]);
 
   useEffect(() => {
     liveItemsRef.current = liveItems;
@@ -589,6 +594,7 @@ export function ThreadDetailPage() {
     error: null,
   });
   const relayRouteDeviceId = relayDeviceIdFromPath(location.pathname);
+  const workbenchNavigation = useWorkbenchNavigation(detail, threads, relayRouteDeviceId);
   const relayDeviceRouteActive =
     relayModeActive() && Boolean(relayRouteDeviceId);
   const relayAccess = relayAccessState.access;
@@ -3206,7 +3212,6 @@ export function ThreadDetailPage() {
     }} />
   );
   const mobileSessionConnectionControl = sessionConnectionIndicator;
-  const desktopSessionConnectionIndicator = <span className="hidden lg:inline-flex">{sessionConnectionIndicator}</span>;
   const currentGoal = goalState.data ?? detail?.goal ?? null;
   const goalHistory = detail?.goalHistory ?? [];
   const monitorGoals = currentGoal
@@ -3228,22 +3233,11 @@ export function ThreadDetailPage() {
       ) : null,
     [relayAccess],
   );
-  const threadActionsButton = useMemo(
-    () => (
-      <button
-        type="button"
-        aria-label="Thread actions"
-        title="Thread actions"
-        onClick={() => setExportDialogOpen(true)}
-        disabled={!detail}
-        className="host-icon-button relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-[var(--theme-shadow)] transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
-      >
-        <Share2 className="h-4 w-4" aria-hidden="true" />
-        {threadShareState.shares.length > 0 && <span aria-label={`${new Set(threadShareState.shares.map(share => share.targetUsername)).size} people shared`} className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[var(--theme-accent)] px-1 text-[9px] font-semibold text-[var(--theme-accent-fg)]">{new Set(threadShareState.shares.map(share => share.targetUsername)).size}</span>}
-      </button>
-    ),
-    [detail, threadShareState.shares],
-  );
+  const threadActionsButton = <div>
+    {relayThreadCanShare && relayRouteDeviceId && <button aria-label="Share as link" title="Share as link" onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>}
+    {relayThreadCanShare && <button aria-label="Sharing permissions" title="Sharing permissions" onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>}
+    <button aria-label="Download transcript" title="Download transcript" disabled={!detail} onClick={() => { setActionMode('html'); setExportDialogOpen(true); }}><Download /></button>
+  </div>;
   const mobileSessionConnectionButton = useMemo(
     () => (
       <div className="relative flex items-center justify-end gap-1.5">
@@ -3257,10 +3251,10 @@ export function ThreadDetailPage() {
     () => (
       <div className="flex items-center justify-end gap-2">
         {relayAccessBadge}
-        {desktopSessionConnectionIndicator}
+        {sessionConnectionIndicator}
       </div>
     ),
-    [desktopSessionConnectionIndicator, relayAccessBadge, relayRouteDeviceId],
+    [sessionConnectionIndicator, relayAccessBadge, relayRouteDeviceId],
   );
   const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
     () => ({
@@ -3511,14 +3505,12 @@ export function ThreadDetailPage() {
       workspaceAdapter,
     ],
   );
-  const workspaceReturnHref = detail?.thread.workspaceId
-    ? currentThreadsHref(detail.thread.workspaceId)
-    : currentWorkspacesHref();
+  const workspaceReturnHref = currentWorkspacesHref();
   const dialogs = useMemo(
     () => (
       <>
         <ThreadActionsDialog
-          initialMode="share"
+          initialMode={actionMode}
           {...(relayThreadCanShare && relayRouteDeviceId && id ? {linkContent: <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} />} : {})}
           open={exportDialogOpen}
           busy={exportBusy || shareBusy}
@@ -3564,6 +3556,7 @@ export function ThreadDetailPage() {
       </>
     ),
     [
+      actionMode,
       deletingThread,
       deletingThreadBusy,
       exportBusy,
@@ -3584,6 +3577,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
+      workbench={{ ...workbenchNavigation, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}
@@ -3605,7 +3599,7 @@ export function ThreadDetailPage() {
       liveOutput={liveOutput}
       timelineProps={timelineProps}
       timelineComponent={ThreadTimeline}
-      useFloatingMobileComposer={useFloatingMobileComposer}
+      useFloatingMobileComposer={false}
       floatingMobileComposerBottomOffset={floatingMobileComposerBottomOffset}
       composerHostRef={composerHostRef}
       shellPanelRef={shellPanelRef}
@@ -3626,7 +3620,7 @@ export function ThreadDetailPage() {
           Unable to resolve this thread.
         </div>
       }
-      dialogs={<>{dialogs}{harnessSettingsOpen && detail && <HarnessSettingsDialog
+      dialogs={<>{dialogs}{searchOpen && id && <ConversationSearch key={id} threadId={id} onClose={() => setSearchOpen(false)} />}{harnessSettingsOpen && detail && <HarnessSettingsDialog
         key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}
         onChange={handleUpdateThreadSettings} onClose={() => setHarnessSettingsOpen(false)}
       />}</>}
