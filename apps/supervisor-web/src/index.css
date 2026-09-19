@@ -1,4 +1,17 @@
 @import "tailwindcss";
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('/fonts/dm-sans-latin.woff2') format('woff2'); }
+
+.workbench-search { width: min(640px, calc(100vw - 32px)); max-height: min(700px, 85dvh); margin: auto; padding: 20px; border: 1px solid var(--theme-border); border-radius: 16px; background: var(--theme-panel); color: var(--theme-fg); box-shadow: 0 24px 80px rgb(0 0 0 / 18%); }
+.workbench-search::backdrop { background: rgb(12 15 17 / 35%); backdrop-filter: blur(3px); }
+.workbench-search-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.workbench-search-header h2 { flex: 1; font-size: 15px; font-weight: 600; }
+.workbench-search-header button { padding: 8px; }
+.workbench-search > input { width: 100%; padding: 12px; border: 1px solid var(--theme-border); border-radius: 8px; background: var(--theme-surface); font-size: 16px; }
+.workbench-search > p { margin: 12px 0; font-size: 12px; color: var(--theme-fg-muted); }
+.workbench-search-results { max-height: 50dvh; overflow-y: auto; }
+.workbench-search-results article { padding: 14px 0; border-bottom: 1px solid var(--theme-border); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.workbench-search-results strong { font-size: 11px; color: var(--theme-fg-muted); }
+.workbench-search-results mark { background: #c8efd9; color: #153d28; border-radius: 2px; }
 @source "../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
 @source "../../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
 @source "../../../node_modules/streamdown/dist/*.js";
