@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LockKeyhole,
   ShieldAlert,
@@ -35,6 +36,18 @@ export function DeviceEncryptionStatus({
   const [open, setOpen] = useState(false),
     [confirm, setConfirm] = useState<TransportStatus | null>(null);
   const [trustError, setTrustError] = useState<string | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState({ top: 0, right: 12 });
+  useEffect(() => {
+    if (!open) return;
+    const place = () => { const rect = trigger.current?.getBoundingClientRect(); if (rect) setPosition({ top: rect.bottom + 8, right: Math.max(12, window.innerWidth - rect.right) }); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.removeEventListener('keydown', escape); };
+  }, [open]);
   useEffect(() => {
     setStatus(deviceId ? getTransportStatus(deviceId) : undefined);
     const update = (event: Event) => {
@@ -60,6 +73,8 @@ export function DeviceEncryptionStatus({
   return (
     <span className="relative inline-flex">
       <button
+        ref={trigger}
+        aria-expanded={open}
         type="button"
         aria-label={
           connection
@@ -103,10 +118,12 @@ export function DeviceEncryptionStatus({
               <LoaderCircle size={19} className="animate-spin" />
             ) : connection.state === 'offline' ? (
               <WifiOff size={19} />
+            ) : encrypted && connection.loaded && connection.state === 'connected' ? (
+              <LockKeyhole size={19} />
             ) : (
               <Wifi size={19} />
             )}
-            {deviceId && (
+            {deviceId && !(encrypted && connection.loaded && connection.state === 'connected') && (
               <span className="device-connection-security" aria-hidden="true">
                 {encrypted ? (
                   <LockKeyhole size={10} />
@@ -124,7 +141,7 @@ export function DeviceEncryptionStatus({
           <ShieldAlert size={16} />
         )}
       </button>
-      {open && (
+      {open && createPortal(
         <>
           <button
             aria-label="Close connection information"
@@ -133,9 +150,11 @@ export function DeviceEncryptionStatus({
           />
           <span
             role="status"
-            className="fixed left-4 right-4 top-24 z-[100] mx-auto block max-w-md space-y-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 text-left text-sm shadow-xl"
+            className="device-connection-popover fixed z-[100] block space-y-3 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 text-left text-sm shadow-xl"
+            style={{ top: position.top, right: position.right, width: 'min(360px, calc(100vw - 24px))' }}
           >
             <strong className="block">{label}</strong>
+            {connection && <span className="block device-connection-state">{connection.label}</span>}
             <span className="block text-[var(--theme-fg-muted)]">
               {encrypted
                 ? 'Private content is encrypted between this browser and the device. Routing metadata remains visible to the relay.'
@@ -167,7 +186,7 @@ export function DeviceEncryptionStatus({
               </button>
             )}
           </span>
-        </>
+        </>, document.body
       )}
       <ConfirmDialog
         open={Boolean(confirm)}

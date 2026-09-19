@@ -1301,6 +1301,11 @@ export function buildThreadImageAssetUrl(
   );
 }
 
+export async function downloadThreadImage(threadId: string, path: string) {
+  const result = await downloadFile(`/api/threads/${encodeURIComponent(threadId)}/assets/image?${new URLSearchParams({ path })}`);
+  return result.blob;
+}
+
 export function downloadWorkspaceFile(
   workspaceId: string,
   input: { path: string },

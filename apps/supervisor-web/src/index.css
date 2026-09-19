@@ -9,7 +9,8 @@
 .workbench-search > input { width: 100%; padding: 12px; border: 1px solid var(--theme-border); border-radius: 8px; background: var(--theme-surface); font-size: 16px; }
 .workbench-search > p { margin: 12px 0; font-size: 12px; color: var(--theme-fg-muted); }
 .workbench-search-results { max-height: 50dvh; overflow-y: auto; }
-.workbench-search-results article { padding: 14px 0; border-bottom: 1px solid var(--theme-border); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.workbench-search-results > button { display: block; width: 100%; text-align: left; padding: 14px 8px; border-bottom: 1px solid var(--theme-border); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; border-radius: 6px; }
+.workbench-search-results > button:hover, .workbench-search-results > button:focus-visible { background: var(--theme-hover); }
 .workbench-search-results strong { font-size: 11px; color: var(--theme-fg-muted); }
 .workbench-search-results mark { background: #c8efd9; color: #153d28; border-radius: 2px; }
 @source "../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
@@ -2530,6 +2531,10 @@ main:has(.product-navigation) { padding-top: 0 !important; }
 }
 .device-connection-button:hover { background: var(--theme-hover); }
 .device-connection-button:disabled { opacity: .6; }
+.device-connection-popover { background: #f7f8f6; color: #121416; border-color: #cbd2d7; }
+:root[data-theme-effective='dark'] .device-connection-popover { background: #141b20; color: #f4f7f6; border-color: #36434d; }
+.device-connection-popover > span { color: #5d6972; }
+:root[data-theme-effective='dark'] .device-connection-popover > span { color: #a2afb9; }
 .device-connection-security { position: absolute; right: 1px; bottom: 1px; padding: 2px; border-radius: 5px; background: var(--theme-panel); }
 .device-connection-button:not([data-encryption="encrypted"]) .device-connection-security { color: var(--status-warning-fg); }
 .device-connection-button[data-encryption="identity-changed"] .device-connection-security { color: var(--status-danger-fg); }

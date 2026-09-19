@@ -66,6 +66,8 @@ export function useWorkbenchNavigation(
   const [busy, setBusy] = useState(false);
   const [navigationReady, setNavigationReady] = useState(false);
   const [readAt, setReadAt] = useState(Date.now());
+  const [notificationDetails, setNotificationDetails] = useState<Record<string, { title: string; summary: string }>>({});
+  const [notificationsOpened, setNotificationsOpened] = useState(0);
   const revision = useRef(0);
   const currentKey = `${deviceId ?? 'local'}:${detail?.thread.id ?? ''}`;
   const current = useRef(detail);
@@ -256,7 +258,35 @@ export function useWorkbenchNavigation(
           occurredAt: t.lastTurnCompletedAt!,
         }))
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-  const notifications = relay ? snapshot.notifications : localNotifications;
+  const rawNotifications = relay ? snapshot.notifications : localNotifications;
+  const notificationKey = JSON.stringify(rawNotifications.slice(0, 30).map(n => [n.id, n.href, n.occurredAt]));
+  useEffect(() => {
+    if (!notificationsOpened) return;
+    let alive = true;
+    const controller = new AbortController();
+    const pending = rawNotifications.slice(0, 30).filter(n => !notificationDetails[n.id]);
+    void Promise.all(Array.from({ length: Math.min(3, pending.length) }, async () => {
+      while (alive && pending.length) {
+        const notification = pending.shift()!;
+        // Fetch private previews through the viewer's authenticated device transport.
+        const match = notification.href.match(/^\/devices\/([^/]+)\/threads\/([^/?#]+)$/);
+        const local = notification.href.match(/^\/threads\/([^/?#]+)$/);
+        const base = match ? `/relay/devices/${match[1]}/api/threads/${match[2]}` : local && !relay ? `/api/threads/${local[1]}` : null;
+        if (!base) continue;
+        try {
+          const value = await request<ThreadDetailDto>(`${base}?view=summary&limit=10`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) });
+          const eventTime = Date.parse(notification.occurredAt);
+          const turn = value.turns.filter(t => t.completedAt && Math.abs(Date.parse(t.completedAt) - eventTime) < 60_000)
+            .sort((a, b) => Math.abs(Date.parse(a.completedAt!) - eventTime) - Math.abs(Date.parse(b.completedAt!) - eventTime))[0];
+          const text = [...(turn?.items ?? [])].reverse().find(item => item.kind === 'agentMessage' && item.text.trim())?.text.trim().replace(/\s+/g, ' ') ?? '';
+          const summary = text ? Array.from(text).slice(0, 180).join('') + (Array.from(text).length > 180 ? '…' : '') : 'Open the thread to view its response.';
+          if (alive) setNotificationDetails(previous => ({ ...previous, [notification.id]: { title: `${value.thread.title} · ${turn?.status === 'failed' ? 'Failed' : turn?.status === 'interrupted' ? 'Interrupted' : 'Completed'}`, summary } }));
+        } catch { /* Leave metadata visible; retry unavailable previews when the bell opens again. */ }
+      }
+    }));
+    return () => { alive = false; controller.abort(); };
+  }, [notificationKey, notificationsOpened, relay]);
+  const notifications = rawNotifications.map(n => ({ ...n, ...notificationDetails[n.id] }));
   return {
     navigationReady,
     threads: items,
@@ -268,6 +298,6 @@ export function useWorkbenchNavigation(
     notifications,
     unreadCount: notifications.filter((n) => Date.parse(n.occurredAt) > readAt)
       .length,
-    onReadNotifications: () => setReadAt(Date.now()),
+    onReadNotifications: () => { setReadAt(Date.now()); setNotificationsOpened(value => value + 1); },
   };
 }

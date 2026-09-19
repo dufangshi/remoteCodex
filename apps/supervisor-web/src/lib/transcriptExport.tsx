@@ -6,7 +6,7 @@ import {
   type PublicTranscriptSnapshot,
 } from '@remote-codex/thread-ui';
 import type { ExportThreadTranscriptInput, ThreadTurnDto } from '@remote-codex/shared';
-import { buildThreadImageAssetUrl, fetchThreadDetail } from './api';
+import { downloadThreadImage, fetchThreadDetail, fetchThreadTurnDetail } from './api';
 
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -65,6 +65,7 @@ export async function loadExportSnapshot(
     document.documentElement.getAttribute('data-theme-effective') === 'dark'
       ? 'dark'
       : 'light';
+  turns = await Promise.all(turns.map(turn => turn.hasDeferredItems ? fetchThreadTurnDetail(id, turn.id) : turn));
   const snapshot = transcriptSnapshot(title, turns, theme);
   if (input.options?.includeTokenAndPrice === false)
     snapshot.turns.forEach((turn) => {
@@ -84,12 +85,7 @@ export async function loadExportSnapshot(
   snapshot.images = {};
   let imageBytes = 0;
   for (const path of paths) {
-    const response = await fetch(buildThreadImageAssetUrl(id, { path }));
-    if (!response.ok)
-      throw new Error(
-        'An attachment could not be included. Reconnect the device and retry.',
-      );
-    const blob = await response.blob();
+    const blob = await downloadThreadImage(id, path);
     imageBytes += blob.size;
     if (imageBytes > 10 * 1024 * 1024) throw new Error('Attachments exceed the 10 MB public snapshot limit.');
     snapshot.images[path] = await dataUrl(blob);

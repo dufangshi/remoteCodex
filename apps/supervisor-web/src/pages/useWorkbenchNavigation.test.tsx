@@ -11,6 +11,25 @@ vi.mock('../lib/api', () => ({
 }));
 
 describe('account thread navigation', () => {
+  it('loads notification titles and reply previews using the notification device, even without a saved shortcut', async () => {
+    const completed = '2026-09-19T14:00:00Z';
+    const snapshot = { threads: [], notifications: [{ id: 'event', title: '1 completed', href: '/devices/mac/threads/review', occurredAt: completed }] };
+    vi.mocked(request).mockImplementation(async url => {
+      if (url === '/relay/account/workbench') return snapshot;
+      if (url === '/relay/devices/mac/api/threads/review?view=summary&limit=10') return {
+        thread: { title: 'Fix the image preview' }, turns: [{ status: 'completed', completedAt: completed, items: [{ kind: 'agentMessage', text: 'The image now loads correctly. ' + 'Details '.repeat(50) }] }],
+      };
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const { result, unmount } = renderHook(() => useWorkbenchNavigation(null, [], 'wsl'));
+    await waitFor(() => expect(result.current.notifications).toHaveLength(1));
+    act(() => result.current.onReadNotifications());
+    await waitFor(() => expect(result.current.notifications[0]?.title).toBe('Fix the image preview · Completed'));
+    expect(result.current.notifications[0]?.summary).toMatch(/^The image now loads correctly/);
+    expect(Array.from(result.current.notifications[0]!.summary!)).toHaveLength(181);
+    expect(result.current.notifications[0]?.summary).toMatch(/…$/);
+    unmount();
+  });
   it('distinguishes running, unread completion, read idle, failure and unavailable states', () => {
     const completed = '2026-09-19T14:00:00Z';
     const activity = { status: 'idle', lastTurnCompletedAt: completed };
