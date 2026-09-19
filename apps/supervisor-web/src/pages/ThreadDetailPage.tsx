@@ -54,6 +54,9 @@ import {
   connectShellSocket,
   createThreadShell,
   createRelayShare,
+  createRelayGrant,
+  updateRelayGrant,
+  revokeRelayGrant,
   disconnectThread,
   deleteThread,
   fetchAgentBackendModels,
@@ -436,6 +439,7 @@ export function ThreadDetailPage() {
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTarget, setSearchTarget] = useState<{ turnId: string; itemId: string; key: number }>();
   const [actionMode, setActionMode] = useState<'share' | 'link' | 'html'>('share');
   const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] =
     useState<WorkspaceFocusPathRequest | null>(null);
@@ -657,7 +661,7 @@ export function ThreadDetailPage() {
             }),
           ),
       );
-      const shares = ownedShares
+      const shares: ThreadShareSummary[] = ownedShares
         .map((share) => ({
           id: share.id,
           targetUsername: share.targetUsername,
@@ -666,6 +670,10 @@ export function ThreadDetailPage() {
           workspaceAccess: share.workspaceAccess,
           createdAt: share.createdAt,
         }));
+      shares.push(...(portal.grantsByMe ?? []).filter(grant => grant.deviceId === deviceId && grant.scope === 'device').map(grant => ({
+        id: `grant:${grant.id}`, scope: 'device' as const, targetUsername: grant.targetUsername, label: grant.label,
+        threadAccess: grant.threadAccess, workspaceAccess: grant.workspaceAccess, createdAt: grant.createdAt,
+      })));
       setThreadShareState({
         status: 'ready',
         shares,
@@ -713,7 +721,11 @@ export function ThreadDetailPage() {
         error: null,
       }));
       try {
-        await createRelayShare({
+        if (input.scope === 'device') await createRelayGrant({
+          targetIdentifier: input.targetIdentifier, deviceId, scope: 'device', workspaceScope: 'all', workspaceIds: [],
+          label: input.label ?? null, threadAccess: input.threadAccess, workspaceAccess: input.workspaceAccess, canCreateThreads: false,
+        });
+        else await createRelayShare({
           targetIdentifier: input.targetIdentifier,
           deviceId,
           threadId: currentDetail.thread.id,
@@ -745,7 +757,10 @@ export function ThreadDetailPage() {
     if (!currentDetail) return;
     setShareBusy(true);
     try {
-      await updateRelayShare(shareId, {
+      if (shareId.startsWith('grant:')) await updateRelayGrant(shareId.slice(6), {
+        threadAccess: input.threadAccess, workspaceAccess: input.workspaceAccess, label: input.label ?? null,
+      });
+      else await updateRelayShare(shareId, {
         threadAccess: input.threadAccess, workspaceAccess: input.workspaceAccess,
         workspaceId: currentDetail.workspace.id,
         workspaceLabel: currentDetail.workspace.label,
@@ -764,7 +779,8 @@ export function ThreadDetailPage() {
       error: null,
     }));
     try {
-      await revokeRelayShare(shareId);
+      if (shareId.startsWith('grant:')) await revokeRelayGrant(shareId.slice(6));
+      else await revokeRelayShare(shareId);
       await loadThreadShares();
     } catch (caught) {
       const message = actionErrorMessage(caught, 'Unable to revoke share.');
@@ -778,15 +794,6 @@ export function ThreadDetailPage() {
       setShareBusy(false);
     }
   }, [loadThreadShares]);
-  const handleOpenDeviceSharing = useCallback(() => {
-    const deviceId = currentRelayDeviceIdFromPath();
-    if (!deviceId) {
-      return;
-    }
-
-    setExportDialogOpen(false);
-    navigate(`/relay-devices?shareDevice=${encodeURIComponent(deviceId)}`);
-  }, [navigate]);
   useEffect(() => {
     if (detail?.thread.id && relayThreadCanShare) {
       void loadThreadShares();
@@ -3269,6 +3276,7 @@ export function ThreadDetailPage() {
       scrollRequestKey,
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
+      ...(searchTarget ? { searchTarget } : {}),
       bottomSpacer: timelineBottomSpacer,
       className: 'thread-timeline-surface min-h-0 flex-1',
       onTailVisibilityChange: setFollowTail,
@@ -3299,6 +3307,7 @@ export function ThreadDetailPage() {
       scrollRequestKey,
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
+      searchTarget,
       timelineBottomSpacer,
       timelineOptimisticTurn,
     ],
@@ -3536,7 +3545,7 @@ export function ThreadDetailPage() {
             ? {
                 onCreateShare: handleCreateThreadShare,
                 onUpdateShare: handleUpdateThreadShare,
-                onOpenDeviceSharing: handleOpenDeviceSharing,
+                deviceShareAvailable: true,
                 onRevokeShare: handleRevokeThreadShare,
               }
             : {})}
@@ -3570,7 +3579,6 @@ export function ThreadDetailPage() {
       handleCreateThreadShare,
       handleDeleteThread,
       handleExportTranscript,
-      handleOpenDeviceSharing,
       handleRevokeThreadShare,
       loadExportTurns,
       relayDeviceRouteActive,
@@ -3625,7 +3633,13 @@ export function ThreadDetailPage() {
           Unable to resolve this thread.
         </div>
       }
-      dialogs={<>{dialogs}{searchOpen && id && <ConversationSearch key={id} threadId={id} onClose={() => setSearchOpen(false)} />}{harnessSettingsOpen && detail && <HarnessSettingsDialog
+      dialogs={<>{dialogs}{searchOpen && id && <ConversationSearch key={id} threadId={id} onClose={() => setSearchOpen(false)} onSelect={(turns, turnId, itemId) => {
+        setDetail(current => current ? { ...current, turns: prependTurns(current.turns.map(turn => {
+          const full = turns.find(t => t.id === turn.id);
+          return full && turn.status !== 'inProgress' ? full : turn;
+        }), turns) } : current);
+        setSearchTarget({ turnId, itemId, key: Date.now() });
+      }} />}{harnessSettingsOpen && detail && <HarnessSettingsDialog
         key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}
         onChange={handleUpdateThreadSettings} onClose={() => setHarnessSettingsOpen(false)}
       />}</>}

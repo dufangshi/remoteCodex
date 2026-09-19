@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { fetchThreadDetail } from '../lib/api';
+import { fetchThreadDetail, fetchThreadTurnDetail } from '../lib/api';
+import type { ThreadTurnDto } from '@remote-codex/shared';
 
 export function ConversationSearch({
   threadId,
   onClose,
+  onSelect,
 }: {
   threadId: string;
   onClose: () => void;
+  onSelect: (turns: ThreadTurnDto[], turnId: string, itemId: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<
-    { id: string; role: string; text: string }[]
+    { id: string; turnId: string; itemId: string; role: string; text: string }[]
   >([]);
+  const loadedTurns = useRef<ThreadTurnDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -31,7 +35,11 @@ export function ConversationSearch({
         if (!alive) return;
         const fresh = page.turns.filter((t) => !seen.has(t.id));
         if (!fresh.length) break;
-        fresh.forEach((t) => {
+        const pageTurns: ThreadTurnDto[] = [];
+        for (const summary of fresh) {
+          const t = summary.hasDeferredItems ? await fetchThreadTurnDetail(threadId, summary.id) : summary;
+          if (!alive) return;
+          pageTurns.push(t);
           seen.add(t.id);
           t.items
             .filter(
@@ -40,11 +48,14 @@ export function ConversationSearch({
             .forEach((i) =>
               next.push({
                 id: `${t.id}:${i.id}`,
+                turnId: t.id,
+                itemId: i.id,
                 role: i.kind === 'userMessage' ? 'You' : 'Assistant',
                 text: i.text,
               }),
             );
-        });
+        }
+        loadedTurns.current = [...pageTurns, ...loadedTurns.current];
         beforeTurnId = fresh[0]?.id;
         setMessages([...next]);
         if (seen.size >= (page.totalTurnCount ?? seen.size)) break;
@@ -105,7 +116,7 @@ export function ConversationSearch({
           const index = m.text.toLocaleLowerCase().indexOf(normalized);
           const start = Math.max(0, index - 120);
           return (
-            <article key={m.id}>
+            <button type="button" key={m.id} onClick={() => { onSelect(loadedTurns.current, m.turnId, m.itemId); onClose(); }}>
               <strong>{m.role}</strong>
               <p>
                 {start > 0 ? '…' : ''}
@@ -114,7 +125,7 @@ export function ConversationSearch({
                 {m.text.slice(index + query.trim().length, index + 360)}
                 {m.text.length > index + 360 ? '…' : ''}
               </p>
-            </article>
+            </button>
           );
         })}
         {matches.length > 100 && (

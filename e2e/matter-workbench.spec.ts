@@ -6,6 +6,88 @@ import { DatabaseSync } from 'node:sqlite';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 
+test('search reveals an older collapsed message, Explorer resizes and connection details stay anchored', async ({ page, request }, testInfo) => {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `interactions-${randomUUID()}`);
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Interaction review' } })).json();
+  const started = await (await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title: 'Interaction review', provider: 'acp', agentId: 'grok', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
+  const id = started.id ?? started.thread.id;
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  let running = false;
+  const turns = Array.from({ length: 6 }, (_, index) => ({
+    id: `search-turn-${index}`, status: 'completed', startedAt: new Date(Date.now() - (7 - index) * 60_000).toISOString(), completedAt: new Date(Date.now() - (7 - index) * 60_000 + 20_000).toISOString(),
+    items: [
+      { id: `prompt-${index}`, kind: 'userMessage', text: `Review step ${index}` },
+      { id: `progress-${index}`, kind: 'agentMessage', text: index === 0 ? 'The hidden cobalt decision belongs in this earlier message.' : `Progress for step ${index}` },
+      { id: `command-${index}`, kind: 'commandExecution', text: 'Inspect files', command: 'pwd', status: 'completed' },
+      { id: `reply-${index}`, kind: 'agentMessage', text: `Final response ${index}.\n\n` + 'A readable paragraph to create enough scrolling space.\n\n'.repeat(8) },
+    ],
+  }));
+  await page.route(`**/api/threads/${id}?**`, route => {
+    const limit = Number(new URL(route.request().url()).searchParams.get('limit') ?? 3);
+    return route.fulfill({ json: { ...detail, thread: { ...detail.thread, ...(running ? { status: 'running', activeTurnId: 'search-turn-5' } : {}) }, totalTurnCount: turns.length, turns: turns.slice(-limit).map(turn => ({ ...turn, ...(running && turn.id === 'search-turn-5' ? { status: 'inProgress', completedAt: null } : {}), hasDeferredItems: true, deferredItemCount: 2, items: [turn.items[0], turn.items[3]] })) } });
+  });
+  await page.route(`**/api/threads/${id}/turns/*/detail`, route => route.fulfill({ json: turns.find(turn => route.request().url().includes(`/${turn.id}/`)) }));
+  await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode', 'light'));
+  await page.goto(`/threads/${id}`);
+  await expect(page.locator('[data-turn-id="search-turn-0"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Search conversation', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Search messages' }).fill('hidden cobalt');
+  const result = page.locator('.workbench-search-results > button').filter({ hasText: 'hidden cobalt' });
+  await expect(result).toHaveCount(1);
+  await result.click();
+  const target = page.locator('[data-message-id="progress-0"]');
+  await expect(target).toBeVisible();
+  await expect.poll(async () => target.evaluate(element => {
+    const viewport = document.querySelector('.thread-graph-scroll-container')!.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    return box.top >= viewport.top && box.bottom <= viewport.bottom;
+  })).toBe(true);
+  await page.getByRole('button', { name: 'Toggle Explorer', exact: true }).click();
+  const explorer = page.getByRole('complementary', { name: 'Explorer', exact: true });
+  const separator = page.getByRole('separator', { name: 'Resize Explorer' });
+  const width = (await explorer.boundingBox())!.width;
+  const handle = (await separator.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 100, handle.y + 80, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await explorer.boundingBox())!.width).toBeGreaterThan(width + 80);
+  await separator.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.getByRole('button', { name: 'Close Explorer', exact: true }).click();
+  const connection = page.locator('.matter-connection .device-connection-button');
+  const bell = page.getByRole('button', { name: 'Notifications', exact: true });
+  const connectionBox = (await connection.boundingBox())!;
+  const bellBox = (await bell.boundingBox())!;
+  expect(Math.abs(connectionBox.y + connectionBox.height / 2 - bellBox.y - bellBox.height / 2)).toBeLessThan(1);
+  await connection.click();
+  const popover = page.locator('.device-connection-popover');
+  await expect(popover).toBeVisible();
+  const popoverBox = (await popover.boundingBox())!;
+  expect(popoverBox.y - connectionBox.y - connectionBox.height).toBeCloseTo(8, 0);
+  expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(connectionBox.x + connectionBox.width + 1);
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await page.screenshot({ path: `output/playwright/workbench-interactions-${testInfo.project.name}.png` });
+  running = true;
+  await page.reload();
+  const stop = page.locator('.thread-graph-composer-stop-button');
+  const send = page.locator('.thread-graph-composer-send-button');
+  await expect(stop).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => {
+      const a = (await stop.boundingBox())!, b = (await send.boundingBox())!;
+      return Math.abs(a.x + a.width / 2 - b.x - b.width / 2);
+    }).toBeLessThan(1);
+    await expect(stop).toHaveCSS('box-shadow', 'none');
+    await expect(stop).toHaveCSS('width', '32px');
+    await expect(send).toHaveCSS('width', '32px');
+    await page.screenshot({ path: `output/playwright/workbench-running-${width}.png` });
+  }
+});
+
 test('workbench keeps tab positions, fills the viewport and separates session identifiers in themed settings', async ({ page, request, context }, testInfo) => {
   const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `workbench-tabs-${randomUUID()}`);
   await mkdir(absPath, { recursive: true });
@@ -56,7 +138,7 @@ test('workbench keeps tab positions, fills the viewport and separates session id
   await settings.getByTestId('theme-mode-light').click();
   await expect(settings).toHaveAttribute('data-theme-effective', 'light');
   await expect(settings.getByTestId('theme-mode-light')).toHaveAttribute('aria-pressed', 'true');
-  await expect(settings).toHaveCSS('background-color', 'rgb(253, 253, 253)');
+  await expect(settings).toHaveCSS('background-color', 'rgb(247, 248, 246)');
   await page.screenshot({ path: `output/playwright/matter-settings-global-${testInfo.project.name}.png` });
   await page.keyboard.press('Escape');
   await page.evaluate(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
