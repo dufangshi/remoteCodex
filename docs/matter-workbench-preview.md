@@ -12,7 +12,8 @@ reply readable when scrolling to the bottom.
 - Shared UI repository: `dufangshi/remote-codex-thread-ui-rust`, checked out at
   `remote-codex-thread-ui/` (not the similarly named sibling repository).
 - Shared UI branch: `feat/matter-workbench`, based on main `db97668`.
-- Required shared UI commit: `54367117497f07b03714558a99b1e21a4e2ee6d3`.
+- Required shared UI commit: `1b81c16064467839f4745f63128e62c69e8fb508`
+  ([shared UI PR #4](https://github.com/dufangshi/remote-codex-thread-ui-rust/pull/4)).
 - Visual reference: [Matter Design System](https://github.com/the-matter-lab/matter-design-system),
   commit `08ff4d786c75a44e9ac5d223e7e9bfaf89233e99`, `app-ui.html`.
   The requester confirmed permission to reuse its styles. The implementation
@@ -49,6 +50,13 @@ conventional home prefixes replaced by `~`. Link, permissions, and HTML export
 open separate dialogs using the workbench's light/dark palette. Opening the
 link action creates one snapshot and copies its URL, retaining a manual copy
 fallback when clipboard access is unavailable.
+
+Open tabs retain their order across thread switching, account refreshes, and
+page reloads. The host removes its legacy 16 px bottom padding so the workbench
+is not clipped. Dark selection uses a brighter gray-blue background and stronger
+text contrast. Session and Global settings share the workbench theme. The thread
+menu separately copies Remote Codex IDs, native harness IDs, and (for Codex)
+`codex://threads/...` deeplinks.
 
 Thread indicators distinguish running (blue spinner), completed/unread (green
 dot), idle/read (gray ring), failed (red diamond), interrupted (amber square),
@@ -90,6 +98,9 @@ Completed checks:
   action entry points, compact row/tab heights, step times/check icons, and
   home-relative middle truncation. Dialog light/dark screenshots were also
   inspected in the browser.
+- A further focused desktop/mobile regression verifies stable tab order after
+  switching/reload, bottom-edge hit testing, all three clipboard values, and
+  Session/Global settings with live light/dark theme switching.
 
 With the isolated services running, reproduce the desktop checks using:
 
@@ -109,6 +120,6 @@ Screenshots are generated under `output/playwright/` as
 `matter-preview-light.png`, `matter-preview-dark.png`, and
 `matter-workbench-mobile-chromium.png`.
 
-This branch is a local review build. No production deployment or runtime
-release has been performed. A later Relay deployment must include the paired
-shared UI commit above as `thread_ui_sha`.
+Production deployment uses `relay-deploy.yml` from main with the paired shared
+UI commit above as `thread_ui_sha`. The changes require the updated Relay and
+Web assets; no device protocol update or npm release is needed.

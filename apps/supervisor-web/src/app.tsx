@@ -334,7 +334,9 @@ function AppShell({
           className={`mx-auto w-full ${
             isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
           } ${
-            isViewportLockedRoute || isSettingsRoute
+            isThreadDetailRoute
+              ? 'absolute inset-0 pb-0'
+              : isViewportLockedRoute || isSettingsRoute
               ? 'absolute inset-0 pb-0 sm:pb-4'
               : 'pb-4'
           } ${

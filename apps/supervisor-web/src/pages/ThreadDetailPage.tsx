@@ -3091,21 +3091,25 @@ export function ThreadDetailPage() {
 
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
+      <div>
+        <dt className="text-[var(--theme-fg-muted)]">Remote Codex session ID</dt>
+        <dd className="mt-1 break-all text-[var(--theme-fg)]">{detail.thread.id}</dd>
+      </div>
       <div className="relative pr-9">
-        <dt className="text-[var(--theme-fg-muted)]">Session ID</dt>
+        <dt className="text-[var(--theme-fg-muted)]">Harness session ID</dt>
         <dd className="mt-1 break-all text-[var(--theme-fg)]">
           {detail.thread.providerSessionId ?? 'Unavailable'}
         </dd>
         {(detail.thread.providerSessionId) && (
           <button
             type="button"
-            aria-label="Copy session ID"
+            aria-label="Copy harness session ID"
             title={
               metaSessionCopyState === 'copied'
                 ? 'Copied'
                 : metaSessionCopyState === 'failed'
                   ? 'Copy failed'
-                  : 'Copy session ID'
+                  : 'Copy harness session ID'
             }
             onClick={() => void handleCopyMetaSessionId()}
             className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm backdrop-blur transition ${
@@ -3578,7 +3582,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}

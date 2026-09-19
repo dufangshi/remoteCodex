@@ -64,6 +64,7 @@ export function useWorkbenchNavigation(
   const [statuses, setStatuses] = useState<Record<string, ThreadActivity>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [navigationReady, setNavigationReady] = useState(false);
   const [readAt, setReadAt] = useState(Date.now());
   const revision = useRef(0);
   const currentKey = `${deviceId ?? 'local'}:${detail?.thread.id ?? ''}`;
@@ -76,6 +77,7 @@ export function useWorkbenchNavigation(
     let inFlight = false;
     const controller = new AbortController();
     setSnapshot({ threads: [], notifications: [] });
+    setNavigationReady(false);
     async function refresh() {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
@@ -87,7 +89,7 @@ export function useWorkbenchNavigation(
             })
           : loadLocal();
         if (!alive) return;
-        if (startedAtRevision === revision.current) setSnapshot(next);
+        if (startedAtRevision === revision.current) { setSnapshot(next); setNavigationReady(true); }
         setError(null);
         if (relay) {
           // Explicit device + thread paths: never switch the browser's selected device to poll.
@@ -160,7 +162,7 @@ export function useWorkbenchNavigation(
           '/relay/account/workbench',
           { method: 'POST', body: JSON.stringify(reference) },
         );
-        if (writeRevision === revision.current) setSnapshot(next);
+        if (writeRevision === revision.current) { setSnapshot(next); setNavigationReady(true); }
       } else {
         const next = loadLocal();
         const previous = next.threads.find(
@@ -180,6 +182,7 @@ export function useWorkbenchNavigation(
         ].slice(0, 100);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
         setSnapshot(next);
+        setNavigationReady(true);
       }
     },
     [deviceId, relay],
@@ -242,9 +245,6 @@ export function useWorkbenchNavigation(
       status: workbenchThreadStatus(local ?? statuses[referenceKey(r)], r.readCompletedAt),
     };
   });
-  items.sort((a, b) =>
-    a.key === currentKey ? -1 : b.key === currentKey ? 1 : 0,
-  );
   const localNotifications: WorkbenchNotification[] = relay
     ? []
     : threads
@@ -258,6 +258,7 @@ export function useWorkbenchNavigation(
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   const notifications = relay ? snapshot.notifications : localNotifications;
   return {
+    navigationReady,
     threads: items,
     currentKey,
     favorite,

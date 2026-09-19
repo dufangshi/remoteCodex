@@ -6,6 +6,65 @@ import { DatabaseSync } from 'node:sqlite';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 
+test('workbench keeps tab positions, fills the viewport and separates session identifiers in themed settings', async ({ page, request, context }, testInfo) => {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `workbench-tabs-${randomUUID()}`);
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Workbench review' } })).json();
+  const ids: string[] = [];
+  for (const title of ['First review', 'Second review']) {
+    const response = await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title, provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } });
+    expect(response.ok()).toBeTruthy();
+    const thread = await response.json();
+    ids.push(thread.id ?? thread.thread.id);
+  }
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto(`/threads/${ids[0]}`);
+  await expect(page.locator('.matter-thread-tabs a')).toHaveCount(1);
+  await page.goto(`/threads/${ids[1]}`);
+  await expect(page.locator('.matter-thread-tabs a')).toHaveCount(2);
+  const expected = ids.map(id => `/threads/${id}`);
+  const tabOrder = () => page.locator('.matter-thread-tabs a').evaluateAll(links => links.map(link => link.getAttribute('href')));
+  expect(await tabOrder()).toEqual(expected);
+  await page.locator(`.matter-thread-tabs a[href="${expected[0]}"]`).click();
+  await expect(page.locator('.matter-current-title')).toHaveText('First review');
+  expect(await tabOrder()).toEqual(expected);
+  await page.evaluate(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
+  await page.reload();
+  await expect(page.locator('.matter-thread-tabs a')).toHaveCount(2);
+  expect(await tabOrder()).toEqual(expected);
+  // A parent's old bottom padding clipped the workbench even when its own bounds were correct.
+  expect(await page.evaluate(() => document.elementsFromPoint(innerWidth / 2, innerHeight - 1).some(e => e.classList.contains('matter-workbench')))).toBe(true);
+  await page.locator('.matter-thread-menu > summary').click();
+  await page.getByRole('button', { name: 'Copy Remote Codex session ID', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(ids[0]);
+  const detail = await (await request.get(`${base}/api/threads/${ids[0]}`)).json();
+  expect(detail.thread.providerSessionId).toBeTruthy();
+  await page.getByRole('button', { name: 'Copy harness session ID', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(detail.thread.providerSessionId);
+  await page.getByRole('button', { name: 'Copy Codex deeplink', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`codex://threads/${detail.thread.providerSessionId}`);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Open settings', exact: true }).click();
+  const settings = page.getByTestId('settings-dialog');
+  await expect(settings).toHaveClass(/matter-settings-dialog/);
+  await expect(settings).toHaveAttribute('data-theme-effective', 'dark');
+  await expect(settings.getByText('Remote Codex session ID', { exact: true })).toBeVisible();
+  await expect(settings.getByText('Harness session ID', { exact: true })).toBeVisible();
+  await page.screenshot({ path: `output/playwright/matter-settings-dark-${testInfo.project.name}.png` });
+  await settings.getByRole('button', { name: 'Global', exact: true }).click();
+  await expect(settings.locator('.thread-graph-settings-global-content')).toBeVisible();
+  await settings.getByTestId('theme-mode-light').click();
+  await expect(settings).toHaveAttribute('data-theme-effective', 'light');
+  await expect(settings.getByTestId('theme-mode-light')).toHaveAttribute('aria-pressed', 'true');
+  await expect(settings).toHaveCSS('background-color', 'rgb(253, 253, 253)');
+  await page.screenshot({ path: `output/playwright/matter-settings-global-${testInfo.project.name}.png` });
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
+  await page.reload();
+  await expect(page.locator('.matter-thread-tabs a')).toHaveCount(2);
+  await page.screenshot({ path: `output/playwright/matter-workbench-final-${testInfo.project.name}.png` });
+});
+
 test('Matter workbench floats the composer, persists shortcuts, searches history and gates Terminal', async ({
   page,
   request,
