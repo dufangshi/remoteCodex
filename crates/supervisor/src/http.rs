@@ -68,6 +68,22 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/management/jobs", get(crate::management::jobs))
         .route(
+            "/api/management/upstreams",
+            get(crate::upstreams::list).post(crate::upstreams::save),
+        )
+        .route(
+            "/api/management/upstreams/{id}",
+            post(crate::upstreams::action).delete(crate::upstreams::delete),
+        )
+        .route(
+            "/api/management/upstreams/import",
+            post(crate::upstreams::import_config),
+        )
+        .route(
+            "/api/management/templates",
+            post(crate::upstreams::template),
+        )
+        .route(
             "/api/management/harnesses/{id}",
             post(crate::management::harness_action),
         )

@@ -4,6 +4,7 @@ import { Download, RefreshCw, ChevronDown, RotateCw } from 'lucide-react';
 import { ApiError, relayModeActive, request } from '../lib/api';
 import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 import { FormDialog } from './FormDialog';
+import { UpstreamManagement } from './UpstreamManagement';
 
 type Installation = {
   installed?: boolean;
@@ -272,7 +273,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           <h4 className="text-sm font-medium">{h.name}</h4>
           <button
             className={button}
-            disabled={busy || !h.base || active(job)}
+            disabled={busy || !h.base || h.base.installed===false || active(job)}
             title="Reload this harness's configuration. Other harnesses stay connected."
             aria-label={`Restart ${h.name}`}
             onClick={() => void act(h.id, 'restart')}
@@ -303,7 +304,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           >
             {job.error ??
               (active(job)
-                ? `${job.action === 'update' ? 'Updating' : 'Restarting'}…`
+                ? `${job.action === 'install' ? 'Installing' : job.action === 'update' ? 'Updating' : 'Restarting'}…`
                 : job.connectionVerified ? 'ACP connection verified' : `${job.action === 'update' && job.component === 'base' ? 'Base component update completed' : 'Completed'} · configuration reloads on the next turn`)}
           </p>
         )}
@@ -395,6 +396,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           .filter((h) => !['codex', 'claude', 'opencode'].includes(h.id))
           .map(row)}
       </details>
+      <UpstreamManagement key={apiRoot} apiRoot={apiRoot}/>
       {error && (
         <p role="alert" className="mt-3 text-xs text-[var(--status-danger-fg)]">
           {error}
@@ -409,7 +411,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             confirm.action === 'restart'
               ? 'The device will briefly disconnect. Running tasks will be paused and continued in their existing sessions after restart; queued messages will be preserved.'
               : confirm.id
-              ? confirm.installing ? 'Install the adapter in this device’s user-owned Remote Codex directory and verify its ACP connection.' : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
+              ? confirm.installing ? 'Install this component on the selected device. Required ACP adapters are included with a harness installation.' : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
               : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
           }
         >
@@ -426,7 +428,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             disabled={busy}
             onClick={() =>
               void (confirm.id
-                ? confirm.legacyInstall ? installLegacyAdapter(confirm.id) : act(confirm.id, 'update', confirm.component)
+                ? confirm.legacyInstall ? installLegacyAdapter(confirm.id) : act(confirm.id, confirm.installing&&confirm.component==='base'?'install':'update', confirm.component)
                 : supervisorAction(confirm.action ?? 'update'))
             }
           >

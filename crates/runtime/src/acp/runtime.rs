@@ -2517,12 +2517,13 @@ async fn apply_mode_update(inner: &Inner, update: &Value) {
 }
 
 fn extra_env_for(def: &AcpAgentDef) -> Vec<(&'static str, String)> {
-    let mut env = Vec::new();
+    let mut env = crate::upstreams::launch_environment(&def.id);
     let home_key = match def.id.as_str() {
         "codex" => Some("CODEX_HOME"),
         "grok" => Some("GROK_HOME"),
         "claude" => Some("CLAUDE_CONFIG_DIR"),
         "opencode" => Some("OPENCODE_HOME"),
+        "gemini" => Some("GEMINI_CLI_HOME"),
         _ => None,
     };
     if let Some(key) = home_key {

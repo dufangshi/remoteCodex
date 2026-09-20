@@ -583,8 +583,9 @@ export function RelayDevicesPage() {
     }
 
     try {
-      const command = request<{ token: string }>(`/relay/devices/${device.id}/setup-token`, { method: 'POST' })
-        .then(({ token }) => relaySupervisorCommand(token, platform));
+      const command = platform === 'unix'
+        ? request<{ code: string }>(`/relay/devices/${device.id}/bootstrap`, { method: 'POST' }).then(({ code }) => relaySupervisorCommand(code, platform))
+        : request<{ token: string }>(`/relay/devices/${device.id}/setup-token`, { method: 'POST' }).then(({ token }) => relaySupervisorCommand(token, platform));
       // Start the clipboard operation within the tap gesture, including Safari.
       if (typeof ClipboardItem !== 'undefined' && typeof clipboard.write === 'function') {
         await clipboard.write([new ClipboardItem({
@@ -2230,7 +2231,20 @@ function DeviceRow({
 
 function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
   const [platform, setPlatform] = useState<SupervisorPlatform>('unix');
-  const command = relaySupervisorCommand(result.token, platform);
+  const [code, setCode] = useState('');
+  const [setupError, setSetupError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    void request<{ code: string }>(`/relay/devices/${result.device.id}/bootstrap`, { method: 'POST' })
+      .then(({ code }) => { if (alive) setCode(code); })
+      .catch(() => {
+        if (alive) setSetupError('Unable to create setup command. Copy setup from the device menu to retry.');
+      });
+    return () => { alive = false; };
+  }, [result.device.id]);
+  const command = platform === 'windows'
+    ? relaySupervisorCommand(result.token, platform)
+    : code ? relaySupervisorCommand(code, platform) : '';
   return (
     <section
       aria-live="polite"
@@ -2242,7 +2256,9 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
       <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
         You can copy this setup again from the device actions menu.
       </p>
-      <CodeBlock label="Device token" value={result.token} />
+      <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">The macOS/Linux command installs Node.js if needed and starts this device. Setup codes expire in one hour and can be used once.</p>
+      {setupError && <p role="alert">{setupError}</p>}
+      {platform === 'windows' && <CodeBlock label="Device token" value={result.token} />}
       <div className="mt-3">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
@@ -2267,12 +2283,12 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
             </PlatformButton>
           </div>
         </div>
-        <CodeBlock
+        {command ? <CodeBlock
           copyLabel={`Copy ${platform === 'windows' ? 'Windows PowerShell' : 'macOS and Linux'} supervisor command`}
           label={platform === 'windows' ? 'PowerShell' : 'Shell'}
           nested
           value={command}
-        />
+        /> : <p>Preparing setup command…</p>}
       </div>
     </section>
   );
@@ -2409,12 +2425,8 @@ function relaySupervisorCommand(
     ].join('\n');
   }
 
-  return [
-    `REMOTE_CODEX_RELAY_SERVER_URL=${shellQuote(relayUrl)} \\`,
-    `REMOTE_CODEX_RELAY_AGENT_TOKEN=${shellQuote(token)} \\`,
-    `REMOTE_CODEX_RELAY_SUPERVISOR_PORT=${supervisorPort} \\`,
-    'remote-codex relay-supervisor',
-  ].join('\n');
+  const origin = relayUrl.replace(/^ws/, 'http');
+  return `curl -fsSL ${shellQuote(origin + '/setup.sh')} | sh -s -- --relay ${shellQuote(origin)} --code ${shellQuote(token)} --port ${supervisorPort}`;
 }
 
 function powershellQuote(value: string) {

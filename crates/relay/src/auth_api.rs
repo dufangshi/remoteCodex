@@ -64,6 +64,9 @@ fn recent(conn: &Connection, token: &str) -> Result<(), Failure> {
 pub(crate) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/relay/devices/{id}/setup-token", post(device_setup_token))
+        .route("/relay/devices/{id}/bootstrap", post(device_bootstrap))
+        .route("/relay/setup/redeem", post(redeem_bootstrap))
+        .route("/setup.sh", get(setup_script))
         .merge(passkeys::routes())
         .route("/relay/devices/{id}/token", post(rotate_device_token))
         .route("/relay/account/security", get(summary))
@@ -468,6 +471,139 @@ async fn cancel_challenge(State(state): State<Arc<AppState>>, headers: HeaderMap
     }
     ([ (header::SET_COOKIE,"remote_codex_factor_challenge=; HttpOnly; Secure; SameSite=Lax; Path=/relay/auth; Max-Age=0") ],Json(json!({"ok":true}))).into_response()
 }
+async fn setup_script() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/x-shellscript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../../../scripts/setup.sh")
+            .replace("__REMOTE_CODEX_VERSION__", env!("CARGO_PKG_VERSION")),
+    )
+}
+async fn device_bootstrap(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, Failure> {
+    let conn = state.store.conn.lock().await;
+    let (user, _) = auth(&conn, &state, &headers)?;
+    let owned: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM relay_devices WHERE id=?1 AND owner_user_id=?2)",
+            params![id, user.id],
+            |r| r.get(0),
+        )
+        .map_err(internal)?;
+    if !owned {
+        return Err(failure(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Device not found",
+        ));
+    }
+    let code = security::random_token();
+    let expires = factors::now() + 60 * 60 * 1000;
+    conn.execute(
+        "DELETE FROM relay_bootstrap_codes WHERE expires_at<=?1",
+        [factors::now()],
+    )
+    .map_err(internal)?;
+    conn.execute(
+        "INSERT INTO relay_bootstrap_codes(code_hash,device_id,expires_at) VALUES (?1,?2,?3)",
+        params![security::token_hash(&code), id, expires],
+    )
+    .map_err(internal)?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"code":code,"expiresAt":expires})),
+    )
+        .into_response())
+}
+#[derive(Deserialize)]
+struct BootstrapRedemption {
+    code: String,
+}
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+    #[tokio::test]
+    async fn enrollment_is_single_use_and_rejects_expired_or_disabled_devices() {
+        let (state, _) = crate::tests::test_app_state("bootstrap");
+        {
+            let conn = state.store.conn.lock().await;
+            conn.execute("INSERT INTO relay_users VALUES ('owner','o@example.test','owner','user',1,NULL,'now','salt','hash')", []).unwrap();
+            conn.execute("INSERT INTO relay_devices VALUES ('device','owner','test',NULL,'hash','preview','now')", []).unwrap();
+            for (code, expires) in [
+                ("valid", factors::now() + 3_600_000),
+                ("expired", factors::now() - 1),
+                ("disabled", factors::now() + 3_600_000),
+            ] {
+                conn.execute(
+                    "INSERT INTO relay_bootstrap_codes VALUES (?1,'device',?2)",
+                    params![security::token_hash(code), expires],
+                )
+                .unwrap();
+            }
+        }
+        let redeem = |code: &str| {
+            redeem_bootstrap(
+                State(state.clone()),
+                Json(BootstrapRedemption { code: code.into() }),
+            )
+        };
+        assert_eq!(
+            redeem("expired").await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+        let response = redeem("valid").await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(
+            redeem("valid").await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+        state
+            .store
+            .conn
+            .lock()
+            .await
+            .execute("UPDATE relay_users SET enabled=0", [])
+            .unwrap();
+        assert_eq!(
+            redeem("disabled").await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+}
+async fn redeem_bootstrap(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BootstrapRedemption>,
+) -> Result<Response, Failure> {
+    let conn = state.store.conn.lock().await;
+    let tx = conn.unchecked_transaction().map_err(internal)?;
+    let id:Option<String>=tx.query_row("SELECT b.device_id FROM relay_bootstrap_codes b JOIN relay_devices d ON d.id=b.device_id JOIN relay_users u ON u.id=d.owner_user_id WHERE b.code_hash=?1 AND b.expires_at>?2 AND u.enabled=1",params![security::token_hash(&body.code),factors::now()],|r|r.get(0)).optional().map_err(internal)?;
+    let id = id.ok_or_else(|| {
+        failure(
+            StatusCode::UNAUTHORIZED,
+            "invalid_setup_code",
+            "Setup code expired or already used. Copy a new setup command.",
+        )
+    })?;
+    let token = super::device_tokens::get_or_create(&tx, &state.store.session_secret, &id)
+        .map_err(internal)?;
+    tx.execute(
+        "DELETE FROM relay_bootstrap_codes WHERE code_hash=?1",
+        [security::token_hash(&body.code)],
+    )
+    .map_err(internal)?;
+    tx.commit().map_err(internal)?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"deviceId":id,"token":token})),
+    )
+        .into_response())
+}
 async fn device_setup_token(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -532,6 +668,11 @@ async fn rotate_device_token(
         .map_err(internal)?;
         super::device_tokens::save(&tx, &state.store.session_secret, &id, &token)
             .map_err(internal)?;
+        tx.execute(
+            "DELETE FROM relay_bootstrap_codes WHERE device_id=?1",
+            [&id],
+        )
+        .map_err(internal)?;
         tx.commit().map_err(internal)?;
     }
     security::audit(&conn, Some(&user.id), "device.token_rotated", Some(&id));

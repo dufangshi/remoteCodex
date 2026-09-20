@@ -9,6 +9,7 @@ mod secure_transport;
 mod shells;
 mod socket;
 mod tunnel;
+mod upstreams;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

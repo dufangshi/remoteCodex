@@ -1,12 +1,113 @@
 //! Resolve the installation actually selected by the harness, never a second PATH copy.
 use crate::{acp::builtin_agents, Supervisor};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
+
+pub fn harness_prefix() -> PathBuf {
+    crate::config::home_dir().join(".local/share/remote-codex/harnesses")
+}
+pub fn harness_bin() -> PathBuf {
+    if cfg!(windows) {
+        harness_prefix()
+    } else {
+        harness_prefix().join("bin")
+    }
+}
+fn npm_package(id: &str) -> Option<&'static str> {
+    match id {
+        "codex" => Some("@openai/codex"),
+        "claude" => Some("@anthropic-ai/claude-code"),
+        "gemini" => Some("@google/gemini-cli"),
+        "copilot" => Some("@github/copilot"),
+        "opencode" => Some("opencode-ai"),
+        _ => None,
+    }
+}
+pub fn can_install(id: &str) -> bool {
+    npm_package(id).is_some() || (!cfg!(windows) && matches!(id, "grok" | "cursor"))
+}
+pub async fn ensure_adapter(def: &crate::acp::catalog::AcpAgentDef) -> Result<()> {
+    crate::acp::dependencies::ensure(def, false).await
+}
+pub async fn install_harness(state: &Supervisor, id: &str) -> Result<()> {
+    let _install = state.harness_install_gate.lock().await;
+    let def = builtin_agents(state.config.acp_command.as_deref())
+        .into_iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| anyhow!("Unknown harness"))?;
+    if let Ok(found) = inspect(&def.base_command, id).await {
+        if !found.path.starts_with(harness_bin()) {
+            bail!(
+                "A harness is already installed. Use Update to preserve the selected installation."
+            );
+        }
+    }
+    if let Some(package) = npm_package(id) {
+        let command = shell_words::join([
+            "npm",
+            "install",
+            "--global",
+            "--prefix",
+            &harness_prefix().to_string_lossy(),
+            &format!("{package}@latest"),
+            "--no-audit",
+            "--no-fund",
+        ]);
+        let parsed = crate::acp::rpc::parse_spawn_command(&command)?;
+        output(Path::new(&parsed.program), &parsed.args, 600).await?;
+    } else if matches!(id, "grok" | "cursor") && !cfg!(windows) {
+        let url = if id == "grok" {
+            "https://x.ai/cli/install.sh"
+        } else {
+            "https://cursor.com/install"
+        };
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?;
+        let script = response.bytes().await?;
+        if script.len() > 1024 * 1024 {
+            bail!("Installer is unexpectedly large");
+        }
+        let tmp = tempfile::tempdir()?;
+        let file = tmp.path().join("install.sh");
+        std::fs::write(&file, script)?;
+        // Official installers only; templates can never supply a URL or command.
+        output(
+            &resolve("bash")?,
+            &[file.to_string_lossy().into_owned()],
+            600,
+        )
+        .await?;
+    } else {
+        bail!("No supported installer for this harness on this platform");
+    }
+    let installed = inspect(&def.base_command, id)
+        .await
+        .context("Installer finished, but harness could not be found")?;
+    verify_executable(&installed).await?;
+    crate::acp::dependencies::ensure(&def, false).await?;
+    state.restart_harness(id).await?;
+    Ok(())
+}
+
+async fn verify_executable(installation: &Installation) -> Result<()> {
+    let version = output(&installation.path, &["--version".into()], 30)
+        .await
+        .context("Installed executable could not run --version")?;
+    if !version.chars().any(|c| c.is_ascii_digit()) {
+        bail!("Installed executable did not report a version");
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct Installation {
@@ -211,6 +312,38 @@ pub fn installation(path: PathBuf, agent: &str) -> Installation {
 
 pub async fn inspect(command: &str, agent: &str) -> Result<Installation> {
     let mut found = installation(resolve(command)?, agent);
+    if found.path.starts_with(harness_bin()) && npm_package(agent).is_some() {
+        let parsed = crate::acp::rpc::parse_spawn_command(&shell_words::join([
+            "npm",
+            "install",
+            "--global",
+            "--prefix",
+            &harness_prefix().to_string_lossy(),
+            &format!("{}@latest", npm_package(agent).unwrap()),
+            "--no-audit",
+            "--no-fund",
+        ]))?;
+        found.manager = "remote-codex".into();
+        found.reason = None;
+        found.update = vec![parsed.program];
+        found.update.extend(parsed.args);
+    } else if agent == "grok"
+        && found
+            .real_path
+            .starts_with(crate::config::home_dir().join(".grok"))
+    {
+        found.manager = "native".into();
+        found.reason = None;
+        found.update = vec![text_path(&found.path), "update".into()];
+    } else if agent == "cursor"
+        && found
+            .real_path
+            .starts_with(crate::config::home_dir().join(".local"))
+    {
+        found.manager = "native".into();
+        found.reason = None;
+        found.update = vec![text_path(&found.path), "update".into()];
+    }
     if found.version.is_some() {
         return Ok(found);
     }
@@ -233,12 +366,14 @@ pub async fn inventory(state: &Supervisor) -> Value {
             if def.transport == "adapter" { Some(adapter_inventory(&def).await) } else { None }
         });
         let job = state.management_jobs.lock().unwrap().get(&def.id).cloned();
-        json!({"id":def.id,"name":def.display_name,"transport":def.transport,"base":base.ok().map(dto),"adapter":adapter,"job":job})
+        let base=base.map(dto).unwrap_or_else(|_|json!({"installed":false,"canInstall":can_install(&def.id),"canUpdate":false,"path":"","resolvedPath":"","manager":"remote-codex","reason":if can_install(&def.id){""}else{"No managed installer available for this platform."}}));
+        json!({"id":def.id,"name":def.display_name,"transport":def.transport,"base":base,"adapter":adapter,"job":job})
     })).await;
     json!(rows)
 }
 
 pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Result<()> {
+    let _install = state.harness_install_gate.lock().await;
     let def = builtin_agents(state.config.acp_command.as_deref())
         .into_iter()
         .find(|d| d.id == id)
@@ -278,9 +413,7 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
     };
     output(Path::new(program), args, 300).await?;
     let updated = inspect(command, id).await?;
-    if updated.version.is_none() {
-        bail!("Installer finished, but the selected executable's version could not be verified");
-    }
+    verify_executable(&updated).await?;
     state.restart_harness(id).await?;
     Ok(())
 }

@@ -186,6 +186,19 @@ export function relayLogFile(env, cwd = process.cwd(), home = os.homedir()) {
     path.join(home, '.remote-codex/logs/relay-supervisor.log'));
 }
 
+export function managedService(env, action, command = spawnSync) {
+  const manager=env.REMOTE_CODEX_MANAGED_SERVICE;
+  if(!manager)return false;
+  let program,args;
+  if(manager==='systemd-user'){program='systemctl';args=['--user',action==='stop'?'stop':'start','remote-codex-supervisor.service'];}
+  else if(manager==='launchd'){
+    program='/bin/launchctl';const domain=`gui/${process.getuid()}`;
+    args=action==='stop'?['bootout',`${domain}/com.remote-codex.supervisor`]:['bootstrap',domain,path.join(env.HOME||os.homedir(),'Library/LaunchAgents/com.remote-codex.supervisor.plist')];
+  }else throw Error('Unknown Supervisor service manager');
+  if(command(program,args,{env,encoding:'utf8'}).status!==0)throw Error(`Unable to ${action} managed Supervisor service`);
+  return true;
+}
+
 export async function worker(plan, hooks = {}) {
   const execute = hooks.run ?? run;
   const getHealth = hooks.health ?? health;
@@ -194,6 +207,7 @@ export async function worker(plan, hooks = {}) {
   const start = hooks.start ?? detachedService;
   const captureSession = hooks.captureRelaySession ?? captureRelaySession;
   const retireSession = hooks.retireRelaySession ?? retireRelaySession;
+  const manageService = hooks.managedService ?? managedService;
   const env = cleanEnvironment(plan.env);
   if (plan.action === 'restart') env.REMOTE_CODEX_NATIVE_BINARY = plan.executable;
   const isAlive = hooks.alive ?? alive;
@@ -279,7 +293,7 @@ export async function worker(plan, hooks = {}) {
         'A turn started during preparation. Try updating after it finishes.',
       );
     stopped = true;
-    stop(plan.pid);
+    if(!manageService(plan.env,'stop')) stop(plan.pid);
     for (let i = 0; i < 30 && isAlive(plan.pid); i++) await pause(500);
     if (isAlive(plan.pid))
       throw Error(
@@ -294,7 +308,7 @@ export async function worker(plan, hooks = {}) {
     // A new process may migrate the database before binding HTTP. From this point
     // a package-only rollback cannot establish that the old binary is compatible.
     newStartAttempted = true;
-    start(
+    if(!manageService(plan.env,'start')) start(
       plan.node,
       [
         plan.launcher,
@@ -363,7 +377,7 @@ export async function worker(plan, hooks = {}) {
         fs.cpSync(backup, plan.root, { recursive: true });
       }
       if (stopped && !isAlive(plan.pid)) {
-        start(
+        if(!manageService(plan.env,'start')) start(
           plan.node,
           [
             plan.launcher,

@@ -12,6 +12,7 @@ pub mod local_sessions;
 pub mod management;
 pub mod publications;
 pub mod service;
+pub mod upstreams;
 
 pub use actor::{EventBus, SharedRuntime};
 pub use config::RuntimeConfig;

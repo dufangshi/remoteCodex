@@ -12,7 +12,10 @@ use sha2::Sha256;
 
 pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS relay_device_setup_tokens (
+        "CREATE TABLE IF NOT EXISTS relay_bootstrap_codes (
+          code_hash TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+          expires_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS relay_device_setup_tokens (
         device_id TEXT PRIMARY KEY REFERENCES relay_devices(id) ON DELETE CASCADE,
         token_hash TEXT NOT NULL UNIQUE, encrypted_token TEXT NOT NULL
     );",

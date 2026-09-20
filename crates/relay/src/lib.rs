@@ -6192,7 +6192,7 @@ mod tests {
         ))
     }
 
-    fn test_app_state(name: &str) -> (Arc<AppState>, PathBuf) {
+    pub(super) fn test_app_state(name: &str) -> (Arc<AppState>, PathBuf) {
         let data_dir = temporary_test_dir(name);
         let store = RelayStore::open(
             data_dir.join("relay-store.sqlite"),
@@ -6526,6 +6526,9 @@ mod tests {
         access.thread_access = "control".to_string();
         for route in [
             "/api/management/harnesses",
+            "/api/management/upstreams",
+            "/api/management/upstreams/profile-1",
+            "/api/management/templates",
             "/api/management/supervisor",
             "/api/management/harnesses/codex",
             "/api/management/supervisor/update",
