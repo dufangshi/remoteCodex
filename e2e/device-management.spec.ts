@@ -11,6 +11,11 @@ test('upstream editor and template preview stay usable inside device settings', 
     if (p.endsWith('/supervisor'))
       result = { runningVersion: 'test', canUpdate: false };
     else if (p.endsWith('/harnesses')) result = [];
+    else if (p.endsWith('/upstreams/models'))
+      result = {
+        models: [{ id: 'test-model', name: 'Test model' }],
+        truncated: false,
+      };
     else if (p.endsWith('/upstreams')) {
       if (route.request().method() === 'POST') {
         const { apiKey, ...saved } = route.request().postDataJSON();
@@ -33,7 +38,9 @@ test('upstream editor and template preview stay usable inside device settings', 
   await editor.getByLabel('Name', { exact: true }).fill('Personal API');
   await editor.getByLabel('Base URL').fill('https://api.example.test/v1');
   await editor.getByLabel('API key').fill('synthetic-key');
-  await editor.getByLabel('Model', { exact: true }).fill('test-model');
+  const model = editor.getByRole('combobox', { name: 'Model', exact: true });
+  await expect(model).toBeEnabled();
+  await model.selectOption('test-model');
   await editor.getByRole('button', { name: 'Save upstream' }).click();
   await expect(editor).toBeHidden();
   await expect(page.getByText('Personal API', { exact: true })).toBeVisible();

@@ -38,6 +38,24 @@ pub async fn save(
         .map(Json)
         .map_err(failure)
 }
+pub async fn models(
+    State(s): State<Arc<Supervisor>>,
+    Json(input): Json<profiles::DiscoveryInput>,
+) -> Result<Json<Value>, Failure> {
+    let p = {
+        let _g = s.upstream_gate.lock().await;
+        profiles::discovery_profile(&profiles::directory(&s.config.database_url), input)
+            .map_err(failure)?
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        profiles::discover_models(&p),
+    )
+    .await
+    .map_err(|_| failure("Model discovery timed out. Try loading models again."))?
+    .map(Json)
+    .map_err(failure)
+}
 pub async fn delete(
     State(s): State<Arc<Supervisor>>,
     Path(id): Path<String>,

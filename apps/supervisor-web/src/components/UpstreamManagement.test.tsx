@@ -11,22 +11,26 @@ import { request } from '../lib/api';
 vi.mock('../lib/api', () => ({ request: vi.fn() }));
 beforeEach(() => vi.mocked(request).mockReset());
 it('pins configuration to the selected device and never reuses secrets in duplicated profiles', async () => {
-  vi.mocked(request).mockResolvedValue({
-    profiles: [
-      {
-        id: 'p',
-        name: 'Work',
-        harness: 'codex',
-        baseUrl: 'https://example.test/v1',
-        model: 'test',
-        apiType: 'responses',
-        contextWindow: 100000,
-        hasApiKey: true,
-      },
-    ],
-    active: { codex: 'p' },
-    backups: [],
-  });
+  vi.mocked(request).mockImplementation(async (path) =>
+    String(path).endsWith('/models')
+      ? { models: [{ id: 'test', name: 'test' }], truncated: false }
+      : {
+          profiles: [
+            {
+              id: 'p',
+              name: 'Work',
+              harness: 'codex',
+              baseUrl: 'https://example.test/v1',
+              model: 'test',
+              apiType: 'responses',
+              contextWindow: 100000,
+              hasApiKey: true,
+            },
+          ],
+          active: { codex: 'p' },
+          backups: [],
+        },
+  );
   render(<UpstreamManagement apiRoot="/relay/devices/device-a/api" />);
   expect(await screen.findByText('Work')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Use upstream' })).toBeDisabled();
@@ -35,6 +39,10 @@ it('pins configuration to the selected device and never reuses secrets in duplic
   expect(screen.getByLabelText('API key')).toBeRequired();
   fireEvent.change(screen.getByLabelText('API key'), {
     target: { value: 'new-secret' },
+  });
+  await screen.findByRole('option', { name: 'test' });
+  fireEvent.change(screen.getByLabelText('Model'), {
+    target: { value: 'test' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save upstream' }));
   await waitFor(() =>
@@ -46,6 +54,54 @@ it('pins configuration to the selected device and never reuses secrets in duplic
       }),
     ),
   );
+});
+it('discards stale model discovery when the upstream changes', async () => {
+  let resolveOld!: (value: unknown) => void;
+  vi.mocked(request).mockImplementation(async (path, options) => {
+    if (!String(path).endsWith('/models'))
+      return { profiles: [], active: {}, backups: [] };
+    const body = JSON.parse(String(options?.body));
+    if (body.baseUrl.includes('old'))
+      return new Promise((resolve) => {
+        resolveOld = resolve;
+      });
+    return {
+      models: [{ id: 'new-model', name: 'new-model' }],
+      truncated: false,
+    };
+  });
+  render(<UpstreamManagement apiRoot="/relay/devices/device-b/api" />);
+  await screen.findByText(/Add an API provider/);
+  fireEvent.click(screen.getByRole('button', { name: 'Add upstream' }));
+  fireEvent.change(screen.getByLabelText('Base URL'), {
+    target: { value: 'https://old.example/v1' },
+  });
+  fireEvent.change(screen.getByLabelText('API key'), {
+    target: { value: 'key' },
+  });
+  await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
+  fireEvent.change(screen.getByLabelText('Base URL'), {
+    target: { value: 'https://new.example/v1' },
+  });
+  await screen.findByRole('option', { name: 'new-model' });
+  fireEvent.change(screen.getByLabelText('Model'), {
+    target: { value: 'new-model' },
+  });
+  await act(async () =>
+    resolveOld({
+      models: [{ id: 'old-model', name: 'old-model' }],
+      truncated: false,
+    }),
+  );
+  expect(
+    screen.queryByRole('option', { name: 'old-model' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Model')).toHaveValue('new-model');
+  fireEvent.change(screen.getByLabelText('API key'), {
+    target: { value: 'changed-key' },
+  });
+  expect(screen.getByLabelText('Model')).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Save upstream' })).toBeDisabled();
 });
 it('previews a template without mutation and applies only on the second action', async () => {
   vi.mocked(request).mockImplementation(async (path, options) =>
