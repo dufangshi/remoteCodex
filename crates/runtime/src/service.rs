@@ -406,7 +406,9 @@ impl Supervisor {
                         return Ok(());
                     };
                     let item = serde_json::from_value::<ThreadHistoryItemDto>(item)?;
-                    supervisor.upsert_history_item(&event.thread_id, turn_id, &item)
+                    supervisor.upsert_history_item(&event.thread_id, turn_id, &item)?;
+                    crate::history::defer_tool_details(&mut event.payload);
+                    Ok(())
                 }
                 _ => Ok(()),
             }
@@ -1766,6 +1768,10 @@ impl Supervisor {
                 .query_map(params![thread_id, turn_id], |row| row.get::<_, String>(0))?
                 .filter_map(|r| r.ok())
                 .filter_map(|raw| serde_json::from_str::<ThreadHistoryItemDto>(&raw).ok())
+                .map(|mut item| {
+                    crate::history::normalize_legacy_file_change(&mut item);
+                    item
+                })
                 .collect();
             Ok(items)
         })
@@ -1930,7 +1936,8 @@ impl Supervisor {
         let Some(raw) = raw else {
             bail!("history item not found");
         };
-        let item: ThreadHistoryItemDto = serde_json::from_str(&raw)?;
+        let mut item: ThreadHistoryItemDto = serde_json::from_str(&raw)?;
+        crate::history::normalize_legacy_file_change(&mut item);
         Ok(json!({
             "id": item.id,
             "kind": item.kind,

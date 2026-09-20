@@ -1,0 +1,154 @@
+import { test, expect, type APIRequestContext } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+test.use({ actionTimeout: 10_000 });
+async function createThread(request: APIRequestContext) {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Timeline regression' } })).json();
+  const response = await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title: 'Timeline interactions', provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } });
+  expect(response.ok()).toBeTruthy();
+  const value = await response.json();
+  return value.id ?? value.thread.id as string;
+}
+
+test('turn navigation changes direction reliably and tool details load only on click', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const db = new DatabaseSync(path.resolve(process.env.E2E_DATABASE_URL!));
+  const at = (turn: number, seconds = 0) => new Date(Date.UTC(2026, 8, 20, 1, turn, seconds)).toISOString();
+  try {
+    for (let i = -2; i < 3; i++) {
+      const turnId = `${id}-turn-${i}`;
+      db.prepare('INSERT INTO thread_turns(id,thread_id,status,started_at,completed_at,ordinal,display_prompt) VALUES (?,?,?,?,?,?,?)').run(turnId, id, 'completed', at(i), at(i, 50), i, `Prompt ${i}`);
+      const items = [
+        { id: 'user', kind: 'userMessage', text: `Prompt ${i}` },
+        { id: 'reason-a', kind: 'reasoning', text: '**Checking the first section**' },
+        { id: 'reason-b', kind: 'reasoning', text: '**Checking the second section**' },
+        { id: 'cmd-a', kind: 'commandExecution', text: 'pnpm test', detailText: 'PASS 42 tests\nActual command output.' },
+        { id: 'cmd-b', kind: 'commandExecution', text: 'git status', detailText: 'On branch test\nworking tree clean' },
+        { id: 'read', kind: 'fileRead', text: '/home/user/a/very/long/workspace/path/packages/runtime/src/important-file.rs' },
+        { id: 'single', kind: 'commandExecution', text: 'cargo check', detailText: 'Finished dev profile successfully' },
+        { id: 'edit-a', kind: 'fileChange', text: 'src/main.rs', changedFiles: 1, addedLines: 1, removedLines: 1, detailText: '--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,2 +1,2 @@\n fn main() {\n-    old();\n+    new();' },
+        { id: 'edit-b', kind: 'fileChange', text: 'src/lib.rs', changedFiles: 1, addedLines: 2, removedLines: 0, detailText: '--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -0,0 +1,2 @@\n+pub fn ready() -> bool {\n+    true' },
+        { id: 'reply', kind: 'agentMessage', text: `Final reply ${i}.\n\n` + 'A full paragraph for testing navigation through a long conversation.\n\n'.repeat(18) },
+      ];
+      for (const [index, item] of items.entries()) {
+        const key = `${turnId}-${item.id}`;
+        const time = at(i, index * 4);
+        db.prepare('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(randomUUID(), id, turnId, key, JSON.stringify({ ...item, id: key, createdAt: time, status: 'completed' }), time, time);
+      }
+    }
+  } finally { db.close(); }
+  const detailRequests: string[] = [];
+  page.on('request', request => { if (request.url().includes(`/api/threads/${id}/items/`)) detailRequests.push(request.url()); });
+  await page.goto(`/threads/${id}`);
+  await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+  if (testInfo.project.name === 'mobile-chromium') {
+    await expect(page.locator('.matter-rail')).toHaveCount(0);
+    await expect(page.locator('.matter-topbar').getByRole('button', { name: 'Chat', exact: true })).toBeVisible();
+    await expect(page.locator('.matter-topbar').getByRole('button', { name: 'Open settings', exact: true })).toBeVisible();
+    expect(await page.locator('.matter-main').evaluate(e => e.getBoundingClientRect().left)).toBeLessThan(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } else {
+    await expect(page.locator('.matter-rail')).toBeVisible();
+  }
+  const previous = page.getByRole('button', { name: 'Jump to previous turn' });
+  const next = page.getByRole('button', { name: 'Jump to next turn' });
+  const bottom = page.getByRole('button', { name: 'Jump to latest' });
+  const aligned = async (index: number) => expect.poll(() => page.locator(`[data-timeline-turn][data-turn-id="${id}-turn-${index}"]`).evaluate(e => Math.abs(e.getBoundingClientRect().top - document.querySelector('[data-testid="thread-scroll-container"]')!.getBoundingClientRect().top - 8))).toBeLessThan(3);
+  await bottom.click(); await previous.click(); await aligned(2);
+  await previous.click(); await aligned(1);
+  await next.click(); await aligned(2);
+  await previous.click(); await aligned(1);
+  await previous.click(); await aligned(0);
+  await previous.click(); await aligned(-1);
+  await previous.click(); await aligned(-2);
+  await expect(previous).toBeDisabled();
+  await next.click(); await aligned(-1);
+  await next.click(); await aligned(0);
+  await next.click(); await aligned(1);
+  await bottom.click(); await previous.click(); await aligned(2);
+  // Reverse before smooth scrolling settles.
+  await previous.evaluate(e => (e as HTMLButtonElement).click());
+  await next.evaluate(e => (e as HTMLButtonElement).click());
+  await aligned(2);
+  const last = page.locator(`[data-timeline-turn][data-turn-id="${id}-turn-2"]`);
+  await last.getByRole('button', { name: /Expand turn 5/ }).click();
+  await expect(last.getByText('Checking the first section', { exact: true })).toHaveCount(0);
+  await last.getByRole('button', { name: 'Expand 2 command entries' }).click();
+  expect(detailRequests).toHaveLength(0);
+  const command = last.getByRole('button', { name: 'Open grouped command 1', exact: true });
+  await expect(command).toContainText('12s');
+  await command.getByRole('button', { name: /Toggle timestamp/ }).click();
+  await expect(command).not.toContainText('12s');
+  expect(detailRequests).toHaveLength(0);
+  await command.click();
+  await expect(page.getByRole('dialog').getByText(/PASS 42 tests/)).toBeVisible();
+  expect(detailRequests).toHaveLength(1);
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await last.getByRole('button', { name: 'Open full command', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Finished dev profile successfully');
+  expect(detailRequests).toHaveLength(2);
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  const read = last.getByRole('button', { name: 'Show full file path' });
+  await read.click();
+  await expect(read).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await last.getByRole('button', { name: 'Expand 2 file change entries' }).click();
+  expect(detailRequests).toHaveLength(2);
+  const edit = last.getByRole('button', { name: 'Open grouped file change 1', exact: true });
+  await expect(edit).toContainText('src/main.rs');
+  await expect(edit.locator('.is-add')).toHaveText('+1');
+  await expect(edit.locator('.is-remove')).toHaveText('-1');
+  await edit.click();
+  await expect(page.locator('.thread-diff')).toHaveAttribute('data-highlighted', 'true');
+  await expect(page.locator('.thread-diff-line.is-add')).toContainText('new();');
+  await expect(page.locator('.thread-diff-line.is-remove')).toContainText('old();');
+  expect(detailRequests).toHaveLength(3);
+  await page.screenshot({ path: `output/playwright/timeline-diff-${testInfo.project.name}.png` });
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Open settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Global', exact: true }).click();
+  const setting = page.getByRole('checkbox', { name: /Show agent status summaries/ });
+  await expect(setting).not.toBeChecked();
+  await setting.check();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(last.getByText('Checking the first section', { exact: true })).toBeVisible();
+  await expect(last.getByText('Checking the second section', { exact: true })).toBeVisible();
+  await expect(last.locator(`[data-message-id$="reason-a"]`)).toContainText('4s');
+  await expect(last.locator(`[data-message-id$="reason-b"]`)).toContainText('8s');
+  await page.reload();
+  expect(await page.evaluate(() => localStorage.getItem('remote-codex-show-reasoning-summaries'))).toBe('true');
+});
+
+test('failed sends preserve the prompt and all attachments for correction and retry', async ({ page, request }) => {
+  const id = await createThread(request);
+  await page.goto(`/threads/${id}`);
+  const editor = page.getByRole('textbox', { name: 'Prompt' });
+  await editor.fill('Keep this exact draft after any send failure.');
+  await page.locator('input[type=file]:not([accept])').setInputFiles(Array.from({ length: 11 }, (_, index) => ({ name: `file-${index}.txt`, mimeType: 'text/plain', buffer: Buffer.from(`attachment ${index}`) })));
+  await page.getByRole('button', { name: 'Send Prompt' }).click();
+  await expect(page.getByText(/A prompt can include at most 10 attachments/).first()).toBeVisible();
+  await expect(editor).toContainText('Keep this exact draft');
+  await expect(editor.locator('[data-segment-type="attachment"]')).toHaveCount(11);
+  // Remove the attachment chips by replacing the editor, then retry with one file.
+  await editor.fill('Keep this exact draft after any send failure.');
+  await page.locator('input[type=file]:not([accept])').setInputFiles({ name: 'retry.txt', mimeType: 'text/plain', buffer: Buffer.from('retry attachment') });
+  let sends = 0;
+  await page.route(`**/api/threads/${id}/prompt`, route => {
+    sends++;
+    return route.fulfill({ status: 400, json: { code: 'too_many_attachments', message: 'A prompt can include at most 10 attachments.' } });
+  });
+  await page.getByRole('button', { name: 'Send Prompt' }).click();
+  await expect.poll(() => sends).toBe(1);
+  await expect(editor).toContainText('Keep this exact draft after any send failure.');
+  await expect(editor.locator('[data-segment-type="attachment"]')).toHaveCount(1);
+  await page.unroute(`**/api/threads/${id}/prompt`);
+  await page.getByRole('button', { name: 'Send Prompt' }).click();
+  await expect(editor).toHaveText('');
+  await expect(page.getByText('Showing 1 of 1 turns')).toBeVisible();
+});

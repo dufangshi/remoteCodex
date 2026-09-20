@@ -952,6 +952,12 @@ export function AppShellSettingsDialog({
             )}
           </section>
 
+          <section className="py-5">
+            <label className="flex min-h-11 items-center justify-between gap-4">
+              <span><span className="block text-sm font-semibold">Show agent status summaries</span><span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">Show intermediate thinking summaries with their own timestamps. Off by default.</span></span>
+              <input type="checkbox" checked={shellNav?.showReasoningSummaries ?? false} onChange={event => shellNav?.setShowReasoningSummaries?.(event.currentTarget.checked)} className="h-5 w-5 accent-[var(--theme-accent-solid)]" />
+            </label>
+          </section>
           <ModelPricingSettings />
 
           <section className="py-5">

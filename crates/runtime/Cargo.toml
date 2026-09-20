@@ -19,6 +19,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
+similar = "2.7"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

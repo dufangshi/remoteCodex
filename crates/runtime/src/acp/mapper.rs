@@ -21,6 +21,8 @@ pub struct TurnMapper {
     thought_segments: Vec<ThreadHistoryItemDto>,
     active_agent_segment: Option<usize>,
     active_thought_segment: Option<usize>,
+    agent_message_id: Option<String>,
+    thought_message_id: Option<String>,
     tools: Vec<ThreadHistoryItemDto>,
     tool_payloads: HashMap<String, Value>,
     plans: Vec<ThreadHistoryItemDto>,
@@ -36,6 +38,8 @@ impl TurnMapper {
             thought_segments: Vec::new(),
             active_agent_segment: None,
             active_thought_segment: None,
+            agent_message_id: None,
+            thought_message_id: None,
             tools: Vec::new(),
             tool_payloads: HashMap::new(),
             plans: Vec::new(),
@@ -55,6 +59,14 @@ impl TurnMapper {
         match kind {
             "agent_message_chunk" => {
                 if let Some(text) = content_text(body) {
+                    let message_id = body
+                        .get("messageId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if message_id.is_some() && message_id != self.agent_message_id {
+                        self.active_agent_segment = None;
+                    }
+                    self.agent_message_id = message_id;
                     self.active_thought_segment = None;
                     let segment_index = if let Some(index) = self.active_agent_segment {
                         index
@@ -88,6 +100,19 @@ impl TurnMapper {
             }
             "agent_thought_chunk" => {
                 if let Some(text) = content_text(body) {
+                    let message_id = body
+                        .get("messageId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if message_id.is_some()
+                        && (message_id != self.thought_message_id || text == "\n\n")
+                    {
+                        self.active_thought_segment = None;
+                    }
+                    self.thought_message_id = message_id;
+                    if text.trim().is_empty() && self.active_thought_segment.is_none() {
+                        return mapped;
+                    }
                     self.active_agent_segment = None;
                     let segment_index = if let Some(index) = self.active_thought_segment {
                         index
@@ -283,6 +308,26 @@ fn merge_tool_payload(previous: Option<&Value>, patch: &Value) -> Value {
             merged.insert(key.clone(), value.clone());
         }
     }
+    // Codex ACP's terminal references are accompanied by output in _meta.
+    // Accumulate deltas separately; a final rawOutput remains authoritative.
+    let previous_output = previous
+        .and_then(|value| value.get("_remoteTerminalOutput"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if let Some(delta) = patch
+        .pointer("/_meta/terminal_output_delta/data")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            patch
+                .pointer("/_meta/terminal_output/data")
+                .and_then(Value::as_str)
+        })
+    {
+        merged.insert(
+            "_remoteTerminalOutput".into(),
+            Value::String(format!("{previous_output}{delta}")),
+        );
+    }
     Value::Object(merged)
 }
 
@@ -354,7 +399,59 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
     );
     mapped.preview_text = Some(title);
     mapped.detail_text = (!detail.is_empty()).then_some(detail);
+    if kind == "fileChange" {
+        apply_file_changes(&mut mapped, body);
+    }
     mapped
+}
+
+fn apply_file_changes(mapped: &mut ThreadHistoryItemDto, body: &Value) {
+    let mut paths = Vec::new();
+    let mut patches = Vec::new();
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    for entry in body
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if entry["type"] != "diff" {
+            continue;
+        }
+        let path = entry["path"].as_str().unwrap_or("unknown");
+        let old = entry["oldText"].as_str().unwrap_or("");
+        let new = entry["newText"].as_str().unwrap_or("");
+        let diff = similar::TextDiff::from_lines(old, new);
+        for change in diff.iter_all_changes() {
+            match change.tag() {
+                similar::ChangeTag::Insert => added += 1,
+                similar::ChangeTag::Delete => removed += 1,
+                _ => {}
+            }
+        }
+        patches.push(
+            diff.unified_diff()
+                .context_radius(3)
+                .header(&format!("a/{path}"), &format!("b/{path}"))
+                .to_string(),
+        );
+        paths.push(path);
+    }
+    if !paths.is_empty() {
+        mapped.text = paths.join(", ");
+        mapped.preview_text = Some(mapped.text.clone());
+        mapped.detail_text = Some(patches.join("\n"));
+        mapped
+            .extra
+            .insert("changedFiles".into(), serde_json::json!(paths.len()));
+        mapped
+            .extra
+            .insert("addedLines".into(), serde_json::json!(added));
+        mapped
+            .extra
+            .insert("removedLines".into(), serde_json::json!(removed));
+    }
 }
 
 fn nonempty_string(value: Option<&Value>) -> Option<String> {
@@ -412,6 +509,20 @@ fn tool_detail(body: &Value, tool_name: Option<&str>, raw_kind: &str, locations:
         parts.push(format!("Input:\n{}", pretty_json(input)));
     }
     let content = tool_content_text(body);
+    let terminal_output = body
+        .get("rawOutput")
+        .filter(|value| !value.is_null())
+        .map(readable_output)
+        .or_else(|| {
+            body.get("_remoteTerminalOutput")
+                .and_then(Value::as_str)
+                .filter(|output| !output.is_empty())
+                .map(str::to_owned)
+        });
+    if raw_kind == "execute" && terminal_output.is_some() {
+        parts.push(format!("Output:\n{}", terminal_output.unwrap()));
+        return parts.join("\n\n");
+    }
     if !content.is_empty() {
         parts.push(format!("Result:\n{content}"));
     } else if let Some(output) = body.get("rawOutput") {
@@ -492,6 +603,8 @@ fn content_block_text(block: &Value) -> Option<String> {
 
 fn readable_output(output: &Value) -> String {
     for pointer in [
+        "/formatted_output",
+        "/aggregatedOutput",
         "/output_for_prompt",
         "/raw_output",
         "/output",
@@ -577,6 +690,66 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         source_turn_id: Some(turn_id.into()),
         artifact: None,
         extra: Default::default(),
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn terminal_output_survives_references_deltas_and_final_snapshot() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.apply(&json!({"sessionUpdate":"tool_call","toolCallId":"cmd","kind":"execute","title":"Run tests","content":[{"type":"terminal","terminalId":"cmd"}]}));
+        mapper.apply(&json!({"sessionUpdate":"tool_call_update","toolCallId":"cmd","_meta":{"terminal_output_delta":{"data":"first\n","terminal_id":"cmd"}}}));
+        let update = mapper.apply(&json!({"sessionUpdate":"tool_call_update","toolCallId":"cmd","_meta":{"terminal_output_delta":{"data":"second\n","terminal_id":"cmd"}}}));
+        assert!(update.items[0]
+            .detail_text
+            .as_ref()
+            .unwrap()
+            .contains("first\nsecond\n"));
+        let done = mapper.apply(&json!({"sessionUpdate":"tool_call_update","toolCallId":"cmd","status":"completed","rawOutput":{"formatted_output":"first\nsecond\n","exit_code":0}}));
+        let detail = done.items[0].detail_text.as_ref().unwrap();
+        assert!(detail.contains("Output:\nfirst\nsecond\n"));
+        assert!(!detail.contains("Terminal: cmd"));
+        assert_eq!(detail.matches("first").count(), 1);
+    }
+
+    #[test]
+    fn reasoning_respects_message_and_summary_boundaries() {
+        let mut mapper = TurnMapper::new("turn");
+        for (id, text, at) in [
+            ("a", "**First", "2026-09-20T02:00:00Z"),
+            ("a", " step**", "2026-09-20T02:00:01Z"),
+            ("a", "\n\n", "2026-09-20T02:00:02Z"),
+            ("a", "**Second**", "2026-09-20T02:00:03Z"),
+            ("b", "**Third**", "2026-09-20T02:00:04Z"),
+        ] {
+            mapper.apply(&json!({"sessionUpdate":"agent_thought_chunk","messageId":id,"content":{"type":"text","text":text},"createdAt":at}));
+        }
+        let items = mapper.finish(false);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].text, "**First step**");
+        assert_eq!(items[1].text, "**Second**");
+        assert_eq!(items[2].text, "**Third**");
+        assert_ne!(items[0].id, items[1].id);
+    }
+
+    #[test]
+    fn file_changes_include_paths_counts_and_unified_diff() {
+        let mapped = tool_item(
+            "turn",
+            &json!({"toolCallId":"edit","kind":"edit","title":"Editing files","status":"completed","content":[{"type":"diff","path":"src/main.rs","oldText":"fn main() {\n    old();\n}\n","newText":"fn main() {\n    new();\n    done();\n}\n"}]}),
+        );
+        assert_eq!(mapped.text, "src/main.rs");
+        assert_eq!(mapped.extra["addedLines"], 2);
+        assert_eq!(mapped.extra["removedLines"], 1);
+        assert_eq!(mapped.extra["changedFiles"], 1);
+        let detail = mapped.detail_text.unwrap();
+        assert!(detail.contains("-    old();"));
+        assert!(detail.contains("+    new();"));
+        assert!(detail.contains("@@"));
     }
 }
 
