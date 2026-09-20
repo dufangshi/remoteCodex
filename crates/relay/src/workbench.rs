@@ -22,7 +22,44 @@ pub(super) fn ensure_schema(conn: &Connection) -> Result<()> {
 }
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
-    Router::new().route("/relay/account/workbench", get(load).post(save))
+    Router::new().route(
+        "/relay/account/workbench",
+        get(load).post(save).delete(remove),
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveReference {
+    device_id: String,
+    thread_id: String,
+}
+
+async fn remove(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    Json(reference): Json<RemoveReference>,
+) -> Response {
+    let conn = state.store.conn.lock().await;
+    let Some(user) = authenticated_user(&conn, &state.store.session_secret, &headers, &query)
+    else {
+        return unauthorized();
+    };
+    // Removing an account's own bookmark does not mutate the remote thread or
+    // another user's navigation, even when access to that device was revoked.
+    match remove_reference(&conn, &user.id, &reference).and_then(|_| snapshot(&conn, &user.id)) {
+        Ok(value) => Json(value).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+fn remove_reference(conn: &Connection, user: &str, reference: &RemoveReference) -> Result<()> {
+    conn.execute(
+        "DELETE FROM relay_thread_navigation WHERE user_id=?1 AND device_id=?2 AND thread_id=?3",
+        params![user, reference.device_id, reference.thread_id],
+    )?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -176,6 +213,36 @@ async fn save(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn removing_reference_is_scoped_to_account_device_and_thread() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE relay_thread_navigation(user_id TEXT,device_id TEXT,thread_id TEXT);
+            INSERT INTO relay_thread_navigation VALUES ('a','mac','one'),('a','wsl','one'),('b','mac','one'),('a','mac','two');").unwrap();
+        remove_reference(
+            &conn,
+            "a",
+            &RemoveReference {
+                device_id: "mac".into(),
+                thread_id: "one".into(),
+            },
+        )
+        .unwrap();
+        let rows: Vec<(String, String, String)> = conn
+            .prepare("SELECT * FROM relay_thread_navigation ORDER BY user_id,device_id,thread_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("a".into(), "mac".into(), "two".into()),
+                ("a".into(), "wsl".into(), "one".into()),
+                ("b".into(), "mac".into(), "one".into())
+            ]
+        );
+    }
     #[test]
     fn navigation_and_notifications_disappear_when_thread_sharing_is_revoked() {
         let store = RelayStore::open(PathBuf::from(":memory:"), "workbench-test".into()).unwrap();

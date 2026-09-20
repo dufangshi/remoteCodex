@@ -141,6 +141,45 @@ function detachedService(program, args, env, cwd, log) {
   return child;
 }
 
+// A native PID can exit before its launcher / tee pipeline releases the tmux
+// session. Capture ownership while the native process is still alive; never
+// remove a session merely because it has the configured name.
+export function captureRelaySession(plan, command = spawnSync) {
+  if (plan.mode !== 'relay' || !plan.env.TMUX || !plan.env.TMUX_PANE) return null;
+  const socket = plan.env.TMUX.slice(0, plan.env.TMUX.lastIndexOf(','));
+  const socketPath = socket.slice(0, socket.lastIndexOf(','));
+  const query = (...args) => command('tmux', ['-S', socketPath, ...args], { encoding: 'utf8', env: plan.env });
+  const result = query('display-message', '-p', '-t', plan.env.TMUX_PANE,
+    '#{session_id}\t#{session_name}\t#{pane_id}\t#{pane_pid}');
+  if (result.status !== 0) throw Error('Cannot identify the Supervisor tmux session');
+  const [session, name, pane, panePid] = result.stdout.trim().split('\t');
+  const expected = plan.env.REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION?.trim() || 'remote-codex-relay-supervisor';
+  // A foreground Supervisor inside a user's own tmux session is not managed here.
+  if (name !== expected) return null;
+  let pid = plan.pid;
+  for (let depth = 0; depth < 64 && pid > 1 && pid !== Number(panePid); depth++) {
+    const parent = command('ps', ['-p', String(pid), '-o', 'ppid='], { encoding: 'utf8' });
+    pid = parent.status === 0 ? Number(parent.stdout.trim()) : 0;
+  }
+  if (pid !== Number(panePid)) throw Error('Supervisor does not own the configured tmux pane');
+  const panes = query('list-panes', '-s', '-t', session, '-F', '#{pane_id}');
+  if (panes.status !== 0 || panes.stdout.trim() !== pane)
+    throw Error('Supervisor tmux session contains other panes; move them before updating');
+  return { socketPath, session, pane, panePid };
+}
+
+export function retireRelaySession(owner, env, command = spawnSync) {
+  if (!owner) return;
+  const query = (...args) => command('tmux', ['-S', owner.socketPath, ...args], { encoding: 'utf8', env });
+  const panes = query('list-panes', '-s', '-t', owner.session, '-F', '#{pane_id}\t#{pane_pid}');
+  if (panes.status !== 0) return; // The old pipeline has already exited.
+  if (panes.stdout.trim() !== `${owner.pane}\t${owner.panePid}`)
+    throw Error('Supervisor tmux session changed during update; refusing to close it');
+  if (query('kill-session', '-t', owner.session).status !== 0 &&
+      query('has-session', '-t', owner.session).status === 0)
+    throw Error('Unable to retire the old Supervisor tmux session');
+}
+
 export function relayLogFile(env, cwd = process.cwd(), home = os.homedir()) {
   // tmux clears optional launcher controls by exporting empty strings.
   return path.resolve(cwd, env.REMOTE_CODEX_RELAY_SUPERVISOR_LOG ||
@@ -153,6 +192,8 @@ export async function worker(plan, hooks = {}) {
   const pause = hooks.sleep ?? sleep;
   const stop = hooks.stop ?? ((pid) => process.kill(pid, 'SIGTERM'));
   const start = hooks.start ?? detachedService;
+  const captureSession = hooks.captureRelaySession ?? captureRelaySession;
+  const retireSession = hooks.retireRelaySession ?? retireRelaySession;
   const env = cleanEnvironment(plan.env);
   if (plan.action === 'restart') env.REMOTE_CODEX_NATIVE_BINARY = plan.executable;
   const isAlive = hooks.alive ?? alive;
@@ -195,6 +236,7 @@ export async function worker(plan, hooks = {}) {
     status('preparing');
     if ((await getHealth(plan.port, plan.host))?.processId !== plan.pid)
       throw Error('The running Supervisor changed; check for updates again');
+    const relaySession = captureSession(plan);
     if (plan.action !== 'restart') {
     fs.cpSync(plan.root, backup, { recursive: true });
     installed = true;
@@ -243,6 +285,10 @@ export async function worker(plan, hooks = {}) {
       throw Error(
         'Old Supervisor did not stop; refusing to kill another process',
       );
+    retireSession(relaySession, plan.env);
+    // The replacement is a new launcher, not a child of the retired pane.
+    delete env.TMUX;
+    delete env.TMUX_PANE;
     const log = relayLogFile(plan.env, plan.cwd);
     const previousLog = fs.existsSync(log) ? fs.statSync(log) : null;
     // A new process may migrate the database before binding HTTP. From this point

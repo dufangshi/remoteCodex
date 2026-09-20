@@ -6,6 +6,60 @@ import { DatabaseSync } from 'node:sqlite';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 
+test('recent thread menus manage shortcuts and history while glass controls and outer pages share the theme', async ({ page, request }, testInfo) => {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `recent-menus-${randomUUID()}`);
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Glass workspace' } })).json();
+  const ids: string[] = [];
+  for (const title of ['Keep this conversation', 'Manage from Recent chats']) {
+    const response = await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title, provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } });
+    expect(response.ok()).toBeTruthy();
+    const value = await response.json(); ids.push(value.id ?? value.thread.id);
+    await page.goto(`/threads/${ids.at(-1)}`);
+    await expect(page.locator('.matter-current-title')).toHaveText(title);
+  }
+  await page.goto(`/threads/${ids[0]}`);
+  if (testInfo.project.name === 'mobile-chromium') await page.getByRole('button', { name: 'Toggle shortcuts sidebar' }).click();
+  const recent = page.getByTestId('recent-chats');
+  await recent.getByRole('button', { name: 'Actions for Manage from Recent chats' }).click();
+  const menu = page.getByRole('dialog', { name: 'Thread actions: Manage from Recent chats', exact: true });
+  await menu.getByRole('button', { name: 'Star thread', exact: true }).click();
+  await expect(page.getByTestId('shortcuts').getByRole('link', { name: /Manage from Recent chats/ })).toBeVisible();
+  await expect(page.locator('.matter-current-title')).toHaveText('Keep this conversation');
+  await recent.getByRole('button', { name: 'Actions for Manage from Recent chats' }).click();
+  await menu.getByRole('button', { name: 'Rename thread', exact: true }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename thread', exact: true });
+  await rename.getByRole('textbox', { name: 'Thread title' }).fill('Renamed in sidebar');
+  await rename.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(recent.getByRole('button', { name: 'Actions for Renamed in sidebar' })).toBeVisible();
+  await page.reload();
+  if (testInfo.project.name === 'mobile-chromium') await page.getByRole('button', { name: 'Toggle shortcuts sidebar' }).click();
+  await recent.getByRole('button', { name: 'Actions for Renamed in sidebar' }).click();
+  await page.getByRole('dialog', { name: 'Thread actions: Renamed in sidebar', exact: true }).getByRole('button', { name: 'Delete thread' }).click();
+  await page.getByRole('dialog', { name: 'Delete thread?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(recent.getByRole('link', { name: /Renamed in sidebar/ })).toHaveCount(0);
+  await expect.poll(async () => (await request.get(`${base}/api/threads/${ids[1]}`)).status()).toBe(404);
+  if (testInfo.project.name === 'mobile-chromium') await page.getByRole('button', { name: 'Close sidebar', exact: true }).click();
+  await page.locator('.matter-thread-menu > summary').click();
+  await page.getByRole('button', { name: 'Star thread', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Remove shortcut', exact: true })).toBeVisible();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => localStorage.setItem('remote-codex-theme-mode', theme), theme);
+    await page.reload();
+    await expect(page.locator('.thread-graph-composer-shell')).toBeVisible();
+    await expect(page.locator('.thread-graph-composer-shell')).toHaveCSS('backdrop-filter', 'blur(24px) saturate(1.35)');
+    await expect(page.getByRole('group', { name: 'Timeline navigation' })).toHaveCSS('border-top-width', '0px');
+    await page.screenshot({ path: `output/playwright/glass-${theme}-${testInfo.project.name}.png` });
+    const conversationBackground = await page.locator('.matter-chat').evaluate(e => getComputedStyle(e).getPropertyValue('--theme-bg').trim());
+    await page.goto('/workspaces');
+    await expect(page.getByRole('heading', { name: 'Workspaces', exact: true }).first()).toBeVisible();
+    expect(await page.locator('body').evaluate(e => getComputedStyle(e).getPropertyValue('--theme-bg').trim())).toBe(conversationBackground);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `output/playwright/outer-${theme}-${testInfo.project.name}.png` });
+    await page.goto(`/threads/${ids[0]}`);
+  }
+});
+
 test('reading area uses most of a wide viewport and fills the space beside Explorer', async ({ page, request }, testInfo) => {
   const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `wide-reading-${randomUUID()}`);
   await mkdir(absPath, { recursive: true });

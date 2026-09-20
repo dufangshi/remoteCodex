@@ -25,6 +25,34 @@ beforeEach(() => {
   });
 });
 
+it('distinguishes a prolonged restart disconnect and recovers without another click', async () => {
+  let offline = false, completed = false;
+  api.request.mockImplementation(async (path: string) => {
+    if (offline) throw new Error('Device offline');
+    if (path.endsWith('/harnesses')) return [];
+    if (path.endsWith('/jobs')) return {};
+    return { runningVersion: '0.12.38', canUpdate: true, job: { phase: completed ? 'completed' : 'restarting', action: 'update' } };
+  });
+  const view = mount('/devices/a/workspaces');
+  await screen.findByText(/Restarting Supervisor/);
+  vi.useFakeTimers();
+  try {
+    // The component's interval was created before fake timers; remount under them.
+    view.unmount();
+    const next = mount('/devices/a/workspaces');
+    await act(async () => {});
+    offline = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(35_000); });
+    expect(screen.getByText(/Waiting for the device to reconnect/)).toBeVisible();
+    expect(screen.getByText(/restart has not been verified/)).toBeVisible();
+    completed = true; offline = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(screen.getByText(/Update completed/)).toBeVisible();
+    expect(screen.queryByText(/Waiting for the device/)).not.toBeInTheDocument();
+    next.unmount();
+  } finally { vi.useRealTimers(); }
+});
+
 it('offers repair when npm is old but the running process already matches latest', async () => {
   api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
     runningVersion: '0.12.32', installedVersion: '0.12.30', latestVersion: '0.12.32', canUpdate: true,

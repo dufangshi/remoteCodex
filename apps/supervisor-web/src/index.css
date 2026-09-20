@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./matter-theme.css";
 @font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('/fonts/dm-sans-latin.woff2') format('woff2'); }
 
 .workbench-search { width: min(640px, calc(100vw - 32px)); max-height: min(700px, 85dvh); margin: auto; padding: 20px; border: 1px solid var(--theme-border); border-radius: 16px; background: var(--theme-panel); color: var(--theme-fg); box-shadow: 0 24px 80px rgb(0 0 0 / 18%); }

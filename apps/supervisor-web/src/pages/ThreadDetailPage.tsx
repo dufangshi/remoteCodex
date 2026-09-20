@@ -8,6 +8,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, Link2, Users } from 'lucide-react';
 
+import { RecentThreadMenu } from '../components/RecentThreadMenu';
 import {
   AgentProviderCapabilitiesDto,
   AgentBackendManagementSchemaDto,
@@ -3590,7 +3591,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}
