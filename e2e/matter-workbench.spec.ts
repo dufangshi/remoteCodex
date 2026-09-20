@@ -6,6 +6,40 @@ import { DatabaseSync } from 'node:sqlite';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 
+test('reading area uses most of a wide viewport and fills the space beside Explorer', async ({ page, request }, testInfo) => {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `wide-reading-${randomUUID()}`);
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Wide conversation' } })).json();
+  const started = await (await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title: 'A wider conversation', provider: 'acp', agentId: 'grok', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
+  const id = started.id ?? started.thread.id;
+  await request.post(`${base}/api/threads/${id}/prompt`, { data: { prompt: 'hello' } });
+  await expect.poll(async () => (await (await request.get(`${base}/api/threads/${id}`)).json()).thread.status).toBe('idle');
+  await page.setViewportSize({ width: 2560, height: 1200 });
+  await page.goto(`/threads/${id}`);
+  await expect(page.locator('[data-role="assistant"]').getByText('hello', { exact: true })).toBeVisible();
+  const measure = () => page.evaluate(() => {
+    const chat = document.querySelector('.matter-chat')!.getBoundingClientRect();
+    const reply = document.querySelector('.thread-graph-message-stack.is-assistant')!.getBoundingClientRect();
+    const composer = document.querySelector('.thread-graph-composer-shell')!.getBoundingClientRect();
+    return { reply: reply.width / chat.width, composer: composer.width / chat.width, leftDifference: Math.abs(reply.left - composer.left), rightDifference: Math.abs(reply.right - composer.right), overflow: document.documentElement.scrollWidth > innerWidth };
+  });
+  await expect.poll(async () => (await measure()).reply).toBeGreaterThanOrEqual(.70);
+  expect((await measure()).composer).toBeGreaterThanOrEqual(.70);
+  expect((await measure()).reply).toBeLessThan(.90);
+  expect((await measure()).leftDifference).toBeLessThan(4);
+  expect((await measure()).rightDifference).toBeLessThan(4);
+  await page.screenshot({ path: `output/playwright/wide-reading-${testInfo.project.name}.png` });
+  await page.getByRole('button', { name: 'Toggle Explorer', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Explorer', exact: true })).toBeVisible();
+  await expect.poll(async () => (await measure()).reply).toBeGreaterThan(.94);
+  expect((await measure()).composer).toBeGreaterThan(.94);
+  await page.screenshot({ path: `output/playwright/wide-reading-explorer-${testInfo.project.name}.png` });
+  await page.getByRole('button', { name: 'Close Explorer', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await measure()).reply).toBeGreaterThan(.90);
+  expect((await measure()).overflow).toBe(false);
+});
+
 test('search reveals an older collapsed message, Explorer resizes and connection details stay anchored', async ({ page, request }, testInfo) => {
   const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `interactions-${randomUUID()}`);
   await mkdir(absPath, { recursive: true });

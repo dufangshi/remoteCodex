@@ -4,6 +4,7 @@ import { createServer } from 'node:net';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 test('workbench shares images publicly and grants device access without leaving the thread', async ({ browser }, testInfo) => {
   const root = await mkdtemp(resolve('.local/workbench-sharing-'));
@@ -41,21 +42,61 @@ test('workbench shares images publicly and grants device access without leaving 
     await writeFile(join(absPath, '.temp/threads', id, 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=', 'base64'));
     await api(`${deviceApi}/threads/${id}/prompt`, owner, { prompt: `Review this attachment [PHOTO ./.temp/threads/${id}/image.png]` });
     await expect.poll(async () => (await api(`${deviceApi}/threads/${id}`, owner)).thread.status).toBe('idle');
+    // The reported conversation contains these examples in an assistant reply.
+    // They are text, not uploaded images, and must not be fetched as attachments.
+    const example = 'Syntax examples: `[PHOTO …]` and `[PHOTO ./.temp/threads/…/image.png]`.';
+    const db = new DatabaseSync(join(root, 'supervisor.sqlite'));
+    try {
+      const rows = db.prepare('SELECT id,item_json FROM thread_history_items WHERE thread_id=?').all(id) as { id: string; item_json: string }[];
+      for (const row of rows) {
+        const item = JSON.parse(row.item_json);
+        if (item.kind === 'agentMessage') {
+          item.text += `\n\n${example}`;
+          db.prepare('UPDATE thread_history_items SET item_json=? WHERE id=?').run(JSON.stringify(item), row.id);
+        }
+      }
+    } finally { db.close(); }
     await context.addCookies([{ name: 'remote_codex_relay_session', value: owner, url: base }]);
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const page = await context.newPage();
+    const contrast = async (selector: string) => page.locator(selector).evaluate(element => {
+      const style = getComputedStyle(element);
+      const luminance = (color: string) => {
+        const channels = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(c => { const s = c / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; });
+        return channels[0]! * .2126 + channels[1]! * .7152 + channels[2]! * .0722;
+      };
+      const a = luminance(style.color), b = luminance(style.backgroundColor);
+      return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    });
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>(resolve => { releaseCreate = resolve; });
+    await page.route('**/relay/thread-links', async route => { if (route.request().method() === 'POST') await createGate; await route.continue(); });
     await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
     await page.goto(`${base}/devices/${device.device.id}/threads/${id}`);
     await page.getByRole('button', { name: 'Share as link', exact: true }).click();
+    try {
+      await expect(page.getByRole('button', { name: 'Creating link…' })).toBeVisible();
+      expect(await contrast('.thread-public-link-create')).toBeGreaterThanOrEqual(4.5);
+    } finally { releaseCreate(); }
     const link = page.getByRole('textbox', { name: 'Public share URL' });
     await expect(link).toBeVisible();
     const url = await link.inputValue();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+    const createButton = page.getByRole('button', { name: 'Create & copy link', exact: true });
+    await expect(createButton).toBeEnabled();
+    expect(await contrast('.thread-public-link-create')).toBeGreaterThanOrEqual(4.5);
+    await createButton.hover();
+    expect(await contrast('.thread-public-link-create')).toBeGreaterThanOrEqual(4.5);
+    await createButton.focus();
+    expect(await contrast('.thread-public-link-create')).toBeGreaterThanOrEqual(4.5);
+    await page.screenshot({ path: `output/playwright/share-link-contrast-${testInfo.project.name}.png` });
     const anonymous = await browser.newContext();
     try {
       const publicPage = await anonymous.newPage();
       await publicPage.goto(url);
       await expect(publicPage.getByText('Review this attachment', { exact: true })).toBeVisible();
+      await expect(publicPage.getByText('[PHOTO …]', { exact: true })).toBeVisible();
+      await expect(publicPage.getByText('[PHOTO ./.temp/threads/…/image.png]', { exact: true })).toBeVisible();
       await expect(publicPage.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
       await expect.poll(() => publicPage.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
     } finally { await anonymous.close(); }

@@ -96,7 +96,7 @@ export function ThreadPublicLinks({
         type="button"
         disabled={busy}
         onClick={() => void create()}
-        className="thread-public-link-create thread-export-dialog-secondary-button flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
+        className="thread-public-link-create matter-dialog-primary flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
       >
         <Link2 size={17} />
         {busy ? 'Creating link…' : 'Create & copy link'}

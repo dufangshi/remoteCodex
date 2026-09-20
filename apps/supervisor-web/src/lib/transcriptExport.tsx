@@ -74,7 +74,9 @@ export async function loadExportSnapshot(
     });
   const paths = new Set(
     snapshot.turns.flatMap((turn) =>
-      turn.messages.flatMap((message) =>
+      // Only user messages render PHOTO markers as attachments. Assistant
+      // replies can discuss the syntax (e.g. [PHOTO …]); those remain text.
+      turn.messages.filter(message => message.role === 'user').flatMap((message) =>
         Array.from(
           message.text.matchAll(/\[PHOTO\s+([^\]]+)\]/g),
           (match) => match[1]!.trim(),
