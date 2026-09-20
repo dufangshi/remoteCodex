@@ -15,6 +15,9 @@ pub(super) struct UpstreamModels {
     cache: Mutex<HashMap<String, Cached>>,
 }
 impl UpstreamModels {
+    pub fn prepare_grok(&self, profile: &Profile, models: &[ModelOptionDto]) -> Result<()> {
+        upstreams::prepare_grok_models(&self.directory, profile, models)
+    }
     pub fn new(directory: PathBuf) -> Self {
         Self {
             directory,

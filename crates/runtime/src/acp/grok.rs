@@ -60,8 +60,15 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
                 .as_str()
                 .is_some_and(|id| id.starts_with("remote-codex/"))
         });
-        if managed && !model_id.starts_with("remote-codex/") {
-            continue;
+        if managed {
+            if model_id == "remote-codex"
+                || model_id.starts_with("remote-codex/")
+                || !available
+                    .iter()
+                    .any(|m| m["modelId"] == format!("remote-codex/{model_id}"))
+            {
+                continue;
+            }
         }
         let public_id = model_id.strip_prefix("remote-codex/").unwrap_or(model_id);
         let meta = model.get("_meta").cloned().unwrap_or(json!({}));
@@ -137,15 +144,7 @@ pub fn apply_model(model: &str, state: &Value) -> SessionSettingOp {
     } else {
         model
     };
-    let managed = format!("remote-codex/{model}");
-    let model = if state["availableModels"]
-        .as_array()
-        .is_some_and(|rows| rows.iter().any(|row| row["modelId"] == managed))
-    {
-        &managed
-    } else {
-        model
-    };
+    let model = model.strip_prefix("remote-codex/").unwrap_or(model);
     SessionSettingOp::SetModel {
         model_id: model.to_string(),
     }
@@ -155,10 +154,12 @@ pub fn apply_model(model: &str, state: &Value) -> SessionSettingOp {
 mod tests {
     use super::*;
     #[test]
-    fn managed_catalog_exposes_real_names_and_routes_selection_to_native_aliases() {
+    fn managed_catalog_uses_native_ids_and_preserves_advertised_effort() {
         let state = json!({"currentModelId":"remote-codex/model-b","availableModels":[
             {"modelId":"builtin","name":"Built in"},
             {"modelId":"remote-codex","name":"model-a"},
+            {"modelId":"model-a","name":"model-a"},
+            {"modelId":"model-b","name":"model-b","_meta":{"reasoningEfforts":[{"value":"high","default":true}]}},
             {"modelId":"remote-codex/model-a","name":"model-a"},
             {"modelId":"remote-codex/model-b","name":"model-b"}
         ]});
@@ -173,10 +174,14 @@ mod tests {
         );
         assert_eq!(projected.model.as_deref(), Some("model-b"));
         assert!(
-            matches!(apply_model("model-b", &state), SessionSettingOp::SetModel{model_id} if model_id == "remote-codex/model-b")
+            matches!(apply_model("model-b", &state), SessionSettingOp::SetModel{model_id} if model_id == "model-b")
         );
         assert!(
-            matches!(apply_model("remote-codex", &state), SessionSettingOp::SetModel{model_id} if model_id == "remote-codex/model-a")
+            matches!(apply_model("remote-codex", &state), SessionSettingOp::SetModel{model_id} if model_id == "model-a")
+        );
+        assert_eq!(
+            projected.models[1].supported_reasoning_efforts[0].reasoning_effort,
+            "high"
         );
     }
 }
