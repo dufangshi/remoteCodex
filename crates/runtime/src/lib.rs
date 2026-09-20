@@ -10,6 +10,7 @@ pub mod import_id;
 pub mod interaction;
 pub mod local_sessions;
 pub mod management;
+pub mod publications;
 pub mod service;
 
 pub use actor::{EventBus, SharedRuntime};

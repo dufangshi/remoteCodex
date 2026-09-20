@@ -17,28 +17,39 @@ export function PublicThreadPage() {
     robots.content = 'noindex, nofollow, noarchive';
     document.head.appendChild(robots);
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setSnapshot(null);
     setError('');
-    fetch(`/relay/public-links/${encodeURIComponent(id ?? '')}`, {
-      signal: controller.signal,
-      credentials: 'omit',
-      cache: 'no-store',
-    })
-      .then(async (response) => {
+    async function refresh() {
+      try {
+        const response = await fetch(`/relay/public-links/${encodeURIComponent(id ?? '')}`, {
+          signal: controller.signal,
+          credentials: 'omit',
+          cache: 'no-store',
+        });
         if (!response.ok)
           throw new Error(
             response.status === 404
               ? 'This share link is unavailable or has been revoked.'
               : 'Unable to load this shared thread.',
           );
-        return response.json();
-      })
-      .then(setSnapshot)
-      .catch((error) => {
-        if (!controller.signal.aborted) setError(error.message);
-      });
+        const value: PublicTranscriptSnapshot = await response.json();
+        if (controller.signal.aborted) return;
+        setSnapshot(value);
+        setError('');
+        if (value.live) timer = setTimeout(refresh, 5000);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSnapshot(null);
+          setError(error instanceof Error ? error.message : 'Unable to load this shared thread.');
+          timer = setTimeout(refresh, 5000);
+        }
+      }
+    }
+    void refresh();
     return () => {
       controller.abort();
+      clearTimeout(timer);
       robots.remove();
     };
   }, [id]);

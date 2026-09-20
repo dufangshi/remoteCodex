@@ -417,6 +417,11 @@ impl RelayStore {
               created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS relay_public_links_owner_idx ON relay_public_links(owner_user_id,device_id,thread_id);
+            CREATE TABLE IF NOT EXISTS relay_public_link_sources (
+              link_id TEXT PRIMARY KEY REFERENCES relay_public_links(id) ON DELETE CASCADE,
+              publication_token TEXT NOT NULL,
+              refreshed_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS relay_shares (
               id TEXT PRIMARY KEY,
               owner_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,

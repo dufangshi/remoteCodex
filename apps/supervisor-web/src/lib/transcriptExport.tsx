@@ -7,6 +7,7 @@ import {
 } from '@remote-codex/thread-ui';
 import type { ExportThreadTranscriptInput, ThreadTurnDto } from '@remote-codex/shared';
 import { downloadThreadImage, fetchThreadDetail, fetchThreadTurnDetail } from './api';
+import { standaloneImageViewer } from './standaloneImageViewer';
 
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -31,8 +32,8 @@ export async function loadExportSnapshot(
 ): Promise<PublicTranscriptSnapshot> {
   const selected = input.mode === 'selected' ? new Set(input.turnIds) : null;
   const limit = Math.min(100, Math.max(1, input.limit ?? 10));
-  if (selected && (!selected.size || selected.size > 100))
-    throw new Error('Select between 1 and 100 turns.');
+  if (selected && (!selected.size || selected.size > 10_000))
+    throw new Error('Select between 1 and 10,000 turns.');
   let turns: ThreadTurnDto[] = [];
   let cursor: string | undefined;
   let title = 'Thread';
@@ -175,8 +176,17 @@ export async function renderStandaloneTranscript(
         if (response.ok) img.src = await dataUrl(await response.blob());
       } catch { /* External images can still load when viewing the HTML online. */ }
     }));
+    clone.querySelectorAll('img').forEach(img => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'transcript-image-button';
+      button.setAttribute('aria-label', `Enlarge image${img.alt ? `: ${img.alt}` : ''}`);
+      const anchor = img.closest('a');
+      (anchor ?? img).replaceWith(button);
+      button.append(img);
+    });
     const theme = snapshot.theme ?? 'dark';
-    return `<!doctype html><html lang="en" class="${theme}" data-theme-effective="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${theme}"><title>${escape(snapshot.title)}</title><style>${css.replaceAll('</style', '<\\/style')}</style><style>html,body{margin:0;background:${theme === 'dark' ? '#11110d' : '#f5f6f5'}}a{overflow-wrap:anywhere}</style></head><body>${clone.outerHTML}</body></html>`;
+    return `<!doctype html><html lang="en" class="${theme}" data-theme-effective="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${theme}"><title>${escape(snapshot.title)}</title><style>${css.replaceAll('</style', '<\\/style')}</style><style>html,body{margin:0;background:${theme === 'dark' ? '#11110d' : '#f5f6f5'}}a{overflow-wrap:anywhere}</style></head><body>${clone.outerHTML}${standaloneImageViewer}</body></html>`;
   } finally {
     root.unmount();
     host.remove();

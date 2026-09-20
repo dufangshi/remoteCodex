@@ -79,6 +79,53 @@ fn send(from: &str, text: &str, notify: bool, key: &str) -> SendInput {
         client_request_id: Some(key.into()),
     }
 }
+
+#[tokio::test]
+async fn publication_selects_history_and_includes_future_until_revoked() {
+    let (_dir, s) = setup();
+    let thread = thread(&s, Provider::Codex).await;
+    let seed = |ordinal: i64| {
+        let turn = uuid::Uuid::new_v4().to_string();
+        s.db.with(|conn| {
+            conn.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES (?1,?2,'completed',?3)", params![turn,thread,ordinal])?;
+            conn.execute("UPDATE thread_turns SET token_usage_json=?1 WHERE id=?2", params![json!({"total":{"totalTokens":10,"private":"internal"},"last":{"inputTokens":5},"private":"internal"}).to_string(),turn])?;
+            for (n, kind, text, phase) in [(0,"userMessage",format!("prompt {ordinal}"),""),(1,"reasoning","private reasoning".into(),""),(2,"agentMessage","private commentary".into(),"commentary"),(3,"agentMessage",format!("answer {ordinal}"),"final_answer")] {
+                let item = format!("{turn}-{n}");
+                conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES (?1,?2,?3,?1,?4,?5,?5)",params![item,thread,turn,json!({"id":item,"kind":kind,"text":text,"phase":phase}).to_string(),format!("2026-09-20T00:00:0{n}Z")])?;
+            }
+            Ok(())
+        }).unwrap();
+        turn
+    };
+    let first = seed(1);
+    let _hidden = seed(2);
+    let publication = s
+        .create_publication(
+            &thread,
+            remote_codex_runtime::publications::CreatePublication {
+                turn_ids: vec![first],
+                theme: "light".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(publication["snapshot"]["turnCount"], 1);
+    assert!(!publication.to_string().contains("prompt 2"));
+    seed(3);
+    let token = publication["token"].as_str().unwrap();
+    let updated = s.read_publication(token).await.unwrap();
+    assert_eq!(updated["turnCount"], 2);
+    assert!(updated.to_string().contains("answer 3"));
+    assert!(!updated.to_string().contains("prompt 2"));
+    assert!(!updated.to_string().contains("private"));
+    assert!(!updated.to_string().contains(&thread));
+    assert!(s
+        .read_publication(&uuid::Uuid::new_v4().simple().to_string())
+        .await
+        .is_err());
+    s.revoke_publication(token).unwrap();
+    assert!(s.read_publication(token).await.is_err());
+}
 async fn until(mut check: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(8), async {
         while !check() {
