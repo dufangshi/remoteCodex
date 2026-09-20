@@ -2,6 +2,7 @@ node_modules
 dist
 coverage
 remote-codex-thread-ui
+/remote-codex-app/
 .DS_Store
 .local
 target/

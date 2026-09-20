@@ -11,6 +11,18 @@ vi.mock('../lib/api', () => ({
 }));
 
 describe('account thread navigation', () => {
+  it('uses every current-workspace thread for tabs, independently of account recents and active tab', async () => {
+    vi.mocked(request).mockResolvedValue({ threads: [{ deviceId: 'wsl', threadId: 'elsewhere', title: 'Recent elsewhere', favorite: false }], notifications: [] });
+    const detail = { thread: { id: 'second', workspaceId: 'app', title: 'Second', status: 'running', createdAt: '2026-09-02' }, workspace: { label: 'App' } } as ThreadDetailDto;
+    const threads = [detail.thread, { ...detail.thread, id: 'first', createdAt: '2026-09-01' }, { ...detail.thread, id: 'other', workspaceId: 'another' }];
+    const { result, rerender, unmount } = renderHook(({ current }) => useWorkbenchNavigation(current, threads, 'wsl'), { initialProps: { current: detail } });
+    await waitFor(() => expect(result.current.navigationReady).toBe(true));
+    expect(result.current.workspaceThreads.map(t => t.key)).toEqual(['wsl:first', 'wsl:second']);
+    expect(result.current.threads.map(t => t.key)).toContain('wsl:elsewhere');
+    rerender({ current: { ...detail, thread: threads[1]! } });
+    expect(result.current.workspaceThreads.map(t => t.key)).toEqual(['wsl:first', 'wsl:second']);
+    unmount();
+  });
   it('loads notification titles and reply previews using the notification device, even without a saved shortcut', async () => {
     const completed = '2026-09-19T14:00:00Z';
     const snapshot = { threads: [], notifications: [{ id: 'event', title: '1 completed', href: '/devices/mac/threads/review', occurredAt: completed }] };

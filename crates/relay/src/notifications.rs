@@ -54,6 +54,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/relay/account/notifications/subscription",
             post(subscribe).delete(unsubscribe),
         )
+        .route(
+            "/relay/account/notifications/native",
+            post(subscribe_native).delete(unsubscribe),
+        )
 }
 fn failure(status: StatusCode, message: &str) -> Response {
     (status, Json(ApiError::new("notifications", message))).into_response()
@@ -81,7 +85,9 @@ async fn settings(
                 |r| r.get::<_, String>(0),
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(json!({"publicKey":key,"subscriptionIds":ids,"scope":"ownedDevices"}))
+        Ok(
+            json!({"publicKey":key,"subscriptionIds":ids,"scope":"ownedDevices","nativePushAvailable":apns::configured()}),
+        )
     })();
     match result {
         Ok(value) => Json(value).into_response(),
@@ -172,6 +178,63 @@ async fn subscribe(
 #[derive(Deserialize)]
 struct Remove {
     id: String,
+}
+
+async fn subscribe_native(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    Json(sub): Json<apns::Subscription>,
+) -> Response {
+    let conn = state.store.conn.lock().await;
+    let Some(user) = authenticated_user(&conn, &state.store.session_secret, &headers, &query)
+    else {
+        return unauthorized();
+    };
+    if !apns::configured() {
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "APNs is not configured on this relay.",
+        );
+    }
+    if apns::validate(&sub).is_err() {
+        return failure(StatusCode::BAD_REQUEST, "Invalid native push subscription.");
+    }
+    let id = security::token_hash(&format!(
+        "apns:{}:{}",
+        sub.sandbox,
+        sub.device_token.to_ascii_lowercase()
+    ));
+    let session = security::token_hash(&extract_session_token(&headers, &query).unwrap());
+    let result = (|| -> Result<()> {
+        let tx = conn.unchecked_transaction()?;
+        let count: i64 = tx.query_row(
+            "SELECT count(*) FROM relay_push_subscriptions WHERE user_id=?1 AND id!=?2",
+            params![user.id, id],
+            |r| r.get(0),
+        )?;
+        anyhow::ensure!(count < 20, "Too many subscriptions");
+        tx.execute("DELETE FROM relay_push_subscriptions WHERE id=?1", [&id])?;
+        tx.execute(
+            "INSERT INTO relay_push_subscriptions VALUES (?1,?2,?3,?4,?5)",
+            params![
+                id,
+                user.id,
+                session,
+                serde_json::to_string(&sub)?,
+                chrono::Utc::now().timestamp_millis()
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Json(json!({"id":id})).into_response(),
+        Err(_) => failure(
+            StatusCode::BAD_REQUEST,
+            "Unable to save native push subscription.",
+        ),
+    }
 }
 async fn unsubscribe(
     State(state): State<Arc<AppState>>,
@@ -300,6 +363,9 @@ async fn deliver_batch(state: &AppState, http: &reqwest::Client) -> Result<()> {
         // Recheck before sending: unsubscribe/logout may happen during a batch.
         if !state.store.conn.lock().await.query_row("SELECT EXISTS(SELECT 1 FROM relay_push_subscriptions p JOIN relay_auth_sessions s ON s.token_hash=p.session_hash JOIN relay_push_events e ON e.id=?3 JOIN relay_devices d ON d.id=e.device_id WHERE p.id=?1 AND s.expires_at>?2 AND p.subscription=?4 AND p.user_id=e.user_id AND d.owner_user_id=p.user_id)",params![id,chrono::Utc::now().timestamp_millis(),event,raw],|r|r.get::<_,bool>(0))? { continue; }
         let result = async {
+            if let Ok(sub) = serde_json::from_str::<apns::Subscription>(&raw) {
+                return apns::deliver(http, &sub, &payload).await;
+            }
             let sub: SubscriptionInfo = serde_json::from_str(&raw)?;
             validate_subscription(&sub)?;
             let message = encrypted_request(&pem, &sub, payload.as_bytes())?;

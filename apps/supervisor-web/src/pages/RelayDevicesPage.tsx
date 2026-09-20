@@ -2081,15 +2081,14 @@ function DeviceRow({
         <div className="flex min-w-0 items-center gap-2">
           <span
             aria-hidden="true"
-            className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-              device.connected
-                ? 'bg-[var(--status-success-fg)]'
-                : 'bg-[var(--theme-fg-muted)]'
-            }`}
+            className={`device-presence-dot ${device.connected ? 'is-online' : 'is-offline'}`}
           />
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--theme-fg)]">
             {device.name}
           </p>
+          <span className={`device-presence-label ${device.connected ? 'is-online' : 'is-offline'}`}>
+            {device.connected ? 'Online' : 'Offline'}
+          </span>
           {hostedStatus ? (
             <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
               Hosted: {statusText}
