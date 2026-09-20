@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Download, RefreshCw, ChevronDown, RotateCw } from 'lucide-react';
+import { Download, RefreshCw, RotateCw } from 'lucide-react';
 import { ApiError, relayModeActive, request } from '../lib/api';
 import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 import { FormDialog } from './FormDialog';
@@ -49,29 +49,50 @@ type Supervisor = {
   job?: Job | undefined;
 };
 const active = (job?: Job) =>
-  ['running', 'scheduled', 'preparing', 'installing', 'restarting', 'verifying'].includes(
-    job?.state ?? job?.phase ?? '',
-  );
+  [
+    'running',
+    'scheduled',
+    'preparing',
+    'installing',
+    'restarting',
+    'verifying',
+  ].includes(job?.state ?? job?.phase ?? '');
 function supervisorJobText(job: Job) {
   const operation = job.action === 'restart' ? 'Restart' : 'Update';
-  if (job.rollingBack && active(job)) return `${operation} failed; restoring the previous service…`;
+  if (job.rollingBack && active(job))
+    return `${operation} failed; restoring the previous service…`;
   switch (job.phase) {
-    case 'scheduled': return `${operation} requested…`;
-    case 'preparing': return `Preparing ${operation.toLowerCase()}: saving active tasks…`;
-    case 'installing': return 'Installing Supervisor update…';
-    case 'restarting': return 'Restarting Supervisor…';
-    case 'verifying': return 'Supervisor started; verifying its connection…';
-    case 'completed': return `${operation} completed`;
-    case 'recovered': return 'Supervisor recovered';
-    case 'failed': return `Last ${operation.toLowerCase()} failed: ${job.error ?? 'Check the device logs.'}`;
-    case 'rolled-back': return `Last ${operation.toLowerCase()} failed; previous service restored. ${job.error ?? ''}`;
-    case 'rollback-failed': return `Last ${operation.toLowerCase()} and recovery failed: ${job.error ?? 'Check the device logs.'}`;
-    default: return job.error ?? job.phase;
+    case 'scheduled':
+      return `${operation} requested…`;
+    case 'preparing':
+      return `Preparing ${operation.toLowerCase()}: saving active tasks…`;
+    case 'installing':
+      return 'Installing Supervisor update…';
+    case 'restarting':
+      return 'Restarting Supervisor…';
+    case 'verifying':
+      return 'Supervisor started; verifying its connection…';
+    case 'completed':
+      return `${operation} completed`;
+    case 'recovered':
+      return 'Supervisor recovered';
+    case 'failed':
+      return `Last ${operation.toLowerCase()} failed: ${job.error ?? 'Check the device logs.'}`;
+    case 'rolled-back':
+      return `Last ${operation.toLowerCase()} failed; previous service restored. ${job.error ?? ''}`;
+    case 'rollback-failed':
+      return `Last ${operation.toLowerCase()} and recovery failed: ${job.error ?? 'Check the device logs.'}`;
+    default:
+      return job.error ?? job.phase;
   }
 }
 const button =
   'host-secondary-button inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs disabled:opacity-50';
-export function RuntimeManagement() {
+export function RuntimeManagement({
+  view = 'all',
+}: {
+  view?: 'all' | 'device' | 'harnesses';
+}) {
   const { pathname } = useLocation();
   const deviceId = relayDeviceIdFromPath(pathname);
   if (relayModeActive() && !deviceId) {
@@ -86,16 +107,32 @@ export function RuntimeManagement() {
   }
   // Route identity owns both the state and requests. Never fall back to a
   // remembered device, or retain another device's open update confirmation.
-  return <DeviceRuntimeManagement key={deviceId ?? 'local'} apiRoot={
-    deviceId ? `/relay/devices/${encodeURIComponent(deviceId)}/api` : '/api'
-  } />;
+  return (
+    <DeviceRuntimeManagement
+      view={view}
+      key={deviceId ?? 'local'}
+      apiRoot={
+        deviceId ? `/relay/devices/${encodeURIComponent(deviceId)}/api` : '/api'
+      }
+    />
+  );
 }
 
-function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
+function DeviceRuntimeManagement({
+  apiRoot,
+  view,
+}: {
+  apiRoot: string;
+  view: 'all' | 'device' | 'harnesses';
+}) {
+  const [selectedHarness, setSelectedHarness] = useState('codex');
   const api = <T,>(path: string, action?: unknown) =>
-    request<T>(`${apiRoot}/management/${path}`, action
-      ? { method: 'POST', body: JSON.stringify(action) }
-      : { cache: 'no-store' });
+    request<T>(
+      `${apiRoot}/management/${path}`,
+      action
+        ? { method: 'POST', body: JSON.stringify(action) }
+        : { cache: 'no-store' },
+    );
   const [supervisor, setSupervisor] = useState<Supervisor | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
@@ -104,7 +141,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
   const [reconnectSince, setReconnectSince] = useState<number | null>(null);
   const [ownerDenied, setOwnerDenied] = useState(false);
   const [clock, setClock] = useState(Date.now());
-  useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [confirm, setConfirm] = useState<{
     id?: string;
     action?: 'restart';
@@ -120,7 +160,12 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         api<Supervisor>('supervisor'),
         api<Harness[]>('harnesses'),
       ]);
-      setSupervisor((previous) => ({ ...previous, ...s, job: s.job, observedAt: performance.now() }));
+      setSupervisor((previous) => ({
+        ...previous,
+        ...s,
+        job: s.job,
+        observedAt: performance.now(),
+      }));
       setHarnesses(h);
       setJobs(
         Object.fromEntries(
@@ -169,12 +214,17 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         if (stopped) return;
         setReconnectSince(null);
         setJobs(j);
-        setSupervisor((previous) => ({ ...previous, ...s, job: s.job, observedAt: performance.now() }));
+        setSupervisor((previous) => ({
+          ...previous,
+          ...s,
+          job: s.job,
+          observedAt: performance.now(),
+        }));
         if (!Object.values(j).some(active) && !active(s.job)) await load();
       } catch {
         /* Temporary disconnect during supervisor replacement; keep polling. */
         const lostAt = Date.now();
-        if (!stopped) setReconnectSince(previous => previous ?? lostAt);
+        if (!stopped) setReconnectSince((previous) => previous ?? lostAt);
       } finally {
         loading = false;
       }
@@ -202,8 +252,16 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
     setError('');
     try {
       const next = await api<Supervisor>(`supervisor/${action}`, {});
-      setSupervisor((previous) => ({ ...previous, ...next, observedAt: performance.now() }));
-      if ((action === 'update' && next.canUpdate) || (action === 'restart' && next.canRestart)) setConfirm(null);
+      setSupervisor((previous) => ({
+        ...previous,
+        ...next,
+        observedAt: performance.now(),
+      }));
+      if (
+        (action === 'update' && next.canUpdate) ||
+        (action === 'restart' && next.canRestart)
+      )
+        setConfirm(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to update Supervisor');
     } finally {
@@ -214,14 +272,22 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
     setBusy(true);
     setError('');
     try {
-      await request(`${apiRoot}/agent-runtimes/acp/install?agentId=${encodeURIComponent(id)}`, {
-        method: 'POST', body: JSON.stringify({}),
-      });
+      await request(
+        `${apiRoot}/agent-runtimes/acp/install?agentId=${encodeURIComponent(id)}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({}),
+        },
+      );
       setConfirm(null);
       await load();
     } catch (error) {
-      setError(`${error instanceof Error ? error.message : 'Adapter installation failed'}. Older Supervisors install through the system npm prefix; update the Supervisor to use managed adapter installation.`);
-    } finally { setBusy(false); }
+      setError(
+        `${error instanceof Error ? error.message : 'Adapter installation failed'}. Older Supervisors install through the system npm prefix; update the Supervisor to use managed adapter installation.`,
+      );
+    } finally {
+      setBusy(false);
+    }
   }
   function installation(row: Harness, data: Installation, component: string) {
     return (
@@ -229,7 +295,9 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>
             {component === 'adapter' ? 'ACP adapter · ' : ''}
-            {data.installed === false ? 'Not installed' : `${data.version ?? 'Version unavailable'} · ${data.manager ?? 'managed'}`}
+            {data.installed === false
+              ? 'Not installed'
+              : `${data.version ?? 'Version unavailable'} · ${data.manager ?? 'managed'}`}
           </span>
           {(data.canUpdate || data.canInstall) && (
             <button
@@ -252,12 +320,17 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             </button>
           )}
         </div>
-        <p
-          className="mt-1 break-all font-mono text-[11px]"
-          title={data.resolvedPath}
-        >
-          {data.path}
-        </p>
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px]">
+            Installation details
+          </summary>
+          <p
+            className="mt-1 break-all font-mono text-[11px]"
+            title={data.resolvedPath}
+          >
+            {data.path}
+          </p>
+        </details>
         {data.reason && <p className="mt-1 leading-5">{data.reason}</p>}
       </div>
     );
@@ -273,7 +346,9 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           <h4 className="text-sm font-medium">{h.name}</h4>
           <button
             className={button}
-            disabled={busy || !h.base || h.base.installed===false || active(job)}
+            disabled={
+              busy || !h.base || h.base.installed === false || active(job)
+            }
             title="Reload this harness's configuration. Other harnesses stay connected."
             aria-label={`Restart ${h.name}`}
             onClick={() => void act(h.id, 'restart')}
@@ -290,11 +365,30 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           </p>
         )}
         {(h.adapter || h.transport === 'adapter') && (
-          <details className="mt-2" open={!h.adapter || h.adapter.installed === false}>
+          <details className="settings-detail">
             <summary className="cursor-pointer text-xs text-[var(--theme-fg-muted)]">
               ACP adapter
+              {!h.adapter || h.adapter.installed === false
+                ? ' · Installation required'
+                : ' · Installed'}
             </summary>
-            {installation(h, h.adapter ?? {installed:false,canInstall:true,legacyInstall:true,path:'',resolvedPath:'',manager:'',canUpdate:false,reason:'Adapter not detected. This older Supervisor uses its existing npm installer; update the Supervisor for user-owned dependency management.'}, 'adapter')}
+            <div>
+              {installation(
+                h,
+                h.adapter ?? {
+                  installed: false,
+                  canInstall: true,
+                  legacyInstall: true,
+                  path: '',
+                  resolvedPath: '',
+                  manager: '',
+                  canUpdate: false,
+                  reason:
+                    'Adapter not detected. This older Supervisor uses its existing npm installer; update the Supervisor for user-owned dependency management.',
+                },
+                'adapter',
+              )}
+            </div>
           </details>
         )}
         {job && (
@@ -305,98 +399,194 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             {job.error ??
               (active(job)
                 ? `${job.action === 'install' ? 'Installing' : job.action === 'update' ? 'Updating' : 'Restarting'}…`
-                : job.connectionVerified ? 'ACP connection verified' : `${job.action === 'update' && job.component === 'base' ? 'Base component update completed' : 'Completed'} · configuration reloads on the next turn`)}
+                : job.connectionVerified
+                  ? 'ACP connection verified'
+                  : `${job.action === 'update' && job.component === 'base' ? 'Base component update completed' : 'Completed'} · configuration reloads on the next turn`)}
           </p>
         )}
       </div>
     );
   }
-  if (ownerDenied) return <section className="py-5" aria-label="Runtime management">
-    <h3 className="text-sm font-semibold">Supervisor</h3>
-    <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">Only the device owner can manage or restart this Supervisor.</p>
-  </section>;
-  const seconds = supervisor?.uptimeSeconds !== undefined ? supervisor.uptimeSeconds + Math.max(0, Math.floor((performance.now() - (supervisor.observedAt ?? performance.now())) / 1000)) : supervisor?.startedAt ? Math.max(0, Math.floor((clock - Date.parse(supervisor.startedAt)) / 1000)) : undefined;
-  const uptime = seconds === undefined ? null : `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
+  if (ownerDenied)
+    return (
+      <section className="py-5" aria-label="Runtime management">
+        <h3 className="text-sm font-semibold">Supervisor</h3>
+        <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
+          Only the device owner can manage or restart this Supervisor.
+        </p>
+      </section>
+    );
+  const seconds =
+    supervisor?.uptimeSeconds !== undefined
+      ? supervisor.uptimeSeconds +
+        Math.max(
+          0,
+          Math.floor(
+            (performance.now() - (supervisor.observedAt ?? performance.now())) /
+              1000,
+          ),
+        )
+      : supervisor?.startedAt
+        ? Math.max(
+            0,
+            Math.floor((clock - Date.parse(supervisor.startedAt)) / 1000),
+          )
+        : undefined;
+  const uptime =
+    seconds === undefined
+      ? null
+      : `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
   return (
-    <section className="py-5" aria-label="Runtime management">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Supervisor</h3>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {supervisor?.runningVersion
-              ? `${active(supervisor.job) ? 'Version' : 'Running'} ${supervisor.runningVersion}`
-              : 'Loading version…'}
-            {supervisor?.latestVersion &&
-              ` · Latest ${supervisor.latestVersion}`}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {supervisor?.canRestart && <button className={button}
-            disabled={busy || active(supervisor.job)}
-            onClick={() => setConfirm({ name:'Supervisor', action:'restart' })}>
-            <RotateCw size={13} /> Restart Supervisor
-          </button>}
-          <button
-            className={button}
-            disabled={busy || !supervisor?.canUpdate || active(supervisor?.job)}
-            onClick={() => void supervisorAction('check')}
-          >
-            <RefreshCw size={13} />
-            Check updates
-          </button>
-          {supervisor?.latestVersion &&
-            (supervisor.latestVersion !== supervisor.runningVersion ||
-              (supervisor.installedVersion && supervisor.latestVersion !== supervisor.installedVersion)) &&
-            supervisor.canUpdate && (
+    <section className="py-1" aria-label="Runtime management">
+      {view !== 'harnesses' && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Supervisor</h3>
+              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                {supervisor?.runningVersion
+                  ? `${active(supervisor.job) ? 'Version' : 'Running'} ${supervisor.runningVersion}`
+                  : 'Loading version…'}
+                {supervisor?.latestVersion &&
+                  ` · Latest ${supervisor.latestVersion}`}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {supervisor?.canRestart && (
+                <button
+                  className={button}
+                  disabled={busy || active(supervisor.job)}
+                  onClick={() =>
+                    setConfirm({ name: 'Supervisor', action: 'restart' })
+                  }
+                >
+                  <RotateCw size={13} /> Restart Supervisor
+                </button>
+              )}
               <button
                 className={button}
-                disabled={busy || active(supervisor.job)}
-                onClick={() => setConfirm({ name: 'Supervisor' })}
+                disabled={
+                  busy || !supervisor?.canUpdate || active(supervisor?.job)
+                }
+                onClick={() => void supervisorAction('check')}
               >
-                <Download size={13} />
-                Update
+                <RefreshCw size={13} />
+                Check updates
               </button>
+              {supervisor?.latestVersion &&
+                (supervisor.latestVersion !== supervisor.runningVersion ||
+                  (supervisor.installedVersion &&
+                    supervisor.latestVersion !==
+                      supervisor.installedVersion)) &&
+                supervisor.canUpdate && (
+                  <button
+                    className={button}
+                    disabled={busy || active(supervisor.job)}
+                    onClick={() => setConfirm({ name: 'Supervisor' })}
+                  >
+                    <Download size={13} />
+                    Update
+                  </button>
+                )}
+            </div>
+          </div>
+          {uptime && (
+            <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
+              Uptime {uptime}
+            </p>
+          )}
+          {supervisor?.installedVersion &&
+            supervisor.installedVersion !== supervisor.runningVersion && (
+              <p className="mt-2 text-xs">
+                Installed {supervisor.installedVersion}; running{' '}
+                {supervisor.runningVersion}. Check updates to bring the
+                installation and running service to the same version.
+              </p>
             )}
-        </div>
-      </div>
-      {uptime && <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">Uptime {uptime}</p>}
-      {supervisor?.installedVersion &&
-        supervisor.installedVersion !== supervisor.runningVersion && (
-          <p className="mt-2 text-xs">
-            Installed {supervisor.installedVersion}; running {supervisor.runningVersion}.
-            {' '}Check updates to bring the installation and running service to the same version.
-          </p>
-        )}
-      {supervisor?.reason && (
-        <p role="status" className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-          {supervisor.reason}
-        </p>
+          {supervisor?.reason && (
+            <p
+              role="status"
+              className="mt-2 text-xs text-[var(--theme-fg-muted)]"
+            >
+              {supervisor.reason}
+            </p>
+          )}
+          {supervisor?.job && (
+            <p role="status" className="mt-2 text-xs">
+              {reconnectSince
+                ? 'Waiting for the device to reconnect…'
+                : supervisorJobText(supervisor.job)}
+              {reconnectSince && clock - reconnectSince > 30_000 && (
+                <span className="mt-1 block text-[var(--status-warning-fg)]">
+                  The device has not returned yet. Installation may have
+                  finished, but restart has not been verified. Check the
+                  Supervisor update and launch logs on the device. This page
+                  will keep checking automatically.
+                </span>
+              )}
+              {active(supervisor.job) && (
+                <span className="mt-1 block text-[var(--theme-fg-muted)]">
+                  Controls are temporarily disabled until this operation
+                  finishes.
+                </span>
+              )}
+            </p>
+          )}
+        </>
       )}
-      {supervisor?.job && (
-        <p role="status" className="mt-2 text-xs">
-          {reconnectSince ? 'Waiting for the device to reconnect…' : supervisorJobText(supervisor.job)}
-          {reconnectSince && clock - reconnectSince > 30_000 && <span className="mt-1 block text-[var(--status-warning-fg)]">
-            The device has not returned yet. Installation may have finished, but restart has not been verified. Check the Supervisor update and launch logs on the device. This page will keep checking automatically.
-          </span>}
-          {active(supervisor.job) && <span className="mt-1 block text-[var(--theme-fg-muted)]">
-            Controls are temporarily disabled until this operation finishes.
-          </span>}
-        </p>
+      {view !== 'device' && (
+        <>
+          <div
+            className="flex flex-wrap gap-2 pb-4"
+            role="group"
+            aria-label="Choose harness"
+          >
+            {[
+              ...new Map(
+                [
+                  ...[
+                    { id: 'codex', name: 'Codex' },
+                    { id: 'claude', name: 'Claude Code' },
+                    { id: 'gemini', name: 'Gemini CLI' },
+                    { id: 'grok', name: 'Grok Build' },
+                  ],
+                  ...harnesses,
+                ].map((h) => [h.id, h]),
+              ).values(),
+            ].map((h) => (
+              <button
+                key={h.id}
+                type="button"
+                aria-pressed={selectedHarness === h.id}
+                className={`min-h-10 rounded-xl border px-3 text-xs transition ${selectedHarness === h.id ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]' : 'border-[var(--theme-border)] hover:bg-[var(--theme-hover)]'}`}
+                onClick={() => setSelectedHarness(h.id)}
+              >
+                {h.name}
+              </button>
+            ))}
+          </div>
+          {harnesses.filter((h) => h.id === selectedHarness).map(row)}
+          {['codex', 'claude', 'gemini', 'grok'].includes(selectedHarness) ? (
+            <UpstreamManagement
+              key={apiRoot + selectedHarness}
+              apiRoot={apiRoot}
+              harness={selectedHarness}
+            />
+          ) : (
+            <p className="mt-4 rounded-xl border border-dashed border-[var(--theme-border)] p-4 text-xs text-[var(--theme-fg-muted)]">
+              Use this harness's native configuration to manage upstreams.
+            </p>
+          )}
+        </>
       )}
-      <h3 className="mb-2 mt-6 text-sm font-semibold">Harnesses</h3>
-      {harnesses
-        .filter((h) => ['codex', 'claude', 'opencode'].includes(h.id))
-        .map(row)}
-      <details className="border-t border-[var(--theme-border)] pt-3">
-        <summary className="flex cursor-pointer items-center justify-between text-sm font-medium">
-          ACP agents
-          <ChevronDown size={16} />
-        </summary>
-        {harnesses
-          .filter((h) => !['codex', 'claude', 'opencode'].includes(h.id))
-          .map(row)}
-      </details>
-      <UpstreamManagement key={apiRoot} apiRoot={apiRoot}/>
+      {view !== 'harnesses' && (
+        <UpstreamManagement
+          key={apiRoot + 'templates'}
+          apiRoot={apiRoot}
+          templatesOnly
+        />
+      )}
+
       {error && (
         <p role="alert" className="mt-3 text-xs text-[var(--status-danger-fg)]">
           {error}
@@ -411,8 +601,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             confirm.action === 'restart'
               ? 'The device will briefly disconnect. Running tasks will be paused and continued in their existing sessions after restart; queued messages will be preserved.'
               : confirm.id
-              ? confirm.installing ? 'Install this component on the selected device. Required ACP adapters are included with a harness installation.' : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
-              : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
+                ? confirm.installing
+                  ? 'Install this component on the selected device. Required ACP adapters are included with a harness installation.'
+                  : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
+                : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
           }
         >
           {confirm.command && (
@@ -428,11 +620,25 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
             disabled={busy}
             onClick={() =>
               void (confirm.id
-                ? confirm.legacyInstall ? installLegacyAdapter(confirm.id) : act(confirm.id, confirm.installing&&confirm.component==='base'?'install':'update', confirm.component)
+                ? confirm.legacyInstall
+                  ? installLegacyAdapter(confirm.id)
+                  : act(
+                      confirm.id,
+                      confirm.installing && confirm.component === 'base'
+                        ? 'install'
+                        : 'update',
+                      confirm.component,
+                    )
                 : supervisorAction(confirm.action ?? 'update'))
             }
           >
-            {busy ? 'Starting…' : confirm.action === 'restart' ? 'Restart' : confirm.installing ? 'Install' : 'Update'}
+            {busy
+              ? 'Starting…'
+              : confirm.action === 'restart'
+                ? 'Restart'
+                : confirm.installing
+                  ? 'Install'
+                  : 'Update'}
           </button>
         </FormDialog>
       )}

@@ -290,7 +290,7 @@ impl HarnessAdapter for GrokAdapter {
         grok::project_session(response)
     }
     fn apply_model(&self, model: &str, _state: &Value) -> Option<SessionSettingOp> {
-        Some(grok::apply_model(model))
+        Some(grok::apply_model(model, _state))
     }
     fn apply_reasoning(&self, effort: &str, state: &Value) -> Option<SessionSettingOp> {
         grok::apply_reasoning(effort, state)

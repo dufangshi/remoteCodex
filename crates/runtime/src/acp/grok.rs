@@ -55,6 +55,15 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
     let mut projected = Vec::new();
     for (index, model) in available.iter().enumerate() {
         let model_id = model.get("modelId").and_then(Value::as_str)?;
+        let managed = available.iter().any(|m| {
+            m["modelId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("remote-codex/"))
+        });
+        if managed && !model_id.starts_with("remote-codex/") {
+            continue;
+        }
+        let public_id = model_id.strip_prefix("remote-codex/").unwrap_or(model_id);
         let meta = model.get("_meta").cloned().unwrap_or(json!({}));
         let efforts = grok_efforts(&meta);
         let declared_default = meta
@@ -80,8 +89,8 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
             normalize_acp_effort(meta.get("reasoningEffort").and_then(Value::as_str))
                 .or(declared_default);
         projected.push(ModelOptionDto {
-            id: model_id.to_string(),
-            model: model_id.to_string(),
+            id: public_id.to_string(),
+            model: public_id.to_string(),
             display_name: model
                 .get("name")
                 .and_then(Value::as_str)
@@ -104,6 +113,8 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
     if projected.is_empty() {
         return None;
     }
+    let current_id =
+        current_id.map(|id| id.strip_prefix("remote-codex/").unwrap_or(&id).to_owned());
     let selected = projected
         .iter()
         .find(|model| current_id.as_deref() == Some(model.model.as_str()))
@@ -116,9 +127,57 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
     })
 }
 
-pub fn apply_model(model: &str) -> SessionSettingOp {
+pub fn apply_model(model: &str, state: &Value) -> SessionSettingOp {
+    let model = if model == "remote-codex" {
+        state["availableModels"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["modelId"] == "remote-codex"))
+            .and_then(|row| row["name"].as_str())
+            .unwrap_or(model)
+    } else {
+        model
+    };
+    let managed = format!("remote-codex/{model}");
+    let model = if state["availableModels"]
+        .as_array()
+        .is_some_and(|rows| rows.iter().any(|row| row["modelId"] == managed))
+    {
+        &managed
+    } else {
+        model
+    };
     SessionSettingOp::SetModel {
         model_id: model.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn managed_catalog_exposes_real_names_and_routes_selection_to_native_aliases() {
+        let state = json!({"currentModelId":"remote-codex/model-b","availableModels":[
+            {"modelId":"builtin","name":"Built in"},
+            {"modelId":"remote-codex","name":"model-a"},
+            {"modelId":"remote-codex/model-a","name":"model-a"},
+            {"modelId":"remote-codex/model-b","name":"model-b"}
+        ]});
+        let projected = project_session(&json!({"models":state})).unwrap();
+        assert_eq!(
+            projected
+                .models
+                .iter()
+                .map(|m| m.model.as_str())
+                .collect::<Vec<_>>(),
+            ["model-a", "model-b"]
+        );
+        assert_eq!(projected.model.as_deref(), Some("model-b"));
+        assert!(
+            matches!(apply_model("model-b", &state), SessionSettingOp::SetModel{model_id} if model_id == "remote-codex/model-b")
+        );
+        assert!(
+            matches!(apply_model("remote-codex", &state), SessionSettingOp::SetModel{model_id} if model_id == "remote-codex/model-a")
+        );
     }
 }
 

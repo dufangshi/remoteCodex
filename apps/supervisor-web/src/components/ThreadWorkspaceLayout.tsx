@@ -6,7 +6,7 @@ import type { ComponentProps } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
-import { AppShellSettingsDialog } from './AppShellNavigation';
+import { appSettingsSections } from './AppShellSettingsDialog';
 import {
   currentNewThreadHref,
   currentThreadHref,
@@ -43,9 +43,7 @@ export function ThreadWorkspaceLayout({
     <SharedThreadWorkspaceLayout
       {...props}
       workspaceReturnHref={props.workspaceReturnHref ?? currentWorkspacesHref()}
-      globalSettingsContent={
-        props.globalSettingsContent ?? <AppShellSettingsDialog embedded />
-      }
+      settingsSections={props.settingsSections ?? appSettingsSections()}
       {...(effectiveTheme ? { effectiveTheme } : {})}
       {...(themeMode ? { themeMode } : {})}
       {...(onThemeModeChange ? { onThemeModeChange } : {})}
