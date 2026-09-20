@@ -77,7 +77,16 @@ const sample = {
     },
   ],
 };
-export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
+export function UpstreamManagement({
+  apiRoot,
+  harness,
+  templatesOnly = false,
+}: {
+  apiRoot: string;
+  harness?: string;
+  templatesOnly?: boolean;
+}) {
+  const [deleting, setDeleting] = useState<Profile | null>(null);
   const [data, setData] = useState<Snapshot>({
     profiles: [],
     active: {},
@@ -90,7 +99,7 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
   const [editor, setEditor] = useState<Profile | null>(null),
     [mode, setMode] = useState<'config' | 'template' | null>(null);
   const [text, setText] = useState(''),
-    [importHarness, setImportHarness] = useState('codex'),
+    [importHarness, setImportHarness] = useState(harness ?? 'codex'),
     [importName, setImportName] = useState('Imported upstream'),
     [importKey, setImportKey] = useState('');
   const [preview, setPreview] = useState<{
@@ -212,201 +221,258 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
   return (
     <section
       className="mt-6 border-t border-[var(--theme-border)] pt-5"
-      aria-label="Upstream management"
+      aria-label={templatesOnly ? 'Device templates' : 'Upstream management'}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Upstreams</h3>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            Saved on this device. Switch providers without opening its terminal.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className={button}
-            disabled={!loaded || disabled}
-            onClick={() => openImport('config')}
-          >
-            <Upload size={14} />
-            Import config
-          </button>
-          <button
-            className={button}
-            disabled={!loaded || disabled}
-            onClick={() => setEditor(blank())}
-          >
-            <Plus size={14} />
-            Add upstream
-          </button>
-        </div>
-      </div>
-      {loaded && data.profiles.length === 0 && (
-        <p className="my-5 rounded-lg border border-dashed border-[var(--theme-border)] p-4 text-sm text-[var(--theme-fg-muted)]">
-          Add an API provider or import an existing configuration to get
-          started.
-        </p>
-      )}
-      <div className="mt-3 space-y-3">
-        {data.profiles.map((p) => (
-          <article
-            key={p.id}
-            className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h4 className="flex items-center gap-2 text-sm font-medium">
-                  {p.name}
-                  {data.active[p.harness] === p.id && (
-                    <span className="inline-flex items-center gap-1 text-xs text-[var(--theme-accent-strong)]">
-                      <Check size={13} />
-                      Active
-                    </span>
-                  )}
-                </h4>
-                <p className="mt-1 break-all text-xs text-[var(--theme-fg-muted)]">
-                  {labels[p.harness]} · {p.model}
-                </p>
-                <p className="mt-1 break-all text-xs text-[var(--theme-fg-muted)]">
-                  {p.baseUrl}
-                </p>
-              </div>
+      {!templatesOnly && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">
+                {harness ? `${labels[harness]} upstreams` : 'Upstreams'}
+              </h3>
+              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                Saved on this device. Switch providers without opening its
+                terminal.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
               <button
                 className={button}
-                disabled={disabled}
-                aria-label={`Duplicate ${p.name}`}
-                onClick={() => setEditor({ ...p, id: '', apiKey: '' })}
+                disabled={!loaded || disabled}
+                onClick={() => openImport('config')}
               >
-                <Copy size={13} />
+                <Upload size={14} />
+                Import config
+              </button>
+              <button
+                className={button}
+                disabled={!loaded || disabled}
+                onClick={() =>
+                  setEditor({ ...blank(), harness: harness ?? 'codex' })
+                }
+              >
+                <Plus size={14} />
+                Add upstream
               </button>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className={button}
-                disabled={disabled || data.active[p.harness] === p.id}
-                onClick={() =>
-                  void perform(async () => {
-                    await api(`upstreams/${p.id}`, { action: 'activate' });
-                    await load();
-                    setNotice(
-                      `${labels[p.harness]} configuration applied. Idle sessions were restarted; the next turn uses this upstream.`,
-                    );
-                  })
-                }
-              >
-                Use upstream
-              </button>
-              <button
-                className={button}
-                disabled={disabled}
-                title="Sends a small request using this model; API charges may apply"
-                onClick={() =>
-                  void perform(async () => {
-                    const r = await api<{ latencyMs: number }>(
-                      `upstreams/${p.id}`,
-                      { action: 'test' },
-                    );
-                    setNotice(
-                      `${p.name}: connection succeeded (${r.latencyMs} ms).`,
-                    );
-                  })
-                }
-              >
-                <FlaskConical size={13} />
-                Test connection
-              </button>
-              <button
-                className={button}
-                disabled={disabled || data.active[p.harness] === p.id}
-                onClick={() => setEditor({ ...p, apiKey: '' })}
-              >
-                Edit
-              </button>
-              <button
-                className={button}
-                disabled={disabled || data.active[p.harness] === p.id}
-                aria-label={`Delete ${p.name}`}
-                onClick={() =>
-                  void perform(async () => {
-                    await api(`upstreams/${p.id}`, undefined, 'DELETE');
-                    await load();
-                  })
-                }
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-      <p className="mt-3 text-xs leading-5 text-[var(--theme-fg-muted)]">
-        Switch after current tasks finish. Existing MCP and skill settings are
-        preserved. Connection tests send a small model request and may incur API
-        charges.
-      </p>
-      {!!data.backups.length && (
-        <details className="mt-3 text-xs">
-          <summary className="cursor-pointer py-2">
-            Configuration backups
-          </summary>
-          {Object.keys(labels).map((h) => {
-            const b = [...data.backups].reverse().find((v) => v.harness === h);
-            return (
-              b && (
-                <div
-                  key={h}
-                  className="flex flex-wrap items-center justify-between gap-2 py-2"
+          </div>
+          {loaded &&
+            !data.profiles.some((p) => !harness || p.harness === harness) && (
+              <p className="my-5 rounded-lg border border-dashed border-[var(--theme-border)] p-4 text-sm text-[var(--theme-fg-muted)]">
+                Add an API provider or import an existing configuration to get
+                started.
+              </p>
+            )}
+          <div className="mt-3 space-y-3">
+            {data.profiles
+              .filter((p) => !harness || p.harness === harness)
+              .map((p) => (
+                <article
+                  key={p.id}
+                  className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3"
                 >
-                  <span>
-                    {labels[h]} · {new Date(b.createdAt).toLocaleString()}
-                  </span>
-                  <button
-                    className={button}
-                    disabled={disabled}
-                    onClick={() =>
-                      void perform(async () => {
-                        await api(`upstreams/${b.id}`, { action: 'restore' });
-                        await load();
-                        setNotice(
-                          'Previous configuration restored. The next turn reloads it.',
-                        );
-                      })
-                    }
-                  >
-                    <RotateCcw size={13} />
-                    Restore previous
-                  </button>
-                </div>
-              )
-            );
-          })}
-        </details>
-      )}
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--theme-border)] pt-4">
-        <div>
-          <h3 className="text-sm font-semibold">Device templates</h3>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            Install harnesses and configure their upstreams together.
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h4 className="flex items-center gap-2 text-sm font-medium">
+                        {p.name}
+                        {data.active[p.harness] === p.id && (
+                          <span className="inline-flex items-center gap-1 text-xs text-[var(--theme-accent-strong)]">
+                            <Check size={13} />
+                            Active
+                          </span>
+                        )}
+                      </h4>
+                      <p className="mt-1 break-all text-xs text-[var(--theme-fg-muted)]">
+                        {labels[p.harness]} · {p.model}
+                      </p>
+                      <p className="mt-1 break-all text-xs text-[var(--theme-fg-muted)]">
+                        {p.baseUrl}
+                      </p>
+                    </div>
+                    <button
+                      className={button}
+                      disabled={disabled}
+                      aria-label={`Duplicate ${p.name}`}
+                      onClick={() => setEditor({ ...p, id: '', apiKey: '' })}
+                    >
+                      <Copy size={13} />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className={button}
+                      disabled={disabled || data.active[p.harness] === p.id}
+                      onClick={() =>
+                        void perform(async () => {
+                          await api(`upstreams/${p.id}`, {
+                            action: 'activate',
+                          });
+                          await load();
+                          setNotice(
+                            `${labels[p.harness]} configuration applied. Idle sessions were restarted; the next turn uses this upstream.`,
+                          );
+                        })
+                      }
+                    >
+                      Use upstream
+                    </button>
+                    <button
+                      className={button}
+                      disabled={disabled}
+                      title="Sends a small request using this model; API charges may apply"
+                      onClick={() =>
+                        void perform(async () => {
+                          const r = await api<{ latencyMs: number }>(
+                            `upstreams/${p.id}`,
+                            { action: 'test' },
+                          );
+                          setNotice(
+                            `${p.name}: connection succeeded (${r.latencyMs} ms).`,
+                          );
+                        })
+                      }
+                    >
+                      <FlaskConical size={13} />
+                      Test connection
+                    </button>
+                    <button
+                      className={button}
+                      disabled={disabled || data.active[p.harness] === p.id}
+                      onClick={() => setEditor({ ...p, apiKey: '' })}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={button}
+                      disabled={disabled}
+                      aria-label={`Delete ${p.name}`}
+                      onClick={() => setDeleting(p)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </article>
+              ))}
+          </div>
+          <p className="mt-3 text-xs leading-5 text-[var(--theme-fg-muted)]">
+            Switch after current tasks finish. Existing MCP and skill settings
+            are preserved. Connection tests send a small model request and may
+            incur API charges.
           </p>
+          {!!data.backups.length && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer py-2">
+                Configuration backups
+              </summary>
+              {Object.keys(labels)
+                .filter((h) => !harness || h === harness)
+                .map((h) => {
+                  const b = [...data.backups]
+                    .reverse()
+                    .find((v) => v.harness === h);
+                  return (
+                    b && (
+                      <div
+                        key={h}
+                        className="flex flex-wrap items-center justify-between gap-2 py-2"
+                      >
+                        <span>
+                          {labels[h]} · {new Date(b.createdAt).toLocaleString()}
+                        </span>
+                        <button
+                          className={button}
+                          disabled={disabled}
+                          onClick={() =>
+                            void perform(async () => {
+                              await api(`upstreams/${b.id}`, {
+                                action: 'restore',
+                              });
+                              await load();
+                              setNotice(
+                                'Previous configuration restored. The next turn reloads it.',
+                              );
+                            })
+                          }
+                        >
+                          <RotateCcw size={13} />
+                          Restore previous
+                        </button>
+                      </div>
+                    )
+                  );
+                })}
+            </details>
+          )}
+        </>
+      )}
+      {templatesOnly && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Device templates</h3>
+            <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+              Install harnesses and configure their upstreams together.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className={button}
+              disabled={!loaded || disabled}
+              onClick={() => openImport('template')}
+            >
+              <Upload size={14} />
+              Import template
+            </button>
+            <button
+              className={button}
+              disabled={!loaded || disabled || !Object.keys(data.active).length}
+              onClick={download}
+            >
+              <Download size={14} />
+              Export template
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+      )}
+      {deleting && (
+        <FormDialog
+          title={
+            data.active[deleting.harness] === deleting.id
+              ? 'Deactivate and delete upstream'
+              : 'Delete upstream'
+          }
+          onClose={() => setDeleting(null)}
+          busy={busy}
+        >
+          <p className="text-sm leading-6">
+            {data.active[deleting.harness] === deleting.id
+              ? 'This restores the native configuration from before managed upstreams were enabled. Running tasks must finish first. Other saved upstreams remain available.'
+              : 'Remove this saved upstream from the device.'}
+          </p>
+          <p className="my-3 text-sm font-medium">{deleting.name}</p>
+          {error && (
+            <p
+              role="alert"
+              className="mb-3 text-xs text-[var(--status-danger-fg)]"
+            >
+              {error}
+            </p>
+          )}
           <button
-            className={button}
-            disabled={!loaded || disabled}
-            onClick={() => openImport('template')}
+            className="relay-button-primary min-h-10"
+            disabled={busy}
+            onClick={() =>
+              void perform(async () => {
+                await api(`upstreams/${deleting.id}`, undefined, 'DELETE');
+                await load();
+                setDeleting(null);
+                setNotice('Upstream removed.');
+              })
+            }
           >
-            <Upload size={14} />
-            Import template
+            {busy ? 'Removing…' : 'Delete upstream'}
           </button>
-          <button
-            className={button}
-            disabled={!loaded || disabled || !Object.keys(data.active).length}
-            onClick={download}
-          >
-            <Download size={14} />
-            Export template
-          </button>
-        </div>
-      </div>
+        </FormDialog>
+      )}
       {job && (
         <div role={job.error ? 'alert' : 'status'} className="mt-3 text-xs">
           <p>

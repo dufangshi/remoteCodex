@@ -3540,25 +3540,26 @@ pub fn bootstrap_runtimes(config: &RuntimeConfig) -> Vec<SharedRuntime> {
     }
     for provider in &config.enabled_providers {
         match provider {
-            Provider::Acp => out.push(Arc::new(AcpRuntime::catalog(
-                config.acp_command.clone(),
-                config.acp_startup_timeout_ms,
-            ))),
-            Provider::Codex => out.push(Arc::new(AcpRuntime::bound(
-                Provider::Codex,
-                "codex",
-                config.acp_startup_timeout_ms,
-            ))),
-            Provider::Claude => out.push(Arc::new(AcpRuntime::bound(
-                Provider::Claude,
-                "claude",
-                config.acp_startup_timeout_ms,
-            ))),
-            Provider::Opencode => out.push(Arc::new(AcpRuntime::bound(
-                Provider::Opencode,
-                "opencode",
-                config.acp_startup_timeout_ms,
-            ))),
+            Provider::Acp => out.push(Arc::new(
+                AcpRuntime::catalog(config.acp_command.clone(), config.acp_startup_timeout_ms)
+                    .with_upstreams(crate::upstreams::directory(&config.database_url)),
+            )),
+            Provider::Codex => out.push(Arc::new(
+                AcpRuntime::bound(Provider::Codex, "codex", config.acp_startup_timeout_ms)
+                    .with_upstreams(crate::upstreams::directory(&config.database_url)),
+            )),
+            Provider::Claude => out.push(Arc::new(
+                AcpRuntime::bound(Provider::Claude, "claude", config.acp_startup_timeout_ms)
+                    .with_upstreams(crate::upstreams::directory(&config.database_url)),
+            )),
+            Provider::Opencode => out.push(Arc::new(
+                AcpRuntime::bound(
+                    Provider::Opencode,
+                    "opencode",
+                    config.acp_startup_timeout_ms,
+                )
+                .with_upstreams(crate::upstreams::directory(&config.database_url)),
+            )),
         }
     }
     out

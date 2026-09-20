@@ -26,9 +26,7 @@ import {
   ThreadTurnTokenUsageDto,
   truncateAutoThreadTitle,
 } from '../../../../packages/shared/src/index';
-import {
-  AppShellSettingsDialog,
-} from '../components/AppShellNavigation';
+import { appSettingsSections } from '../components/AppShellSettingsDialog';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ConfirmDialog,
@@ -3640,7 +3638,7 @@ export function ThreadDetailPage() {
       adapter={surfaceAdapter}
       metaContent={metaContent}
       settingsContent={settingsContent}
-      globalSettingsContent={<AppShellSettingsDialog embedded />}
+      settingsSections={appSettingsSections()}
       mobileHeaderAction={mobileSessionConnectionButton}
       workspaceReturnHref={workspaceReturnHref}
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}

@@ -1,7 +1,7 @@
+import { FormDialog } from './FormDialog';
 import { RuntimeManagement } from './RuntimeManagement';
 import { ModelPricingSettings } from './ModelPricingSettings';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
   AgentBackendDto,
@@ -9,7 +9,6 @@ import type {
   ProviderHostConfigArchiveDto,
   WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';
-import { defaultAgentBackendId } from '../../../../packages/shared/src/index';
 import {
   ApiError,
   applyProviderHostConfigArchive,
@@ -22,9 +21,16 @@ import {
   updateProviderHostFile,
   updateWorkspaceSettings,
 } from '../lib/api';
-import { usePlugins } from '@remote-codex/thread-ui';
+import {
+  usePlugins,
+  SettingsPanels,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  type SettingsSection,
+} from '@remote-codex/thread-ui';
 import { useAppShellNav } from './AppShellNavContext';
-import { useDialogLifecycle } from './useDialogLifecycle';
 import {
   apiErrorMessage,
   defaultProviderHostFileState,
@@ -43,15 +49,18 @@ function unavailablePluginReason(plugin: unknown) {
     available?: unknown;
     unavailableReason?: unknown;
   };
-  return availability.available === false && typeof availability.unavailableReason === 'string'
+  return availability.available === false &&
+    typeof availability.unavailableReason === 'string'
     ? availability.unavailableReason
     : null;
 }
 
 export function AppShellSettingsDialog({
   embedded = false,
+  section,
 }: {
   embedded?: boolean;
+  section?: string;
 } = {}) {
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
@@ -65,7 +74,6 @@ export function AppShellSettingsDialog({
     message: null,
     error: null,
   });
-  const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [files, setFiles] = useState<
     Record<
@@ -136,15 +144,6 @@ export function AppShellSettingsDialog({
   });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
   const settingsVisible = embedded || Boolean(shellNav?.settingsOpen);
-  const settingsDialogRef = useRef<HTMLElement>(null);
-  const settingsCloseRef = useRef<HTMLButtonElement>(null);
-  const pluginsDialogRef = useRef<HTMLElement>(null);
-  const pluginsCloseRef = useRef<HTMLButtonElement>(null);
-  const fileDialogRef = useRef<HTMLDivElement>(null);
-  const fileCloseRef = useRef<HTMLButtonElement>(null);
-  const settingsTitleId = useId();
-  const pluginsTitleId = useId();
-  const fileTitleId = useId();
   const shellNavRef = useRef(shellNav);
   shellNavRef.current = shellNav;
 
@@ -152,52 +151,15 @@ export function AppShellSettingsDialog({
     shellNavRef.current?.closeSettings();
     window.requestAnimationFrame(() => {
       document
-        .querySelector<HTMLElement>('[aria-controls="app-shell-navigation-menu"]')
+        .querySelector<HTMLElement>(
+          '[aria-controls="app-shell-navigation-menu"]',
+        )
         ?.focus();
     });
-  }, []);
-  const closePluginsPanel = useCallback(() => {
-    setPluginsPanelOpen(false);
   }, []);
   const closeFileEditor = useCallback(() => {
     setSelectedFileName(null);
   }, []);
-
-  useDialogLifecycle({
-    busy: true,
-    containerRef: settingsDialogRef,
-    initialFocusRef: settingsCloseRef,
-    onClose: closeSettings,
-    open: settingsVisible && !embedded,
-  });
-  useDialogLifecycle({
-    containerRef: pluginsDialogRef,
-    initialFocusRef: pluginsCloseRef,
-    onClose: closePluginsPanel,
-    open: embedded && pluginsPanelOpen,
-  });
-  useDialogLifecycle({
-    containerRef: fileDialogRef,
-    initialFocusRef: fileCloseRef,
-    onClose: closeFileEditor,
-    open: !embedded && settingsVisible && Boolean(selectedFileName && selectedFile),
-  });
-
-  useEffect(() => {
-    if (!settingsVisible || embedded || selectedFileName) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeSettings();
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [closeSettings, embedded, selectedFileName, settingsVisible]);
 
   async function handleImportPlugin() {
     const manifestJson = pluginImportDraft.trim();
@@ -235,7 +197,8 @@ export function AppShellSettingsDialog({
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
   const autoCollapseCompletedTurns =
     shellNav?.autoCollapseCompletedTurns ?? true;
-  const selectedBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
+  const [selectedBackend, setSelectedBackend] =
+    useState<AgentBackendIdDto>('codex');
   const enabledPluginCount = plugins.plugins.filter(
     (plugin) => plugin.enabled,
   ).length;
@@ -252,7 +215,7 @@ export function AppShellSettingsDialog({
   const editableFiles = activeManagementSchema.hostConfigFiles;
 
   useEffect(() => {
-    if (!settingsVisible) {
+    if (!settingsVisible || section !== 'advanced') {
       return;
     }
 
@@ -299,10 +262,10 @@ export function AppShellSettingsDialog({
     return () => {
       cancelled = true;
     };
-  }, [settingsVisible]);
+  }, [settingsVisible, section]);
 
   useEffect(() => {
-    if (!settingsVisible) {
+    if (!settingsVisible || section !== 'workspace') {
       return;
     }
 
@@ -345,11 +308,12 @@ export function AppShellSettingsDialog({
     return () => {
       cancelled = true;
     };
-  }, [settingsVisible]);
+  }, [settingsVisible, section]);
 
   useEffect(() => {
     if (
       !settingsVisible ||
+      section !== 'advanced' ||
       !activeBackend.capabilities.management.hostConfigFiles
     ) {
       return;
@@ -440,10 +404,11 @@ export function AppShellSettingsDialog({
     activeBackend.provider,
     editableFiles,
     settingsVisible,
+    section,
   ]);
 
   useEffect(() => {
-    if (!settingsVisible) {
+    if (!settingsVisible || section !== 'advanced') {
       return;
     }
 
@@ -495,6 +460,7 @@ export function AppShellSettingsDialog({
     activeBackend.provider,
     activeManagementSchema.configArchives,
     settingsVisible,
+    section,
   ]);
 
   async function handleSaveWorkspaceSettings() {
@@ -810,61 +776,55 @@ export function AppShellSettingsDialog({
           </button>
         </div>
         {pluginImportState.error && (
-          <p className="host-error mt-2 rounded-md border px-3 py-2 text-xs" role="alert">
+          <p
+            className="host-error mt-2 rounded-md border px-3 py-2 text-xs"
+            role="alert"
+          >
             {pluginImportState.error}
           </p>
         )}
         {pluginImportState.message && (
-          <p className="mt-2 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
+          <p
+            className="mt-2 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]"
+            role="status"
+          >
             {pluginImportState.message}
           </p>
         )}
       </div>
       {plugins.error && (
-        <p className="host-error mt-2 rounded-md border px-3 py-2 text-xs" role="alert">{plugins.error}</p>
+        <p
+          className="host-error mt-2 rounded-md border px-3 py-2 text-xs"
+          role="alert"
+        >
+          {plugins.error}
+        </p>
       )}
     </>
   );
 
   const settingsContentNode = (
     <>
-      {!embedded ? (
-        <div className="shrink-0 border-b border-[var(--theme-border)] p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 id={settingsTitleId} className="text-xl font-semibold text-[var(--theme-fg)]">
-                Settings
-              </h2>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--theme-fg-soft)]">
-                Configure appearance, workspaces, plugins, and host runtimes.
-              </p>
-            </div>
-            <button
-              aria-label="Close Settings"
-              className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
-              onClick={closeSettings}
-              ref={settingsCloseRef}
-              type="button"
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      ) : null}
       <div
         className={`min-h-0 flex-1 overflow-y-auto ${embedded ? '!overflow-visible !flex-none p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
       >
         <div className="divide-y divide-[var(--theme-border)]">
-          {!embedded ? (
+          {section === 'preferences' ? (
             <fieldset className="py-5">
-              <legend className="text-sm font-semibold text-[var(--theme-fg)]">Appearance</legend>
+              <legend className="text-sm font-semibold text-[var(--theme-fg)]">
+                Appearance
+              </legend>
               <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                Choose a theme for this browser. The active display is {effectiveTheme}.
+                Choose a theme for this browser. The active display is{' '}
+                {effectiveTheme}.
               </p>
               <div className="product-segmented mt-3 grid w-full grid-cols-3 sm:w-auto">
                 {themeOptions.map((option) => {
                   return (
-                    <label className="product-segment min-h-11 flex-1 cursor-pointer" key={option.value}>
+                    <label
+                      className="product-segment min-h-11 flex-1 cursor-pointer"
+                      key={option.value}
+                    >
                       <input
                         checked={selectedThemeMode === option.value}
                         className="sr-only"
@@ -879,410 +839,480 @@ export function AppShellSettingsDialog({
                 })}
               </div>
               <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                {themeOptions.find((option) => option.value === selectedThemeMode)?.description}
+                {
+                  themeOptions.find(
+                    (option) => option.value === selectedThemeMode,
+                  )?.description
+                }
               </p>
             </fieldset>
           ) : null}
 
-          {shellNav?.setAutoCollapseCompletedTurns ? (
-            <section className="py-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                    Thread timeline
-                  </h3>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Collapse completed turns into prompt, elapsed work, and final reply.
-                  </p>
-                </div>
-                <label className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-[var(--theme-fg-soft)]">
+          {section === 'preferences' &&
+            shellNav?.setAutoCollapseCompletedTurns && (
+              <section className="py-5">
+                <label className="flex min-h-11 items-center justify-between gap-4">
+                  <span>
+                    <span className="block text-sm font-semibold">
+                      Thread timeline
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+                      Collapse completed turns to keep conversations easy to
+                      scan.
+                    </span>
+                  </span>
                   <input
+                    type="checkbox"
+                    aria-label="Auto collapse"
                     checked={autoCollapseCompletedTurns}
-                    className="h-5 w-5 accent-[var(--theme-accent-solid)]"
-                    onChange={(event) =>
+                    onChange={(e) =>
                       shellNav.setAutoCollapseCompletedTurns?.(
-                        event.currentTarget.checked,
+                        e.currentTarget.checked,
                       )
                     }
-                    type="checkbox"
+                    className="h-5 w-5 accent-[var(--theme-accent-solid)]"
                   />
-                  <span>Auto collapse</span>
                 </label>
-              </div>
-            </section>
-          ) : null}
-
-          <section className="py-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                  Plugins
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                  Enable renderers and thread extensions loaded by this
-                  supervisor.
-                </p>
-              </div>
-              {!embedded ? (
-                <button
-                  className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={plugins.loading}
-                  onClick={() => void plugins.refresh()}
-                  type="button"
-                >
-                  {plugins.loading ? 'Loading...' : 'Refresh'}
-                </button>
-              ) : null}
-            </div>
-            {embedded ? (
-              <div className="mt-3 flex min-h-11 flex-wrap items-center justify-between gap-2 border-y border-[var(--theme-border)] py-2">
-                <span className="text-xs text-[var(--theme-fg-muted)]">
-                  {pluginCountLabel}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPluginsPanelOpen(true)}
-                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition"
-                >
-                  Manage
-                </button>
-              </div>
-            ) : (
-              pluginsManagementNode
+              </section>
             )}
-          </section>
-
-          <section className="py-5">
-            <label className="flex min-h-11 items-center justify-between gap-4">
-              <span><span className="block text-sm font-semibold">Show agent status summaries</span><span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">Show intermediate thinking summaries with their own timestamps. Off by default.</span></span>
-              <input type="checkbox" checked={shellNav?.showReasoningSummaries ?? false} onChange={event => shellNav?.setShowReasoningSummaries?.(event.currentTarget.checked)} className="h-5 w-5 accent-[var(--theme-accent-solid)]" />
-            </label>
-          </section>
-          <ModelPricingSettings />
-
-          <section className="py-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                  Workspace defaults
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                  Git projects clone into dev home. New workspace directories
-                  can create one missing child under this path.
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 grid gap-4">
-              <div className="border-y border-[var(--theme-border)] py-3">
-                <p className="text-xs font-medium text-[var(--theme-fg-muted)]">
-                  Workspace root
-                </p>
-                <p
-                  title={
-                    workspaceSettings?.workspaceRoot ?? 'Loading workspace root'
-                  }
-                  className="mt-1 truncate font-mono text-xs leading-5 text-[var(--theme-fg-soft)]"
+          {section === 'plugins' && (
+            <section className="py-2">
+              <div className="flex items-center justify-between text-xs text-[var(--theme-fg-muted)]">
+                <span>{pluginCountLabel}</span>
+                <button
+                  className="host-secondary-button rounded-md border px-3 py-2"
+                  onClick={() => void plugins.refresh()}
                 >
-                  {workspaceSettingsState.loading && !workspaceSettings
-                    ? 'Loading...'
-                    : (workspaceSettings?.workspaceRoot ?? 'Unavailable')}
-                </p>
+                  Refresh plugins
+                </button>
               </div>
-              <div>
-                <label
-                  htmlFor="settings-dev-home"
-                  className="text-xs font-medium text-[var(--theme-fg-soft)]"
-                >
-                  Dev home
-                </label>
-                <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    disabled={workspaceSettingsState.loading || workspaceSettingsState.saving}
-                    id="settings-dev-home"
-                    value={workspaceSettingsState.devHomeDraft}
-                    onChange={(event) =>
-                      setWorkspaceSettingsState((current) => ({
-                        ...current,
-                        devHomeDraft: event.target.value,
-                        message: null,
-                        error: null,
-                      }))
-                    }
-                    placeholder="/Users/name/dev"
-                    className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
-                  />
-                  <button
-                    type="button"
-                    aria-label="Save workspace defaults"
-                    onClick={() => void handleSaveWorkspaceSettings()}
-                    disabled={
-                      workspaceSettingsState.loading ||
-                      workspaceSettingsState.saving ||
-                      !workspaceSettingsState.devHomeDraft.trim()
-                    }
-                    className="relay-button-primary min-h-11 shrink-0 rounded-md px-4"
-                  >
-                    {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            {workspaceSettingsState.error ? (
-              <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">
-                {workspaceSettingsState.error}
-              </p>
-            ) : workspaceSettingsState.message ? (
-              <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
-                {workspaceSettingsState.message}
-              </p>
-            ) : null}
-          </section>
-
-          <RuntimeManagement />
-
-          <section className="py-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                  Provider host files
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                  {activeBackend.displayName} exposes these editable files
-                  through its backend schema.
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
-              {editableFiles.map((file) => {
-                const state = files[file.name] ?? {
-                  path: file.name,
-                  exists: false,
-                  originalContent: '',
-                  draftContent: '',
-                  loading: false,
-                  saving: false,
-                  error: null,
-                  saveMessage: null,
-                };
-                const dirty = state.draftContent !== state.originalContent;
-
-                return (
-                  <button
-                    key={file.name}
-                    type="button"
-                    onClick={() => setSelectedFileName(file.name)}
-                    className="block min-h-11 w-full px-2 py-3 text-left transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-                          {file.label}
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                          {file.description}
-                        </p>
-                        {state.error ? (
-                          <p className="mt-1 text-xs text-[var(--status-danger-fg)]" role="alert">{state.error}</p>
-                        ) : null}
-                      </div>
-                      <div className="shrink-0">
-                        {state.loading ? (
-                          <span className="text-[11px] font-medium text-[var(--theme-fg-muted)]">
-                            Loading
-                          </span>
-                        ) : dirty ? (
-                          <span className="text-[11px] font-medium text-[var(--theme-accent-strong)]">
-                            Unsaved
-                          </span>
-                        ) : state.exists ? (
-                          <span className="text-[11px] font-medium text-[var(--status-success-fg)]">
-                            Ready
-                          </span>
-                        ) : (
-                          <span className="text-[11px] font-medium text-[var(--status-info-fg)]">
-                            New
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-              {editableFiles.length === 0 ? (
-                <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
-                  This backend does not expose editable host files.
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          {activeManagementSchema.configArchives ? (
+              {pluginsManagementNode}
+            </section>
+          )}
+          {section === 'preferences' && (
             <section className="py-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <label className="flex min-h-11 items-center justify-between gap-4">
+                <span>
+                  <span className="block text-sm font-semibold">
+                    Show agent status summaries
+                  </span>
+                  <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+                    Show intermediate thinking summaries with their own
+                    timestamps. Off by default.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={shellNav?.showReasoningSummaries ?? false}
+                  onChange={(event) =>
+                    shellNav?.setShowReasoningSummaries?.(
+                      event.currentTarget.checked,
+                    )
+                  }
+                  className="h-5 w-5 accent-[var(--theme-accent-solid)]"
+                />
+              </label>
+            </section>
+          )}
+          {section === 'preferences' && (
+            <details className="settings-detail">
+              <summary>Model pricing</summary>
+              <div>
+                <ModelPricingSettings />
+              </div>
+            </details>
+          )}
+
+          {section === 'workspace' && (
+            <section className="py-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                    Config archives
+                    Workspace defaults
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Backup the selected backend host files, then apply a saved
-                    archive with a backend restart.
+                    Git projects clone into dev home. New workspace directories
+                    can create one missing child under this path.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleCreateArchive()}
-                  disabled={
-                    archivesState.creating ||
-                    archivesState.applyingId !== null ||
-                    archivesState.renamingBusyId !== null
-                  }
-                  className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {archivesState.creating ? 'Creating...' : 'Create backup'}
-                </button>
               </div>
-              {archivesState.error ? (
-                <p className="host-error mt-3 rounded-md border px-3 py-2 text-xs" role="alert">
-                  {archivesState.error}
+              <div className="mt-3 grid gap-4">
+                <div className="border-y border-[var(--theme-border)] py-3">
+                  <p className="text-xs font-medium text-[var(--theme-fg-muted)]">
+                    Workspace root
+                  </p>
+                  <p
+                    title={
+                      workspaceSettings?.workspaceRoot ??
+                      'Loading workspace root'
+                    }
+                    className="mt-1 truncate font-mono text-xs leading-5 text-[var(--theme-fg-soft)]"
+                  >
+                    {workspaceSettingsState.loading && !workspaceSettings
+                      ? 'Loading...'
+                      : (workspaceSettings?.workspaceRoot ?? 'Unavailable')}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="settings-dev-home"
+                    className="text-xs font-medium text-[var(--theme-fg-soft)]"
+                  >
+                    Dev home
+                  </label>
+                  <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      disabled={
+                        workspaceSettingsState.loading ||
+                        workspaceSettingsState.saving
+                      }
+                      id="settings-dev-home"
+                      value={workspaceSettingsState.devHomeDraft}
+                      onChange={(event) =>
+                        setWorkspaceSettingsState((current) => ({
+                          ...current,
+                          devHomeDraft: event.target.value,
+                          message: null,
+                          error: null,
+                        }))
+                      }
+                      placeholder="/Users/name/dev"
+                      className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Save workspace defaults"
+                      onClick={() => void handleSaveWorkspaceSettings()}
+                      disabled={
+                        workspaceSettingsState.loading ||
+                        workspaceSettingsState.saving ||
+                        !workspaceSettingsState.devHomeDraft.trim()
+                      }
+                      className="relay-button-primary min-h-11 shrink-0 rounded-md px-4"
+                    >
+                      {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {workspaceSettingsState.error ? (
+                <p
+                  className="host-error mt-3 rounded-md border px-3 py-2 text-xs"
+                  role="alert"
+                >
+                  {workspaceSettingsState.error}
                 </p>
-              ) : archivesState.message ? (
-                <p className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]" role="status">
-                  {archivesState.message}
+              ) : workspaceSettingsState.message ? (
+                <p
+                  className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]"
+                  role="status"
+                >
+                  {workspaceSettingsState.message}
                 </p>
               ) : null}
-              <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
-                {archivesState.loading ? (
-                  <p className="py-4 text-xs text-[var(--theme-fg-muted)]" role="status">
-                    Loading backups...
-                  </p>
-                ) : archives.length === 0 ? (
-                  <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
-                    No config backups yet.
-                  </p>
-                ) : (
-                  archives.map((archive) => {
-                    const renaming = archivesState.renamingId === archive.id;
+            </section>
+          )}
+          {(section === 'device' || section === 'harnesses') && (
+            <RuntimeManagement view={section} />
+          )}
+
+          {section === 'advanced' && (
+            <>
+              <label className="block text-xs font-medium">
+                Harness configuration
+                <select
+                  className="host-input mt-2 w-full rounded-lg border p-3 text-sm"
+                  value={selectedBackend}
+                  onChange={(event) => {
+                    setSelectedBackend(event.target.value as AgentBackendIdDto);
+                    setSelectedFileName(null);
+                  }}
+                >
+                  {backends
+                    .filter((b) => b.capabilities.management.hostConfigFiles)
+                    .map((b) => (
+                      <option key={b.provider} value={b.provider}>
+                        {b.displayName}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <section className="py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
+                      Provider host files
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                      {activeBackend.displayName} exposes these editable files
+                      through its backend schema.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
+                  {editableFiles.map((file) => {
+                    const state = files[file.name] ?? {
+                      path: file.name,
+                      exists: false,
+                      originalContent: '',
+                      draftContent: '',
+                      loading: false,
+                      saving: false,
+                      error: null,
+                      saveMessage: null,
+                    };
+                    const dirty = state.draftContent !== state.originalContent;
+
                     return (
-                      <div
-                        key={archive.id}
-                        className="py-3"
+                      <button
+                        key={file.name}
+                        type="button"
+                        onClick={() => setSelectedFileName(file.name)}
+                        className="block min-h-11 w-full px-2 py-3 text-left transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]"
                       >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            {renaming ? (
-                              <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
-                                <input
-                                  aria-label={`Rename ${archive.label}`}
-                                  disabled={archivesState.renamingBusyId === archive.id}
-                                  value={archivesState.renameDraft}
-                                  onChange={(event) =>
-                                    setArchivesState((current) => ({
-                                      ...current,
-                                      renameDraft: event.target.value,
-                                      error: null,
-                                      message: null,
-                                    }))
-                                  }
-                                  className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
-                                />
-                                <button
-                                  type="button"
-                                  aria-label={`Save archive name ${archive.label}`}
-                                  onClick={() =>
-                                    void handleRenameArchive(archive)
-                                  }
-                                  disabled={
-                                    archivesState.renamingBusyId === archive.id ||
-                                    !archivesState.renameDraft.trim()
-                                  }
-                                  className="relay-button-primary min-h-11 rounded-md px-3"
-                                >
-                                  {archivesState.renamingBusyId === archive.id ? 'Saving...' : 'Save'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setArchivesState((current) => ({
-                                      ...current,
-                                      renamingId: null,
-                                      renameDraft: '',
-                                    }))
-                                  }
-                                  disabled={archivesState.renamingBusyId === archive.id}
-                                  className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-                                {archive.label}
+                            <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                              {file.label}
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                              {file.description}
+                            </p>
+                            {state.error ? (
+                              <p
+                                className="mt-1 text-xs text-[var(--status-danger-fg)]"
+                                role="alert"
+                              >
+                                {state.error}
                               </p>
-                            )}
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
-                              <span>
-                                Created {formatArchiveDate(archive.createdAt)}
-                              </span>
-                              {editableFiles.map((file) => (
-                                <span
-                                  key={file.name}
-                                  className="font-mono"
-                                >
-                                  {file.name}:{' '}
-                                  {archive.files[
-                                    file.name as keyof typeof archive.files
-                                  ]?.exists
-                                    ? 'saved'
-                                    : 'missing'}
-                                </span>
-                              ))}
-                            </div>
+                            ) : null}
                           </div>
-                          <div className="flex shrink-0 flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setArchivesState((current) => ({
-                                  ...current,
-                                  renamingId: archive.id,
-                                  renameDraft: archive.label,
-                                  message: null,
-                                  error: null,
-                                }))
-                              }
-                              disabled={
-                                renaming ||
-                                archivesState.creating ||
-                                archivesState.renamingBusyId !== null ||
-                                archivesState.applyingId !== null
-                              }
-                              className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleApplyArchive(archive)}
-                              disabled={
-                                archivesState.applyingId !== null ||
-                                archivesState.creating ||
-                                archivesState.renamingBusyId !== null
-                              }
-                              className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {archivesState.applyingId === archive.id
-                                ? 'Applying...'
-                                : 'Apply'}
-                            </button>
+                          <div className="shrink-0">
+                            {state.loading ? (
+                              <span className="text-[11px] font-medium text-[var(--theme-fg-muted)]">
+                                Loading
+                              </span>
+                            ) : dirty ? (
+                              <span className="text-[11px] font-medium text-[var(--theme-accent-strong)]">
+                                Unsaved
+                              </span>
+                            ) : state.exists ? (
+                              <span className="text-[11px] font-medium text-[var(--status-success-fg)]">
+                                Ready
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-medium text-[var(--status-info-fg)]">
+                                New
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </div>
+                      </button>
                     );
-                  })
-                )}
-              </div>
-            </section>
-          ) : null}
+                  })}
+                  {editableFiles.length === 0 ? (
+                    <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
+                      This backend does not expose editable host files.
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+
+              {activeManagementSchema.configArchives ? (
+                <details className="settings-detail">
+                  <summary>Configuration backups</summary>
+                  <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
+                          Config archives
+                        </h3>
+                        <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                          Backup the selected backend host files, then apply a
+                          saved archive with a backend restart.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateArchive()}
+                        disabled={
+                          archivesState.creating ||
+                          archivesState.applyingId !== null ||
+                          archivesState.renamingBusyId !== null
+                        }
+                        className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {archivesState.creating
+                          ? 'Creating...'
+                          : 'Create backup'}
+                      </button>
+                    </div>
+                    {archivesState.error ? (
+                      <p
+                        className="host-error mt-3 rounded-md border px-3 py-2 text-xs"
+                        role="alert"
+                      >
+                        {archivesState.error}
+                      </p>
+                    ) : archivesState.message ? (
+                      <p
+                        className="mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)]"
+                        role="status"
+                      >
+                        {archivesState.message}
+                      </p>
+                    ) : null}
+                    <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
+                      {archivesState.loading ? (
+                        <p
+                          className="py-4 text-xs text-[var(--theme-fg-muted)]"
+                          role="status"
+                        >
+                          Loading backups...
+                        </p>
+                      ) : archives.length === 0 ? (
+                        <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
+                          No config backups yet.
+                        </p>
+                      ) : (
+                        archives.map((archive) => {
+                          const renaming =
+                            archivesState.renamingId === archive.id;
+                          return (
+                            <div key={archive.id} className="py-3">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  {renaming ? (
+                                    <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
+                                      <input
+                                        aria-label={`Rename ${archive.label}`}
+                                        disabled={
+                                          archivesState.renamingBusyId ===
+                                          archive.id
+                                        }
+                                        value={archivesState.renameDraft}
+                                        onChange={(event) =>
+                                          setArchivesState((current) => ({
+                                            ...current,
+                                            renameDraft: event.target.value,
+                                            error: null,
+                                            message: null,
+                                          }))
+                                        }
+                                        className="relay-input min-h-11 min-w-0 flex-1 rounded-md disabled:cursor-wait disabled:opacity-60"
+                                      />
+                                      <button
+                                        type="button"
+                                        aria-label={`Save archive name ${archive.label}`}
+                                        onClick={() =>
+                                          void handleRenameArchive(archive)
+                                        }
+                                        disabled={
+                                          archivesState.renamingBusyId ===
+                                            archive.id ||
+                                          !archivesState.renameDraft.trim()
+                                        }
+                                        className="relay-button-primary min-h-11 rounded-md px-3"
+                                      >
+                                        {archivesState.renamingBusyId ===
+                                        archive.id
+                                          ? 'Saving...'
+                                          : 'Save'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setArchivesState((current) => ({
+                                            ...current,
+                                            renamingId: null,
+                                            renameDraft: '',
+                                          }))
+                                        }
+                                        disabled={
+                                          archivesState.renamingBusyId ===
+                                          archive.id
+                                        }
+                                        className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                                      {archive.label}
+                                    </p>
+                                  )}
+                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
+                                    <span>
+                                      Created{' '}
+                                      {formatArchiveDate(archive.createdAt)}
+                                    </span>
+                                    {editableFiles.map((file) => (
+                                      <span
+                                        key={file.name}
+                                        className="font-mono"
+                                      >
+                                        {file.name}:{' '}
+                                        {archive.files[
+                                          file.name as keyof typeof archive.files
+                                        ]?.exists
+                                          ? 'saved'
+                                          : 'missing'}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setArchivesState((current) => ({
+                                        ...current,
+                                        renamingId: archive.id,
+                                        renameDraft: archive.label,
+                                        message: null,
+                                        error: null,
+                                      }))
+                                    }
+                                    disabled={
+                                      renaming ||
+                                      archivesState.creating ||
+                                      archivesState.renamingBusyId !== null ||
+                                      archivesState.applyingId !== null
+                                    }
+                                    className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleApplyArchive(archive)
+                                    }
+                                    disabled={
+                                      archivesState.applyingId !== null ||
+                                      archivesState.creating ||
+                                      archivesState.renamingBusyId !== null
+                                    }
+                                    className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {archivesState.applyingId === archive.id
+                                      ? 'Applying...'
+                                      : 'Apply'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </details>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </>
@@ -1291,173 +1321,116 @@ export function AppShellSettingsDialog({
   if (embedded) {
     return (
       <div className="min-w-0">
-        {settingsContentNode}
-        {pluginsPanelOpen ? (
-          <div className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4">
-            <button
-              aria-label="Close plugins panel"
-              className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
-              onClick={closePluginsPanel}
-              tabIndex={-1}
-              type="button"
+        {section ? (
+          settingsContentNode
+        ) : (
+          <SettingsPanels sections={appSettingsSections()} />
+        )}
+        {selectedFileName && selectedFile && (
+          <FormDialog
+            title={selectedFileName}
+            onClose={closeFileEditor}
+            busy={selectedFile.saving}
+          >
+            <p className="break-all font-mono text-xs text-[var(--theme-fg-muted)]">
+              {selectedFile.path}
+            </p>
+            <textarea
+              aria-label={`Edit ${selectedFileName}`}
+              disabled={selectedFile.loading || selectedFile.saving}
+              spellCheck={false}
+              className="host-input my-3 min-h-64 w-full rounded-lg border p-3 font-mono text-xs"
+              value={selectedFile.draftContent}
+              onChange={(e) =>
+                setFiles((current) => ({
+                  ...current,
+                  [selectedFileName]: {
+                    ...current[selectedFileName]!,
+                    draftContent: e.target.value,
+                  },
+                }))
+              }
             />
-            <section
-              aria-labelledby={pluginsTitleId}
-              aria-modal="true"
-              className="product-dialog relative z-10 flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-t-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:max-h-[min(82vh,42rem)] sm:rounded-lg"
-              ref={pluginsDialogRef}
-              role="dialog"
-              tabIndex={-1}
+            {selectedFile.error && <p role="alert">{selectedFile.error}</p>}
+            {selectedFile.saveMessage && (
+              <p role="status">{selectedFile.saveMessage}</p>
+            )}
+            <button
+              className="relay-button-primary min-h-10"
+              disabled={
+                selectedFile.loading ||
+                selectedFile.saving ||
+                selectedFile.draftContent === selectedFile.originalContent
+              }
+              onClick={() => void handleSave(selectedFileName)}
             >
-              <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-                <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-[var(--theme-fg)]" id={pluginsTitleId}>
-                    Plugins
-                  </h2>
-                  <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                    {pluginCountLabel}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void plugins.refresh()}
-                    disabled={plugins.loading}
-                    className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {plugins.loading ? 'Loading...' : 'Refresh'}
-                  </button>
-                  <button
-                    aria-label="Close plugins panel"
-                    className="host-icon-button inline-flex h-11 w-11 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
-                    onClick={closePluginsPanel}
-                    ref={pluginsCloseRef}
-                    type="button"
-                  >
-                    <X aria-hidden="true" className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                {pluginsManagementNode}
-              </div>
-            </section>
-          </div>
-        ) : null}
+              Save file
+            </button>
+          </FormDialog>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center sm:p-4">
-      <button
-        aria-label="Close Settings"
-        className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm"
-        onClick={closeSettings}
-        tabIndex={-1}
-        type="button"
-      />
-      <section
-        aria-labelledby={settingsTitleId}
-        aria-modal="true"
-        className="product-dialog relative z-10 flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:rounded-lg sm:border sm:border-[var(--theme-border)]"
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) closeSettings();
+      }}
+    >
+      <DialogContent
+        className="thread-graph-dialog thread-graph-settings-dialog"
         data-testid="settingsDialog"
-        ref={settingsDialogRef}
-        role="dialog"
-        tabIndex={-1}
+        aria-describedby={undefined}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+        }}
       >
-        {settingsContentNode}
-      </section>
-
-      {selectedFileName && selectedFile ? (
-        <div className="fixed inset-0 z-[71] flex items-center justify-center sm:p-4">
-          <button
-            aria-label="Close file editor"
-            className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
-            onClick={closeFileEditor}
-            tabIndex={-1}
-            type="button"
-          />
-          <div
-            aria-labelledby={fileTitleId}
-            aria-modal="true"
-            className="product-dialog relative z-10 flex h-[100dvh] max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden bg-[var(--theme-panel)] shadow-[var(--theme-shadow)] sm:h-auto sm:max-h-[min(88vh,56rem)] sm:rounded-lg sm:border sm:border-[var(--theme-border)]"
-            ref={fileDialogRef}
-            role="dialog"
-            tabIndex={-1}
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-[var(--theme-fg)]" id={fileTitleId}>
-                  {selectedFileName}
-                </h2>
-                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-fg-muted)]">
-                  {selectedFile.path}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  aria-label={`Save ${selectedFileName}`}
-                  className="relay-button-primary min-h-11 rounded-md px-4"
-                  disabled={
-                    selectedFile.loading ||
-                    selectedFile.saving ||
-                    selectedFile.draftContent === selectedFile.originalContent
-                  }
-                  onClick={() => void handleSave(selectedFileName)}
-                  type="button"
-                >
-                  {selectedFile.saving ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  aria-label="Close File Editor"
-                  className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition sm:h-9 sm:w-9"
-                  onClick={closeFileEditor}
-                  ref={fileCloseRef}
-                  type="button"
-                >
-                  <X aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            {selectedFile.error ? (
-              <p className="host-error mx-4 mt-3 rounded-md border px-3 py-2 text-xs sm:mx-5" role="alert">
-                {selectedFile.error}
-              </p>
-            ) : selectedFile.saveMessage ? (
-              <p className="mx-4 mt-3 rounded-md bg-[var(--status-success-bg)] px-3 py-2 text-xs text-[var(--status-success-fg)] sm:mx-5" role="status">
-                {selectedFile.saveMessage}
-              </p>
-            ) : null}
-            <div className="flex min-h-0 flex-1 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5">
-              <textarea
-                aria-label={`Edit ${selectedFileName}`}
-                disabled={selectedFile.loading || selectedFile.saving}
-                value={selectedFile.draftContent}
-                onChange={(event) =>
-                  setFiles((current) => ({
-                    ...current,
-                    [selectedFileName]: {
-                      ...defaultProviderHostFileState(selectedFileName),
-                      ...current[selectedFileName],
-                      draftContent: event.target.value,
-                      error: null,
-                      saveMessage: null,
-                    },
-                  }))
-                }
-                spellCheck={false}
-                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--theme-fg)] outline-none transition focus-visible:border-[var(--theme-accent-border)] focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-wait disabled:opacity-60 sm:min-h-[28rem]"
-                placeholder={
-                  selectedFile.loading
-                    ? 'Loading...'
-                    : `Edit ${selectedFileName} here`
-                }
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+        </DialogHeader>
+        <SettingsPanels sections={appSettingsSections()} />
+      </DialogContent>
+    </Dialog>
   );
+}
+
+export function appSettingsSections(): SettingsSection[] {
+  return [
+    {
+      id: 'preferences',
+      label: 'Preferences',
+      description: 'Appearance and conversation display, tailored to you.',
+    },
+    {
+      id: 'harnesses',
+      label: 'Harnesses',
+      description:
+        'Manage agents and switch their upstream providers on this device.',
+    },
+    {
+      id: 'device',
+      label: 'Device',
+      description: 'Supervisor maintenance and reusable device templates.',
+    },
+    {
+      id: 'workspace',
+      label: 'Workspace',
+      description: 'Default locations for projects on this device.',
+    },
+    {
+      id: 'plugins',
+      label: 'Plugins',
+      description: 'Renderers and extensions for your workspace.',
+    },
+    {
+      id: 'advanced',
+      label: 'Advanced',
+      description: 'Native configuration files and recovery backups.',
+    },
+  ].map((section) => ({
+    ...section,
+    content: <AppShellSettingsDialog embedded section={section.id} />,
+  }));
 }

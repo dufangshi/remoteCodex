@@ -101,7 +101,7 @@ it('shows a missing adapter and its install action after a successful base updat
     job:{state:'completed',action:'update'},
   }] : {}));
   mount('/devices/a/threads/thread-a');
-  expect(await screen.findByText('ACP adapter')).toBeVisible();
+  fireEvent.click(await screen.findByText('ACP adapter · Installation required'));
   expect(screen.getByText(/Not installed/)).toBeVisible();
   expect(screen.queryByText(/^Ready/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Install OpenAI Codex adapter'}));
@@ -112,6 +112,7 @@ it('shows a missing adapter and its install action after a successful base updat
 it('keeps the repair entry visible for an older device returning adapter null', async () => {
   api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{id:'codex',name:'OpenAI Codex',transport:'adapter',base:null,adapter:null}] : {}));
   mount('/devices/a/threads/thread-a');
+  fireEvent.click(await screen.findByText('ACP adapter · Installation required'));
   const install=await screen.findByRole('button',{name:'Install OpenAI Codex adapter'});
   expect(install).toBeVisible();
   fireEvent.click(install);

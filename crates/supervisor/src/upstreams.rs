@@ -61,7 +61,24 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, Failure> {
     let _g = s.upstream_gate.lock().await;
-    profiles::remove(&profiles::directory(&s.config.database_url), &id).map_err(failure)?;
+    let dir = profiles::directory(&s.config.database_url);
+    let p = profiles::profile(&dir, &id).map_err(failure)?;
+    let _maintenance = s
+        .maintenance_gate
+        .clone()
+        .try_read_owned()
+        .map_err(|_| conflict())?;
+    let _guard = s
+        .harness_gate(&p.harness)
+        .try_write_owned()
+        .map_err(|_| conflict())?;
+    if profiles::active_profile(&dir, &p.harness)
+        .map_err(failure)?
+        .is_some_and(|active| active.id == id)
+    {
+        s.restart_harness(&p.harness).await.map_err(failure)?;
+    }
+    profiles::remove(&dir, &id).map_err(failure)?;
     Ok(Json(json!({"ok":true})))
 }
 #[derive(Deserialize)]

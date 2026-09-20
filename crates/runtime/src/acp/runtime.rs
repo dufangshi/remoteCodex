@@ -117,6 +117,7 @@ struct Inner {
 }
 
 pub struct AcpRuntime {
+    upstreams: Option<super::upstream_models::UpstreamModels>,
     provider: Provider,
     bound_agent: Option<String>,
     custom_command: Option<String>,
@@ -142,6 +143,7 @@ impl AcpRuntime {
     ) -> Self {
         let (updates, _) = broadcast::channel(2048);
         Self {
+            upstreams: None,
             provider,
             bound_agent,
             custom_command: custom,
@@ -172,6 +174,11 @@ impl AcpRuntime {
             .into_iter()
             .find(|a| a.id == id)
             .ok_or_else(|| anyhow!("unknown ACP agent {id}"))
+    }
+
+    pub fn with_upstreams(mut self, directory: PathBuf) -> Self {
+        self.upstreams = Some(super::upstream_models::UpstreamModels::new(directory));
+        self
     }
 
     fn scoped_id(agent_id: &str, session_id: &str) -> String {
@@ -214,6 +221,13 @@ impl AcpRuntime {
         }
         let adapter = adapter_for(&def.id);
         let mut extra_env = extra_env_for(def);
+        if def.id == "grok" {
+            if let Some(upstreams) = &self.upstreams {
+                if let Some((profile, models)) = upstreams.catalog("grok").await? {
+                    crate::upstreams::prepare_grok_models(&profile, &models)?;
+                }
+            }
+        }
         let codex_bridge = if def.id == "codex" {
             Some(Arc::new(
                 super::codex_bridge::CodexBridge::new(&def.base_command, &mut extra_env, &policy)
@@ -664,6 +678,18 @@ impl AcpRuntime {
                 }
             }
             SessionSettingOp::SetModel { model_id } => {
+                if live.adapter_id == "grok" {
+                    if let Some(models) = live.harness_state["availableModels"].as_array() {
+                        let managed = models.iter().any(|m| {
+                            m["modelId"]
+                                .as_str()
+                                .is_some_and(|id| id.starts_with("remote-codex/"))
+                        });
+                        if managed && !models.iter().any(|m| m["modelId"] == model_id) {
+                            bail!("Model is not available in this Grok session. Reconnect the session to refresh its upstream models.");
+                        }
+                    }
+                }
                 let response = process
                     .request(
                         "session/set_model",
@@ -673,7 +699,14 @@ impl AcpRuntime {
                         }),
                     )
                     .await?;
-                live.model = Some(model_id.clone());
+                live.model = Some(if live.adapter_id == "grok" {
+                    model_id
+                        .strip_prefix("remote-codex/")
+                        .unwrap_or(&model_id)
+                        .to_owned()
+                } else {
+                    model_id.clone()
+                });
                 if let Some(obj) = live.harness_state.as_object_mut() {
                     obj.insert("currentModelId".into(), json!(model_id));
                 }
@@ -1063,6 +1096,23 @@ impl AgentRuntime for AcpRuntime {
             Ok(def) => def,
             Err(_) => return Ok(default_model_stub(agent_id.or(self.bound_agent.as_deref()))),
         };
+        if let Some(upstreams) = &self.upstreams {
+            if let Some((_, mut models)) = upstreams.catalog(&def.id).await? {
+                if let Some(known) = self.models_from_live(&def.id).await {
+                    for model in &mut models {
+                        if let Some(metadata) =
+                            known.iter().find(|entry| entry.model == model.model)
+                        {
+                            model.supported_reasoning_efforts =
+                                metadata.supported_reasoning_efforts.clone();
+                            model.default_reasoning_effort =
+                                metadata.default_reasoning_effort.clone();
+                        }
+                    }
+                }
+                return Ok(models);
+            }
+        }
         super::dependencies::ensure(&def, false).await?;
         if classify_availability(&def) != "ready" {
             return Ok(default_model_stub(Some(&def.id)));

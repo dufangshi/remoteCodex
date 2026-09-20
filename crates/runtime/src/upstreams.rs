@@ -175,11 +175,88 @@ pub fn upsert(dir: &Path, mut p: Profile) -> Result<Value> {
 }
 pub fn remove(dir: &Path, id: &str) -> Result<()> {
     let mut s = load(dir)?;
-    if s.active.values().any(|v| v == id) {
-        bail!("Switch away from the active profile before deleting it");
+    if let Some(harness) = s
+        .active
+        .iter()
+        .find(|(_, v)| *v == id)
+        .map(|(h, _)| h.clone())
+    {
+        let baseline = s.backups.iter().find(|b| b.harness == harness && b.active.is_none())
+            .cloned().ok_or_else(|| anyhow!("No original configuration backup is available. Switch to another upstream before deleting this one."))?;
+        let mut rollback = baseline.clone();
+        for file in &mut rollback.files {
+            file.content = read(&file.path)?;
+        }
+        if let Err(error) = restore_files(&baseline) {
+            restore_files(&rollback)?;
+            return Err(error);
+        }
+        s.active.remove(&harness);
+        s.backups.retain(|b| b.harness != harness);
+        s.profiles.retain(|p| p.id != id);
+        if let Err(error) = save(dir, &s) {
+            restore_files(&rollback)?;
+            return Err(error);
+        }
+        return Ok(());
     }
     s.profiles.retain(|p| p.id != id);
     save(dir, &s)
+}
+pub fn active_profile(dir: &Path, harness: &str) -> Result<Option<Profile>> {
+    let s = load(dir)?;
+    Ok(s.active
+        .get(harness)
+        .and_then(|id| s.profiles.iter().find(|p| &p.id == id))
+        .cloned())
+}
+
+pub(crate) fn prepare_grok_models(
+    p: &Profile,
+    models: &[remote_codex_protocol::ModelOptionDto],
+) -> Result<()> {
+    prepare_grok_models_at(p, models, &home("grok"))
+}
+fn prepare_grok_models_at(
+    p: &Profile,
+    models: &[remote_codex_protocol::ModelOptionDto],
+    root: &Path,
+) -> Result<()> {
+    let path = root.join("config.toml");
+    let mut doc = toml_doc(&path)?;
+    // Keep the legacy alias resumable, but give it the actual model name.
+    if let Some(table) = doc.get_mut("model").and_then(|v| v.as_table_like_mut()) {
+        let owned = table
+            .iter()
+            .filter(|(key, _)| key.starts_with("remote-codex/"))
+            .map(|(key, _)| key.to_owned())
+            .collect::<Vec<_>>();
+        for key in owned {
+            table.remove(&key);
+        }
+    }
+    for model in std::iter::once(p.model.as_str()).chain(models.iter().map(|m| m.model.as_str())) {
+        let id = format!("remote-codex/{model}");
+        for (key, text) in [
+            ("name", model),
+            ("model", model),
+            ("base_url", p.base_url.as_str()),
+            ("api_key", p.api_key.as_str()),
+            ("api_backend", p.api_type.as_str()),
+        ] {
+            doc["model"][&id][key] = value(text);
+        }
+        doc["model"][&id]["context_window"] = value(p.context_window);
+    }
+    if doc
+        .get("model")
+        .and_then(|m| m.get("remote-codex"))
+        .is_some()
+    {
+        doc["model"]["remote-codex"]["name"] = value(&p.model);
+    }
+    doc["models"]["default"] = value(format!("remote-codex/{}", p.model));
+    private_write(&path, doc.to_string().as_bytes())
 }
 pub fn profile(dir: &Path, id: &str) -> Result<Profile> {
     load(dir)?
@@ -385,7 +462,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
             }
             doc["models"]["default"] = value("remote-codex");
             for (k, v) in [
-                ("name", &p.name),
+                ("name", &p.model),
                 ("model", &p.model),
                 ("base_url", &p.base_url),
                 ("api_key", &p.api_key),
@@ -749,6 +826,60 @@ pub fn parse_template(value: Value) -> Result<Template> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deleting_active_upstream_restores_original_config_and_keeps_other_profiles() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("grok");
+        let store = temp.path().join("profiles");
+        let original = "# original\n[ui]\ncolor = 'blue'\n";
+        private_write(&root.join("config.toml"), original.as_bytes()).unwrap();
+        let first = fixture("grok");
+        let second = fixture("grok");
+        for p in [&first, &second] {
+            upsert(&store, p.clone()).unwrap();
+            activate_at(&store, p, &root).unwrap();
+        }
+        remove(&store, &second.id).unwrap();
+        assert_eq!(read(&root.join("config.toml")).unwrap().unwrap(), original);
+        assert!(active_profile(&store, "grok").unwrap().is_none());
+        assert!(profile(&store, &first.id).is_ok());
+        assert!(profile(&store, &second.id).is_err());
+        assert!(load(&store).unwrap().backups.is_empty());
+    }
+
+    #[test]
+    fn grok_catalog_maps_every_model_to_the_same_upstream_without_overwriting_native_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        private_write(
+            &temp.path().join("config.toml"),
+            b"[model.personal]\nmodel='keep'\n[model.'remote-codex/obsolete']\nmodel='obsolete'\n",
+        )
+        .unwrap();
+        let p = fixture("grok");
+        let models = ["model-a", "model-b"].map(|id| remote_codex_protocol::ModelOptionDto {
+            id: id.into(),
+            model: id.into(),
+            display_name: id.into(),
+            description: String::new(),
+            is_default: false,
+            hidden: false,
+            supported_reasoning_efforts: vec![],
+            default_reasoning_effort: None,
+            selection_kind: Some("model".into()),
+            acp_agent: None,
+        });
+        prepare_grok_models_at(&p, &models, temp.path()).unwrap();
+        let doc = toml_doc(&temp.path().join("config.toml")).unwrap();
+        assert_eq!(doc["model"]["personal"]["model"].as_str(), Some("keep"));
+        assert!(doc["model"].get("remote-codex/obsolete").is_none());
+        for id in ["model-a", "model-b"] {
+            let configured = &doc["model"][&format!("remote-codex/{id}")];
+            assert_eq!(configured["model"].as_str(), Some(id));
+            assert_eq!(configured["name"].as_str(), Some(id));
+            assert_eq!(configured["base_url"].as_str(), Some(p.base_url.as_str()));
+            assert_eq!(configured["api_key"].as_str(), Some(p.api_key.as_str()));
+        }
+    }
     #[test]
     fn connection_accepts_null_error_but_rejects_errors_and_wrong_protocol() {
         let p = fixture("grok");

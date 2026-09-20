@@ -16,6 +16,7 @@ mod prompt;
 pub(crate) mod rpc;
 mod runtime;
 mod terminal;
+mod upstream_models;
 
 pub use adapter::{
     adapter_for, ClaudeAdapter, CodexAdapter, CursorAdapter, DeepSeekAdapter, GrokAdapter,

@@ -109,8 +109,12 @@ it('previews a template without mutation and applies only on the second action',
       ? { profiles: [], active: {}, backups: [] }
       : { harnesses: ['codex'], profiles: [] },
   );
-  render(<UpstreamManagement apiRoot="/api" />);
-  await screen.findByText(/Add an API provider/);
+  render(<UpstreamManagement apiRoot="/api" templatesOnly />);
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Import template' }),
+    ).toBeEnabled(),
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Import template' }));
   fireEvent.click(screen.getByRole('button', { name: 'Preview template' }));
   await screen.findByText('Install if missing: codex');
