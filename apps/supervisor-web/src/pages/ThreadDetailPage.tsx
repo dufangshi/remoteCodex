@@ -443,7 +443,10 @@ export function ThreadDetailPage() {
   const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [mutationBusy, setBusy] = useState(false);
+  const autoConnectionAttempt = useRef<{ key: string; promise: Promise<ThreadDetailDto> | null } | null>(null);
+  const [autoConnectingRoute, setAutoConnectingRoute] = useState<string | null>(null);
+  const busy = mutationBusy || autoConnectingRoute === routeKey;
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ turnId: string; itemId: string; key: number }>();
@@ -1406,6 +1409,33 @@ export function ThreadDetailPage() {
     },
     [applyDetailResponse, loadThreadDetail],
   );
+
+  useEffect(() => {
+    const current = detailRef.current;
+    if (!current || current.thread.id !== id || !relayThreadCanControl) return;
+    // One attempt per visit, including StrictMode effect replay. A failed
+    // connection remains retryable through the connection indicator.
+    if (autoConnectionAttempt.current?.key !== routeKey) {
+      const needsConnection = !current.thread.isLoaded || current.thread.status === 'recovering';
+      autoConnectionAttempt.current = {
+        key: routeKey,
+        promise: needsConnection ? runDetailMutation(() => {
+          if (activeRouteRef.current !== routeKey) return Promise.resolve(current);
+          return resumeThread(id, current.thread.model ? { model: current.thread.model } : {});
+        }) : null,
+      };
+    }
+    const pending = autoConnectionAttempt.current.promise;
+    if (!pending) return;
+    let cancelled = false;
+    setAutoConnectingRoute(routeKey);
+    void pending.catch((caught) => {
+      if (!cancelled) setError(caught instanceof Error ? caught.message : 'Unable to connect to this thread.');
+    }).finally(() => {
+      if (!cancelled) setAutoConnectingRoute(null);
+    });
+    return () => { cancelled = true; };
+  }, [routeKey, id, detail?.thread.id, relayThreadCanControl, runDetailMutation]);
 
   const syncRealtimeConnectionState = useCallback(() => {
     const socketState = supervisorSocketRef.current?.readyState ?? SOCKET_CLOSED;
@@ -3224,7 +3254,7 @@ export function ThreadDetailPage() {
   const threadLoaded = detail?.thread.isLoaded ?? false;
   const realtimeConnectionLabel = threadConnectionSummary(threadLoaded, realtimeConnection);
   const sessionConnectionIndicator = (
-    <DeviceEncryptionStatus deviceId={relayRouteDeviceId ?? undefined} connection={{
+    <DeviceEncryptionStatus hideHealthy deviceId={relayRouteDeviceId ?? undefined} connection={{
       loaded: threadLoaded && detail?.thread.status !== 'recovering',
       busy: busy || !detail,
       state: realtimeConnection.status,

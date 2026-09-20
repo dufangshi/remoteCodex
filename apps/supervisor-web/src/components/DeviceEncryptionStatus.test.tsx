@@ -18,6 +18,16 @@ function report(state: string, fingerprint?: string) {
 }
 
 describe('combined device connection indicator', () => {
+  it('hides the healthy thread indicator but retains identity-change warnings', () => {
+    render(<DeviceEncryptionStatus hideHealthy deviceId="device-1" connection={{
+      loaded: true, busy: false, state: 'connected', label: 'Connected', onConnect: vi.fn(),
+    }} />);
+    report('encrypted', 'verified-fingerprint');
+    expect(screen.queryByRole('button')).toBeNull();
+    report('identity-changed', 'replacement-fingerprint');
+    fireEvent.click(screen.getByRole('button', { name: /Device identity changed/ }));
+    expect(screen.getByRole('button', { name: 'Trust replacement identity…' })).toBeVisible();
+  });
   it('checks each online device without needing a previous thread visit', () => {
     vi.mocked(probeDeviceEncryption).mockClear();
     const { rerender } = render(<>
