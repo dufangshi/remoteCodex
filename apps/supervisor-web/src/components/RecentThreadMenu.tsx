@@ -6,6 +6,7 @@ import type { WorkbenchThread } from '@remote-codex/thread-ui';
 import { fetchRelayAccess, request } from '../lib/api';
 import { RenameDialog } from './RenameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
+import { threadsHref } from '../lib/relayRoutes';
 
 export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onNavigate, currentKey }: {
   thread: WorkbenchThread;
@@ -13,7 +14,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
   onRenamed: (key: string, title: string) => Promise<void>;
   onRemoved: (key: string) => Promise<void>;
   currentKey: string;
-  onNavigate: (href: string) => void;
+  onNavigate: (href: string, options?: { replace?: boolean }) => void;
 }) {
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
@@ -81,7 +82,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
       setBusy(true); setNotice('');
       try {
         await request(base, { method: 'DELETE' });
-        if (thread.key === currentKey) onNavigate(device === 'local' ? '/workspaces' : `/devices/${encodeURIComponent(device)}/workspaces`);
+        if (thread.key === currentKey) onNavigate(threadsHref(detail?.thread.workspaceId, device === 'local' ? null : device), { replace: true });
         await onRemoved(thread.key);
         setDeleting(false);
       } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not delete thread.'); }

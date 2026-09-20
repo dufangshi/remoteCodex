@@ -342,7 +342,7 @@ function AppShell({
           className={`mx-auto w-full ${
             isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
           } ${
-            isThreadDetailRoute
+            isThreadWorkspaceRoute
               ? 'absolute inset-0 pb-0'
               : isViewportLockedRoute || isSettingsRoute
               ? 'absolute inset-0 pb-0 sm:pb-4'
@@ -351,11 +351,7 @@ function AppShell({
             isSettingsRoute
               ? 'pt-0'
               : isThreadWorkspaceRoute
-                ? isThreadDetailRoute
-                  ? 'pt-0'
-                  : isThreadsRoute
-                    ? 'pt-[env(safe-area-inset-top)] sm:pt-0'
-                    : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
+                ? 'pt-0'
                 : isWorkspacesRoute
                   ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                   : 'pt-4'
