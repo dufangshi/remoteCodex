@@ -8,6 +8,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use toml_edit::{value, DocumentMut};
+mod discovery;
+pub use discovery::{discover_models, discovery_profile, DiscoveryInput};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -520,8 +522,15 @@ pub async fn test_connection(p: &Profile) -> Result<Value> {
             json!({"model":p.model,"input":"Reply OK","max_output_tokens":16}),
         ),
     };
-    let mut request = client.post(url).json(&body);
-    request = match p.harness.as_str() {
+    let request = authenticated(p, client.post(url).json(&body));
+    let start = std::time::Instant::now();
+    let body = response_json(request).await?;
+    validate_model_response(p, &body)?;
+    Ok(json!({"ok":true,"latencyMs":start.elapsed().as_millis(),"model":p.model}))
+}
+
+fn authenticated(p: &Profile, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    match p.harness.as_str() {
         "claude" if p.auth_type == "bearer" => request
             .bearer_auth(&p.api_key)
             .header("anthropic-version", "2023-06-01"),
@@ -530,8 +539,10 @@ pub async fn test_connection(p: &Profile) -> Result<Value> {
             .header("anthropic-version", "2023-06-01"),
         "gemini" => request.header("x-goog-api-key", &p.api_key),
         _ => request.bearer_auth(&p.api_key),
-    };
-    let start = std::time::Instant::now();
+    }
+}
+
+async fn response_json(request: reqwest::RequestBuilder) -> Result<Value> {
     let mut response = request.send().await.map_err(|_| {
         anyhow!("Connection failed or timed out. Check the URL and device network.")
     })?;
@@ -556,16 +567,31 @@ pub async fn test_connection(p: &Profile) -> Result<Value> {
     }
     let body: Value = serde_json::from_slice(&bytes)
         .map_err(|_| anyhow!("Upstream did not return a JSON model response"))?;
+    if body.get("error").is_some_and(|v| !v.is_null()) {
+        bail!("Upstream returned an API error. Check credentials, model and API compatibility.");
+    }
+    Ok(body)
+}
+
+fn validate_model_response(p: &Profile, body: &Value) -> Result<()> {
     let expected = match p.harness.as_str() {
         "claude" => "content",
         "gemini" => "candidates",
         _ if p.api_type == "chat_completions" => "choices",
         _ => "output",
     };
-    if body.get("error").is_some() || !body.get(expected).is_some_and(Value::is_array) {
+    if body.get("error").is_some_and(|v| !v.is_null())
+        || matches!(
+            body.get("status").and_then(Value::as_str),
+            Some("failed" | "cancelled")
+        )
+    {
+        bail!("Upstream returned an API error. Check credentials, model and API compatibility.");
+    }
+    if !body.get(expected).is_some_and(Value::is_array) {
         bail!("Upstream response does not match the selected API format");
     }
-    Ok(json!({"ok":true,"latencyMs":start.elapsed().as_millis(),"model":p.model}))
+    Ok(())
 }
 
 pub fn import_config(harness: &str, name: &str, text: &str, key: &str) -> Result<Profile> {
@@ -723,7 +749,24 @@ pub fn parse_template(value: Value) -> Result<Template> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture(harness: &str) -> Profile {
+    #[test]
+    fn connection_accepts_null_error_but_rejects_errors_and_wrong_protocol() {
+        let p = fixture("grok");
+        assert!(validate_model_response(
+            &p,
+            &json!({"status":"completed","error":null,"output":[]})
+        )
+        .is_ok());
+        for body in [
+            json!({"output":[],"error":{"message":"failed"}}),
+            json!({"output":[],"status":"failed"}),
+            json!({"output":[],"status":"cancelled"}),
+            json!({"choices":[]}),
+        ] {
+            assert!(validate_model_response(&p, &body).is_err());
+        }
+    }
+    pub(super) fn fixture(harness: &str) -> Profile {
         Profile {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Test".into(),

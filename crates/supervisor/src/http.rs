@@ -80,6 +80,10 @@ pub fn router(state: AppState) -> Router {
             post(crate::upstreams::import_config),
         )
         .route(
+            "/api/management/upstreams/models",
+            post(crate::upstreams::models),
+        )
+        .route(
             "/api/management/templates",
             post(crate::upstreams::template),
         )

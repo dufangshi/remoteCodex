@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { request } from '../lib/api';
 import { FormDialog } from './FormDialog';
+import { UpstreamModelPicker } from './UpstreamModelPicker';
 
 type Profile = {
   id: string;
@@ -468,7 +469,7 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
                 className={field}
                 value={editor.harness}
                 onChange={(e) =>
-                  setEditor({ ...editor, harness: e.target.value })
+                  setEditor({ ...editor, harness: e.target.value, model: '' })
                 }
               >
                 {Object.entries(labels).map(([id, label]) => (
@@ -487,7 +488,7 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
                 placeholder="https://api.example.com/v1"
                 value={editor.baseUrl}
                 onChange={(e) =>
-                  setEditor({ ...editor, baseUrl: e.target.value })
+                  setEditor({ ...editor, baseUrl: e.target.value, model: '' })
                 }
               />
             </label>
@@ -505,21 +506,24 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
                 required={!editor.id || !editor.hasApiKey}
                 value={editor.apiKey}
                 onChange={(e) =>
-                  setEditor({ ...editor, apiKey: e.target.value })
+                  setEditor({ ...editor, apiKey: e.target.value, model: '' })
                 }
               />
             </label>
-            <label className="block text-sm">
-              Model
-              <input
-                className={field}
-                required
-                value={editor.model}
-                onChange={(e) =>
-                  setEditor({ ...editor, model: e.target.value })
-                }
-              />
-            </label>
+            <UpstreamModelPicker
+              key={JSON.stringify([
+                apiRoot,
+                editor.id,
+                editor.harness,
+                editor.baseUrl,
+                editor.apiKey,
+                editor.authType,
+              ])}
+              apiRoot={apiRoot}
+              connection={editor}
+              value={editor.model}
+              onChange={(model) => setEditor({ ...editor, model })}
+            />
             {editor.harness === 'claude' && (
               <label className="block text-sm">
                 Authentication
@@ -527,7 +531,11 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
                   className={field}
                   value={editor.authType ?? 'api_key'}
                   onChange={(e) =>
-                    setEditor({ ...editor, authType: e.target.value })
+                    setEditor({
+                      ...editor,
+                      authType: e.target.value,
+                      model: '',
+                    })
                   }
                 >
                   <option value="api_key">API key (x-api-key)</option>
@@ -577,7 +585,7 @@ export function UpstreamManagement({ apiRoot }: { apiRoot: string }) {
             )}
             <button
               className="relay-button-primary min-h-10"
-              disabled={busy}
+              disabled={busy || !editor.model}
               type="submit"
             >
               {busy ? 'Saving…' : 'Save upstream'}
