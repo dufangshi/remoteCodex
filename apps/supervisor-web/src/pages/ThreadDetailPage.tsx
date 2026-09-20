@@ -2996,11 +2996,7 @@ export function ThreadDetailPage() {
       const deletedCurrentThread = deletingThread.id === detail?.thread.id;
       setDeletingThread(null);
       if (deletedCurrentThread) {
-        const nextThread = threads.find((thread) =>
-          thread.id !== deletingThread.id &&
-          thread.workspaceId === detail?.thread.workspaceId
-        ) ?? threads.find((thread) => thread.id !== deletingThread.id);
-        navigate(nextThread ? currentThreadHref(nextThread.id) : currentThreadsHref());
+        navigate(currentThreadsHref(deletingThread.workspaceId), { replace: true });
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete thread.');

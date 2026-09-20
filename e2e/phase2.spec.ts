@@ -32,13 +32,13 @@ test.describe('Phase 2 acceptance', () => {
 
     await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
     await expect(
-      page.getByRole('heading', { level: 1, name: workspaceName }),
+      page.getByRole('heading', { level: 1, name: `Start a thread in ${workspaceName}` }),
     ).toBeVisible();
     await expect(
-      page.getByText('No threads available in this workspace.'),
+      page.locator('.matter-workbench'),
     ).toBeVisible();
 
-    await page.getByRole('link', { name: 'New thread', exact: true }).click();
+    await page.getByRole('link', { name: 'Create thread', exact: true }).click();
     await page.getByLabel('Title').fill(`${workspaceName} thread`);
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
