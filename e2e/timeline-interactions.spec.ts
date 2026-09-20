@@ -16,6 +16,37 @@ async function createThread(request: APIRequestContext) {
   return value.id ?? value.thread.id as string;
 }
 
+test('workspace tabs include unvisited threads, keep their order and truncate long titles', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const titles = Array.from({ length: 13 }, (_, i) => `Workspace thread ${i + 1} with a deliberately long descriptive title`);
+  const ids = [id];
+  for (const title of titles) {
+    const response = await request.post(`${base}/api/threads/start`, { data: { workspaceId: detail.thread.workspaceId, title, provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } });
+    expect(response.ok()).toBeTruthy();
+    const value = await response.json();
+    ids.push(value.id ?? value.thread.id);
+  }
+  const outside = await createThread(request);
+  await page.goto(`/threads/${outside}`);
+  await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+  await page.goto(`/threads/${id}`);
+  const tabs = page.getByRole('navigation', { name: 'Workspace threads', exact: true });
+  await expect(tabs.locator('a')).toHaveCount(14);
+  await expect(tabs.locator(`a[href="/threads/${outside}"]`)).toHaveCount(0);
+  const order = await tabs.locator('a').evaluateAll(elements => elements.map(e => e.getAttribute('href')));
+  const last = tabs.locator('a').last();
+  await last.click();
+  await expect(last).toHaveAttribute('aria-current', 'page');
+  expect(await tabs.locator('a').evaluateAll(elements => elements.map(e => e.getAttribute('href')))).toEqual(order);
+  expect(await last.evaluate(e => e.getBoundingClientRect().width)).toBeLessThanOrEqual(testInfo.project.name === 'mobile-chromium' ? 140 : 180);
+  expect(await last.locator('span').last().evaluate(e => ({ ellipsis: getComputedStyle(e).textOverflow, clipped: e.scrollWidth > e.clientWidth }))).toEqual({ ellipsis: 'ellipsis', clipped: true });
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.screenshot({ path: testInfo.outputPath(`workspace-tabs-${colorScheme}.png`) });
+  }
+});
+
 test('turn navigation changes direction reliably and tool details load only on click', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const db = new DatabaseSync(path.resolve(process.env.E2E_DATABASE_URL!));
@@ -47,12 +78,28 @@ test('turn navigation changes direction reliably and tool details load only on c
   page.on('request', request => { if (request.url().includes(`/api/threads/${id}/items/`)) detailRequests.push(request.url()); });
   await page.goto(`/threads/${id}`);
   await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+  await expect(page.locator('.matter-breadcrumb')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Thread tools', exact: true }).click();
+  await expect(page.locator('.matter-breadcrumb')).toBeVisible();
+  await page.getByRole('button', { name: 'Thread tools', exact: true }).click();
+  await expect(page.locator('.matter-breadcrumb')).toHaveCount(0);
   if (testInfo.project.name === 'mobile-chromium') {
     await expect(page.locator('.matter-rail')).toHaveCount(0);
     await expect(page.locator('.matter-topbar').getByRole('button', { name: 'Chat', exact: true })).toBeVisible();
     await expect(page.locator('.matter-topbar').getByRole('button', { name: 'Open settings', exact: true })).toBeVisible();
     expect(await page.locator('.matter-main').evaluate(e => e.getBoundingClientRect().left)).toBeLessThan(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const jump = page.getByRole('group', { name: 'Timeline navigation' });
+    await expect(jump).toBeVisible();
+    const compact = await jump.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const composer = document.querySelector('.thread-graph-composer-shell')!.getBoundingClientRect();
+      return { height: rect.height, width: rect.width, gap: composer.top - rect.bottom };
+    });
+    expect(compact.height).toBeCloseTo(18, 0);
+    expect(compact.width).toBeLessThanOrEqual(80);
+    expect(compact.gap).toBeGreaterThanOrEqual(0);
+    expect(compact.gap).toBeLessThanOrEqual(2);
   } else {
     await expect(page.locator('.matter-rail')).toBeVisible();
   }

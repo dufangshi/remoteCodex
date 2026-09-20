@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { nativeAppBridge } from '../lib/nativeApp';
 import {
   currentPushSubscription,
   disablePush,
@@ -15,11 +16,12 @@ export function RelayNotifications() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const supported = pushSupported();
+  const native = nativeAppBridge();
   async function refresh() {
     try {
       const next = await loadPushSettings();
       setSettings(next);
-      const sub = supported ? await currentPushSubscription() : null;
+      const sub = supported && !native ? await currentPushSubscription() : null;
       setEnabled(
         !!sub &&
           Notification.permission === 'granted' &&
@@ -53,6 +55,20 @@ export function RelayNotifications() {
       setBusy(false);
     });
   }
+  if (native) return (
+    <section className="grid gap-4 py-6">
+      <h2 className="text-base font-semibold">Thread notifications</h2>
+      <p className="text-sm text-[var(--theme-fg-muted)]">Tap a system notification to open its device and thread.</p>
+      <p className="text-sm">{native.platform === 'ios'
+        ? settings?.nativePushAvailable ? 'Background push is available on this relay. Allow notifications in iOS Settings.' : 'This relay has not configured Apple Push Notifications. Updates are available while the app is active; background delivery is not guaranteed.'
+        : 'Allow notifications and keep the monitoring service running. Android battery restrictions and background service limits can pause monitoring.'}</p>
+      <div className="flex flex-wrap gap-3">
+        <button className="relay-button-primary min-h-11" onClick={() => native.notificationSettings()}>Open notification settings</button>
+        <button className="relay-button-secondary min-h-11" onClick={() => native.changeRelay()}>Change relay</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
   return (
     <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
       <header>

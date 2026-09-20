@@ -5,6 +5,7 @@ export interface PushSettings {
   publicKey: string;
   subscriptionIds: string[];
   scope: string;
+  nativePushAvailable?: boolean;
 }
 export const loadPushSettings = () =>
   request<PushSettings>('/relay/account/notifications');

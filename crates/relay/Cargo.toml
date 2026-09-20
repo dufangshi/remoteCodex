@@ -13,7 +13,7 @@ futures-util.workspace = true
 hex = { workspace = true }
 hmac = "0.12"
 rand.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["http2"] }
 remote-codex-protocol.workspace = true
 rusqlite = { workspace = true, features = ["backup"] }
 scrypt = "0.11"

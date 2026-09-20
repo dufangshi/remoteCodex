@@ -291,6 +291,19 @@ export function useWorkbenchNavigation(
   return {
     navigationReady,
     threads: items,
+    workspaceThreads: threads
+      .filter(thread => thread.workspaceId === detail?.thread.workspaceId)
+      .slice()
+      .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id))
+      .map(thread => {
+        const key = `${deviceId ?? 'local'}:${thread.id}`;
+        const reference = snapshot.threads.find(r => referenceKey(r) === key);
+        return {
+          key, title: thread.title, subtitle: detail?.workspace.label ?? '',
+          href: threadHref(thread.id, deviceId), favorite: reference?.favorite ?? false,
+          status: workbenchThreadStatus(thread.id === detail?.thread.id ? detail.thread : thread, reference?.readCompletedAt),
+        };
+      }),
     currentKey,
     favorite,
     favoriteBusy: busy,

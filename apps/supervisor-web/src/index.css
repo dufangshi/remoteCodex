@@ -1,5 +1,13 @@
 @import "tailwindcss";
 @import "./matter-theme.css";
+.device-presence-dot { display: inline-block; width: 10px; height: 10px; flex-shrink: 0; border-radius: 50%; }
+.device-presence-dot.is-online { background: oklch(0.48 0.13 155); box-shadow: 0 0 0 3px oklch(0.48 0.13 155 / 14%); }
+.device-presence-dot.is-offline { border: 2px solid var(--theme-fg-muted); background: transparent; }
+.device-presence-label { flex-shrink: 0; border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 600; }
+.device-presence-label.is-online { color: oklch(0.36 0.1 155); background: oklch(0.85 0.07 155); }
+.device-presence-label.is-offline { color: var(--theme-fg-muted); background: var(--theme-muted); }
+:root[data-theme-effective='dark'] .device-presence-dot.is-online { background: oklch(0.78 0.18 155); box-shadow: 0 0 0 3px oklch(0.78 0.18 155 / 16%); }
+:root[data-theme-effective='dark'] .device-presence-label.is-online { color: oklch(0.85 0.13 155); background: oklch(0.3 0.055 155); }
 @font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('/fonts/dm-sans-latin.woff2') format('woff2'); }
 
 .workbench-search { width: min(640px, calc(100vw - 32px)); max-height: min(700px, 85dvh); margin: auto; padding: 20px; border: 1px solid var(--theme-border); border-radius: 16px; background: var(--theme-panel); color: var(--theme-fg); box-shadow: 0 24px 80px rgb(0 0 0 / 18%); }
