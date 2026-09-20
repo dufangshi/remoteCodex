@@ -55,6 +55,7 @@ export function useWorkbenchNavigation(
   detail: ThreadDetailDto | null,
   threads: ThreadDto[],
   deviceId: string | null,
+  routeThreadId?: string,
 ) {
   const relay = relayModeActive();
   const [snapshot, setSnapshot] = useState<NavigationSnapshot>({
@@ -69,17 +70,18 @@ export function useWorkbenchNavigation(
   const [notificationDetails, setNotificationDetails] = useState<Record<string, { title: string; summary: string }>>({});
   const [notificationsOpened, setNotificationsOpened] = useState(0);
   const revision = useRef(0);
-  const currentKey = `${deviceId ?? 'local'}:${detail?.thread.id ?? ''}`;
-  const current = useRef(detail);
-  current.current = detail;
+  const currentKey = `${deviceId ?? 'local'}:${routeThreadId ?? detail?.thread.id ?? ''}`;
+  const current = useRef({ detail, deviceId });
+  current.current = { detail, deviceId };
+  const navigationContext = useRef({ detail, threads, deviceId });
+  if (detail) navigationContext.current = { detail, threads, deviceId };
+  const tabContext = detail ? { detail, threads, deviceId } : navigationContext.current;
   const threadId = detail?.thread.id;
 
   useEffect(() => {
     let alive = true;
     let inFlight = false;
     const controller = new AbortController();
-    setSnapshot({ threads: [], notifications: [] });
-    setNavigationReady(false);
     async function refresh() {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
@@ -95,7 +97,8 @@ export function useWorkbenchNavigation(
         setError(null);
         if (relay) {
           // Explicit device + thread paths: never switch the browser's selected device to poll.
-          const pending = next.threads.filter((r) => r.deviceId !== deviceId);
+          const pending = [...next.threads];
+          const missing: ThreadReference[] = [];
           const updates: Record<string, ThreadActivity> = {};
           await Promise.all(
             Array.from({ length: Math.min(6, pending.length) }, async () => {
@@ -112,13 +115,26 @@ export function useWorkbenchNavigation(
                     },
                   );
                   updates[referenceKey(r)] = value.thread;
-                } catch {
+                } catch (error) {
+                  if (error instanceof ApiError && error.statusCode === 404 && /thread.*not found/i.test(error.message)) missing.push(r);
                   updates[referenceKey(r)] = { status: 'unknown' };
                 }
               }
             }),
           );
-          if (alive) setStatuses(updates);
+          if (alive) {
+            setStatuses(updates);
+            // Only a definitive response from the addressed device can remove
+            // stale navigation. Offline, timeouts and access errors preserve it.
+            for (const r of missing) {
+              if (!alive) break;
+              await request('/relay/account/workbench', { method: 'DELETE', body: JSON.stringify({ deviceId: r.deviceId, threadId: r.threadId }), signal: controller.signal });
+              if (alive) {
+                ++revision.current;
+                setSnapshot(previous => ({ ...previous, threads: previous.threads.filter(t => referenceKey(t) !== referenceKey(r)) }));
+              }
+            }
+          }
         }
       } catch (e) {
         if (alive)
@@ -147,7 +163,7 @@ export function useWorkbenchNavigation(
 
   const save = useCallback(
     async (favorite?: boolean, markRead = false, target?: ThreadReference) => {
-      const value = current.current;
+      const value = current.current.deviceId === deviceId ? current.current.detail : null;
       if (!value && !target) return;
       const writeRevision = ++revision.current;
       const reference = {
@@ -190,7 +206,7 @@ export function useWorkbenchNavigation(
     [deviceId, relay],
   );
   useEffect(() => {
-    if (!threadId) return;
+    if (!threadId || (routeThreadId && routeThreadId !== threadId)) return;
     const visit = () => {
       if (document.visibilityState === 'hidden' || !document.hasFocus()) return;
       void save(undefined, true).catch((e) =>
@@ -206,7 +222,7 @@ export function useWorkbenchNavigation(
       window.removeEventListener('focus', visit);
       document.removeEventListener('visibilitychange', visit);
     };
-  }, [threadId, detail?.thread.title, detail?.thread.lastTurnCompletedAt, save]);
+  }, [threadId, routeThreadId, detail?.thread.title, detail?.thread.lastTurnCompletedAt, save]);
 
   const favorite =
     snapshot.threads.find((t) => referenceKey(t) === currentKey)?.favorite ??
@@ -291,17 +307,18 @@ export function useWorkbenchNavigation(
   return {
     navigationReady,
     threads: items,
-    workspaceThreads: threads
-      .filter(thread => thread.workspaceId === detail?.thread.workspaceId)
+    workspacePath: tabContext.detail?.workspace.absPath ?? '',
+    workspaceThreads: tabContext.threads
+      .filter(thread => thread.workspaceId === tabContext.detail?.thread.workspaceId)
       .slice()
       .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id))
       .map(thread => {
-        const key = `${deviceId ?? 'local'}:${thread.id}`;
+        const key = `${tabContext.deviceId ?? 'local'}:${thread.id}`;
         const reference = snapshot.threads.find(r => referenceKey(r) === key);
         return {
-          key, title: thread.title, subtitle: detail?.workspace.label ?? '',
-          href: threadHref(thread.id, deviceId), favorite: reference?.favorite ?? false,
-          status: workbenchThreadStatus(thread.id === detail?.thread.id ? detail.thread : thread, reference?.readCompletedAt),
+          key, title: thread.title, subtitle: tabContext.detail?.workspace.label ?? '',
+          href: threadHref(thread.id, tabContext.deviceId), favorite: reference?.favorite ?? false,
+          status: workbenchThreadStatus(thread.id === tabContext.detail?.thread.id ? tabContext.detail.thread : thread, reference?.readCompletedAt),
         };
       }),
     currentKey,

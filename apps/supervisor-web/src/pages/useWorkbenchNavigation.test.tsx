@@ -2,15 +2,64 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ThreadDetailDto } from '@remote-codex/shared';
 import { useWorkbenchNavigation, workbenchThreadStatus } from './useWorkbenchNavigation';
-import { request } from '../lib/api';
+import { ApiError, request } from '../lib/api';
+import { useScopedState } from './useScopedState';
 
 vi.mock('../lib/api', () => ({
   request: vi.fn(),
   relayModeActive: () => true,
-  ApiError: class extends Error {},
+  ApiError: class extends Error { constructor(public statusCode: number, public payload: { message: string }) { super(payload.message); } },
 }));
 
 describe('account thread navigation', () => {
+  it('retains account navigation during device switches without recording the previous device transcript', async () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const refs = ['mac', 'wsl'].map(deviceId => ({ deviceId, threadId: `${deviceId}-thread`, title: deviceId, workspaceLabel: 'App', favorite: false, visitedAt: '' }));
+    const writes: { deviceId: string; threadId: string }[] = [];
+    vi.mocked(request).mockImplementation(async (url, init) => {
+      if (url === '/relay/account/workbench') {
+        if (init?.method === 'POST') writes.push(JSON.parse(String(init.body)));
+        return { threads: refs, notifications: [] };
+      }
+      return { thread: { status: 'idle' } };
+    });
+    const mac = { thread: { id: 'mac-thread', workspaceId: 'app', title: 'Mac', status: 'idle' }, workspace: { label: 'App', absPath: '/mac/app' } } as ThreadDetailDto;
+    const { result, rerender, unmount } = renderHook(({ device }) => {
+      const [detail, setDetail] = useScopedState<ThreadDetailDto | null>(device, null);
+      return { setDetail, nav: useWorkbenchNavigation(detail, detail ? [detail.thread] : [], device, `${device}-thread`) };
+    }, { initialProps: { device: 'mac' } });
+    act(() => result.current.setDetail(mac));
+    await waitFor(() => expect(writes).toContainEqual(expect.objectContaining({ deviceId: 'mac', threadId: 'mac-thread' })));
+    const oldSetter = result.current.setDetail;
+    rerender({ device: 'wsl' });
+    expect(result.current.nav.threads).toHaveLength(2);
+    expect(result.current.nav.navigationReady).toBe(true);
+    expect(result.current.nav.workspaceThreads[0]?.href).toBe('/devices/mac/threads/mac-thread');
+    act(() => window.dispatchEvent(new Event('focus')));
+    act(() => oldSetter(mac));
+    expect(writes.some(w => w.deviceId === 'wsl' && w.threadId === 'mac-thread')).toBe(false);
+    act(() => result.current.setDetail({ ...mac, thread: { ...mac.thread, id: 'wsl-thread', title: 'WSL' } }));
+    await waitFor(() => expect(writes).toContainEqual(expect.objectContaining({ deviceId: 'wsl', threadId: 'wsl-thread' })));
+    expect(result.current.nav.workspaceThreads[0]?.key).toBe('wsl:wsl-thread');
+    unmount(); focus.mockRestore();
+  });
+  it('removes only confirmed missing thread references, retaining offline and denied devices', async () => {
+    const refs = ['missing', 'offline', 'denied'].map(deviceId => ({ deviceId, threadId: 'old-thread', title: deviceId }));
+    const deletes: unknown[] = [];
+    vi.mocked(request).mockImplementation(async (url, init) => {
+      if (url === '/relay/account/workbench') {
+        if (init?.method === 'DELETE') deletes.push(JSON.parse(String(init.body)));
+        return { threads: refs, notifications: [] };
+      }
+      if (String(url).includes('/missing/')) throw new ApiError(404, { code: 'not_found', message: 'Thread not found' });
+      if (String(url).includes('/offline/')) throw new ApiError(503, { code: 'unavailable', message: 'Device offline' } as never);
+      throw new ApiError(404, { code: 'not_found', message: 'Device not found' });
+    });
+    const { result, unmount } = renderHook(() => useWorkbenchNavigation(null, [], 'missing'));
+    await waitFor(() => expect(deletes).toEqual([{ deviceId: 'missing', threadId: 'old-thread' }]));
+    await waitFor(() => expect(result.current.threads.map(t => t.key)).toEqual(['offline:old-thread', 'denied:old-thread']));
+    unmount();
+  });
   it('uses every current-workspace thread for tabs, independently of account recents and active tab', async () => {
     vi.mocked(request).mockResolvedValue({ threads: [{ deviceId: 'wsl', threadId: 'elsewhere', title: 'Recent elsewhere', favorite: false }], notifications: [] });
     const detail = { thread: { id: 'second', workspaceId: 'app', title: 'Second', status: 'running', createdAt: '2026-09-02' }, workspace: { label: 'App' } } as ThreadDetailDto;

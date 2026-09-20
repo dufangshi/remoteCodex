@@ -1,6 +1,7 @@
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
+import { useScopedState } from './useScopedState';
 import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
@@ -377,6 +378,10 @@ export function ThreadDetailPage() {
   const activeThreadIdRef = useRef(id);
   activeThreadIdRef.current = id;
   const location = useLocation();
+  const relayRouteDeviceId = relayDeviceIdFromPath(location.pathname);
+  const routeKey = `${relayRouteDeviceId ?? 'local'}:${id}`;
+  const activeRouteRef = useRef(routeKey);
+  activeRouteRef.current = routeKey;
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
@@ -405,8 +410,9 @@ export function ThreadDetailPage() {
   const interruptingRef = useRef(false);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
-  const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
-  const [threads, setThreads] = useState<ThreadDto[]>([]);
+  const [detail, setDetail] = useScopedState<ThreadDetailDto | null>(routeKey, null);
+  const [threads, setThreads] = useScopedState<ThreadDto[]>(relayRouteDeviceId ?? 'local', []);
+  detailRef.current = detail;
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
   const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
   const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
@@ -598,8 +604,7 @@ export function ThreadDetailPage() {
     access: null,
     error: null,
   });
-  const relayRouteDeviceId = relayDeviceIdFromPath(location.pathname);
-  const workbenchNavigation = useWorkbenchNavigation(detail, threads, relayRouteDeviceId);
+  const workbenchNavigation = useWorkbenchNavigation(detail, threads, relayRouteDeviceId, id);
   const relayDeviceRouteActive =
     relayModeActive() && Boolean(relayRouteDeviceId);
   const relayAccess = relayAccessState.access;
@@ -929,6 +934,7 @@ export function ThreadDetailPage() {
 
   const applyDetailResponse = useCallback(
     (detailResponse: ThreadDetailDto) => {
+      if (activeRouteRef.current !== routeKey || detailResponse.thread.id !== id) return;
       const pendingThreadSettings = pendingThreadSettingsRef.current;
       const nextDetail =
         pendingThreadSettings && Object.keys(pendingThreadSettings).length > 0
@@ -1147,7 +1153,7 @@ export function ThreadDetailPage() {
         setLiveItems(null);
       }
     },
-    [clearBufferedLiveOutput],
+    [clearBufferedLiveOutput, routeKey, id, setDetail, setThreads],
   );
 
   useEffect(() => {
@@ -1295,7 +1301,7 @@ export function ThreadDetailPage() {
         }
       }
     },
-    [],
+    [relayRouteDeviceId, setThreads],
   );
 
   const loadThreadDetail = useCallback(
@@ -1328,7 +1334,7 @@ export function ThreadDetailPage() {
         const detailResponse = await fetchThreadDetail(id, {
           limit,
         });
-        if (loadRequestIdRef.current !== requestId) {
+        if (loadRequestIdRef.current !== requestId || activeRouteRef.current !== routeKey) {
           return;
         }
 
@@ -1351,7 +1357,7 @@ export function ThreadDetailPage() {
         }
       }
     },
-    [applyDetailResponse, id, loadPageContext],
+    [applyDetailResponse, id, loadPageContext, routeKey],
   );
 
   useEffect(() => {
@@ -1454,6 +1460,7 @@ export function ThreadDetailPage() {
   useEffect(() => {
     loadRequestIdRef.current += 1;
     pageContextRequestIdRef.current += 1;
+    pageContextProviderRef.current = null;
     setDetail(null);
     setError(null);
     setLoading(true);
@@ -3593,7 +3600,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, workspacePath: detail?.workspace.absPath ?? '', activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}
