@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-const {values:opts}=parseArgs({options:{binary:{type:'string'},directory:{type:'string'},npm:{type:'string'}}});
+const {values:opts}=parseArgs({options:{binary:{type:'string'},directory:{type:'string'},npm:{type:'string'},tmux:{type:'boolean',default:false}}});
 assert(process.platform==='linux' && opts.binary && opts.directory && opts.npm, 'Run in Treer with --binary, --directory, --npm');
 const directory=fs.mkdtempSync(path.join(path.resolve(opts.directory),'relay-restart-'));
 const binary=path.resolve(opts.binary);
@@ -30,6 +30,7 @@ const relayFd=fs.openSync(path.join(directory,'relay.log'),'a');
 const relay=spawn(binary,['relay'],{cwd:directory,env:{...clean,HOST:'127.0.0.1',PORT:String(relayPort),REMOTE_CODEX_ADMIN_USERNAME:'admin',REMOTE_CODEX_ADMIN_PASSWORD:password,REMOTE_CODEX_SESSION_SECRET:secret,REMOTE_CODEX_RELAY_DATA_DIR:path.join(directory,'relay'),REMOTE_CODEX_RELAY_REGISTRATION_ENABLED:'true',REMOTE_CODEX_RELAY_SESSION_SECRET:secret},stdio:['ignore',relayFd,relayFd]});
 fs.closeSync(relayFd);
 let token,initialLauncher,ownedPid;
+const tmuxSession = `rcd-update-test-${crypto.randomUUID()}`;
 async function api(route,body){const res=await fetch(relayBase+route,{method:body?'POST':'GET',headers:{'content-type':'application/json',origin:relayBase,...(token?{authorization:`Bearer ${token}`}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(7000)});assert(res.ok,`${route}: HTTP ${res.status}`);return res.json();}
 try {
  await until(()=>api('/healthz'));
@@ -41,13 +42,16 @@ try {
  const hook=path.join(directory,'offline.mjs');
  fs.writeFileSync(hook,"const original=globalThis.fetch;globalThis.fetch=(url,opts)=>{if(!String(url).startsWith('http://127.0.0.1:'))throw Error('Unexpected registry access');return original(url,opts)}");
  const fd=fs.openSync(path.join(directory,'initial-launch.log'),'a');
- initialLauncher=spawn(process.execPath,[launcher,'relay-supervisor','start'],{cwd:directory,env:{...clean,NODE_OPTIONS:`--import=${hook}`,REMOTE_CODEX_NATIVE_BINARY:binary,REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG:cfg,REMOTE_CODEX_RELAY_SUPERVISOR_TMUX:'0',REMOTE_CODEX_RELAY_SUPERVISOR_LOG:''},stdio:['ignore',fd,fd]});
+ initialLauncher=spawn(process.execPath,[launcher,'relay-supervisor','start'],{cwd:directory,env:{...clean,NODE_OPTIONS:`--import=${hook}`,REMOTE_CODEX_NATIVE_BINARY:binary,REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG:cfg,REMOTE_CODEX_RELAY_SUPERVISOR_TMUX:opts.tmux?'1':'0',REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION:tmuxSession,REMOTE_CODEX_RELAY_SUPERVISOR_LOG:path.join(directory,'supervisor.log')},stdio:['ignore',fd,fd]});
  fs.closeSync(fd);
  const prefix=`/relay/devices/${device.device.id}`;
  console.log(JSON.stringify({phase:'waiting for device',directory}));
  const before=await until(async()=>{const h=await api(prefix+'/healthz');return h.relayConnected?h:false;});ownedPid=before.processId;
  const pids=[ownedPid];
  for(let attempt=0;attempt<2;attempt++){
+  // Keep the old pane after native exit to deterministically reproduce the
+  // lingering-session failure instead of relying on a scheduling race.
+  if(opts.tmux) assert.equal(spawnSync('tmux',['set-option','-t',tmuxSession,'remain-on-exit','on']).status,0);
   const accepted=await api(prefix+'/api/management/supervisor/restart',{});
   assert.equal(accepted.job.action,'restart');
   console.log(JSON.stringify({phase:'restart accepted',attempt:attempt+1}));
@@ -58,9 +62,10 @@ try {
   assert.equal((await api(prefix+'/presence')).connected,true);
  }
  assert.equal(new Set(pids).size,3);
- const result={ok:true,directory,version,pids,relayConnected:true,completedRestarts:2,emptyLogOverride:true};
+ const result={ok:true,directory,version,pids,relayConnected:true,completedRestarts:2,tmuxHandover:opts.tmux};
  fs.writeFileSync(path.join(directory,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } finally {
  if(ownedPid){try{process.kill(ownedPid,'SIGTERM')}catch{}}
  initialLauncher?.kill('SIGTERM');relay.kill('SIGTERM');
+ if(opts.tmux) spawnSync('tmux',['kill-session','-t',tmuxSession],{stdio:'ignore'});
 }

@@ -146,18 +146,18 @@ export function useWorkbenchNavigation(
   }, [relay, deviceId]);
 
   const save = useCallback(
-    async (favorite?: boolean, markRead = false) => {
+    async (favorite?: boolean, markRead = false, target?: ThreadReference) => {
       const value = current.current;
-      if (!value) return;
+      if (!value && !target) return;
       const writeRevision = ++revision.current;
       const reference = {
-        deviceId,
-        threadId: value.thread.id,
-        title: value.thread.title,
-        workspaceId: value.thread.workspaceId,
-        workspaceLabel: value.workspace.label,
+        deviceId: target ? target.deviceId : deviceId,
+        threadId: target?.threadId ?? value!.thread.id,
+        title: target?.title ?? value!.thread.title,
+        ...((target ? target.workspaceId : value?.thread.workspaceId) ? { workspaceId: (target ? target.workspaceId : value?.thread.workspaceId)! } : {}),
+        workspaceLabel: target?.workspaceLabel ?? value!.workspace.label,
         ...(favorite !== undefined ? { favorite } : {}),
-        ...(markRead && value.thread.lastTurnCompletedAt ? { readCompletedAt: value.thread.lastTurnCompletedAt } : {}),
+        ...(markRead && value?.thread.lastTurnCompletedAt ? { readCompletedAt: value.thread.lastTurnCompletedAt } : {}),
       };
       if (relay) {
         const next = await request<NavigationSnapshot>(
@@ -211,12 +211,13 @@ export function useWorkbenchNavigation(
   const favorite =
     snapshot.threads.find((t) => referenceKey(t) === currentKey)?.favorite ??
     false;
-  const toggleFavorite = async () => {
+  const toggleFavorite = async (key = currentKey) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await save(!favorite);
+      const target = snapshot.threads.find(t => referenceKey(t) === key);
+      await save(!(target?.favorite ?? favorite), false, target);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save shortcut.');
     } finally {
@@ -295,6 +296,24 @@ export function useWorkbenchNavigation(
     favoriteBusy: busy,
     error,
     onToggleFavorite: () => void toggleFavorite(),
+    onToggleThreadFavorite: (key: string) => toggleFavorite(key),
+    onThreadRenamed: async (key: string, title: string) => {
+      const target = snapshot.threads.find(t => referenceKey(t) === key);
+      if (target) await save(undefined, false, { ...target, title });
+    },
+    onThreadRemoved: async (key: string) => {
+      const target = snapshot.threads.find(t => referenceKey(t) === key);
+      if (!target) return;
+      ++revision.current;
+      if (relay) {
+        setSnapshot(await request<NavigationSnapshot>('/relay/account/workbench', { method: 'DELETE', body: JSON.stringify({ deviceId: target.deviceId, threadId: target.threadId }) }));
+      } else {
+        const next = loadLocal();
+        next.threads = next.threads.filter(t => referenceKey(t) !== key);
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+        setSnapshot(next);
+      }
+    },
     notifications,
     unreadCount: notifications.filter((n) => Date.parse(n.occurredAt) > readAt)
       .length,

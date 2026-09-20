@@ -150,5 +150,11 @@ describe('account thread navigation', () => {
       favorite: true,
     });
     expect(references.find((t) => t.deviceId === 'wsl')?.favorite).toBe(true);
+    await act(async () => result.current.onToggleThreadFavorite('wsl:same-id'));
+    expect(references.find((t) => t.deviceId === 'wsl')?.favorite).toBe(false);
+    expect(references.find((t) => t.deviceId === 'mac')?.favorite).toBe(true);
+    expect(request).toHaveBeenLastCalledWith('/relay/account/workbench', expect.objectContaining({
+      method: 'POST', body: expect.stringContaining('"deviceId":"wsl"'),
+    }));
   });
 });

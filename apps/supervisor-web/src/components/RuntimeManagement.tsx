@@ -100,6 +100,7 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reconnectSince, setReconnectSince] = useState<number | null>(null);
   const [ownerDenied, setOwnerDenied] = useState(false);
   const [clock, setClock] = useState(Date.now());
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -165,11 +166,14 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
           api<Supervisor>('supervisor'),
         ]);
         if (stopped) return;
+        setReconnectSince(null);
         setJobs(j);
         setSupervisor((previous) => ({ ...previous, ...s, job: s.job, observedAt: performance.now() }));
         if (!Object.values(j).some(active) && !active(s.job)) await load();
       } catch {
         /* Temporary disconnect during supervisor replacement; keep polling. */
+        const lostAt = Date.now();
+        if (!stopped) setReconnectSince(previous => previous ?? lostAt);
       } finally {
         loading = false;
       }
@@ -369,7 +373,10 @@ function DeviceRuntimeManagement({ apiRoot }: { apiRoot: string }) {
       )}
       {supervisor?.job && (
         <p role="status" className="mt-2 text-xs">
-          {supervisorJobText(supervisor.job)}
+          {reconnectSince ? 'Waiting for the device to reconnect…' : supervisorJobText(supervisor.job)}
+          {reconnectSince && clock - reconnectSince > 30_000 && <span className="mt-1 block text-[var(--status-warning-fg)]">
+            The device has not returned yet. Installation may have finished, but restart has not been verified. Check the Supervisor update and launch logs on the device. This page will keep checking automatically.
+          </span>}
           {active(supervisor.job) && <span className="mt-1 block text-[var(--theme-fg-muted)]">
             Controls are temporarily disabled until this operation finishes.
           </span>}

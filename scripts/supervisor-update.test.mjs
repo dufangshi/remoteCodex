@@ -7,7 +7,60 @@ import {
   worker,
   readJob,
   needsUpdate,
+  captureRelaySession,
+  retireRelaySession,
 } from '../npm/remote-codex/bin/supervisor-update.mjs';
+
+test('tmux handover captures native ancestry and retires only the original single-pane session', () => {
+  const plan = { mode: 'relay', pid: 103, env: { TMUX: '/tmp/test socket,10,0', TMUX_PANE: '%4' } };
+  const calls = [];
+  let pane = '%4\t101\n';
+  const command = (program, args) => {
+    calls.push([program, ...args]);
+    if (program === 'ps') return { status: 0, stdout: args[1] === '103' ? '102\n' : '101\n' };
+    assert.deepEqual(args.slice(0, 2), ['-S', '/tmp/test socket']);
+    if (args[2] === 'display-message') return { status: 0, stdout: '$2\tremote-codex-relay-supervisor\t%4\t101\n' };
+    if (args[2] === 'list-panes') return { status: 0, stdout: args.at(-1).includes('pane_pid') ? pane : '%4\n' };
+    return { status: 0, stdout: '' };
+  };
+  const owner = captureRelaySession(plan, command);
+  retireRelaySession(owner, plan.env, command);
+  assert.deepEqual(calls.at(-1), ['tmux', '-S', '/tmp/test socket', 'kill-session', '-t', '$2']);
+  const before = calls.filter(c => c.includes('kill-session')).length;
+  for (const changed of ['%4\t101\n%5\t104\n', '%4\t999\n']) {
+    pane = changed;
+    assert.throws(() => retireRelaySession(owner, plan.env, command), /changed during update/);
+  }
+  assert.equal(calls.filter(c => c.includes('kill-session')).length, before);
+  assert.equal(captureRelaySession({ ...plan, env: {} }, command), null);
+  assert.throws(() => captureRelaySession(plan, (program, args) => program === 'ps' ? { status: 0, stdout: '1' } : command(program, args)), /does not own/);
+  assert.throws(() => captureRelaySession(plan, (program, args) => args.includes('list-panes') ? { status: 0, stdout: '%4\n%5\n' } : command(program, args)), /other panes/);
+  retireRelaySession(owner, plan.env, () => ({ status: 1 }));
+});
+
+test('worker releases a lingering tmux pipeline after native exit and before launching the replacement', async () => {
+  const plan = fixture();
+  plan.action = 'restart'; plan.mode = 'relay'; plan.version = plan.runningVersion;
+  plan.env.TMUX = '/tmp/fixture,1,0'; plan.env.TMUX_PANE = '%1';
+  let stopped = false, retired = false, started = false;
+  try {
+    await worker(plan, {
+      captureRelaySession: () => { assert.equal(stopped, false); return { session: '$1' }; },
+      retireRelaySession: owner => { assert.equal(stopped, true); assert.equal(owner.session, '$1'); retired = true; },
+      sleep: async () => {}, alive: () => !stopped,
+      health: async () => started ? { status: 'ok', processId: 987, runningVersion: plan.version, relayConnected: true } : { processId: plan.pid, activeTurnCount: 0 },
+      run: async () => plan.version,
+      stop: () => { stopped = true; },
+      start: (_exe, args, env) => {
+        assert.equal(retired, true);
+        assert.deepEqual(args, [plan.launcher, 'relay-supervisor', 'start']);
+        assert.equal(env.TMUX, undefined); assert.equal(env.TMUX_PANE, undefined);
+        started = true;
+      },
+    });
+    assert.equal(readJob(plan.statusFile, plan.lock).phase, 'completed');
+  } finally { fs.rmSync(plan.directory, { recursive: true, force: true }); }
+});
 
 test('update eligibility includes a rolled-back npm installation under a newer running binary', () => {
   assert.equal(needsUpdate('0.12.32', '0.12.32', '0.12.30'), true);
