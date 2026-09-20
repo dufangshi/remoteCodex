@@ -176,6 +176,10 @@ async fn steering_is_acknowledged_and_processed_before_the_active_turn_finishes(
     .await
     .expect("agent is waiting within the original prompt");
     assert!(!task.is_finished());
+    assert!(
+        runtime.restart("custom").await.is_err(),
+        "active turns must refuse restart"
+    );
     assert!(runtime
         .send_input(&session_id, "wrong-turn", "hello")
         .await
@@ -248,6 +252,34 @@ async fn restored_session_applies_advertised_effort_and_recovers_after_settings_
 
 async fn start_runtime(dir: &std::path::Path, python: &str) -> (AcpRuntime, String) {
     start_runtime_with_args(dir, python, "").await
+}
+
+#[tokio::test]
+async fn harness_restart_reloads_configuration_and_resumes_the_same_session() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("fixture-config.txt"), "upstream-before").unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let read = |turn: &str| turn_input(&session, "read-startup-config", turn);
+    let before = runtime
+        .start_turn(read("before"), EventBus::new(), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(before.iter().any(|i| i.text == "upstream-before"));
+    std::fs::write(dir.path().join("fixture-config.txt"), "upstream-after").unwrap();
+    assert_eq!(runtime.restart("custom").await.unwrap(), 1);
+    runtime
+        .resume_session(
+            &session,
+            Some(dir.path().to_str().unwrap()),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let after = runtime
+        .start_turn(read("after"), EventBus::new(), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(after.iter().any(|i| i.text == "upstream-after"));
 }
 
 async fn start_runtime_with_args(

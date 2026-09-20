@@ -31,7 +31,8 @@ pub async fn harness_action(
     Path(id): Path<String>,
     Json(body): Json<HarnessAction>,
 ) -> Response {
-    if !matches!(body.action.as_str(), "restart" | "update")
+    if !matches!(body.action.as_str(), "restart" | "update" | "install")
+        || !matches!(body.component.as_str(), "base" | "adapter")
         || !remote_codex_runtime::acp::builtin_agents(state.config.acp_command.as_deref())
             .iter()
             .any(|d| d.id == id)
@@ -61,6 +62,8 @@ pub async fn harness_action(
         let _maintenance = maintenance;
         let result = if body.action == "restart" {
             state.restart_harness(&id).await.map(|_| ())
+        } else if body.action == "install" && body.component == "base" {
+            management::install_harness(&state, &id).await
         } else {
             management::update_harness(&state, &id, &body.component).await
         };

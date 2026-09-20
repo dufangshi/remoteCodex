@@ -5,10 +5,8 @@ import { Link } from 'react-router-dom';
 import { enableRelayMode } from '../lib/api';
 
 const setupCommand = [
-  'REMOTE_CODEX_RELAY_SERVER_URL=wss://remote-codex.example.com \\',
-  'REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_... \\',
-  'REMOTE_CODEX_RELAY_SUPERVISOR_PORT=45679 \\',
-  'remote-codex relay-supervisor',
+  'curl -fsSL https://remote-codex.example.com/setup.sh | sh -s -- \\',
+  '  --relay https://remote-codex.example.com --code ONE_TIME_CODE --port 8787',
 ].join('\n');
 
 const connectionModes = [
@@ -33,19 +31,19 @@ const relaySteps = [
   },
   {
     title: 'Create a device',
-    detail: 'In Devices, choose a recognizable name and create a one-time token for the private supervisor.',
+    detail: 'In Devices, choose a recognizable name for the private supervisor.',
   },
   {
     title: 'Copy the setup command',
-    detail: 'Use Copy setup. The generated command includes the relay URL, device token, and supervisor port.',
+    detail: 'Use Copy setup. The macOS/Linux command includes a single-use setup code that expires after one hour.',
   },
   {
     title: 'Start the supervisor',
-    detail: 'Run the command on the workspace host. When tmux is available, Remote Codex keeps it detached by default.',
+    detail: 'Run the command on the workspace host. It installs Node if needed, installs Remote Codex and configures a background service. Systems without a user service manager run detached.',
   },
   {
     title: 'Connect and work',
-    detail: 'Return to Devices, wait for Online, then connect. Workspaces and threads use the selected device.',
+    detail: 'Return to Devices and wait for Online. Open Settings to install harnesses, configure upstreams or import a device template.',
   },
   {
     title: 'Share when needed',
@@ -117,7 +115,7 @@ export function RelayGuidePage() {
             Example supervisor command
           </h2>
           <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
-            Devices generates the real command. Treat its token as a secret.
+            Devices generates the real command. Keep its setup code private.
           </p>
           <pre className="mt-4 block w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3 text-xs leading-5 text-[var(--theme-fg)]">
             <code className="block min-w-max">{setupCommand}</code>

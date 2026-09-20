@@ -31,6 +31,7 @@ fast_enabled = False
 steering_prompt_id = None
 reasoning_effort = "medium"
 write_lock = threading.Lock()
+startup_config = open("fixture-config.txt").read() if os.path.exists("fixture-config.txt") else "unset"
 
 
 def config_options():
@@ -67,6 +68,10 @@ def handle(msg):
     method = msg.get("method")
     req_id = msg.get("id")
     params = msg.get("params") or {}
+    if method == "session/prompt" and prompt_text(params) == "read-startup-config":
+        send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":startup_config}}}})
+        send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"end_turn"}})
+        return
     if method == "initialize":
         send(
             {

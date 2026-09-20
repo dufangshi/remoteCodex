@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const launcherPath = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(launcherPath), '..');
 // Device commands must not import configuration from the workspace they manage.
-const deviceCommand = ['relay-supervisor', 'relay-fingerprint'].includes(process.argv[2]);
+const deviceCommand = ['setup', 'relay-supervisor', 'relay-fingerprint'].includes(process.argv[2]);
 for (const envFile of new Set(deviceCommand ? [] : [
   path.join(process.cwd(), '.env'),
   path.join(packageRoot, '.env'),
@@ -52,6 +52,7 @@ const relayConnectionKeys = [
 ];
 // Distribution/test plumbing; never accept arbitrary REMOTE_CODEX_* settings.
 const relayLauncherKeys = [
+  'REMOTE_CODEX_MANAGED_SERVICE',
   'REMOTE_CODEX_NATIVE_BINARY',
   'REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG',
   'REMOTE_CODEX_RELAY_SUPERVISOR_STATE',
@@ -105,6 +106,12 @@ try {
     const saved = readJson(relayConfigPath) ?? {};
     const database = savedRelayDatabase(saved);
     await runForeground(process.argv.slice(2), relaySupervisorEnvironment({ REMOTE_CODEX_DATABASE_PATH: database }));
+  } else if (command === 'setup') {
+    const { setup } = await import('./setup.mjs');
+    await setup({
+      args: process.argv.slice(3), launcher: launcherPath, config: relayConfigPath,
+      ensureConfig: ensureRelayConfig, nativePath: resolveNativeBinary,
+    });
   } else if (command === 'relay-supervisor') {
     await relaySupervisor(process.argv[3] ?? 'start');
   } else {

@@ -68,6 +68,18 @@ test('update eligibility includes a rolled-back npm installation under a newer r
   assert.equal(needsUpdate('0.12.32', '0.12.32', '0.12.32'), false);
 });
 
+test('service-managed restart stops and starts its owner without a second detached process', async()=>{
+ const plan=fixture();plan.action='restart';plan.mode='relay';plan.version=plan.runningVersion;plan.env.REMOTE_CODEX_MANAGED_SERVICE='systemd-user';
+ let stopped=false,started=false;const calls=[];
+ try{
+  await worker(plan,{captureRelaySession:()=>null,retireRelaySession:()=>{},sleep:async()=>{},alive:()=>!stopped,
+   health:async()=>started?{status:'ok',processId:987,runningVersion:plan.version,relayConnected:true}:{processId:plan.pid,activeTurnCount:0},run:async()=>plan.version,
+   stop:()=>assert.fail('must stop the service owner'),start:()=>assert.fail('must not spawn a duplicate'),
+   managedService:(_env,action)=>{calls.push(action);if(action==='stop')stopped=true;else started=true;return true;}});
+  assert.deepEqual(calls,['stop','start']);assert.equal(readJob(plan.statusFile,plan.lock).phase,'completed');
+ }finally{fs.rmSync(plan.directory,{recursive:true,force:true});}
+});
+
 function fixture() {
   const directory = fs.mkdtempSync(
     path.join(os.tmpdir(), 'supervisor-updater-test-'),

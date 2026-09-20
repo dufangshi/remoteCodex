@@ -163,7 +163,10 @@ fn def(
 }
 
 pub fn extra_bin_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![super::dependencies::bin_dir()];
+    let mut dirs = vec![
+        super::dependencies::bin_dir(),
+        crate::management::harness_bin(),
+    ];
     let home = crate::config::home_dir();
     dirs.extend([
         home.join(".local/bin"),
@@ -201,7 +204,10 @@ pub fn augment_path() {
 }
 
 pub fn child_path() -> std::ffi::OsString {
-    let mut dirs = vec![super::dependencies::bin_dir()];
+    let mut dirs = vec![
+        super::dependencies::bin_dir(),
+        crate::management::harness_bin(),
+    ];
     if let Some(path) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&path));
     }

@@ -283,6 +283,8 @@ pub struct UploadedPromptAttachment {
 }
 
 pub struct Supervisor {
+    pub upstream_gate: Arc<tokio::sync::Mutex<()>>,
+    pub harness_install_gate: Arc<tokio::sync::Mutex<()>>,
     pub interaction: crate::interaction::InteractionState,
     pub relay_connected: std::sync::atomic::AtomicBool,
     pub started_at: String,
@@ -328,6 +330,8 @@ impl Supervisor {
             .map(|runtime| (runtime.provider(), runtime))
             .collect();
         let supervisor = Self {
+            upstream_gate: Default::default(),
+            harness_install_gate: Default::default(),
             started_at: now_rfc3339(),
             started_instant: std::time::Instant::now(),
             interaction: Default::default(),
