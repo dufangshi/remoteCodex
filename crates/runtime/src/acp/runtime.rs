@@ -224,7 +224,7 @@ impl AcpRuntime {
         if def.id == "grok" {
             if let Some(upstreams) = &self.upstreams {
                 if let Some((profile, models)) = upstreams.catalog("grok").await? {
-                    crate::upstreams::prepare_grok_models(&profile, &models)?;
+                    upstreams.prepare_grok(&profile, &models)?;
                 }
             }
         }
@@ -685,7 +685,12 @@ impl AcpRuntime {
                                 .as_str()
                                 .is_some_and(|id| id.starts_with("remote-codex/"))
                         });
-                        if managed && !models.iter().any(|m| m["modelId"] == model_id) {
+                        if managed
+                            && (!models.iter().any(|m| m["modelId"] == model_id)
+                                || !models
+                                    .iter()
+                                    .any(|m| m["modelId"] == format!("remote-codex/{model_id}")))
+                        {
                             bail!("Model is not available in this Grok session. Reconnect the session to refresh its upstream models.");
                         }
                     }
@@ -800,7 +805,10 @@ impl AcpRuntime {
         }
         let adapter = adapter_for(&live.adapter_id);
         if let Some(model) = model.filter(|value| !value.is_empty() && *value != "default") {
-            if live.model.as_deref() != Some(model) {
+            if live.model.as_deref() != Some(model)
+                || (live.adapter_id == "grok"
+                    && live.harness_state["currentModelId"].as_str() != Some(model))
+            {
                 if let Some(op) = adapter.apply_model(model, &live.harness_state) {
                     Self::apply_setting_op(&live.process.clone(), live, op).await?;
                 } else {
@@ -1098,7 +1106,15 @@ impl AgentRuntime for AcpRuntime {
         };
         if let Some(upstreams) = &self.upstreams {
             if let Some((_, mut models)) = upstreams.catalog(&def.id).await? {
-                if let Some(known) = self.models_from_live(&def.id).await {
+                let known = match self.models_from_live(&def.id).await {
+                    Some(known) => Some(known),
+                    None if def.id == "grok" => {
+                        let _lifecycle = self.inner.lifecycle.lock().await;
+                        Some(self.probe_models(&def, cwd.unwrap_or(".")).await?)
+                    }
+                    None => None,
+                };
+                if let Some(known) = known {
                     for model in &mut models {
                         if let Some(metadata) =
                             known.iter().find(|entry| entry.model == model.model)

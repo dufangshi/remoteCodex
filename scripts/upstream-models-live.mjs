@@ -15,7 +15,7 @@ const home = path.join(root, 'home');
 const workspace = path.join(root, 'workspace');
 fs.mkdirSync(path.join(home, '.grok'), { recursive: true });
 fs.mkdirSync(workspace);
-const original = '# isolated original\n[ui]\nscreen_mode = "minimal"\n';
+const original = '# isolated original\n[ui]\nscreen_mode = "minimal"\n[model."grok-4.6"]\napi_key="original-key"\nenv_key="XAI_API_KEY"\n[model.personal]\nmodel="keep"\n';
 fs.writeFileSync(path.join(home, '.grok/config.toml'), original);
 const calls = [];
 const upstream = http.createServer(async (req, res) => {
@@ -30,7 +30,7 @@ const upstream = http.createServer(async (req, res) => {
   if (req.url.endsWith('/models'))
     res.end(
       JSON.stringify({
-        data: [{ id: 'model-a' }, { id: 'model-b' }, { id: 'route-*' }],
+        data: [{ id: 'grok-4.5' }, { id: 'grok-4.6' }, { id: 'route-*' }],
       }),
     );
   else {
@@ -55,7 +55,7 @@ await new Promise((r) => portProbe.close(r));
 const env = Object.fromEntries(
   Object.entries(process.env).filter(
     ([key]) =>
-      !/^(REMOTE_CODEX_|CODEX_|CLAUDE_|GROK_|GEMINI_|ANTHROPIC_|OPENAI_|GOOGLE_|XDG_)/.test(
+      !/^(REMOTE_CODEX_|CODEX_|CLAUDE_|GROK_|GEMINI_|ANTHROPIC_|OPENAI_|XAI_|GOOGLE_|XDG_)/.test(
         key,
       ),
   ),
@@ -63,6 +63,7 @@ const env = Object.fromEntries(
 Object.assign(env, {
   HOME: home,
   GROK_HOME: path.join(home, '.grok'),
+  XAI_API_KEY: 'inherited-wrong-key',
   PATH: `${path.dirname(grok)}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
   HOST: '127.0.0.1',
   PORT: String(port),
@@ -113,7 +114,7 @@ try {
     harness: 'grok',
     baseUrl,
     apiKey: 'synthetic-a',
-    model: 'model-a',
+    model: 'grok-4.5',
   });
   await request(`/api/management/upstreams/${profile.id}`, 'POST', {
     action: 'activate',
@@ -123,9 +124,15 @@ try {
   );
   assert.deepEqual(
     models.map((m) => m.model),
-    ['model-a', 'model-b'],
+    ['grok-4.5', 'grok-4.6'],
   );
   assert(!models.some((m) => m.displayName === 'Provider label'));
+  assert.deepEqual(
+    models
+      .find((m) => m.model === 'grok-4.6')
+      .supportedReasoningEfforts.map((e) => e.reasoningEffort),
+    ['xhigh', 'high', 'medium', 'low'],
+  );
   const ws = await request('/api/workspaces', 'POST', {
     absPath: workspace,
     label: 'Isolated model test',
@@ -134,10 +141,12 @@ try {
     workspaceId: ws.id,
     provider: 'acp',
     agentId: 'grok',
-    model: 'model-b',
+    model: 'grok-4.6',
+    reasoningEffort: 'xhigh',
     approvalMode: 'yolo',
   });
-  assert.equal(thread.model, 'model-b');
+  assert.equal(thread.model, 'grok-4.6');
+  assert.equal(thread.reasoningEffort, 'xhigh');
   await request(`/api/threads/${thread.id}/prompt`, 'POST', {
     prompt: 'Reply OK',
   });
@@ -149,8 +158,9 @@ try {
         c.body.tool_choice?.name !== 'session_title',
     ),
   );
-  assert.equal(inference.body.model, 'model-b');
+  assert.equal(inference.body.model, 'grok-4.6');
   assert.equal(inference.auth, 'Bearer synthetic-a');
+  assert.equal(inference.body.reasoning.effort, 'xhigh');
   await waitFor(async () => {
     const detail = await request(`/api/threads/${thread.id}`);
     return (detail.thread ?? detail).status !== 'running';
@@ -160,7 +170,7 @@ try {
     harness: 'grok',
     baseUrl,
     apiKey: 'synthetic-b',
-    model: 'model-a',
+    model: 'grok-4.5',
   });
   await request(`/api/management/upstreams/${second.id}`, 'POST', {
     action: 'activate',
@@ -168,7 +178,28 @@ try {
   await request(
     `/api/agent-runtimes/acp/models?agentId=grok&cwd=${encodeURIComponent(workspace)}`,
   );
-  assert.equal(calls.at(-1).auth, 'Bearer synthetic-b');
+  assert.equal(
+    calls.findLast((c) => c.url.endsWith('/models')).auth,
+    'Bearer synthetic-b',
+  );
+  await request(`/api/threads/${thread.id}/settings`, 'PATCH', {
+    reasoningEffort: 'low',
+  });
+  const previous = calls.length;
+  await request(`/api/threads/${thread.id}/prompt`, 'POST', {
+    prompt: 'Reply OK again',
+  });
+  const resumed = await waitFor(() =>
+    calls.slice(previous).find(
+      (c) => c.url.endsWith('/responses') && c.body.tool_choice?.name !== 'session_title',
+    ),
+  );
+  assert.equal(resumed.auth, 'Bearer synthetic-b');
+  assert.equal(resumed.body.model, 'grok-4.6');
+  assert.equal(resumed.body.reasoning.effort, 'low');
+  await waitFor(
+    async () => (await request(`/api/threads/${thread.id}`)).thread.status !== 'running',
+  );
   await request(`/api/management/upstreams/${second.id}`, 'DELETE');
   const state = await request('/api/management/upstreams');
   assert(!state.active.grok);
@@ -180,7 +211,7 @@ try {
   console.log(
     JSON.stringify({
       result: 'passed',
-      realGrokModel: 'model-b',
+      realGrokModel: 'grok-4.6',
       upstreamSwitch: true,
       originalConfigRestored: true,
       evidence: root,

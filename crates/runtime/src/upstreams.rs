@@ -44,6 +44,9 @@ struct Store {
     profiles: Vec<Profile>,
     active: BTreeMap<String, String>,
     backups: Vec<Backup>,
+    /// Original native model entries, retained until managed configuration is removed.
+    #[serde(default)]
+    grok_models: BTreeMap<String, Option<String>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,6 +196,9 @@ pub fn remove(dir: &Path, id: &str) -> Result<()> {
         }
         s.active.remove(&harness);
         s.backups.retain(|b| b.harness != harness);
+        if harness == "grok" {
+            s.grok_models.clear();
+        }
         s.profiles.retain(|p| p.id != id);
         if let Err(error) = save(dir, &s) {
             restore_files(&rollback)?;
@@ -212,19 +218,59 @@ pub fn active_profile(dir: &Path, harness: &str) -> Result<Option<Profile>> {
 }
 
 pub(crate) fn prepare_grok_models(
+    dir: &Path,
     p: &Profile,
     models: &[remote_codex_protocol::ModelOptionDto],
 ) -> Result<()> {
-    prepare_grok_models_at(p, models, &home("grok"))
+    prepare_grok_models_at(dir, p, models, &home("grok"))
 }
 fn prepare_grok_models_at(
+    dir: &Path,
     p: &Profile,
     models: &[remote_codex_protocol::ModelOptionDto],
     root: &Path,
 ) -> Result<()> {
     let path = root.join("config.toml");
     let mut doc = toml_doc(&path)?;
-    // Keep the legacy alias resumable, but give it the actual model name.
+    let mut store = load(dir)?;
+    configure_grok_models(
+        &mut doc,
+        p,
+        models.iter().map(|m| m.model.as_str()),
+        &mut store.grok_models,
+    )?;
+    // Retain the union of original entries before writing, including across
+    // switches. A crash between these atomic writes cannot lose an original.
+    save(dir, &store)?;
+    private_write(&path, doc.to_string().as_bytes())
+}
+
+fn configure_grok_models<'a>(
+    doc: &mut DocumentMut,
+    p: &'a Profile,
+    models: impl Iterator<Item = &'a str>,
+    originals: &mut BTreeMap<String, Option<String>>,
+) -> Result<()> {
+    for section in ["model", "models"] {
+        if doc.get(section).is_some_and(|v| !v.is_table_like()) {
+            bail!("Invalid Grok {section} configuration section");
+        }
+    }
+    for (id, original) in originals.iter() {
+        if let Some(original) = original {
+            let snapshot = original.parse::<DocumentMut>()?;
+            let entry = snapshot
+                .get("model")
+                .and_then(|m| m.get(id))
+                .ok_or_else(|| anyhow!("Invalid saved Grok model configuration"))?;
+            doc["model"][id] = entry.clone();
+        } else if let Some(table) = doc.get_mut("model").and_then(|v| v.as_table_like_mut()) {
+            table.remove(id);
+        }
+    }
+    // Legacy aliases remain loadable, but selection uses the actual ID. Grok
+    // canonicalizes aliases to their wire model and otherwise falls back to
+    // built-in authentication when that ID also exists in its built-in catalog.
     if let Some(table) = doc.get_mut("model").and_then(|v| v.as_table_like_mut()) {
         let owned = table
             .iter()
@@ -235,18 +281,49 @@ fn prepare_grok_models_at(
             table.remove(&key);
         }
     }
-    for model in std::iter::once(p.model.as_str()).chain(models.iter().map(|m| m.model.as_str())) {
-        let id = format!("remote-codex/{model}");
-        for (key, text) in [
-            ("name", model),
-            ("model", model),
-            ("base_url", p.base_url.as_str()),
-            ("api_key", p.api_key.as_str()),
-            ("api_backend", p.api_type.as_str()),
-        ] {
-            doc["model"][&id][key] = value(text);
+    for model in std::iter::once(p.model.as_str()).chain(models) {
+        if doc
+            .get("model")
+            .and_then(|m| m.get(model))
+            .is_some_and(|v| !v.is_table_like())
+        {
+            bail!("Invalid Grok model configuration entry");
         }
-        doc["model"][&id]["context_window"] = value(p.context_window);
+        originals.entry(model.to_owned()).or_insert_with(|| {
+            doc.get("model").and_then(|m| m.get(model)).map(|entry| {
+                let mut snapshot = DocumentMut::new();
+                snapshot["model"] = toml_edit::Item::Table(toml_edit::Table::new());
+                snapshot["model"][model] = entry.clone();
+                snapshot.to_string()
+            })
+        });
+        let alias = format!("remote-codex/{model}");
+        for id in [model, alias.as_str()] {
+            for (key, text) in [
+                ("name", model),
+                ("model", model),
+                ("base_url", p.base_url.as_str()),
+                ("api_key", p.api_key.as_str()),
+                ("api_backend", p.api_type.as_str()),
+            ] {
+                doc["model"][id][key] = value(text);
+            }
+            // Explicit inline credentials must not compete with an existing helper,
+            // provider, environment key, or custom Authorization header.
+            for key in [
+                "auth_provider",
+                "env_key",
+                "model_provider",
+                "api_base_url",
+                "extra_headers",
+                "env_http_headers",
+                "query_params",
+                "mtls_cert_dir",
+            ] {
+                doc["model"][id].as_table_like_mut().unwrap().remove(key);
+            }
+            doc["model"][id]["context_window"] = value(p.context_window);
+        }
     }
     if doc
         .get("model")
@@ -255,8 +332,8 @@ fn prepare_grok_models_at(
     {
         doc["model"]["remote-codex"]["name"] = value(&p.model);
     }
-    doc["models"]["default"] = value(format!("remote-codex/{}", p.model));
-    private_write(&path, doc.to_string().as_bytes())
+    doc["models"]["default"] = value(&p.model);
+    Ok(())
 }
 pub fn profile(dir: &Path, id: &str) -> Result<Profile> {
     load(dir)?
@@ -457,20 +534,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         "grok" => {
             let path = root.join("config.toml");
             let mut doc = toml_doc(&path)?;
-            if doc.get("model").is_some_and(|v| !v.is_table_like()) {
-                bail!("Invalid Grok model configuration section");
-            }
-            doc["models"]["default"] = value("remote-codex");
-            for (k, v) in [
-                ("name", &p.model),
-                ("model", &p.model),
-                ("base_url", &p.base_url),
-                ("api_key", &p.api_key),
-                ("api_backend", &p.api_type),
-            ] {
-                doc["model"]["remote-codex"][k] = value(v);
-            }
-            doc["model"]["remote-codex"]["context_window"] = value(p.context_window);
+            configure_grok_models(&mut doc, p, std::iter::empty(), &mut BTreeMap::new())?;
             output.push((path, doc.to_string()));
         }
         _ => bail!("Unsupported harness"),
@@ -484,7 +548,14 @@ pub fn activate(dir: &Path, id: &str) -> Result<String> {
 fn activate_at(dir: &Path, p: &Profile, root: &Path) -> Result<String> {
     validate(p, true)?;
     let mut s = load(dir)?;
-    let edits = changes(p, root)?;
+    let edits = if p.harness == "grok" {
+        let path = root.join("config.toml");
+        let mut doc = toml_doc(&path)?;
+        configure_grok_models(&mut doc, p, std::iter::empty(), &mut s.grok_models)?;
+        vec![(path, doc.to_string())]
+    } else {
+        changes(p, root)?
+    };
     let files = edits
         .iter()
         .map(|(path, _)| {
@@ -558,6 +629,9 @@ pub fn restore(dir: &Path, id: &str) -> Result<()> {
         s.active.insert(b.harness.clone(), active);
     } else {
         s.active.remove(&b.harness);
+        if b.harness == "grok" {
+            s.grok_models.clear();
+        }
     }
     s.backups.retain(|v| v.id != id);
     save(dir, &s)
@@ -845,6 +919,7 @@ mod tests {
         assert!(profile(&store, &first.id).is_ok());
         assert!(profile(&store, &second.id).is_err());
         assert!(load(&store).unwrap().backups.is_empty());
+        assert!(load(&store).unwrap().grok_models.is_empty());
     }
 
     #[test]
@@ -868,17 +943,65 @@ mod tests {
             selection_kind: Some("model".into()),
             acp_agent: None,
         });
-        prepare_grok_models_at(&p, &models, temp.path()).unwrap();
+        prepare_grok_models_at(&temp.path().join("store"), &p, &models, temp.path()).unwrap();
         let doc = toml_doc(&temp.path().join("config.toml")).unwrap();
         assert_eq!(doc["model"]["personal"]["model"].as_str(), Some("keep"));
         assert!(doc["model"].get("remote-codex/obsolete").is_none());
         for id in ["model-a", "model-b"] {
+            assert_eq!(
+                doc["model"][id]["api_key"].as_str(),
+                Some(p.api_key.as_str())
+            );
             let configured = &doc["model"][&format!("remote-codex/{id}")];
             assert_eq!(configured["model"].as_str(), Some(id));
             assert_eq!(configured["name"].as_str(), Some(id));
             assert_eq!(configured["base_url"].as_str(), Some(p.base_url.as_str()));
             assert_eq!(configured["api_key"].as_str(), Some(p.api_key.as_str()));
         }
+    }
+    #[test]
+    fn grok_native_overrides_restore_originals_across_refreshes_and_switches() {
+        let original = "[model.'grok-4.6']\napi_key='original'\nenv_key='XAI_API_KEY'\nauth_provider='native'\nextra_headers={Authorization='old'}\nreasoning_efforts=[{value='high',default=true}]\n[model.personal]\nmodel='keep'\n";
+        let mut doc: DocumentMut = original.parse().unwrap();
+        let mut originals = BTreeMap::new();
+        let mut p = fixture("grok");
+        p.model = "grok-4.6".into();
+        configure_grok_models(&mut doc, &p, ["grok-4.5"].into_iter(), &mut originals).unwrap();
+        // Exercise the persisted representation, not just an in-memory table.
+        let saved: BTreeMap<String, Option<String>> =
+            serde_json::from_str(&serde_json::to_string(&originals).unwrap()).unwrap();
+        originals = saved;
+        doc = doc.to_string().parse().unwrap();
+        for _ in 0..2 {
+            configure_grok_models(&mut doc, &p, ["grok-4.5"].into_iter(), &mut originals).unwrap();
+            let model = &doc["model"]["grok-4.6"];
+            assert_eq!(model["api_key"].as_str(), Some(p.api_key.as_str()));
+            assert!(model.get("env_key").is_none());
+            assert!(model.get("auth_provider").is_none());
+            assert!(model.get("extra_headers").is_none());
+            assert!(model.get("reasoning_efforts").is_some());
+        }
+        p.model = "grok-4.5".into();
+        p.api_key = "second-key".into();
+        configure_grok_models(&mut doc, &p, std::iter::empty(), &mut originals).unwrap();
+        assert_eq!(
+            doc["model"]["grok-4.6"]["api_key"].as_str(),
+            Some("original")
+        );
+        assert_eq!(
+            doc["model"]["grok-4.6"]["env_key"].as_str(),
+            Some("XAI_API_KEY")
+        );
+        assert!(doc["model"].get("remote-codex/grok-4.6").is_none());
+        assert_eq!(
+            doc["model"]["grok-4.5"]["api_key"].as_str(),
+            Some("second-key")
+        );
+        p.model = "new-model".into();
+        configure_grok_models(&mut doc, &p, std::iter::empty(), &mut originals).unwrap();
+        assert!(doc["model"].get("grok-4.5").is_none());
+        assert_eq!(doc["model"]["personal"]["model"].as_str(), Some("keep"));
+        assert_eq!(doc["models"]["default"].as_str(), Some("new-model"));
     }
     #[test]
     fn connection_accepts_null_error_but_rejects_errors_and_wrong_protocol() {
