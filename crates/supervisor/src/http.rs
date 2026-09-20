@@ -983,35 +983,35 @@ async fn get_thread(
         return Ok(Json(state.thread_delivery(&id).await.map_err(map_err)?));
     }
     let summary_only = query.view.as_deref() == Some("summary");
-    Ok(Json(
-        serde_json::to_value(
-            state
-                .get_thread_detail_page(
-                    &id,
-                    query.limit.or(Some(if summary_only { 3 } else { 10 })),
-                    query.before_turn_id.as_deref(),
-                    summary_only,
-                )
-                .await
-                .map_err(map_err)?,
-        )
-        .unwrap(),
-    ))
+    let mut value = serde_json::to_value(
+        state
+            .get_thread_detail_page(
+                &id,
+                query.limit.or(Some(if summary_only { 3 } else { 10 })),
+                query.before_turn_id.as_deref(),
+                summary_only,
+            )
+            .await
+            .map_err(map_err)?,
+    )
+    .unwrap();
+    remote_codex_runtime::history::defer_tool_details(&mut value);
+    Ok(Json(value))
 }
 
 async fn thread_turn_detail(
     Path((id, turn_id)): Path<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
-    Ok(Json(
-        serde_json::to_value(
-            state
-                .get_thread_turn_detail(&id, &turn_id)
-                .await
-                .map_err(map_err)?,
-        )
-        .unwrap(),
-    ))
+    let mut value = serde_json::to_value(
+        state
+            .get_thread_turn_detail(&id, &turn_id)
+            .await
+            .map_err(map_err)?,
+    )
+    .unwrap();
+    remote_codex_runtime::history::defer_tool_details(&mut value);
+    Ok(Json(value))
 }
 
 async fn thread_item_detail(

@@ -2234,6 +2234,10 @@ export function ThreadDetailPage() {
       setError(promptDisabledReason);
       return false;
     }
+    if ((input.attachments?.length ?? 0) > 10) {
+      setError('A prompt can include at most 10 attachments. Remove extra attachments and try again. Your draft has been kept.');
+      return false;
+    }
 
     setBusy(true);
     setError(null);
@@ -2450,6 +2454,7 @@ export function ThreadDetailPage() {
         prompt: '',
         attachments: [],
       });
+      return true;
     } catch (caught) {
       const message =
         caught instanceof ApiError
@@ -2474,6 +2479,7 @@ export function ThreadDetailPage() {
             }
           : current,
       );
+      return false;
     } finally {
       setBusy(false);
     }

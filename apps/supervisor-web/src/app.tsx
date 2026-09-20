@@ -206,6 +206,9 @@ function AppShell({
 }) {
   const [navOpen, setNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showReasoningSummaries, setShowReasoningSummaries] = useState(() => {
+    try { return localStorage.getItem('remote-codex-show-reasoning-summaries') === 'true'; } catch { return false; }
+  });
   const [defaultBackend, setDefaultBackendState] = useState<AgentBackendIdDto>(readInitialBackend);
   const [autoCollapseCompletedTurns, setAutoCollapseCompletedTurnsState] = useState(
     readInitialAutoCollapseCompletedTurns,
@@ -295,6 +298,11 @@ function AppShell({
     setDefaultBackend,
     autoCollapseCompletedTurns,
     setAutoCollapseCompletedTurns,
+    showReasoningSummaries,
+    setShowReasoningSummaries: (enabled: boolean) => {
+      setShowReasoningSummaries(enabled);
+      try { localStorage.setItem('remote-codex-show-reasoning-summaries', String(enabled)); } catch { /* Private browsing may disable storage. */ }
+    },
   };
 
   return (

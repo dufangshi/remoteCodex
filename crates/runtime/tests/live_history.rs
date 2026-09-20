@@ -84,6 +84,47 @@ fn emit(supervisor: &Supervisor, thread_id: &str, event_type: &str, payload: Val
 }
 
 #[tokio::test]
+async fn tool_details_are_durable_but_not_broadcast() {
+    let (_dir, supervisor, thread_id) = running_thread().await;
+    supervisor.spawn_live_item_persister();
+    let mut events = supervisor.bus.subscribe();
+    for kind in ["commandExecution", "fileChange"] {
+        emit(
+            &supervisor,
+            &thread_id,
+            "thread.item.completed",
+            json!({"turnId":"live-turn","item":{"id":kind,"kind":kind,"text":"summary","detailText":"full private tool output","status":"completed"}}),
+        );
+        let event = events.recv().await.unwrap();
+        assert!(event.payload["item"].get("detailText").is_none());
+        assert_eq!(event.payload["item"]["hasDeferredDetail"], true);
+        assert_eq!(
+            supervisor
+                .get_history_item_detail(&thread_id, kind)
+                .unwrap()["text"],
+            "full private tool output"
+        );
+    }
+}
+
+#[test]
+fn old_acp_file_records_gain_paths_counts_and_diff_without_rewriting_storage() {
+    let mut item = serde_json::from_value(json!({"id":"legacy-edit","kind":"fileChange","text":"Editing files","detailText":"Tool: apply_patch\n\nResult:\nFile: src/app.ts\n\nBefore:\nconst value = 1;\n\n\nAfter:\nconst value = 2;\n"})).unwrap();
+    remote_codex_runtime::history::normalize_legacy_file_change(&mut item);
+    assert_eq!(item.text, "src/app.ts");
+    assert_eq!(item.extra["addedLines"], 1);
+    assert_eq!(item.extra["removedLines"], 1);
+    assert!(item
+        .detail_text
+        .as_ref()
+        .unwrap()
+        .contains("+const value = 2;"));
+    let once = serde_json::to_value(&item).unwrap();
+    remote_codex_runtime::history::normalize_legacy_file_change(&mut item);
+    assert_eq!(serde_json::to_value(&item).unwrap(), once);
+}
+
+#[tokio::test]
 async fn broadcast_output_is_already_persisted_and_contains_the_complete_prefix() {
     let (_dir, supervisor, thread_id) = running_thread().await;
     supervisor.spawn_live_item_persister();

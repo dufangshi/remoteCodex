@@ -2432,7 +2432,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-codex"
-version = "0.12.38"
+version = "0.12.39"
 dependencies = [
  "anyhow",
  "clap",
@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-protocol"
-version = "0.12.38"
+version = "0.12.39"
 dependencies = [
  "chrono",
  "serde",
@@ -2459,7 +2459,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-relay"
-version = "0.12.38"
+version = "0.12.39"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -2494,7 +2494,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-runtime"
-version = "0.12.38"
+version = "0.12.39"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2511,6 +2511,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shell-words",
+ "similar",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -2526,7 +2527,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-supervisor"
-version = "0.12.38"
+version = "0.12.39"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -3027,6 +3028,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3187,7 +3194,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
