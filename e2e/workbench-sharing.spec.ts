@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
 test('workbench shares images publicly and grants device access without leaving the thread', async ({ browser }, testInfo) => {
   const root = await mkdtemp(resolve('.local/workbench-sharing-'));
@@ -74,6 +75,9 @@ test('workbench shares images publicly and grants device access without leaving 
     await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
     await page.goto(`${base}/devices/${device.device.id}/threads/${id}`);
     await page.getByRole('button', { name: 'Share as link', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: /Keep updated/ })).not.toBeChecked();
+    await expect(page.getByRole('textbox', { name: 'Public share URL' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Create & copy link', exact: true }).click();
     try {
       await expect(page.getByRole('button', { name: 'Creating link…' })).toBeVisible();
       expect(await contrast('.thread-public-link-create')).toBeGreaterThanOrEqual(4.5);
@@ -122,6 +126,62 @@ test('workbench shares images publicly and grants device access without leaving 
     await page.getByRole('button', { name: 'Notifications', exact: true }).click();
     await expect(page.locator('.matter-notification-summary').first()).toContainText('ok: Review this attachment');
     await expect(page.locator('.matter-notifications')).toContainText('Image sharing review');
+
+    // A downloaded file has no React runtime. Its image viewer must work offline.
+    await page.reload();
+    await page.getByRole('button', { name: 'Download transcript', exact: true }).click();
+    const downloaded = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export HTML', exact: true }).click();
+    const htmlPath = testInfo.outputPath('image-transcript.html');
+    await (await downloaded).saveAs(htmlPath);
+    const offline = await browser.newContext({ offline: true });
+    try {
+      const file = await offline.newPage();
+      await file.goto(pathToFileURL(htmlPath).href);
+      await file.getByRole('button', { name: /Enlarge image/ }).first().click();
+      const viewer = file.getByRole('dialog', { name: 'Image preview' });
+      await expect(viewer).toBeVisible();
+      await expect.poll(() => viewer.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      await viewer.getByRole('button', { name: 'Actual size' }).click();
+      await expect(viewer).toHaveAttribute('data-zoom', 'true');
+      await file.keyboard.press('Escape');
+      await expect(viewer).not.toBeVisible();
+      await expect(file.getByRole('button', { name: /Enlarge image/ }).first()).toBeFocused();
+    } finally { await offline.close(); }
+
+    // Exclude an existing middle turn, then publish a future turn with the owner
+    // browser closed. Fixed links must not change, and live links must not leak it.
+    await api(`${deviceApi}/threads/${id}/prompt`, owner, { prompt: 'Private middle turn' });
+    await expect.poll(async () => (await api(`${deviceApi}/threads/${id}`, owner)).thread.status).toBe('idle');
+    await page.reload();
+    await page.getByRole('button', { name: 'Share as link', exact: true }).click();
+    await page.getByLabel('Choose turns', { exact: true }).check();
+    await page.getByRole('checkbox', { name: 'Share turn 2', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: /Keep updated/ }).check();
+    await page.screenshot({ path: 'output/playwright/selective-live-share.png' });
+    await page.getByRole('button', { name: 'Create & copy link', exact: true }).click();
+    const liveUrl = page.locator('.thread-export-dialog-box').filter({ hasText: 'Live ·' }).getByRole('textbox', { name: 'Public share URL' });
+    await expect(liveUrl).toBeVisible();
+    const liveAddress = await liveUrl.inputValue();
+    await page.close();
+    const readers = await browser.newContext();
+    try {
+      const livePage = await readers.newPage(), fixedPage = await readers.newPage();
+      await livePage.goto(liveAddress);
+      await fixedPage.goto(url);
+      await expect(livePage.getByText('Review this attachment', { exact: true })).toBeVisible();
+      await api(`${deviceApi}/threads/${id}/prompt`, owner, { prompt: 'Future public turn' });
+      await expect(livePage.getByText('ok: Future public turn', { exact: true })).toBeVisible();
+      await expect(livePage.getByText('Private middle turn', { exact: true })).toHaveCount(0);
+      await fixedPage.reload();
+      await expect(fixedPage.getByText('Review this attachment', { exact: true })).toBeVisible();
+      await expect(fixedPage.getByText('Future public turn', { exact: true })).toHaveCount(0);
+      const linkId = new URL(liveAddress).pathname.split('/').pop();
+      const revoked = await fetch(`${base}/relay/public-links/${linkId}`, { method: 'DELETE', headers: { authorization: `Bearer ${owner}` } });
+      expect(revoked.status).toBe(204);
+      await expect(livePage.getByText('This share link is unavailable or has been revoked.')).toBeVisible();
+      await expect(livePage.getByText('Future public turn', { exact: true })).toHaveCount(0);
+    } finally { await readers.close(); }
   } finally {
     await context.close();
     await Promise.all(processes.map(proc => new Promise<void>(done => { if (proc.exitCode !== null || proc.signalCode !== null) return done(); proc.once('exit', () => done()); proc.kill('SIGTERM'); })));

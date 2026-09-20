@@ -190,6 +190,11 @@ pub fn router(state: AppState) -> Router {
             post(steer_pending_prompt),
         )
         .route("/api/threads/{id}/export-turns", get(export_turns))
+        .route("/api/threads/{id}/publications", post(create_publication))
+        .route(
+            "/api/publications/{token}",
+            get(read_publication).delete(revoke_publication),
+        )
         .route("/api/threads/{id}/exports/html", get(export_html))
         .route(
             "/api/threads/{id}/shell",
@@ -1487,6 +1492,34 @@ async fn steer_pending_prompt(
         )
         .unwrap(),
     ))
+}
+
+async fn create_publication(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(input): Json<remote_codex_runtime::publications::CreatePublication>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        state
+            .create_publication(&id, input)
+            .await
+            .map_err(map_err)?,
+    ))
+}
+
+async fn read_publication(
+    Path(token): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(state.read_publication(&token).await.map_err(map_err)?))
+}
+
+async fn revoke_publication(
+    Path(token): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiErr> {
+    state.revoke_publication(&token).map_err(map_err)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn export_turns(

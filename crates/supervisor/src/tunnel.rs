@@ -467,6 +467,12 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
     let key_path = path.ends_with("/transport/key");
     let session_path = path.ends_with("/transport/session");
     let encrypted = payload["headers"]["x-rcd-key"].is_string();
+    if path.starts_with("/api/threads/") && path.ends_with("/publications") && !encrypted {
+        return relay_error_response(
+            400,
+            "Publication consent requires an encrypted owner request",
+        );
+    }
     if key_path || encrypted || session_path {
         let transport = match crate::secure_transport::transport(state) {
             Ok(t) => t,
@@ -809,6 +815,17 @@ mod tests {
             directory,
             Arc::new(Supervisor::new(config, database, vec![runtime])),
         )
+    }
+
+    #[tokio::test]
+    async fn publication_consent_cannot_be_forged_by_plaintext_relay_forwarding() {
+        let (_dir, state) = state_with_relay_url("http://localhost:8788");
+        let response = forward_local(&state, json!({"method":"POST","path":format!("/api/threads/{}/publications", uuid::Uuid::new_v4()),"body":"{}"})).await;
+        assert_eq!(response["statusCode"], 400);
+        assert!(response["body"]
+            .as_str()
+            .unwrap()
+            .contains("encrypted owner request"));
     }
 
     #[tokio::test]

@@ -3526,7 +3526,7 @@ export function ThreadDetailPage() {
           appearance="matter"
           initialMode={actionMode}
           linkContent={relayThreadCanShare && relayRouteDeviceId && id
-            ? <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} createOnOpen />
+            ? <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} />
             : <p className="matter-sharing-unavailable" role="status"><Link2 size={20} />{relayDeviceRouteActive ? 'Only the owner can create a public link for this thread.' : 'Open this device through your Relay account to create a read-only share link.'}</p>}
           open={exportDialogOpen}
           busy={exportBusy || shareBusy}

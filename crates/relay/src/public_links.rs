@@ -1,4 +1,5 @@
-//! Immutable, owner-created public transcripts. Never expose raw thread DTOs.
+//! Owner-created public transcripts. Live sources are explicit device-side
+//! publication capabilities, never access to private thread DTOs.
 use super::*;
 
 #[derive(Deserialize)]
@@ -8,6 +9,8 @@ pub(super) struct Scope {
     thread_id: String,
     #[serde(default)]
     snapshot: Option<Value>,
+    #[serde(default)]
+    publication_token: Option<String>,
 }
 
 fn owns(conn: &Connection, owner: &str, scope: &Scope) -> bool {
@@ -55,9 +58,34 @@ pub(super) async fn create(
         user.id
     };
     let created_at = now_rfc3339();
-    // The browser decrypts and projects the transcript before explicitly publishing it.
-    // Never fetch private transcript data through an unencrypted relay side channel.
-    let Some(input) = scope.snapshot.as_ref() else {
+    let live_snapshot = if let Some(token) = &scope.publication_token {
+        if Uuid::parse_str(token).is_err() {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        match internal_forward_json(
+            &state,
+            &scope.device_id,
+            "GET",
+            &format!("/api/publications/{token}"),
+            None,
+        )
+        .await
+        {
+            Ok(value) if value["live"] == true => Some(value),
+            _ => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    "Unable to read the device's published transcript",
+                )
+                    .into_response()
+            }
+        }
+    } else {
+        None
+    };
+    // Fixed snapshots are decrypted and projected by the browser. Live snapshots
+    // are projected by a capability configured over the owner's encrypted channel.
+    let Some(input) = live_snapshot.as_ref().or(scope.snapshot.as_ref()) else {
         return (
             StatusCode::BAD_REQUEST,
             "A public transcript snapshot is required",
@@ -150,7 +178,7 @@ pub(super) async fn create(
     } else {
         "dark"
     };
-    let snapshot = json!({"title":input["title"].as_str().unwrap_or("Shared thread"),"createdAt":created_at,"turnCount":turns.len(),"turns":turns,"theme":theme,"images":images});
+    let snapshot = json!({"title":input["title"].as_str().unwrap_or("Shared thread"),"createdAt":created_at,"updatedAt":created_at,"live":live_snapshot.is_some(),"turnCount":turns.len(),"turns":turns,"theme":theme,"images":images});
     let serialized = snapshot.to_string();
     if serialized.len() > 16 * 1024 * 1024 {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
@@ -161,7 +189,15 @@ pub(super) async fn create(
         return StatusCode::NOT_FOUND.into_response();
     }
     match conn.execute("INSERT INTO relay_public_links(id,owner_user_id,device_id,thread_id,snapshot_json,created_at) VALUES (?1,?2,?3,?4,?5,?6)", params![id,owner,scope.device_id,scope.thread_id,serialized,created_at]) {
-        Ok(_) => Json(json!({"id":id,"createdAt":created_at,"turnCount":snapshot["turnCount"]})).into_response(),
+        Ok(_) => {
+            if let Some(token) = &scope.publication_token {
+                if conn.execute("INSERT INTO relay_public_link_sources(link_id,publication_token,refreshed_at) VALUES (?1,?2,?3)", params![id,token,created_at]).is_err() {
+                    let _ = conn.execute("DELETE FROM relay_public_links WHERE id=?1", [&id]);
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            }
+            Json(json!({"id":id,"createdAt":created_at,"turnCount":snapshot["turnCount"],"live":live_snapshot.is_some()})).into_response()
+        },
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -177,12 +213,52 @@ pub(super) async fn list(
     else {
         return unauthorized();
     };
-    let Ok(mut statement) = conn.prepare("SELECT id,created_at,json_extract(snapshot_json,'$.turnCount') FROM relay_public_links WHERE owner_user_id=?1 AND device_id=?2 AND thread_id=?3 ORDER BY created_at DESC") else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
-    let Ok(rows) = statement.query_map(params![user.id,scope.device_id,scope.thread_id], |row| Ok(json!({"id":row.get::<_,String>(0)?,"createdAt":row.get::<_,String>(1)?,"turnCount":row.get::<_,i64>(2)?}))) else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    let Ok(mut statement) = conn.prepare("SELECT id,created_at,json_extract(snapshot_json,'$.turnCount'),EXISTS(SELECT 1 FROM relay_public_link_sources WHERE link_id=id) FROM relay_public_links WHERE owner_user_id=?1 AND device_id=?2 AND thread_id=?3 ORDER BY created_at DESC") else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    let Ok(rows) = statement.query_map(params![user.id,scope.device_id,scope.thread_id], |row| Ok(json!({"id":row.get::<_,String>(0)?,"createdAt":row.get::<_,String>(1)?,"turnCount":row.get::<_,i64>(2)?,"live":row.get::<_,bool>(3)?}))) else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     Json(rows.filter_map(Result::ok).collect::<Vec<_>>()).into_response()
 }
 
 pub(super) async fn read(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+    let source = {
+        let conn = state.store.conn.lock().await;
+        conn.query_row("SELECT l.device_id,s.publication_token,s.refreshed_at FROM relay_public_links l JOIN relay_public_link_sources s ON s.link_id=l.id WHERE l.id=?1", [&id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).optional().ok().flatten()
+    };
+    let mut stale = false;
+    if let Some((device, token, refreshed)) = source {
+        let due = chrono::DateTime::parse_from_rfc3339(&refreshed)
+            .map(|time| chrono::Utc::now().signed_duration_since(time).num_seconds() >= 5)
+            .unwrap_or(true);
+        if due {
+            // Claim this refresh before awaiting the device so simultaneous readers
+            // share the cached snapshot rather than fanning out identical requests.
+            let claimed = state.store.conn.lock().await.execute("UPDATE relay_public_link_sources SET refreshed_at=?1 WHERE link_id=?2 AND refreshed_at=?3", params![now_rfc3339(),id,refreshed]).unwrap_or(0) == 1;
+            if claimed {
+                match internal_forward_json(
+                    &state,
+                    &device,
+                    "GET",
+                    &format!("/api/publications/{token}"),
+                    None,
+                )
+                .await
+                {
+                    Ok(snapshot)
+                        if snapshot["live"] == true
+                            && snapshot.to_string().len() <= 16 * 1024 * 1024 =>
+                    {
+                        let _ = state.store.conn.lock().await.execute(
+                            "UPDATE relay_public_links SET snapshot_json=?1 WHERE id=?2",
+                            params![snapshot.to_string(), id],
+                        );
+                    }
+                    _ => {
+                        stale = true;
+                        let _ = state.store.conn.lock().await.execute("UPDATE relay_public_links SET snapshot_json=json_set(snapshot_json,'$.stale',json('true')) WHERE id=?1", [&id]);
+                    }
+                }
+            }
+        }
+    }
     let conn = state.store.conn.lock().await;
     let snapshot: Option<String> = conn
         .query_row(
@@ -201,7 +277,13 @@ pub(super) async fn read(Path(id): Path<String>, State(state): State<Arc<AppStat
                 (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
                 (header::REFERRER_POLICY, "no-referrer"),
             ],
-            snapshot,
+            if stale {
+                let mut value: Value = serde_json::from_str(&snapshot).unwrap_or(json!({}));
+                value["stale"] = json!(true);
+                value.to_string()
+            } else {
+                snapshot
+            },
         )
             .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -219,11 +301,27 @@ pub(super) async fn revoke(
     else {
         return unauthorized();
     };
+    let source = conn.query_row("SELECT l.device_id,s.publication_token FROM relay_public_links l JOIN relay_public_link_sources s ON s.link_id=l.id WHERE l.id=?1 AND l.owner_user_id=?2", params![id,user.id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional().ok().flatten();
     match conn.execute(
         "DELETE FROM relay_public_links WHERE id=?1 AND owner_user_id=?2",
         params![id, user.id],
     ) {
-        Ok(1) => StatusCode::NO_CONTENT.into_response(),
+        Ok(1) => {
+            drop(conn);
+            if let Some((device, token)) = source {
+                tokio::spawn(async move {
+                    let _ = internal_forward_json(
+                        &state,
+                        &device,
+                        "DELETE",
+                        &format!("/api/publications/{token}"),
+                        None,
+                    )
+                    .await;
+                });
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(_) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

@@ -172,7 +172,7 @@ test('workbench keeps tab positions, fills the viewport and separates session id
   await settings.getByTestId('theme-mode-light').click();
   await expect(settings).toHaveAttribute('data-theme-effective', 'light');
   await expect(settings.getByTestId('theme-mode-light')).toHaveAttribute('aria-pressed', 'true');
-  await expect(settings).toHaveCSS('background-color', 'rgb(247, 248, 246)');
+  await expect(settings).toHaveCSS('background-color', 'oklch(0.946 0.006 145)');
   await page.screenshot({ path: `output/playwright/matter-settings-global-${testInfo.project.name}.png` });
   await page.keyboard.press('Escape');
   await page.evaluate(() => localStorage.setItem('remote-codex-theme-mode', 'dark'));
