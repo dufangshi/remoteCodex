@@ -275,13 +275,15 @@ export function useWorkbenchNavigation(
           occurredAt: t.lastTurnCompletedAt!,
         }))
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-  const rawNotifications = relay ? snapshot.notifications : localNotifications;
-  const notificationKey = JSON.stringify(rawNotifications.slice(0, 30).map(n => [n.id, n.href, n.occurredAt]));
+  const rawNotifications = [...(relay ? snapshot.notifications : localNotifications)]
+    .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
+    .slice(0, 10);
+  const notificationKey = JSON.stringify(rawNotifications.map(n => [n.id, n.href, n.occurredAt]));
   useEffect(() => {
     if (!notificationsOpened) return;
     let alive = true;
     const controller = new AbortController();
-    const pending = rawNotifications.slice(0, 30).filter(n => !notificationDetails[n.id]);
+    const pending = rawNotifications.filter(n => !notificationDetails[n.id]);
     void Promise.all(Array.from({ length: Math.min(3, pending.length) }, async () => {
       while (alive && pending.length) {
         const notification = pending.shift()!;

@@ -19,9 +19,11 @@ export function DeviceEncryptionStatus({
   deviceId,
   online,
   connection,
+  hideHealthy = false,
 }: {
   deviceId?: string | undefined;
   online?: boolean;
+  hideHealthy?: boolean;
   connection?: {
     loaded: boolean;
     busy: boolean;
@@ -63,6 +65,7 @@ export function DeviceEncryptionStatus({
   if (!deviceId && !connection) return null;
   const encrypted = status?.state === 'encrypted',
     changed = status?.state === 'identity-changed';
+  if (hideHealthy && !changed && connection?.loaded && connection.state === 'connected') return null;
   const label = !deviceId ? 'Local device connection' : encrypted
     ? 'Device connection encrypted'
     : changed
