@@ -68,7 +68,7 @@ WebSocket 一次握手后复用分方向 AES-GCM 密钥，以单调序号构造 
 
 ## 设备安装命令与旧 VM 恢复
 
-设备所有者可在 Devices 菜单反复复制 macOS/Linux 或 Windows 安装命令。列表和共享响应不包含 token；点击时通过所有者专用 `POST /relay/devices/:id/setup-token` 获取，响应禁止缓存。不会为复制而轮换凭据或关闭设备连接。
+设备所有者可在 Devices 菜单反复复制 macOS/Linux 或 Windows 安装命令。列表和共享响应不包含 token；点击时通过所有者专用 `POST /relay/devices/:id/setup-token` 获取永久 device token，响应禁止缓存。不会为复制而轮换凭据或关闭设备连接。
 
 安装凭据存于 `relay_device_setup_tokens`，使用 session secret 派生的独立 AES-256-GCM 密钥加密，设备 ID 绑定为认证数据。备份需同时保留数据库和 session secret。认证仍校验 token 哈希。
 

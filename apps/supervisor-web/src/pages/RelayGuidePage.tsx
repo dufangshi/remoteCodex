@@ -6,7 +6,7 @@ import { enableRelayMode } from '../lib/api';
 
 const setupCommand = [
   'curl -fsSL https://remote-codex.example.com/setup.sh | sh -s -- \\',
-  '  --relay https://remote-codex.example.com --code ONE_TIME_CODE --port 8787',
+  '  --relay https://remote-codex.example.com --token DEVICE_TOKEN --port 8787',
 ].join('\n');
 
 const connectionModes = [
@@ -35,7 +35,7 @@ const relaySteps = [
   },
   {
     title: 'Copy the setup command',
-    detail: 'Use Copy setup. The macOS/Linux command includes a single-use setup code that expires after one hour.',
+    detail: 'Use Copy setup. The command contains this device’s permanent token and can be run again when the runtime needs to be installed or refreshed.',
   },
   {
     title: 'Start the supervisor',
@@ -115,7 +115,7 @@ export function RelayGuidePage() {
             Example supervisor command
           </h2>
           <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
-            Devices generates the real command. Keep its setup code private.
+            Devices generates the real command. Keep its device token private.
           </p>
           <pre className="mt-4 block w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3 text-xs leading-5 text-[var(--theme-fg)]">
             <code className="block min-w-max">{setupCommand}</code>

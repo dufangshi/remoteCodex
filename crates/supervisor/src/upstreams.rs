@@ -146,7 +146,7 @@ pub async fn template(
     Json(input): Json<Import>,
 ) -> Result<Response, Failure> {
     let template = profiles::parse_template(input.template).map_err(failure)?;
-    let preview = json!({"harnesses":template.harnesses,"profiles":template.profiles.iter().map(|p|json!({"name":p.name,"harness":p.harness,"baseUrl":p.base_url,"model":p.model})).collect::<Vec<_>>()});
+    let preview = json!({"harnesses":template.harnesses,"profiles":template.profiles.iter().map(|p|json!({"name":p.name,"harness":p.harness,"baseUrl":p.base_url,"model":if p.model.is_empty() { "auto-detect" } else { &p.model }})).collect::<Vec<_>>()});
     if !input.apply {
         return Ok(Json(preview).into_response());
     }
@@ -195,6 +195,19 @@ pub async fn template(
                 completed.push(format!("Installed or already available: {id}"));
             }
             for mut p in template.profiles {
+                if p.model.trim().is_empty() {
+                    let mut discovery_profile = p.clone();
+                    discovery_profile.model = "__auto_detect__".into();
+                    let discovered = profiles::discover_models(&discovery_profile).await?;
+                    p.model = discovered["models"]
+                        .as_array()
+                        .and_then(|models| models.first())
+                        .and_then(|model| model["id"].as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("No generative models were returned by {}", p.base_url)
+                        })?
+                        .to_owned();
+                }
                 p.id.clear();
                 let saved = profiles::upsert(&dir, p.clone())?;
                 s.restart_harness(&p.harness).await?;

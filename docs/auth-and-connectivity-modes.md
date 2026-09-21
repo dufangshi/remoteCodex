@@ -238,7 +238,7 @@ Relay portal:
 
 - `/relay-portal` lets users log in or register with email, username, and password.
 - registered users can create multiple devices.
-- creating a device returns a one-time `rcd_...` device token.
+- creating a device returns a permanent `rcd_...` device token; it can be copied again by the device owner and is revoked only when replaced or the device is deleted.
 - each device token maps one running private Remote Codex supervisor to that user.
 - users can share a single `threadId` on one device with another username.
 - invited users see those entries under Shared With Me and can continue the shared thread.

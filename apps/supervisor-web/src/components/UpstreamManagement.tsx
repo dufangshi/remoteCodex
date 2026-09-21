@@ -71,7 +71,6 @@ const sample = {
       name: 'My upstream',
       harness: 'codex',
       baseUrl: 'https://example.com/v1',
-      model: 'your-model',
       apiKey: '',
       apiType: 'responses',
     },
@@ -195,7 +194,7 @@ export function UpstreamManagement({
       ],
       profiles: data.profiles
         .filter((p) => data.active[p.harness] === p.id)
-        .map(({ id, hasApiKey, ...p }) => ({ ...p, apiKey: '' })),
+        .map(({ id, hasApiKey, model, ...p }) => ({ ...p, apiKey: '' })),
     };
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(template, null, 2)], {
@@ -749,7 +748,7 @@ export function UpstreamManagement({
                 </p>
                 {preview.profiles.map((p) => (
                   <p className="mt-2 break-all" key={p.harness}>
-                    {p.name} · {labels[p.harness]} · {p.model}
+                    {p.name} · {labels[p.harness]} · {p.model || '自动探测模型'}
                     <br />
                     {p.baseUrl}
                   </p>

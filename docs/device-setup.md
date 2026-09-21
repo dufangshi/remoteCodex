@@ -1,10 +1,10 @@
 # Device setup and upstream management
 
 On the relay Devices page, create a device and copy its macOS/Linux setup command.
-The command downloads `/setup.sh` from that relay and carries a single-use code
-valid for one hour, rather than a permanent device credential. The script uses
+The command downloads `/setup.sh` from that relay and carries the device's
+permanent token. The script uses
 Node 22+ when available, otherwise installs a checksummed private Node 22 LTS
-runtime. It installs the same Remote Codex version as the relay, enrolls the
+runtime. It installs the latest stable Remote Codex release, enrolls the
 device and verifies the relay connection. No global npm prefix or shell profile
 is changed. Repeating the same command can recover a saved enrollment; it never
 replaces a different existing device configuration.
@@ -62,14 +62,15 @@ Exports omit API keys; fill these before importing on a new device.
       "harness": "codex",
       "baseUrl": "https://api.example.com/v1",
       "apiKey": "REPLACE_WITH_DEVICE_KEY",
-      "model": "your-model",
       "apiType": "responses"
     }
   ]
 }
 ```
 
-The schema accepts one active profile per harness and fixed catalog IDs only.
+The model field is optional. When omitted, applying the template probes the
+upstream model catalog and selects the first generative model returned. The
+schema accepts one active profile per harness and fixed catalog IDs only.
 It never installs imported shell commands, arbitrary package names or URLs.
 
 ## Isolated acceptance

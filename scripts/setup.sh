@@ -3,17 +3,20 @@
 set -eu
 umask 077
 relay_url=''
+setup_token=''
 setup_code=''
 setup_port=8787
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --relay) relay_url=${2:?Missing relay URL}; shift 2 ;;
+    --token) setup_token=${2:?Missing device token}; shift 2 ;;
     --code) setup_code=${2:?Missing setup code}; shift 2 ;;
     --port) setup_port=${2:?Missing port}; shift 2 ;;
-    *) echo "Usage: setup.sh --relay URL --code CODE [--port PORT]" >&2; exit 1 ;;
+    *) echo "Usage: setup.sh --relay URL --token TOKEN [--port PORT]" >&2; exit 1 ;;
   esac
 done
-[ -n "$relay_url" ] && [ -n "$setup_code" ] || { echo 'Copy a setup command from the Devices page.' >&2; exit 1; }
+[ -n "$relay_url" ] && { [ -n "$setup_token" ] || [ -n "$setup_code" ]; } || { echo 'Copy a setup command from the Devices page.' >&2; exit 1; }
+[ -z "$setup_token" ] || [ -z "$setup_code" ] || { echo 'Choose either a device token or a setup code.' >&2; exit 1; }
 case "$relay_url" in https://*|http://localhost:*|http://127.0.0.1:*) ;; *) echo 'Relay must use HTTPS.' >&2; exit 1 ;; esac
 case "$setup_port" in *[!0-9]*|'') echo 'Invalid port' >&2; exit 1 ;; esac
 download() {
@@ -52,11 +55,14 @@ if [ -z "$setup_node" ] || ! "$setup_node" -e 'process.exit(Number(process.versi
 fi
 echo 'Installing Remote Codex…'
 setup_launcher="$setup_root/runtime/lib/node_modules/remote-codex/bin/remote-codex.mjs"
-# Reuse the managed installation on retries; updates belong to Settings.
-if [ ! -f "$setup_launcher" ]; then
-  npm install --global --prefix "$setup_root/runtime" 'remote-codex@__REMOTE_CODEX_VERSION__' npm@10 --no-audit --no-fund
-fi
+# Resolve the stable dist-tag on every run so a copied command always installs
+# the current runtime instead of the version that served this script.
+npm install --global --prefix "$setup_root/runtime" 'remote-codex@latest' npm@10 --prefer-online --no-audit --no-fund
 rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"
 rmdir "$setup_tmp"
 trap - EXIT HUP INT TERM
-exec "$setup_node" "$setup_launcher" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
+if [ -n "$setup_token" ]; then
+  exec "$setup_node" "$setup_launcher" setup --relay "$relay_url" --token "$setup_token" --port "$setup_port"
+else
+  exec "$setup_node" "$setup_launcher" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
+fi
