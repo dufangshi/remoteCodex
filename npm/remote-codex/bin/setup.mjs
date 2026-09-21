@@ -33,8 +33,8 @@ export async function setup({
 }) {
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!['--relay', '--code', '--port'].includes(args[i]) || !args[i + 1])
-      throw Error('Usage: setup --relay URL --code CODE [--port PORT]');
+    if (!['--relay', '--token', '--code', '--port'].includes(args[i]) || !args[i + 1])
+      throw Error('Usage: setup --relay URL --token TOKEN [--port PORT]');
     options[args[i]] = args[i + 1];
   }
   const url = new URL(options['--relay']);
@@ -57,11 +57,12 @@ export async function setup({
   const port = Number(options['--port'] ?? 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw Error('Invalid port');
-  if (!options['--code']) throw Error('A setup code is required');
+  const credential = options['--token'] ?? options['--code'];
+  if (!credential) throw Error('A permanent device token is required');
   const receiptPath = `${config}.setup.json`;
   const digest = (value) => createHash('sha256').update(value).digest('hex');
   const identity = digest(
-    JSON.stringify([url.origin, port, options['--code']]),
+    JSON.stringify([url.origin, port, options['--token'] ? 'token' : 'code', credential]),
   );
   let resume = false;
   try {
@@ -99,7 +100,11 @@ export async function setup({
       'This user already has a device configuration. Manage it from Settings; setup will not overwrite it.',
     );
   await nativePath(); // Fetch and checksum the runtime before consuming the code.
-  if (!resume) {
+  if (!resume && options['--token']) {
+    process.env.REMOTE_CODEX_RELAY_SERVER_URL = url.origin.replace(/^http/, 'ws');
+    process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN = options['--token'];
+    process.env.REMOTE_CODEX_RELAY_SUPERVISOR_PORT = String(port);
+  } else if (!resume) {
     const response = await fetch(new URL('/relay/setup/redeem', url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

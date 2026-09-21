@@ -23,6 +23,7 @@ pub struct Profile {
     pub api_key: String,
     #[serde(default = "api_key_auth")]
     pub auth_type: String,
+    #[serde(default)]
     pub model: String,
     #[serde(default = "responses")]
     pub api_type: String,
@@ -884,7 +885,11 @@ pub fn parse_template(value: Value) -> Result<Template> {
     }
     let mut active = std::collections::HashSet::new();
     for p in &t.profiles {
-        validate(p, true)?;
+        let mut candidate = p.clone();
+        if candidate.model.trim().is_empty() {
+            candidate.model = "__auto_detect__".into();
+        }
+        validate(&candidate, true)?;
         if !active.insert(&p.harness) {
             bail!("A template may activate only one profile per harness");
         }
@@ -1125,4 +1130,20 @@ mod tests {
                 .is_err()
         );
     }
+}
+#[test]
+fn templates_allow_model_omission_for_upstream_discovery() {
+    let template = parse_template(json!({
+        "schemaVersion": 1,
+        "harnesses": ["codex"],
+        "profiles": [{
+            "name": "Gateway",
+            "harness": "codex",
+            "baseUrl": "https://gateway.example/v1",
+            "apiKey": "secret",
+            "apiType": "responses"
+        }]
+    }))
+    .unwrap();
+    assert_eq!(template.profiles[0].model, "");
 }

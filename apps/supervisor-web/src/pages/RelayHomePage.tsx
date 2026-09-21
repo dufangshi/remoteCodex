@@ -127,7 +127,7 @@ export function RelayHomePage() {
             </div>
             <ol className="divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
               <ConnectionStep number="01" title="Register a device">
-                Create a one-time token for the private supervisor machine.
+                Create a permanent token for the private supervisor machine.
               </ConnectionStep>
               <ConnectionStep number="02" title="Start the supervisor">
                 Keep an outbound relay connection open from that machine.
