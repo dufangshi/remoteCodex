@@ -89,6 +89,8 @@ struct LiveSession {
     harness_models: Vec<ModelOptionDto>,
     available_modes: Vec<SessionMode>,
     current_mode_id: Option<String>,
+    /// Prompt bootstrap is scoped to the loaded process and product identity.
+    context_thread_id: Option<String>,
 }
 
 struct PendingPermission {
@@ -436,6 +438,7 @@ impl AcpRuntime {
             },
             available_modes,
             current_mode_id,
+            context_thread_id: None,
         };
         Self::apply_product_mode(&live.process.clone(), &mut live).await?;
         startup_process.0 = None;
@@ -1487,7 +1490,7 @@ impl AgentRuntime for AcpRuntime {
             input.performance_mode,
         )
         .await?;
-        let (process, session_id, cwd, image_capable, adapter_id, harness_state) = {
+        let (process, session_id, cwd, image_capable, adapter_id, harness_state, needs_context) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
                 .get(&input.provider_session_id)
@@ -1499,6 +1502,7 @@ impl AgentRuntime for AcpRuntime {
                 live.negotiated.image,
                 live.adapter_id.clone(),
                 live.harness_state.clone(),
+                live.context_thread_id.as_deref() != Some(input.thread_id.as_str()),
             )
         };
         let adapter = adapter_for(&adapter_id);
@@ -1506,8 +1510,9 @@ impl AgentRuntime for AcpRuntime {
             .prompt_preamble()
             .map(|preamble| format!("{preamble}\n\n{}", input.prompt))
             .unwrap_or_else(|| input.prompt.clone());
-        let prompt = if !crate::interaction::launch_env().is_empty() {
-            format!("[remoteCodex context: your thread ID is {}. This is a remoteCodex ID, not a native Codex session ID. Local peer thread CLI is available. Peer messages default to a passive inbox, not a new prompt. Check `remote-codex inbox` at collaboration checkpoints and before finishing when awaiting peers; read and acknowledge relevant messages. Run `remote-codex skill` to discover creation, messaging, status, and progressive transcript commands. Credentials and current identity are in the process environment.]\n\n{prompt}", input.thread_id)
+        let include_context = needs_context && !input.hidden && !process.cli_env.is_empty();
+        let prompt = if include_context {
+            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. `remote-codex skill` documents peer collaboration; messages default to a passive inbox. When collaborating, check and acknowledge `remote-codex inbox` at checkpoints. Connection credentials are in the environment.]\n\n{prompt}")
         } else {
             prompt
         };
@@ -1694,6 +1699,9 @@ impl AgentRuntime for AcpRuntime {
             {
                 live.active = None;
             }
+            if include_context && prompt_done {
+                live.context_thread_id = Some(input.thread_id.clone());
+            }
         }
         if discard_session {
             self.inner
@@ -1861,6 +1869,9 @@ impl AgentRuntime for AcpRuntime {
                 cancel,
             )
             .await?;
+        if let Some(live) = self.inner.sessions.lock().await.get_mut(session_id) {
+            live.context_thread_id = None;
+        }
         Ok(())
     }
 
@@ -2018,6 +2029,7 @@ impl AgentRuntime for AcpRuntime {
                 harness_models,
                 available_modes,
                 current_mode_id,
+                context_thread_id: None,
             },
         );
         Ok(StartSessionResult {

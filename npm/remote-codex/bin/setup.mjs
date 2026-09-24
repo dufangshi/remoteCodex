@@ -13,6 +13,65 @@ const xml = (s) =>
     .replaceAll('"', '&quot;');
 const quote = (s) =>
   `"${String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"`;
+export function matchesDeviceConfig(saved, relay, token, port) {
+  try {
+    const stored = new URL(saved.REMOTE_CODEX_RELAY_SERVER_URL);
+    stored.protocol = stored.protocol.replace(/^ws/, 'http');
+    return stored.href === new URL(relay).href &&
+      saved.REMOTE_CODEX_RELAY_AGENT_TOKEN === token &&
+      Number(saved.REMOTE_CODEX_RELAY_SUPERVISOR_PORT ?? 8787) === port;
+  } catch {
+    return false;
+  }
+}
+
+async function deviceApi(port, saved, route, method = 'GET') {
+  const base = `http://127.0.0.1:${port}`;
+  const login = await fetch(`${base}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: saved.REMOTE_CODEX_ADMIN_USERNAME, password: saved.REMOTE_CODEX_ADMIN_PASSWORD }),
+    redirect: 'error', signal: AbortSignal.timeout(10000),
+  });
+  if (!login.ok) throw Error('Unable to authenticate the existing device using its saved configuration.');
+  const auth = await login.json();
+  const result = await fetch(`${base}${route}`, {
+    method, headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+    redirect: 'error', signal: AbortSignal.timeout(25000),
+  });
+  if (!result.ok) throw Error(`Device management request failed (HTTP ${result.status}).`);
+  return result.json();
+}
+
+export async function ensureExistingDeviceOnline(port, saved, targetVersion) {
+  const status = await deviceApi(port, saved, '/api/management/supervisor');
+  if (status.runningVersion !== targetVersion) {
+    if (!status.canUpdate) throw Error('The existing Supervisor cannot update itself. Update it from its original installation.');
+    console.log(`Updating the running Supervisor to ${targetVersion}…`);
+    const update = await deviceApi(port, saved, '/api/management/supervisor/update', 'POST');
+    if (update.job?.phase === 'failed') throw Error('The Supervisor updater failed. Check the device update log.');
+  }
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    try {
+      const health = await (await fetch(`http://127.0.0.1:${port}/healthz`, {
+        redirect: 'error', signal: AbortSignal.timeout(3000),
+      })).json();
+      if (health.status === 'ok' && health.relayConnected === true) {
+        const running = await deviceApi(port, saved, '/api/management/supervisor');
+        if (running.runningVersion === targetVersion) {
+          console.log(`Device is online and running Remote Codex ${targetVersion}.`);
+          return;
+        }
+        if (['failed', 'rolled-back', 'rollback-failed'].includes(running.job?.phase))
+          throw Error('The Supervisor update did not complete. Check the device update log.');
+      }
+    } catch (error) {
+      if (error.message.startsWith('The Supervisor update')) throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw Error('The device did not come online at the requested version. Check the relay URL, token, network and device update log.');
+}
 export function serviceDefinition(
   platform,
   { node, launcher, home, config, log, searchPath },
@@ -59,18 +118,38 @@ export async function setup({
     throw Error('Invalid port');
   const credential = options['--token'] ?? options['--code'];
   if (!credential) throw Error('A permanent device token is required');
+  if (options['--token'] && options['--code'])
+    throw Error('Choose either a device token or a setup code.');
   const receiptPath = `${config}.setup.json`;
+  const targetVersion = JSON.parse(fs.readFileSync(path.resolve(path.dirname(launcher), '../package.json'), 'utf8')).version;
   const digest = (value) => createHash('sha256').update(value).digest('hex');
   const identity = digest(
     JSON.stringify([url.origin, port, options['--token'] ? 'token' : 'code', credential]),
   );
   let resume = false;
+  let saved;
+  let configBytes;
+  try {
+    configBytes = fs.readFileSync(config);
+    saved = JSON.parse(configBytes);
+  } catch (error) {
+    if (error.code !== 'ENOENT')
+      throw Error('The existing device configuration cannot be read. Repair it before running setup.');
+  }
   try {
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
     resume =
       receipt.identity === identity &&
-      receipt.configHash === digest(fs.readFileSync(config));
+      receipt.configHash === digest(configBytes);
+    // Before permanent-token setup, code receipts did not include a kind field.
+    if (!resume && options['--code'])
+      resume = receipt.identity === digest(JSON.stringify([url.origin, port, credential])) &&
+        receipt.configHash === digest(configBytes);
   } catch {}
+  // Legacy/manual installations have no receipt. Identify them by the actual
+  // connection settings; never replace a different device or its database.
+  if (options['--token'])
+    resume = matchesDeviceConfig(saved, url.origin, options['--token'], port);
   // Do not overwrite a working device or commandeer an unrelated listening port.
   const occupied = await new Promise((resolve) => {
     const server = net.createServer();
@@ -82,29 +161,22 @@ export async function setup({
       throw Error(
         'The selected port is already in use. Manage the existing device from Settings.',
       );
-    const h = await (
-      await fetch(`http://127.0.0.1:${port}/healthz`, {
-        signal: AbortSignal.timeout(3000),
-      })
-    ).json();
-    if (h.relayConnected === true) {
-      console.log('This device is already online.');
-      return;
-    }
-    throw Error(
-      'The selected port is already in use. Choose another port or manage the existing device from Settings.',
-    );
+    await ensureExistingDeviceOnline(port, saved, targetVersion);
+    return;
   }
   if (fs.existsSync(config) && !resume)
     throw Error(
       'This user already has a device configuration. Manage it from Settings; setup will not overwrite it.',
     );
   await nativePath(); // Fetch and checksum the runtime before consuming the code.
-  if (!resume && options['--token']) {
+  if (options['--token']) {
     process.env.REMOTE_CODEX_RELAY_SERVER_URL = url.origin.replace(/^http/, 'ws');
     process.env.REMOTE_CODEX_RELAY_AGENT_TOKEN = options['--token'];
     process.env.REMOTE_CODEX_RELAY_SUPERVISOR_PORT = String(port);
-  } else if (!resume) {
+  } else if (resume) {
+    for (const name of ['REMOTE_CODEX_RELAY_SERVER_URL', 'REMOTE_CODEX_RELAY_AGENT_TOKEN', 'REMOTE_CODEX_RELAY_SUPERVISOR_PORT'])
+      process.env[name] = saved[name];
+  } else {
     const response = await fetch(new URL('/relay/setup/redeem', url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -211,9 +283,7 @@ export async function setup({
         })
       ).json();
       if (h.status === 'ok' && h.relayConnected === true) {
-        console.log(
-          'Device is online. Open its Settings on the relay to install harnesses and configure upstreams.',
-        );
+        await ensureExistingDeviceOnline(port, JSON.parse(fs.readFileSync(config)), targetVersion);
         return;
       }
     } catch {}

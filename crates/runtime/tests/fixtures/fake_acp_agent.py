@@ -152,6 +152,9 @@ def handle(msg):
     if method == "session/prompt":
         sid = params.get("sessionId") or "fake-session"
         text = prompt_text(params)
+        if os.path.exists("record-prompts"):
+            with open("prompts.jsonl", "a") as log:
+                log.write(json.dumps(text) + "\n")
         if text == "report-effort":
             text = "effort=" + reasoning_effort
         if text == "wait-for-steer":

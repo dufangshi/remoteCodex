@@ -112,6 +112,7 @@ function ok(r) {
   );
   return r.data;
 }
+async function acceptance() {
 try {
   // Only the unpublished package is served locally; Node/npm/harness packages
   // are official downloads. Native override selects this source build.
@@ -227,7 +228,9 @@ try {
   assert.equal(shell.status, 200);
   assert(!shell.text.includes('__REMOTE_CODEX_VERSION__'));
   const script = path.join(root, 'setup.sh');
-  fs.writeFileSync(script, shell.text);
+  // Test the unpublished candidate through a local registry fixture. Production
+  // always resolves from registry.npmjs.org, regardless of inherited npm config.
+  fs.writeFileSync(script, shell.text.replaceAll('https://registry.npmjs.org', registry));
   console.log('Testing setup with no Node on PATH…');
   const args = [script, '--relay', base, '--code', code, '--port', String(sp)];
   console.log((await run('/bin/sh', args)).trim());
@@ -245,8 +248,27 @@ try {
   const repeated = await run('/bin/sh', args, {
     PATH: `${nodeBin}:/usr/bin:/bin`,
   });
-  assert(repeated.includes('already online'));
+  assert(repeated.includes(`Device is online and running Remote Codex ${pkg.version}`));
+  assert(repeated.includes('already installed'));
   assert(!repeated.includes('Installing a private Node'));
+  const savedPath = env.REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG;
+  const saved = JSON.parse(fs.readFileSync(savedPath));
+  fs.unlinkSync(savedPath + '.setup.json');
+  const tokenArgs = [script, '--relay', base, '--token', device.token, '--port', String(sp)];
+  const adopted = await run('/bin/sh', tokenArgs, { PATH: `${nodeBin}:/usr/bin:/bin` });
+  assert(adopted.includes(`Device is online and running Remote Codex ${pkg.version}`));
+  assert.equal(ok(await req(`${local}/healthz`)).processId, health.processId);
+  // Restart a stopped legacy setup without a receipt and keep its identity/database.
+  process.kill(health.processId, 'SIGTERM');
+  await poll(async () => { try { await fetch(`${local}/healthz`); return false; } catch { return true; } });
+  const recovered = await run('/bin/sh', tokenArgs, { PATH: `${nodeBin}:/usr/bin:/bin` });
+  assert(recovered.includes(`Device is online and running Remote Codex ${pkg.version}`));
+  devicePids.push(ok(await req(`${local}/healthz`)).processId);
+  assert.deepEqual(JSON.parse(fs.readFileSync(savedPath)), saved);
+  if (process.argv.includes('--setup-only')) {
+    console.log('PASS: no-Node bootstrap, latest lookup, no reinstall on retry, online legacy adoption, offline legacy recovery and unchanged configuration');
+    return;
+  }
   const nextCode = ok(await req(`${deviceUrl}/bootstrap`, 'POST', {})).code;
   await assert.rejects(
     run('/bin/sh', [
@@ -393,3 +415,5 @@ try {
     server.close();
   }
 }
+}
+await acceptance();

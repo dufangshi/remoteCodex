@@ -264,6 +264,8 @@ export async function worker(plan, hooks = {}) {
         '--prefix',
         plan.prefix,
         `remote-codex@${plan.version}`,
+        '--registry=https://registry.npmjs.org',
+        '--prefer-online',
         '--no-audit',
         '--no-fund',
       ],

@@ -230,7 +230,7 @@ async fn conversation_is_recent_bounded_and_every_stored_detail_is_discoverable(
 async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() {
     use remote_codex_runtime::{
         acp::AcpRuntime,
-        actor::{AgentRuntime, SessionSettings, StartSessionInput},
+        actor::{AgentRuntime, EventBus, SessionSettings, StartSessionInput, StartTurnInput},
     };
     let (dir, s) = setup();
     s.configure_cli("http://127.0.0.1:8787".into());
@@ -265,6 +265,43 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
     };
     assert_eq!(read()["threadId"], "thread-a");
     assert_eq!(read()["hasToken"], true);
+    std::fs::write(dir.path().join("record-prompts"), "").unwrap();
+    let prompt = |identity: &str, text: &str| StartTurnInput {
+        provider_session_id: started.provider_session_id.clone(),
+        thread_id: identity.into(),
+        turn_id: uuid::Uuid::new_v4().to_string(),
+        prompt: text.into(),
+        model: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        collaboration_mode: None,
+        approval_mode: None,
+        performance_mode: None,
+        hidden: false,
+        images: vec![],
+    };
+    for text in ["first", "second"] {
+        s.with_cli_context(
+            "thread-a",
+            runtime.start_turn(
+                prompt("thread-a", text),
+                EventBus::new(),
+                tokio_util::sync::CancellationToken::new(),
+            ),
+        )
+        .await
+        .unwrap();
+    }
+    let prompts = || {
+        std::fs::read_to_string(dir.path().join("prompts.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<String>(line).unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert!(prompts()[0].contains("remote-codex thread self"));
+    assert!(prompts()[0].ends_with("\n\nfirst"));
+    assert_eq!(prompts()[1], "second");
     assert!(
         !s.with_cli_context("thread-b", async {
             runtime.session_loaded(&started.provider_session_id)
@@ -282,6 +319,29 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
     .await
     .unwrap();
     assert_eq!(read()["threadId"], "thread-b");
+    s.with_cli_context(
+        "thread-b",
+        runtime.start_turn(
+            prompt("thread-b", "resumed"),
+            EventBus::new(),
+            tokio_util::sync::CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(prompts()[2].contains("remote-codex thread self"));
+    assert!(prompts()[2].ends_with("\n\nresumed"));
+    s.with_cli_context(
+        "thread-b",
+        runtime.start_turn(
+            prompt("thread-b", "next"),
+            EventBus::new(),
+            tokio_util::sync::CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(prompts()[3], "next");
     assert!(
         s.with_cli_context("thread-b", async {
             runtime.session_loaded(&started.provider_session_id)
