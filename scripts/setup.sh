@@ -35,7 +35,8 @@ fi
 setup_root="$HOME/.local/share/remote-codex"
 mkdir -p "$setup_root"
 setup_tmp=$(mktemp -d "$setup_root/bootstrap.XXXXXX")
-trap 'rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"; rmdir "$setup_tmp" 2>/dev/null || true' EXIT HUP INT TERM
+trap 'setup_exit=$?; rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"; rmdir "$setup_tmp" 2>/dev/null || true; exit "$setup_exit"' EXIT
+trap 'exit 1' HUP INT TERM
 setup_node=$(command -v node || true)
 if [ -z "$setup_node" ] || ! "$setup_node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' 2>/dev/null || ! command -v npm >/dev/null 2>&1; then
   echo 'Installing a private Node.js LTS runtime…'
@@ -53,11 +54,18 @@ if [ -z "$setup_node" ] || ! "$setup_node" -e 'process.exit(Number(process.versi
   PATH="$setup_node_root/bin:$PATH"; export PATH
   setup_node="$setup_node_root/bin/node"
 fi
-echo 'Installing Remote Codex…'
+echo 'Checking the latest Remote Codex release…'
 setup_launcher="$setup_root/runtime/lib/node_modules/remote-codex/bin/remote-codex.mjs"
-# Resolve the stable dist-tag on every run so a copied command always installs
-# the current runtime instead of the version that served this script.
-npm install --global --prefix "$setup_root/runtime" 'remote-codex@latest' npm@10 --prefer-online --no-audit --no-fund
+# Resolve from the official registry even if this user's npm uses a stale mirror.
+setup_latest=$(npm view remote-codex@latest version --registry=https://registry.npmjs.org --prefer-online --json)
+setup_version=$("$setup_node" -e 'const v=JSON.parse(process.argv[1]); if(typeof v!=="string" || !/^\d+\.\d+\.\d+$/.test(v)) process.exit(1); process.stdout.write(v)' "$setup_latest")
+setup_installed=$("$setup_node" -e 'try { process.stdout.write(require(process.argv[1]).version) } catch {}' "$setup_root/runtime/lib/node_modules/remote-codex/package.json")
+if [ "$setup_installed" != "$setup_version" ] || [ ! -f "$setup_launcher" ]; then
+  echo "Installing Remote Codex ${setup_version}…"
+  npm install --global --prefix "$setup_root/runtime" "remote-codex@$setup_version" npm@10 --registry=https://registry.npmjs.org --prefer-online --no-audit --no-fund
+else
+  echo "Remote Codex $setup_version is already installed."
+fi
 rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"
 rmdir "$setup_tmp"
 trap - EXIT HUP INT TERM

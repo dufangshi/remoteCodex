@@ -4,10 +4,12 @@ On the relay Devices page, create a device and copy its macOS/Linux setup comman
 The command downloads `/setup.sh` from that relay and carries the device's
 permanent token. The script uses
 Node 22+ when available, otherwise installs a checksummed private Node 22 LTS
-runtime. It installs the latest stable Remote Codex release, enrolls the
-device and verifies the relay connection. No global npm prefix or shell profile
-is changed. Repeating the same command can recover a saved enrollment; it never
-replaces a different existing device configuration.
+runtime. Each run queries the official npm registry for the latest stable release,
+skips reinstalling an identical launcher, and verifies the running version and
+relay connection. Existing online Supervisors update through their management
+API. No shell profile is changed. A legacy configuration without a setup receipt
+is reused when its relay, token and port match; a different device configuration
+is never overwritten. The existing database and credentials are preserved.
 
 Supported bootstrap platforms are Apple Silicon macOS and glibc Linux on ARM64/x64, with curl
 or wget and tar. macOS uses a user LaunchAgent; Linux uses a systemd user service
