@@ -159,6 +159,7 @@ function assertPackageContents(metadata) {
   const files = new Set(metadata.files.map((entry) => entry.path));
   for (const required of [
     'bin/remote-codex.mjs',
+    'bin/installation.mjs',
     'bin/supervisor-update.mjs',
     'native-manifest.json',
     'web/index.html',

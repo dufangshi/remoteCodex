@@ -9,7 +9,30 @@ import {
   needsUpdate,
   captureRelaySession,
   retireRelaySession,
+  npmInstallation,
 } from '../npm/remote-codex/bin/supervisor-update.mjs';
+
+test('resolves distro npm outside the launcher prefix without changing the update destination', { skip: process.platform === 'win32' }, () => {
+  const plan = fixture();
+  try {
+    fs.writeFileSync(plan.launcher, '');
+    const bin = path.join(plan.directory, 'usr/bin');
+    const npmRoot = path.join(plan.directory, 'usr/share/nodejs/npm');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.mkdirSync(path.join(npmRoot, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(npmRoot, 'package.json'), JSON.stringify({ name: 'npm' }));
+    const cli = path.join(npmRoot, 'bin/npm-cli.js');
+    fs.writeFileSync(cli, '');
+    fs.symlinkSync(cli, path.join(bin, 'npm'));
+    const node = path.join(bin, 'node');
+    fs.writeFileSync(node, '');
+    const installed = npmInstallation(plan.launcher, node, { PATH: '' });
+    assert.equal(installed.npm, cli);
+    assert.equal(installed.prefix, plan.prefix);
+    fs.writeFileSync(path.join(npmRoot, 'package.json'), JSON.stringify({ name: 'not-npm' }));
+    assert.equal(npmInstallation(plan.launcher, node, { PATH: '' }).manager, 'managed-release');
+  } finally { fs.rmSync(plan.directory, { recursive: true, force: true }); }
+});
 
 test('tmux handover captures native ancestry and retires only the original single-pane session', () => {
   const plan = { mode: 'relay', pid: 103, env: { TMUX: '/tmp/test socket,10,0', TMUX_PANE: '%4' } };

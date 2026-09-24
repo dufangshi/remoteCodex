@@ -25,13 +25,20 @@ An ordinary crash or a user-interrupted thread does **not** opt into recovery. A
 
 This is task continuation, not transparent process checkpointing. Running shell commands may have been interrupted or may have already performed side effects; agents must inspect state before repeating them. A very old Supervisor that lacks this API still needs a one-time bootstrap upgrade.
 
+## Installation ownership
+
+The updater resolves the actual launcher independently of npm's configured global prefix. Writable conventional global npm installations update in their owning prefix, including distro npm and nvm. Read-only installations, pnpm stores, local dependencies and installations without npm stage an official release under the current user's `~/.remote-codex/installations/`. Registry SHA-512 integrity and the native manifest/binary are verified before atomically routing the original launcher to the staged release. No sudo, PATH rewrite or package-manager store mutation is required.
+
+Routing is scoped to the canonical original launcher and survives service and machine restarts. An explicit package-manager upgrade of the original package supersedes its previous route. Preparation failure leaves the old service running; failure before a new launch restores the previous route. After launch is attempted, retain the new installation because the database may already have migrated. Managed releases preserve the service's existing configuration, database, device identity and service manager.
+
+Source checkouts are detected and never overwritten with published releases. Standalone native processes without a launcher still require a one-time launcher bootstrap. Older launchers that predate routing also require bootstrap when their original update API cannot complete an upgrade. A user must have a writable home installation directory; the updater reports this before stopping the Supervisor.
+
 ## Verification
 
 Fast tests:
 
 ```sh
-cargo test --workspace
-node --test scripts/supervisor-update.test.mjs
+node --test scripts/supervisor-update.test.mjs scripts/installation.test.mjs
 ```
 
 The opt-in live test runs **inside an isolated Linux machine**, with two distinct test-version builds from the candidate source, an isolated npm prefix containing npm, and Codex plus codex-acp on PATH. Never point it at the host Supervisor. It uses real provider authentication and tokens:

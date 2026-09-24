@@ -6,6 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { routingFile, stagePackage } from './installation.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const read = (file) => {
@@ -34,29 +35,65 @@ const xml = (v) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 
-export function npmInstallation(launcher, node) {
+export function npmInstallation(launcher, node, env = process.env, writable = canWrite) {
   const root = path.dirname(path.dirname(fs.realpathSync(launcher)));
   if (read(path.join(root, 'package.json'))?.name !== 'remote-codex')
     throw Error('Unrecognized launcher package');
   const modules = path.dirname(root);
-  if (path.basename(modules) !== 'node_modules')
-    throw Error('This is a source checkout, not a global npm installation');
+  const packaged = fs.existsSync(path.join(root, 'native-manifest.json'));
+  if (path.basename(modules) !== 'node_modules' && !packaged)
+    throw Error('Source checkout: update with git and rebuild; automatic release installation would overwrite development code');
   const parent = path.dirname(modules);
   const prefix =
     path.basename(parent) === 'lib' ? path.dirname(parent) : parent;
   let npm = path.join(modules, 'npm/bin/npm-cli.js');
   if (process.platform === 'win32' && !fs.existsSync(npm))
     npm = path.join(path.dirname(node), 'node_modules/npm/bin/npm-cli.js');
-  if (!fs.existsSync(npm) || !fs.existsSync(node))
-    throw Error('Cannot identify the npm installation that owns this launcher');
+  if (!fs.existsSync(npm) && process.platform !== 'win32') {
+    // Debian/Ubuntu package npm under /usr/share/nodejs, independently of
+    // the global package prefix. Resolve an actual npm CLI, not a shell shim.
+    for (const directory of [path.dirname(node), ...(env.PATH ?? '').split(path.delimiter)].filter(d => d && path.isAbsolute(d))) {
+      try {
+        const candidate = fs.realpathSync(path.join(directory, 'npm'));
+        if (path.basename(candidate) === 'npm-cli.js' && read(path.resolve(path.dirname(candidate), '../package.json'))?.name === 'npm') {
+          npm = candidate;
+          break;
+        }
+      } catch { /* Try the next installed npm entry. */ }
+    }
+  }
+  if (!fs.existsSync(node)) throw Error('The Node executable used to start this Supervisor is missing');
+  // Only a writable, conventional global layout may be modified in place.
+  // Local dependencies, pnpm stores and read-only system installs use releases
+  // isolated from both the package manager and the managed workspace.
+  const globalLayout = process.platform === 'win32'
+    ? path.basename(modules) === 'node_modules' && !fs.existsSync(path.join(prefix, 'package.json'))
+    : path.basename(parent) === 'lib' && path.basename(modules) === 'node_modules';
+  const managed = !!env.REMOTE_CODEX_INSTALL_ORIGIN || !globalLayout || !fs.existsSync(npm) ||
+    ![root, modules, prefix, path.join(prefix, process.platform === 'win32' ? '.' : 'bin')].every(writable);
+  const origin = env.REMOTE_CODEX_INSTALL_ORIGIN || fs.realpathSync(launcher);
+  const routeFile = managed ? routingFile(origin) : null;
+  if (managed && !writable(path.dirname(routeFile)))
+    throw Error('Neither the original installation nor the user-managed installation directory is writable');
   return {
     root,
     prefix,
     npm,
     node,
     launcher,
+    manager: managed ? 'managed-release' : 'npm',
+    ...(managed ? { routeFile, origin, originVersion: read(path.resolve(origin, '../../package.json'))?.version } : {}),
     installedVersion: read(path.join(root, 'package.json')).version,
   };
+}
+
+function canWrite(directory) {
+  while (!fs.existsSync(directory)) {
+    const parent = path.dirname(directory);
+    if (parent === directory) return false;
+    directory = parent;
+  }
+  try { fs.accessSync(directory, fs.constants.W_OK); return true; } catch { return false; }
 }
 
 async function run(program, args, env, cwd, timeout = 300_000) {
@@ -208,6 +245,7 @@ export async function worker(plan, hooks = {}) {
   const captureSession = hooks.captureRelaySession ?? captureRelaySession;
   const retireSession = hooks.retireRelaySession ?? retireRelaySession;
   const manageService = hooks.managedService ?? managedService;
+  const stage = hooks.stagePackage ?? stagePackage;
   const env = cleanEnvironment(plan.env);
   if (plan.action === 'restart') env.REMOTE_CODEX_NATIVE_BINARY = plan.executable;
   const isAlive = hooks.alive ?? alive;
@@ -216,6 +254,9 @@ export async function worker(plan, hooks = {}) {
     env.SERVICE_PORT = String(plan.port);
   }
   const backup = path.join(plan.directory, 'previous-package');
+  const oldRoute = plan.routeFile && fs.existsSync(plan.routeFile) ? fs.readFileSync(plan.routeFile) : null;
+  let routeChanged = false;
+  let nextLauncher = plan.launcher;
   let installed = false,
     stopped = false,
     newStartAttempted = false,
@@ -252,6 +293,14 @@ export async function worker(plan, hooks = {}) {
       throw Error('The running Supervisor changed; check for updates again');
     const relaySession = captureSession(plan);
     if (plan.action !== 'restart') {
+    if (plan.manager === 'managed-release') {
+      status('installing');
+      fs.mkdirSync(path.dirname(plan.routeFile), { recursive: true, mode: 0o700 });
+      const release = fs.mkdtempSync(path.join(path.dirname(plan.routeFile), 'release-'));
+      await stage(plan.version, release);
+      nextLauncher = path.join(release, 'bin/remote-codex.mjs');
+      env.REMOTE_CODEX_INSTALL_ORIGIN = plan.origin;
+    } else {
     fs.cpSync(plan.root, backup, { recursive: true });
     installed = true;
     status('installing');
@@ -274,9 +323,10 @@ export async function worker(plan, hooks = {}) {
     );
     if (read(path.join(plan.root, 'package.json'))?.version !== plan.version)
       throw Error('Installed launcher version mismatch');
+    }
     const binary = await execute(
       plan.node,
-      [plan.launcher, 'native-path'],
+      [nextLauncher, 'native-path'],
       env,
       plan.cwd,
     );
@@ -294,6 +344,11 @@ export async function worker(plan, hooks = {}) {
       throw Error(
         'A turn started during preparation. Try updating after it finishes.',
       );
+    if (plan.manager === 'managed-release' && plan.action !== 'restart') {
+      write(plan.routeFile, { originVersion: plan.originVersion, version: plan.version,
+        relativeLauncher: path.relative(path.dirname(plan.routeFile), nextLauncher) });
+      routeChanged = true;
+    }
     stopped = true;
     if(!manageService(plan.env,'stop')) stop(plan.pid);
     for (let i = 0; i < 30 && isAlive(plan.pid); i++) await pause(500);
@@ -313,7 +368,7 @@ export async function worker(plan, hooks = {}) {
     if(!manageService(plan.env,'start')) start(
       plan.node,
       [
-        plan.launcher,
+        nextLauncher,
         plan.mode === 'relay' ? 'relay-supervisor' : 'start',
         ...(plan.mode === 'relay' ? ['start'] : []),
       ],
@@ -369,6 +424,12 @@ export async function worker(plan, hooks = {}) {
     // Keep the job active until rollback finishes; the old runtime must stay paused.
     status('restarting', { rollingBack: true, error: error.message });
     try {
+      if (routeChanged) {
+        if (oldRoute) {
+          fs.writeFileSync(`${plan.routeFile}.next`, oldRoute, { mode: 0o600 });
+          fs.renameSync(`${plan.routeFile}.next`, plan.routeFile);
+        } else fs.rmSync(plan.routeFile, { force: true });
+      }
       // Never kill a process found only by port: only the child started by this worker.
       if (newPid && isAlive(newPid)) {
         stop(newPid);
@@ -413,6 +474,7 @@ export function launchWorker(
   const script = path.join(plan.directory, 'worker.mjs'),
     planFile = path.join(plan.directory, 'plan.json');
   fs.copyFileSync(workerSource, script);
+  fs.copyFileSync(path.join(path.dirname(workerSource), 'installation.mjs'), path.join(plan.directory, 'installation.mjs'));
   write(planFile, plan);
   const args = [plan.node, script, 'worker', planFile];
   if (process.platform === 'darwin') {
@@ -520,7 +582,7 @@ async function main(action) {
     canUpdate: true,
     canRestart: true,
     path: install.launcher,
-    manager: 'npm',
+    manager: install.manager,
     job: readJob(statusFile, lock),
   };
   if (action === 'status') return base;

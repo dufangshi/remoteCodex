@@ -7,9 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { activeLauncher } from './installation.mjs';
 
 const launcherPath = fileURLToPath(import.meta.url);
+const active = activeLauncher(launcherPath);
+if (active !== fs.realpathSync(launcherPath)) {
+  process.env.REMOTE_CODEX_INSTALL_ORIGIN = fs.realpathSync(launcherPath);
+  await import(pathToFileURL(active).href);
+  process.exit(0);
+}
 const packageRoot = path.resolve(path.dirname(launcherPath), '..');
 // Device commands must not import configuration from the workspace they manage.
 const deviceCommand = ['setup', 'relay-supervisor', 'relay-fingerprint'].includes(process.argv[2]);
@@ -52,6 +59,7 @@ const relayConnectionKeys = [
 ];
 // Distribution/test plumbing; never accept arbitrary REMOTE_CODEX_* settings.
 const relayLauncherKeys = [
+  'REMOTE_CODEX_INSTALL_ORIGIN',
   'REMOTE_CODEX_MANAGED_SERVICE',
   'REMOTE_CODEX_NATIVE_BINARY',
   'REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG',

@@ -52,6 +52,7 @@ function assertPrepared(packageDir, directory) {
   if (directory === 'remote-codex') {
     for (const file of [
       'bin/remote-codex.mjs',
+      'bin/installation.mjs',
       'web/index.html',
       'native-manifest.json',
       'LICENSE',

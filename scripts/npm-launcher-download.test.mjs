@@ -24,6 +24,7 @@ test(
     const cacheRoot = path.join(temporaryRoot, 'cache');
     const launcherDir = path.join(packageRoot, 'bin');
     fs.mkdirSync(launcherDir, { recursive: true });
+    fs.copyFileSync(new URL('../npm/remote-codex/bin/installation.mjs', import.meta.url), path.join(packageRoot, 'bin/installation.mjs'));
     fs.copyFileSync(
       path.join(repoRoot, 'npm', 'remote-codex', 'bin', 'remote-codex.mjs'),
       path.join(launcherDir, 'remote-codex.mjs'),
@@ -69,7 +70,8 @@ test(
           },
         })}\n`,
       );
-      const { APP_VERSION: _ignoredAppVersion, ...baseEnvironment } =
+      const { APP_VERSION: _ignoredAppVersion, REMOTE_CODEX_NATIVE_BINARY: _ignoredBinary,
+        REMOTE_CODEX_INSTALL_ORIGIN: _ignoredOrigin, ...baseEnvironment } =
         process.env;
       const environment = {
         ...baseEnvironment,
