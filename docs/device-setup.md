@@ -19,6 +19,18 @@ Without a user service manager (including some containers), setup starts a
 detached process and reports that reboot startup is unavailable. Windows retains
 the independently released Device Manager workflow.
 
+Linux units use `WorkingDirectory=%h`: systemd resolves the service user's home.
+Unlike `ExecStart` arguments and `Environment` assignments, this directive must
+not contain surrounding quotes. If an older setup left a failed unit with a
+quoted home path, running a **fixed launcher** with the same relay/token/port
+while the device is offline regenerates the unit, reloads systemd and starts it,
+preserving the saved configuration and history. An already-online device is
+left running; setup does not rewrite or restart its service just for this repair.
+
+The parser regression can be run in an isolated Linux environment with Node and
+systemd installed: `REMOTE_CODEX_TEST_SYSTEMD=1 node --test scripts/setup.test.mjs`.
+It verifies generated units without starting a Supervisor or contacting a relay.
+
 Open a device's Settings to manage its Supervisor, harnesses and upstreams.
 Only the device owner can change these settings. Install/Update jobs keep running
 when the page closes; their progress is visible when reopening Settings. The

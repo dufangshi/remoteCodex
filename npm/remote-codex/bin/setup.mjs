@@ -12,7 +12,7 @@ const xml = (s) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 const quote = (s) =>
-  `"${String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"`;
+  `"${String(s).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t').replaceAll('%', '%%')}"`;
 export function matchesDeviceConfig(saved, relay, token, port) {
   try {
     const stored = new URL(saved.REMOTE_CODEX_RELAY_SERVER_URL);
@@ -81,7 +81,10 @@ export function serviceDefinition(
 <key>Label</key><string>com.remote-codex.supervisor</string><key>ProgramArguments</key><array>${[node, launcher, 'relay-supervisor', 'run'].map((v) => `<string>${xml(v)}</string>`).join('')}</array>
 <key>WorkingDirectory</key><string>${xml(home)}</string><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(searchPath)}</string><key>REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG</key><string>${xml(config)}</string><key>REMOTE_CODEX_MANAGED_SERVICE</key><string>launchd</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>\n`;
-  return `[Unit]\nDescription=Remote Codex Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart=${[node, launcher, 'relay-supervisor', 'run'].map((v) => quote(v).replaceAll('$', () => '$$')).join(' ')}\nWorkingDirectory=${quote(home)}\nEnvironment=${quote(`PATH=${searchPath}`)}\nEnvironment=${quote(`REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG=${config}`)}\nEnvironment=REMOTE_CODEX_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=default.target\n`;
+  // WorkingDirectory is a path, not a quoted word list like ExecStart or
+  // Environment. Let the user manager resolve its own home, including spaces
+  // and literal %, quotes or backslashes, without serializing it as unit syntax.
+  return `[Unit]\nDescription=Remote Codex Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart=${[node, launcher, 'relay-supervisor', 'run'].map((v) => quote(v).replaceAll('$', () => '$$')).join(' ')}\nWorkingDirectory=%h\nEnvironment=${quote(`PATH=${searchPath}`)}\nEnvironment=${quote(`REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG=${config}`)}\nEnvironment=REMOTE_CODEX_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=default.target\n`;
 }
 export async function setup({
   args,
