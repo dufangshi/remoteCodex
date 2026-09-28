@@ -86,43 +86,13 @@ pub(crate) fn parse_spawn_command(command: &str) -> Result<ParsedCommand> {
         program = path.to_string_lossy().into_owned();
     }
 
-    #[cfg(windows)]
-    if resolves_to_windows_batch_script(&program) {
-        return Ok(ParsedCommand {
-            program: std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()),
-            args: vec![
-                "/D".into(),
-                "/S".into(),
-                "/C".into(),
-                // Preserve the existing cmd.exe argument quoting. POSIX
-                // shell_words::join would single-quote Windows paths with spaces.
-                if command.trim_start().starts_with('"') {
-                    command.replacen(&parts[0], &program, 1)
-                } else {
-                    command.replacen(&parts[0], &format!("\"{program}\""), 1)
-                },
-            ],
-        });
-    }
-
+    // Keep argv structured, including .cmd/.bat paths. Rust's Windows Command
+    // handles batch dispatch and cmd escaping itself. Passing a prequoted /C
+    // string through .args instead applies CRT escaping (\") to cmd syntax.
     Ok(ParsedCommand {
         program,
         args: parts.into_iter().skip(1).collect(),
     })
-}
-
-#[cfg(windows)]
-fn resolves_to_windows_batch_script(program: &str) -> bool {
-    fn is_batch(path: &std::path::Path) -> bool {
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| {
-                extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
-            })
-    }
-
-    is_batch(std::path::Path::new(program))
-        || which::which(program).ok().as_deref().is_some_and(is_batch)
 }
 
 impl AcpProcess {
@@ -483,6 +453,72 @@ pub(crate) fn timeout_for_method(method: &str) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn spawn_command_preserves_structured_windows_arguments() {
+        let args = [
+            r"C:\User Name\node\npm.cmd",
+            "install",
+            "--prefix",
+            r"C:\User Name\O'Brien & tools\",
+            "@agentclientprotocol/codex-acp@latest",
+        ];
+        let parsed = parse_spawn_command(&shell_words::join(args)).unwrap();
+        assert_eq!(parsed.program, args[0]);
+        assert_eq!(parsed.args, args[1..]);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_batch_harness_preserves_paths_and_reports_update_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("Node Tools & adapter's");
+        std::fs::create_dir_all(&folder).unwrap();
+        let script = folder.join("npm.cmd");
+        std::fs::write(&script, "@echo off\r\necho [%~1]\r\necho [%~2]\r\n").unwrap();
+        let prefix = folder.join("private prefix").to_string_lossy().into_owned();
+        let parsed = parse_spawn_command(&shell_words::join([
+            script.to_str().unwrap(),
+            "--prefix",
+            &prefix,
+        ]))
+        .unwrap();
+        assert_eq!(
+            std::path::Path::new(&parsed.program).extension().unwrap(),
+            "cmd"
+        );
+        let output =
+            crate::management::output(std::path::Path::new(&parsed.program), &parsed.args, 10)
+                .await
+                .unwrap();
+        assert_eq!(
+            output.lines().collect::<Vec<_>>(),
+            ["[--prefix]", &format!("[{prefix}]")]
+        );
+        std::fs::write(
+            &script,
+            "@echo off\r\necho fixture-update-failure 1>&2\r\nexit /b 7\r\n",
+        )
+        .unwrap();
+        let error = crate::management::output(&script, &[], 10)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("fixture-update-failure"));
+        // The same path launches ACP/adapter processes, not just update commands.
+        std::fs::write(&script, "@echo off\r\nset /p request=\r\necho {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}\r\nset /p request=\r\n").unwrap();
+        let (process, _, _) = AcpProcess::spawn(
+            &shell_words::quote(script.to_str().unwrap()),
+            root.path().to_str().unwrap(),
+            &[],
+        )
+        .await
+        .unwrap();
+        let result = process
+            .request_with_timeout("initialize", json!({}), Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        assert_eq!(result["protocolVersion"], 1);
+        process.shutdown().await.unwrap();
+    }
 
     fn python_command(script: &std::path::Path) -> String {
         static PYTHON: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();

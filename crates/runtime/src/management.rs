@@ -127,11 +127,20 @@ pub async fn output(program: &Path, args: &[String], timeout: u64) -> Result<Str
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     let result = tokio::time::timeout(Duration::from_secs(timeout), command.output()).await??;
     if !result.status.success() {
-        bail!("Command failed ({})", result.status);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let detail: String = stderr
+            .chars()
+            .rev()
+            .take(4000)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        bail!("Command failed ({}): {}", result.status, detail.trim());
     }
     Ok(String::from_utf8_lossy(&result.stdout).trim().to_string())
 }
@@ -384,6 +393,10 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
         _ => bail!("Unknown component"),
     };
     if component == "adapter" {
+        // Windows cannot replace an executable still owned by a live harness.
+        // restart_harness rejects active turns and retires idle processes; the
+        // next use resumes their persisted sessions after installation.
+        state.restart_harness(id).await?;
         crate::acp::dependencies::ensure(&def, true).await?;
         state.restart_harness(id).await?;
         let provider = if state
@@ -411,6 +424,7 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
     let Some((program, args)) = found.update.split_first() else {
         bail!("{}", found.reason.unwrap_or_default());
     };
+    state.restart_harness(id).await?;
     output(Path::new(program), args, 300).await?;
     let updated = inspect(command, id).await?;
     verify_executable(&updated).await?;
