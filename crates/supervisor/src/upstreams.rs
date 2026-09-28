@@ -47,14 +47,15 @@ pub async fn models(
         profiles::discovery_profile(&profiles::directory(&s.config.database_url), input)
             .map_err(failure)?
     };
-    tokio::time::timeout(
+    let result = tokio::time::timeout(
         std::time::Duration::from_secs(25),
         profiles::discover_models(&p),
     )
     .await
     .map_err(|_| failure("Model discovery timed out. Try loading models again."))?
-    .map(Json)
-    .map_err(failure)
+    .map_err(failure)?;
+    s.invalidate_models(&p.harness).await;
+    Ok(Json(result))
 }
 pub async fn delete(
     State(s): State<Arc<Supervisor>>,

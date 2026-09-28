@@ -308,6 +308,11 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    pub async fn invalidate_models(&self, id: &str) {
+        for runtime in self.runtimes.values() {
+            runtime.invalidate_models(id).await;
+        }
+    }
     pub fn harness_gate(&self, id: &str) -> Arc<tokio::sync::RwLock<()>> {
         self.harness_gates
             .lock()
@@ -2725,8 +2730,9 @@ impl Supervisor {
             {
                 bail!("This backend does not support Fast mode.");
             }
-            runtime
-                .apply_session_settings(
+            self.with_cli_context(
+                id,
+                runtime.apply_session_settings(
                     session,
                     SessionSettings {
                         model: model.clone(),
@@ -2736,8 +2742,9 @@ impl Supervisor {
                         approval_mode: approval.clone(),
                         performance_mode: fast,
                     },
-                )
-                .await?;
+                ),
+            )
+            .await?;
         }
         self.db.with(|conn| {
             if let Some(model) = model {

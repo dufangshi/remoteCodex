@@ -192,6 +192,7 @@ pub trait AgentRuntime: Send + Sync {
     }
     fn descriptor(&self) -> AgentBackendDto;
     async fn start(&self) -> Result<()>;
+    async fn invalidate_models(&self, _agent_id: &str) {}
     async fn restart(&self, _agent_id: &str) -> Result<usize> {
         self.start().await?;
         Ok(0)

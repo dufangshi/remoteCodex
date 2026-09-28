@@ -10,6 +10,7 @@ use std::{
 use toml_edit::{value, DocumentMut};
 mod discovery;
 pub use discovery::{discover_models, discovery_profile, DiscoveryInput};
+pub(crate) use discovery::{normalize_effort, DiscoveredModel};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -221,14 +222,14 @@ pub fn active_profile(dir: &Path, harness: &str) -> Result<Option<Profile>> {
 pub(crate) fn prepare_grok_models(
     dir: &Path,
     p: &Profile,
-    models: &[remote_codex_protocol::ModelOptionDto],
+    models: &[DiscoveredModel],
 ) -> Result<()> {
     prepare_grok_models_at(dir, p, models, &home("grok"))
 }
 fn prepare_grok_models_at(
     dir: &Path,
     p: &Profile,
-    models: &[remote_codex_protocol::ModelOptionDto],
+    models: &[DiscoveredModel],
     root: &Path,
 ) -> Result<()> {
     let path = root.join("config.toml");
@@ -237,9 +238,33 @@ fn prepare_grok_models_at(
     configure_grok_models(
         &mut doc,
         p,
-        models.iter().map(|m| m.model.as_str()),
+        models.iter().map(|m| m.id.as_str()),
         &mut store.grok_models,
     )?;
+    for model in models {
+        let Some(cap) = &model.reasoning else {
+            continue;
+        };
+        for id in [&model.id, &format!("remote-codex/{}", model.id)] {
+            let table = doc["model"][id].as_table_like_mut().unwrap();
+            table.remove("reasoning_effort");
+            table.remove("supports_reasoning_effort");
+            let mut options = toml_edit::Array::new();
+            for effort in &cap.efforts {
+                let mut entry = toml_edit::InlineTable::new();
+                entry.insert("value", effort.reasoning_effort.clone().into());
+                entry.insert("label", effort.description.clone().into());
+                if cap.default.as_deref() == Some(&effort.reasoning_effort) {
+                    entry.insert("default", true.into());
+                }
+                options.push(entry);
+            }
+            table.insert("reasoning_efforts", value(options));
+            if cap.efforts.is_empty() {
+                table.insert("supports_reasoning_effort", value(false));
+            }
+        }
+    }
     // Retain the union of original entries before writing, including across
     // switches. A crash between these atomic writes cannot lose an original.
     save(dir, &store)?;
@@ -936,17 +961,10 @@ mod tests {
         )
         .unwrap();
         let p = fixture("grok");
-        let models = ["model-a", "model-b"].map(|id| remote_codex_protocol::ModelOptionDto {
+        let models = ["model-a", "model-b"].map(|id| DiscoveredModel {
             id: id.into(),
-            model: id.into(),
-            display_name: id.into(),
-            description: String::new(),
-            is_default: false,
-            hidden: false,
-            supported_reasoning_efforts: vec![],
-            default_reasoning_effort: None,
-            selection_kind: Some("model".into()),
-            acp_agent: None,
+            name: id.into(),
+            reasoning: None,
         });
         prepare_grok_models_at(&temp.path().join("store"), &p, &models, temp.path()).unwrap();
         let doc = toml_doc(&temp.path().join("config.toml")).unwrap();
@@ -1007,6 +1025,48 @@ mod tests {
         assert!(doc["model"].get("grok-4.5").is_none());
         assert_eq!(doc["model"]["personal"]["model"].as_str(), Some("keep"));
         assert_eq!(doc["models"]["default"].as_str(), Some("new-model"));
+    }
+    #[test]
+    fn grok_discovered_capabilities_refresh_both_ids_and_restore_originals() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = temp.path().join("store");
+        let config = temp.path().join("config.toml");
+        let original = "[model.'grok-build-0.1']\nreasoning_effort='xhigh'\nsupports_reasoning_effort=true\nreasoning_efforts=[{value='xhigh',default=true}]\n";
+        private_write(&config, original.as_bytes()).unwrap();
+        let mut p = fixture("grok");
+        p.model = "grok-build-0.1".into();
+        upsert(&store, p.clone()).unwrap();
+        activate_at(&store, &p, temp.path()).unwrap();
+        let mut model: DiscoveredModel = serde_json::from_value(json!({"id":p.model,"name":"Build","reasoning":{
+            "efforts":[{"reasoningEffort":"low","description":"Low"},{"reasoningEffort":"high","description":"High"}],"default":"high"
+        }})).unwrap();
+        prepare_grok_models_at(&store, &p, &[model.clone()], temp.path()).unwrap();
+        let doc = toml_doc(&config).unwrap();
+        for id in ["grok-build-0.1", "remote-codex/grok-build-0.1"] {
+            let entry = &doc["model"][id];
+            assert_eq!(entry["reasoning_efforts"].as_array().unwrap().len(), 2);
+            assert!(entry.get("reasoning_effort").is_none());
+        }
+        model.reasoning.as_mut().unwrap().efforts.clear();
+        model.reasoning.as_mut().unwrap().default = None;
+        prepare_grok_models_at(&store, &p, &[model.clone()], temp.path()).unwrap();
+        let doc = toml_doc(&config).unwrap();
+        assert_eq!(
+            doc["model"][&p.model]["supports_reasoning_effort"].as_bool(),
+            Some(false)
+        );
+        model.reasoning = None;
+        prepare_grok_models_at(&store, &p, &[model], temp.path()).unwrap();
+        let doc = toml_doc(&config).unwrap();
+        assert_eq!(
+            doc["model"][&p.model]["reasoning_effort"].as_str(),
+            Some("xhigh")
+        );
+        assert!(doc["model"]["remote-codex/grok-build-0.1"]
+            .get("reasoning_efforts")
+            .is_none());
+        remove(&store, &p.id).unwrap();
+        assert_eq!(read(&config).unwrap().unwrap(), original);
     }
     #[test]
     fn connection_accepts_null_error_but_rejects_errors_and_wrong_protocol() {
