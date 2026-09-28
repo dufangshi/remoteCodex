@@ -1,4 +1,128 @@
 use super::*;
+use remote_codex_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredModel {
+    pub id: String,
+    pub name: String,
+    /// None means unknown, not unsupported. An explicit empty list is authoritative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningCapabilities>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningCapabilities {
+    pub efforts: Vec<ReasoningEffortOptionDto>,
+    pub default: Option<String>,
+}
+
+impl DiscoveredModel {
+    pub fn option(&self, profile: &Profile, fallback: Option<&ModelOptionDto>) -> ModelOptionDto {
+        let (efforts, default) = match &self.reasoning {
+            Some(cap) => (cap.efforts.clone(), cap.default.clone()),
+            None => fallback
+                .map(|m| {
+                    (
+                        m.supported_reasoning_efforts.clone(),
+                        m.default_reasoning_effort.clone(),
+                    )
+                })
+                .unwrap_or_default(),
+        };
+        ModelOptionDto {
+            id: self.id.clone(),
+            model: self.id.clone(),
+            display_name: self.name.clone(),
+            description: format!("{} · {}", profile.name, profile.harness),
+            is_default: self.id == profile.model,
+            hidden: false,
+            supported_reasoning_efforts: efforts,
+            default_reasoning_effort: default,
+            selection_kind: Some("model".into()),
+            acp_agent: None,
+        }
+    }
+}
+
+pub fn normalize_effort(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+    match value.as_str() {
+        "none" | "off" => Some("none".into()),
+        "minimal" | "low" | "medium" | "high" | "max" | "ultra" => Some(value),
+        "xhigh" | "extra_high" => Some("xhigh".into()),
+        _ => None,
+    }
+}
+
+fn reasoning_capabilities(row: &Value) -> Option<ReasoningCapabilities> {
+    let nested = row
+        .pointer("/capabilities/reasoning_effort")
+        .unwrap_or(&Value::Null);
+    let supported = row
+        .get("supportsReasoningEffort")
+        .or_else(|| row.get("supports_reasoning_effort"))
+        .and_then(Value::as_bool)
+        .or_else(|| nested.as_bool())
+        .or_else(|| nested.get("supported").and_then(Value::as_bool));
+    if supported == Some(false) {
+        return Some(ReasoningCapabilities {
+            efforts: vec![],
+            default: None,
+        });
+    }
+    let rows = row
+        .get("reasoningEfforts")
+        .or_else(|| row.get("reasoning_efforts"))
+        .or_else(|| nested.get("options"))
+        .or_else(|| nested.get("values"))
+        .or_else(|| nested.as_array().map(|_| nested))?
+        .as_array()?;
+    let mut efforts = Vec::new();
+    let mut marked_default = None;
+    for entry in rows {
+        let Some(value) = entry
+            .as_str()
+            .or_else(|| entry.get("value").and_then(Value::as_str))
+            .or_else(|| entry.get("id").and_then(Value::as_str))
+            .and_then(normalize_effort)
+        else {
+            continue;
+        };
+        if entry.get("default").and_then(Value::as_bool) == Some(true) && marked_default.is_none() {
+            marked_default = Some(value.clone());
+        }
+        if !efforts
+            .iter()
+            .any(|e: &ReasoningEffortOptionDto| e.reasoning_effort == value)
+        {
+            let description = entry
+                .get("label")
+                .or_else(|| entry.get("description"))
+                .and_then(Value::as_str)
+                .unwrap_or(&value)
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(200)
+                .collect();
+            efforts.push(ReasoningEffortOptionDto {
+                reasoning_effort: value,
+                description,
+            });
+        }
+    }
+    let declared = row
+        .get("reasoningEffort")
+        .or_else(|| row.get("reasoning_effort"))
+        .or_else(|| nested.get("default"))
+        .and_then(Value::as_str)
+        .and_then(normalize_effort);
+    let default = declared
+        .filter(|v| efforts.iter().any(|e| e.reasoning_effort == *v))
+        .or(marked_default);
+    Some(ReasoningCapabilities { efforts, default })
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -46,7 +170,11 @@ fn models_url(p: &Profile) -> Result<url::Url> {
     Ok(url::Url::parse(&format!("{base}{version}/models"))?)
 }
 
-fn collect_models(body: &Value, gemini: bool, models: &mut BTreeMap<String, String>) -> Result<()> {
+fn collect_models(
+    body: &Value,
+    gemini: bool,
+    models: &mut BTreeMap<String, DiscoveredModel>,
+) -> Result<()> {
     let rows = body
         .get(if gemini { "models" } else { "data" })
         .and_then(Value::as_array)
@@ -86,7 +214,14 @@ fn collect_models(body: &Value, gemini: bool, models: &mut BTreeMap<String, Stri
         if models.len() >= 2000 && !models.contains_key(id) {
             bail!("Upstream returned too many models (maximum 2000)");
         }
-        models.insert(id.into(), name);
+        models.insert(
+            id.into(),
+            DiscoveredModel {
+                id: id.into(),
+                name,
+                reasoning: reasoning_capabilities(row),
+            },
+        );
     }
     Ok(())
 }
@@ -117,7 +252,7 @@ pub async fn discover_models(p: &Profile) -> Result<Value> {
         };
         let Some(cursor) = cursor.filter(|c| !c.is_empty()) else {
             return Ok(
-                json!({"models":models.into_iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>(),"truncated":false}),
+                json!({"models":models.into_values().collect::<Vec<_>>(),"truncated":false}),
             );
         };
         if !cursors.insert(cursor.to_owned()) {
@@ -133,15 +268,73 @@ pub async fn discover_models(p: &Profile) -> Result<Value> {
             cursor,
         );
     }
-    Ok(
-        json!({"models":models.into_iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>(),"truncated":true}),
-    )
+    Ok(json!({"models":models.into_values().collect::<Vec<_>>(),"truncated":true}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn reasoning_metadata_is_validated_and_authoritative_per_model() {
+        let mut models = BTreeMap::new();
+        collect_models(&json!({"data": [
+            {"id":"grok-build-0.1","supportsReasoningEffort":true,"reasoningEffort":"high","reasoningEfforts":[
+                {"value":"low","label":"Low"},{"value":"medium"},{"value":"high","default":true}]},
+            {"id":"grok-4.6","reasoning_efforts":["LOW","high","extra-high","HIGH","invalid"],"reasoning_effort":"XHIGH"},
+            {"id":"unknown"},
+            {"id":"disabled","supportsReasoningEffort":false,"reasoningEfforts":["high"]},
+            {"id":"nested","capabilities":{"reasoning_effort":{"options":[{"id":"medium","default":true}],"default":"bogus"}}},
+            {"id":"no-default","reasoningEfforts":["low","high"],"reasoningEffort":"xhigh"}
+        ]}), false, &mut models).unwrap();
+        let profile = super::super::tests::fixture("grok");
+        let fallback = models["grok-4.6"].option(&profile, None);
+        let build = models["grok-build-0.1"].option(&profile, Some(&fallback));
+        assert_eq!(
+            build
+                .supported_reasoning_efforts
+                .iter()
+                .map(|e| e.reasoning_effort.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high"]
+        );
+        assert_eq!(build.default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(fallback.supported_reasoning_efforts.len(), 3);
+        assert_eq!(fallback.default_reasoning_effort.as_deref(), Some("xhigh"));
+        assert!(models["unknown"].reasoning.is_none());
+        assert_eq!(
+            models["unknown"]
+                .option(&profile, Some(&fallback))
+                .supported_reasoning_efforts
+                .len(),
+            3
+        );
+        assert!(models["disabled"]
+            .option(&profile, Some(&fallback))
+            .supported_reasoning_efforts
+            .is_empty());
+        assert_eq!(
+            models["nested"]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .default
+                .as_deref(),
+            Some("medium")
+        );
+        assert!(models["no-default"]
+            .reasoning
+            .as_ref()
+            .unwrap()
+            .default
+            .is_none());
+        let roundtrip: Vec<DiscoveredModel> = serde_json::from_value(
+            serde_json::to_value(models.into_values().collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(roundtrip.len(), 6);
+    }
 
     #[test]
     fn discovery_secret_is_bound_to_saved_destination() {
@@ -180,7 +373,7 @@ mod tests {
             {"name":"models/gemini-test","displayName":"Gemini Test","supportedGenerationMethods":["generateContent"]},
             {"name":"models/embedding","supportedGenerationMethods":["embedContent"]}
         ]}), true, &mut models).unwrap();
-        assert_eq!(models.get("gemini-test").unwrap(), "Gemini Test");
+        assert_eq!(models.get("gemini-test").unwrap().name, "Gemini Test");
         assert_eq!(models.len(), 1);
         assert!(collect_models(&json!({"unexpected":[]}), false, &mut models).is_err());
     }

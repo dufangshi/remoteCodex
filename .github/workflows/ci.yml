@@ -57,6 +57,7 @@ jobs:
             npm:
               - 'npm/**'
               - 'scripts/*.mjs'
+              - 'scripts/setup.sh'
               - 'package.json'
             workflows:
               - '.github/workflows/**'
@@ -160,6 +161,10 @@ jobs:
           package-manager-cache: false
       - name: Test npm scripts without building or installing the product
         run: node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs scripts/npm-launcher-relay.test.mjs scripts/supervisor-update.test.mjs
+      - name: Check setup and real systemd unit parsing without starting services
+        env:
+          REMOTE_CODEX_TEST_SYSTEMD: '1'
+        run: node --test scripts/setup.test.mjs
 
   result:
     name: PR checks complete

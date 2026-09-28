@@ -19,6 +19,18 @@ Without a user service manager (including some containers), setup starts a
 detached process and reports that reboot startup is unavailable. Windows retains
 the independently released Device Manager workflow.
 
+Linux units use `WorkingDirectory=%h`: systemd resolves the service user's home.
+Unlike `ExecStart` arguments and `Environment` assignments, this directive must
+not contain surrounding quotes. If an older setup left a failed unit with a
+quoted home path, running a **fixed launcher** with the same relay/token/port
+while the device is offline regenerates the unit, reloads systemd and starts it,
+preserving the saved configuration and history. An already-online device is
+left running; setup does not rewrite or restart its service just for this repair.
+
+The parser regression can be run in an isolated Linux environment with Node and
+systemd installed: `REMOTE_CODEX_TEST_SYSTEMD=1 node --test scripts/setup.test.mjs`.
+It verifies generated units without starting a Supervisor or contacting a relay.
+
 Open a device's Settings to manage its Supervisor, harnesses and upstreams.
 Only the device owner can change these settings. Install/Update jobs keep running
 when the page closes; their progress is visible when reopening Settings. The
@@ -37,6 +49,21 @@ conflict; finish or stop its current tasks before switching. Restore recovers
 the previous files. CLI configuration follows the Supervisor's OS user and
 native config-home overrides; two Supervisors sharing those directories share
 the live CLI configuration.
+
+Model discovery preserves per-model reasoning capabilities from upstream
+`reasoningEfforts` / `reasoning_efforts` or `capabilities.reasoning_effort`
+metadata. Unknown effort names are ignored; defaults must belong to the advertised
+options. An explicit unsupported/empty declaration takes precedence over ACP;
+only missing metadata is supplemented by a fresh, bounded-cache ACP probe.
+No common effort list is assigned to every model.
+
+For Grok, discovered options are written to both the wire model ID and its legacy
+managed alias. Refreshing the directory invalidates discovery/probe caches;
+changed catalogs reload an idle session before its next settings change or prompt.
+Harness Check/Update/restart also invalidates caches. Active turns are not killed
+by directory refresh. Explicit effort changes use ACP `session/set_config_option`
+with a string value and verify the returned setting; Auto selects the model's
+advertised default. Original local model settings are retained for restoration.
 
 Connection tests make a small authenticated model request and may incur charges.
 Claude profiles support both API-key and bearer-token authentication; imported
@@ -83,3 +110,10 @@ database, fetches official Node and harness packages, exercises device-scoped
 management, and stops only the processes it created. Evidence remains in its
 printed temporary directory. Restart/configuration ACP tests use deterministic
 fixtures; no host credentials or model quota are required.
+
+`scripts/upstream-models-live.mjs <candidate-runtime> <grok-binary>` is an opt-in
+isolated Linux regression with real Grok and a synthetic upstream. It checks
+new-model capabilities, actual request effort values, Auto, directory refresh,
+session restoration, upstream switching and exact native-config restoration.
+Run with `TEST_GROK_API_TYPE=chat_completions` as well as the default Responses
+mode. It sends requests only to its loopback fixture, not a paid model provider.
