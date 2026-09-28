@@ -474,7 +474,7 @@ mod tests {
         let folder = root.path().join("Node Tools & adapter's");
         std::fs::create_dir_all(&folder).unwrap();
         let script = folder.join("npm.cmd");
-        std::fs::write(&script, "@echo off\r\necho [%~1]\r\necho [%~2]\r\n").unwrap();
+        std::fs::write(&script, "@echo off\r\necho [%~1]\r\necho \"%~2\"\r\n").unwrap();
         let prefix = folder.join("private prefix").to_string_lossy().into_owned();
         let parsed = parse_spawn_command(&shell_words::join([
             script.to_str().unwrap(),
@@ -492,7 +492,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             output.lines().collect::<Vec<_>>(),
-            ["[--prefix]", &format!("[{prefix}]")]
+            ["[--prefix]", &format!("\"{prefix}\"")]
         );
         std::fs::write(
             &script,
