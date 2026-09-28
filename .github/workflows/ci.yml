@@ -25,6 +25,7 @@ jobs:
       incus: ${{ steps.filter.outputs.incus }}
       npm: ${{ steps.filter.outputs.npm }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      windows_harness: ${{ steps.filter.outputs.windows_harness }}
     steps:
       - uses: dorny/paths-filter@v3
         id: filter
@@ -59,6 +60,24 @@ jobs:
               - 'package.json'
             workflows:
               - '.github/workflows/**'
+            windows_harness:
+              - 'crates/runtime/src/acp/rpc.rs'
+              - 'crates/runtime/src/acp/dependencies.rs'
+              - 'crates/runtime/src/management.rs'
+
+  windows_harness:
+    name: Windows harness command regression
+    needs: changes
+    if: needs.changes.outputs.windows_harness == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install $env:RUST_VERSION --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Test batch spawning and update diagnostics only
+        run: cargo +$env:RUST_VERSION test -p remote-codex-runtime --lib windows_ --locked
 
   workflows:
     name: Workflow syntax
@@ -144,7 +163,7 @@ jobs:
 
   result:
     name: PR checks complete
-    needs: [changes, workflows, rust, node, npm]
+    needs: [changes, workflows, rust, node, npm, windows_harness]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

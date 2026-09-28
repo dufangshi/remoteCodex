@@ -100,7 +100,8 @@ pub async fn ensure(def: &AcpAgentDef, update: bool) -> Result<()> {
 
 async fn install(def: &AcpAgentDef) -> Result<()> {
     let args = install_args(&def.id)?;
-    let parsed = super::rpc::parse_spawn_command(&command_line(&args))?;
+    // shell_words is our serialization format, not the shell used to execute it.
+    let parsed = super::rpc::parse_spawn_command(&shell_words::join(&args))?;
     tokio::fs::create_dir_all(prefix())
         .await
         .context("Create user-owned ACP adapter directory")?;

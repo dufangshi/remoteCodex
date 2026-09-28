@@ -5128,7 +5128,10 @@ fn access_allows(access: &EffectiveAccess, method: &Method, path: &str) -> bool 
     }
     access.scope == "device"
         && method == "GET"
-        && matches!(pathname, "/api/threads" | "/api/workspaces")
+        // Collection pages cannot use a thread/workspace-scoped handshake before
+        // they have loaded the collection. This publishes only the device's signed
+        // recipient key; each subsequent request still goes through this ACL.
+        && matches!(pathname, "/api/threads" | "/api/workspaces" | "/api/transport/key")
 }
 
 fn shared_runtime_metadata_allowed(method: &str, pathname: &str) -> bool {
@@ -6497,6 +6500,23 @@ mod tests {
             workspace_ids: Vec::new(),
             can_create_threads: false,
         };
+        assert!(!access_allows(&access, &Method::GET, "/api/transport/key"));
+        let mut device_access = access.clone();
+        device_access.scope = "device".into();
+        assert!(access_allows(
+            &device_access,
+            &Method::GET,
+            "/api/transport/key?challenge=fresh"
+        ));
+        for (method, path) in [
+            (Method::POST, "/api/transport/key"),
+            (Method::POST, "/api/transport/session"),
+            (Method::GET, "/api/transport/private"),
+            (Method::GET, "/api/management/upstreams"),
+            (Method::POST, "/api/management/supervisor/restart"),
+        ] {
+            assert!(!access_allows(&device_access, &method, path));
+        }
         assert!(access_allows(
             &access,
             &Method::GET,
