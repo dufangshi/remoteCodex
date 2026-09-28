@@ -8,6 +8,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 assert.equal(process.platform, 'linux');
 const [binary, grok] = process.argv.slice(2);
+const apiType = process.env.TEST_GROK_API_TYPE ?? 'responses';
+const inferencePath = apiType === 'chat_completions' ? '/chat/completions' : '/responses';
+const effortOf = body => body.reasoning?.effort ?? body.reasoning_effort;
+const isInference = call => call.url.endsWith(inferencePath)
+  && (call.body.tool_choice?.name ?? call.body.tool_choice?.function?.name) !== 'session_title';
 assert(path.isAbsolute(binary) && path.isAbsolute(grok));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-models-live-'));
 console.log(`Isolated evidence: ${root}`);
@@ -18,6 +23,8 @@ fs.mkdirSync(workspace);
 const original = '# isolated original\n[ui]\nscreen_mode = "minimal"\n[model."grok-4.6"]\napi_key="original-key"\nenv_key="XAI_API_KEY"\n[model.personal]\nmodel="keep"\n';
 fs.writeFileSync(path.join(home, '.grok/config.toml'), original);
 const calls = [];
+let buildEfforts = ['low', 'medium', 'high'];
+let buildDefault = 'high';
 const upstream = http.createServer(async (req, res) => {
   let body = '';
   for await (const b of req) body += b;
@@ -30,7 +37,11 @@ const upstream = http.createServer(async (req, res) => {
   if (req.url.endsWith('/models'))
     res.end(
       JSON.stringify({
-        data: [{ id: 'grok-4.5' }, { id: 'grok-4.6' }, { id: 'route-*' }],
+        data: [{ id: 'grok-4.5' }, { id: 'grok-4.6' }, { id: 'route-*' }, {
+          id: 'grok-build-0.1', display_name: 'Grok Build 0.1', supportsReasoningEffort: true,
+          reasoningEffort: buildDefault,
+          reasoningEfforts: buildEfforts.map(value => ({ value, label: value, default: value === buildDefault })),
+        }],
       }),
     );
   else {
@@ -115,6 +126,7 @@ try {
     baseUrl,
     apiKey: 'synthetic-a',
     model: 'grok-4.5',
+    apiType,
   });
   await request(`/api/management/upstreams/${profile.id}`, 'POST', {
     action: 'activate',
@@ -124,7 +136,7 @@ try {
   );
   assert.deepEqual(
     models.map((m) => m.model),
-    ['grok-4.5', 'grok-4.6'],
+    ['grok-4.5', 'grok-4.6', 'grok-build-0.1'],
   );
   assert(!models.some((m) => m.displayName === 'Provider label'));
   assert.deepEqual(
@@ -137,6 +149,39 @@ try {
     absPath: workspace,
     label: 'Isolated model test',
   });
+  const buildModel = models.find(m => m.model === 'grok-build-0.1');
+  assert.deepEqual(buildModel.supportedReasoningEfforts.map(e => e.reasoningEffort), buildEfforts);
+  assert.equal(buildModel.defaultReasoningEffort, 'high');
+  const buildThread = await request('/api/threads/start', 'POST', {
+    workspaceId: ws.id, provider: 'acp', agentId: 'grok', model: 'grok-build-0.1',
+    reasoningEffort: 'low', approvalMode: 'yolo',
+  });
+  const checkBuild = async (effort, expected) => {
+    await request(`/api/threads/${buildThread.id}/settings`, 'PATCH', { reasoningEffort: effort });
+    const previous = calls.length;
+    await request(`/api/threads/${buildThread.id}/prompt`, 'POST', { prompt: 'Reply OK' });
+    const inference = await waitFor(() => calls.slice(previous).find(isInference));
+    assert.equal(inference.body.model, 'grok-build-0.1');
+    assert.equal(effortOf(inference.body), expected);
+    await waitFor(async () => (await request(`/api/threads/${buildThread.id}`)).thread.status !== 'running');
+  };
+  await checkBuild('low', 'low');
+  await request('/api/agent-runtimes/acp/restart?agentId=grok', 'POST');
+  await checkBuild('auto', 'high');
+  await checkBuild('high', 'high');
+  await checkBuild('low', 'low');
+  await checkBuild('auto', 'high');
+  // Refresh the directory while a session still has the old capability snapshot.
+  buildEfforts = ['low', 'medium']; buildDefault = 'medium';
+  await request('/api/management/upstreams/models', 'POST', {
+    id: profile.id, harness: 'grok', baseUrl, apiKey: 'synthetic-a',
+  });
+  const refreshed = await request(`/api/agent-runtimes/acp/models?agentId=grok&cwd=${encodeURIComponent(workspace)}`);
+  assert.deepEqual(refreshed.find(m => m.model === 'grok-build-0.1').supportedReasoningEfforts.map(e => e.reasoningEffort), buildEfforts);
+  await checkBuild('medium', 'medium');
+  await request('/api/agent-runtimes/acp/restart?agentId=grok', 'POST');
+  await checkBuild('low', 'low');
+  await checkBuild('auto', 'medium');
   const thread = await request('/api/threads/start', 'POST', {
     workspaceId: ws.id,
     provider: 'acp',
@@ -154,13 +199,12 @@ try {
   const inference = await waitFor(() =>
     calls.find(
       (c) =>
-        c.url.endsWith('/responses') &&
-        c.body.tool_choice?.name !== 'session_title',
+        isInference(c) && c.body.model === 'grok-4.6',
     ),
   );
   assert.equal(inference.body.model, 'grok-4.6');
   assert.equal(inference.auth, 'Bearer synthetic-a');
-  assert.equal(inference.body.reasoning.effort, 'xhigh');
+  assert.equal(effortOf(inference.body), 'xhigh');
   await waitFor(async () => {
     const detail = await request(`/api/threads/${thread.id}`);
     return (detail.thread ?? detail).status !== 'running';
@@ -171,6 +215,7 @@ try {
     baseUrl,
     apiKey: 'synthetic-b',
     model: 'grok-4.5',
+    apiType,
   });
   await request(`/api/management/upstreams/${second.id}`, 'POST', {
     action: 'activate',
@@ -191,12 +236,12 @@ try {
   });
   const resumed = await waitFor(() =>
     calls.slice(previous).find(
-      (c) => c.url.endsWith('/responses') && c.body.tool_choice?.name !== 'session_title',
+      isInference,
     ),
   );
   assert.equal(resumed.auth, 'Bearer synthetic-b');
   assert.equal(resumed.body.model, 'grok-4.6');
-  assert.equal(resumed.body.reasoning.effort, 'low');
+  assert.equal(effortOf(resumed.body), 'low');
   await waitFor(
     async () => (await request(`/api/threads/${thread.id}`)).thread.status !== 'running',
   );
@@ -212,6 +257,9 @@ try {
     JSON.stringify({
       result: 'passed',
       realGrokModel: 'grok-4.6',
+      discoveredModel: 'grok-build-0.1',
+      autoReset: true, liveCatalogRefresh: true,
+      harnessRestart: true, apiType,
       upstreamSwitch: true,
       originalConfigRestored: true,
       evidence: root,

@@ -35,14 +35,7 @@ pub fn billing_usage(update: &Value) -> Option<Value> {
 use super::adapter::{HarnessProjection, SessionSettingOp};
 
 pub fn normalize_acp_effort(value: Option<&str>) -> Option<String> {
-    let normalized = value?.trim().to_ascii_lowercase().replace([' ', '-'], "_");
-    match normalized.as_str() {
-        "none" | "off" => Some("none".into()),
-        "minimal" | "low" | "medium" | "high" | "max" | "ultra" => Some(normalized),
-        "xhigh" | "extra_high" => Some("xhigh".into()),
-        "auto" | "" => None,
-        _ => None,
-    }
+    crate::upstreams::normalize_effort(value?)
 }
 
 pub fn project_session(response: &Value) -> Option<HarnessProjection> {
@@ -92,9 +85,14 @@ pub fn project_session(response: &Value) -> Option<HarnessProjection> {
                         .or_else(|| entry.get("id").and_then(Value::as_str)),
                 )
             });
-        let default_effort =
-            normalize_acp_effort(meta.get("reasoningEffort").and_then(Value::as_str))
-                .or(declared_default);
+        // Grok reports the restored session's current effort in reasoningEffort;
+        // the marked catalog default must win when resolving Auto.
+        let default_effort = declared_default
+            .filter(|value| efforts.iter().any(|e| e.reasoning_effort == *value))
+            .or_else(|| {
+                normalize_acp_effort(meta.get("reasoningEffort").and_then(Value::as_str))
+                    .filter(|value| efforts.iter().any(|e| e.reasoning_effort == *value))
+            });
         projected.push(ModelOptionDto {
             id: public_id.to_string(),
             model: public_id.to_string(),
@@ -154,6 +152,19 @@ pub fn apply_model(model: &str, state: &Value) -> SessionSettingOp {
 mod tests {
     use super::*;
     #[test]
+    fn effort_setting_uses_string_config_value_and_auto_resets_default() {
+        let state = json!({"currentModelId":"build","availableModels":[{"modelId":"build","_meta":{
+            "reasoningEffort":"low","reasoningEfforts":[{"value":"low"},{"value":"high","default":true}]
+        }}]});
+        for (input, expected) in [("low", "low"), ("high", "high"), ("auto", "high")] {
+            assert!(
+                matches!(apply_reasoning(input, &state), Some(SessionSettingOp::SetConfig { config_id, value }) if config_id == "reasoning_effort" && value == expected)
+            );
+        }
+        assert!(apply_reasoning("xhigh", &state).is_none());
+        assert!(apply_reasoning("bogus", &state).is_none());
+    }
+    #[test]
     fn managed_catalog_uses_native_ids_and_preserves_advertised_effort() {
         let state = json!({"currentModelId":"remote-codex/model-b","availableModels":[
             {"modelId":"builtin","name":"Built in"},
@@ -187,7 +198,7 @@ mod tests {
 }
 
 pub fn apply_reasoning(effort: &str, state: &Value) -> Option<SessionSettingOp> {
-    let wanted = normalize_acp_effort(Some(effort))?;
+    let wanted = resolve_effort(effort, state)?;
     let current_id = state.get("currentModelId").and_then(Value::as_str);
     let models = state.get("availableModels")?.as_array()?;
     let model = models
@@ -213,12 +224,29 @@ pub fn apply_reasoning(effort: &str, state: &Value) -> Option<SessionSettingOp> 
         .get("value")
         .and_then(Value::as_str)
         .or_else(|| selected.get("id").and_then(Value::as_str))?;
-    Some(SessionSettingOp::LoadWithMeta {
-        meta: json!({ "reasoningEffort": value }),
+    Some(SessionSettingOp::SetConfig {
+        config_id: "reasoning_effort".into(),
+        value: value.into(),
     })
 }
 
+pub fn resolve_effort(effort: &str, state: &Value) -> Option<String> {
+    if effort != "auto" {
+        return normalize_acp_effort(Some(effort));
+    }
+    let projected = project_session(&json!({"models": state}))?;
+    projected
+        .models
+        .iter()
+        .find(|m| Some(&m.model) == projected.model.as_ref())?
+        .default_reasoning_effort
+        .clone()
+}
+
 fn grok_efforts(meta: &Value) -> Vec<ReasoningEffortOptionDto> {
+    if meta.get("supportsReasoningEffort").and_then(Value::as_bool) == Some(false) {
+        return vec![];
+    }
     meta.get("reasoningEfforts")
         .and_then(Value::as_array)
         .map(|entries| {

@@ -91,6 +91,7 @@ struct LiveSession {
     current_mode_id: Option<String>,
     /// Prompt bootstrap is scoped to the loaded process and product identity.
     context_thread_id: Option<String>,
+    upstream_revision: Option<Vec<u8>>,
 }
 
 struct PendingPermission {
@@ -223,10 +224,14 @@ impl AcpRuntime {
         }
         let adapter = adapter_for(&def.id);
         let mut extra_env = extra_env_for(def);
+        let mut upstream_revision = None;
         if def.id == "grok" {
             if let Some(upstreams) = &self.upstreams {
                 if let Some((profile, models)) = upstreams.catalog("grok").await? {
                     upstreams.prepare_grok(&profile, &models)?;
+                    upstream_revision = Some(super::upstream_models::UpstreamModels::revision(
+                        &profile, &models,
+                    )?);
                 }
             }
         }
@@ -384,7 +389,7 @@ impl AcpRuntime {
             } else {
                 (json!({}), Vec::new(), None, None)
             };
-        let (model, reasoning_effort) = if def.id == "deepseek" {
+        let (model, reasoning_effort) = if def.id == "deepseek" || def.id == "grok" {
             let current = |category: &str| {
                 config_options
                     .as_array()
@@ -396,7 +401,14 @@ impl AcpRuntime {
                     .and_then(|option| option["currentValue"].as_str())
                     .map(str::to_string)
             };
-            (current("model"), current("thought_level"))
+            (
+                if def.id == "grok" {
+                    current("model").or(model)
+                } else {
+                    current("model")
+                },
+                current("thought_level"),
+            )
         } else {
             (model, reasoning_effort)
         };
@@ -415,6 +427,7 @@ impl AcpRuntime {
             negotiated,
             adapter_id: def.id.clone(),
             goal: None,
+            upstream_revision,
             model,
             reasoning_effort,
             active: None,
@@ -639,6 +652,21 @@ impl AcpRuntime {
                         }),
                     )
                     .await?;
+                if live.adapter_id == "grok" && config_id == "reasoning_effort" {
+                    let actual = response["configOptions"]
+                        .as_array()
+                        .and_then(|options| {
+                            options
+                                .iter()
+                                .find(|option| option["category"] == "thought_level")
+                        })
+                        .and_then(|option| option["currentValue"].as_str());
+                    if super::grok::normalize_acp_effort(actual)
+                        != super::grok::normalize_acp_effort(Some(&value))
+                    {
+                        bail!("Grok did not confirm the requested reasoning effort");
+                    }
+                }
                 if let Some(options) = response.get("configOptions") {
                     live.config_options = options.clone();
                     if live.adapter_id == "deepseek" {
@@ -717,6 +745,10 @@ impl AcpRuntime {
                 });
                 if let Some(obj) = live.harness_state.as_object_mut() {
                     obj.insert("currentModelId".into(), json!(model_id));
+                }
+                if live.adapter_id == "grok" {
+                    // set_model may reset the harness setting without returning configOptions.
+                    live.reasoning_effort = None;
                 }
                 if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
                     apply_projection(live, proj);
@@ -827,6 +859,12 @@ impl AcpRuntime {
                 }
             }
         }
+        let grok_effort = if live.adapter_id == "grok" {
+            effort.and_then(|effort| super::grok::resolve_effort(effort, &live.harness_state))
+        } else {
+            None
+        };
+        let effort = grok_effort.as_deref().or(effort);
         if let Some(effort) = effort.filter(|value| {
             *value != "auto" && (!value.is_empty() || live.adapter_id == "deepseek")
         }) {
@@ -844,6 +882,8 @@ impl AcpRuntime {
                         },
                     )
                     .await?;
+                } else if live.adapter_id == "grok" {
+                    bail!("The selected Grok model does not advertise reasoning effort {effort}");
                 }
             }
         }
@@ -853,6 +893,75 @@ impl AcpRuntime {
         if sandbox.is_some() || collab.is_some() || approval.is_some() {
             Self::apply_product_mode(&live.process.clone(), live).await?;
         }
+        Ok(())
+    }
+
+    /// Catalog changes take effect at the next idle operation, never mid-turn.
+    async fn refresh_grok_session(&self, key: &str) -> Result<()> {
+        let Some(upstreams) = &self.upstreams else {
+            return Ok(());
+        };
+        if !key.starts_with("grok::") {
+            return Ok(());
+        }
+        let Some((profile, models)) = upstreams.catalog("grok").await? else {
+            return Ok(());
+        };
+        let revision = super::upstream_models::UpstreamModels::revision(&profile, &models)?;
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let mut sessions = self.inner.sessions.lock().await;
+        let Some(live) = sessions.get_mut(key) else {
+            return Ok(());
+        };
+        if live.upstream_revision.as_ref() == Some(&revision) {
+            return Ok(());
+        }
+        if live.active.is_some() {
+            bail!("conflict: Grok is busy; refresh after the turn finishes")
+        }
+        let _operation = live
+            .operation
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| anyhow!("conflict: Grok is busy"))?;
+        let def = self.agent_def(Some("grok"))?;
+        let (_, mut replacement) = self
+            .spawn_session(
+                &def,
+                &live.cwd.to_string_lossy(),
+                ProductSessionPolicy {
+                    approval_mode: Some(if live.yolo { "yolo" } else { "guarded" }.into()),
+                    sandbox_mode: live.sandbox_mode.clone(),
+                    collaboration_mode: live.collaboration_mode.clone(),
+                },
+                Some(&live.session_id),
+                None,
+            )
+            .await?;
+        let adapter = adapter_for("grok");
+        let restore = async {
+            if let Some(model) = &live.model {
+                if let Some(op) = adapter.apply_model(model, &replacement.harness_state) {
+                    Self::apply_setting_op(&replacement.process.clone(), &mut replacement, op)
+                        .await?;
+                }
+            }
+            if let Some(effort) = &live.reasoning_effort {
+                if let Some(op) = adapter.apply_reasoning(effort, &replacement.harness_state) {
+                    Self::apply_setting_op(&replacement.process.clone(), &mut replacement, op)
+                        .await?;
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = restore {
+            let _ = replacement.process.shutdown().await;
+            return Err(error);
+        }
+        replacement.goal = live.goal.clone();
+        live.process.shutdown().await?;
+        *live = replacement;
         Ok(())
     }
 
@@ -1089,8 +1198,17 @@ impl AgentRuntime for AcpRuntime {
             .retain(|(agent, _), _| agent != agent_id);
         self.inner.caps_by_agent.lock().await.remove(agent_id);
         self.inner.toolbox_by_agent.lock().await.remove(agent_id);
+        if let Some(upstreams) = &self.upstreams {
+            upstreams.invalidate(agent_id).await;
+        }
         *self.started_at.lock().await = Some(now_rfc3339());
         Ok(keys.len())
+    }
+
+    async fn invalidate_models(&self, agent_id: &str) {
+        if let Some(upstreams) = &self.upstreams {
+            upstreams.invalidate(agent_id).await;
+        }
     }
 
     async fn start(&self) -> Result<()> {
@@ -1108,28 +1226,34 @@ impl AgentRuntime for AcpRuntime {
             Err(_) => return Ok(default_model_stub(agent_id.or(self.bound_agent.as_deref()))),
         };
         if let Some(upstreams) = &self.upstreams {
-            if let Some((_, mut models)) = upstreams.catalog(&def.id).await? {
-                let known = match self.models_from_live(&def.id).await {
-                    Some(known) => Some(known),
-                    None if def.id == "grok" => {
+            if let Some((profile, models)) = upstreams.catalog(&def.id).await? {
+                let known = if def.id == "grok" {
+                    if models.iter().any(|m| m.reasoning.is_none()) {
                         let _lifecycle = self.inner.lifecycle.lock().await;
-                        Some(self.probe_models(&def, cwd.unwrap_or(".")).await?)
-                    }
-                    None => None,
-                };
-                if let Some(known) = known {
-                    for model in &mut models {
-                        if let Some(metadata) =
-                            known.iter().find(|entry| entry.model == model.model)
-                        {
-                            model.supported_reasoning_efforts =
-                                metadata.supported_reasoning_efforts.clone();
-                            model.default_reasoning_effort =
-                                metadata.default_reasoning_effort.clone();
+                        let revision =
+                            super::upstream_models::UpstreamModels::revision(&profile, &models)?;
+                        if let Some(known) = upstreams.native_models(&revision).await {
+                            Some(known)
+                        } else {
+                            let known = self.probe_models(&def, cwd.unwrap_or(".")).await?;
+                            upstreams.cache_native(revision, known.clone()).await;
+                            Some(known)
                         }
+                    } else {
+                        None
                     }
-                }
-                return Ok(models);
+                } else {
+                    self.models_from_live(&def.id).await
+                };
+                return Ok(models
+                    .iter()
+                    .map(|model| {
+                        let fallback = known
+                            .as_ref()
+                            .and_then(|known| known.iter().find(|m| m.model == model.id));
+                        model.option(&profile, fallback)
+                    })
+                    .collect());
             }
         }
         super::dependencies::ensure(&def, false).await?;
@@ -1320,12 +1444,29 @@ impl AgentRuntime for AcpRuntime {
                 live.model = Some(input.model.clone());
             }
         }
-        if let Some(effort) = input.reasoning_effort.as_deref().filter(|value| {
-            *value != "auto" && (!value.is_empty() || live.adapter_id == "deepseek")
-        }) {
+        let grok_effort = if live.adapter_id == "grok" {
+            input
+                .reasoning_effort
+                .as_deref()
+                .and_then(|effort| super::grok::resolve_effort(effort, &live.harness_state))
+        } else {
+            None
+        };
+        if let Some(effort) = grok_effort
+            .as_deref()
+            .or(input.reasoning_effort.as_deref())
+            .filter(|value| {
+                *value != "auto" && (!value.is_empty() || live.adapter_id == "deepseek")
+            })
+        {
             if live.reasoning_effort.as_deref() != Some(effort) {
                 if let Some(op) = adapter.apply_reasoning(effort, &live.harness_state) {
-                    let _ = Self::apply_setting_op(&live.process.clone(), &mut live, op).await;
+                    if let Err(error) =
+                        Self::apply_setting_op(&live.process.clone(), &mut live, op).await
+                    {
+                        let _ = live.process.shutdown().await;
+                        return Err(error);
+                    }
                 } else if let Some(config_id) = reasoning_config_id(&live.config_options) {
                     let config_id = config_id.to_string();
                     Self::apply_setting_op(
@@ -1459,6 +1600,8 @@ impl AgentRuntime for AcpRuntime {
         bus: EventBus,
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>> {
+        self.refresh_grok_session(&input.provider_session_id)
+            .await?;
         let operation = self
             .inner
             .sessions
@@ -2030,6 +2173,7 @@ impl AgentRuntime for AcpRuntime {
                 available_modes,
                 current_mode_id,
                 context_thread_id: None,
+                upstream_revision: None,
             },
         );
         Ok(StartSessionResult {
@@ -2180,6 +2324,7 @@ impl AgentRuntime for AcpRuntime {
         session_id: &str,
         settings: SessionSettings,
     ) -> Result<()> {
+        self.refresh_grok_session(session_id).await?;
         self.apply_live_settings(
             session_id,
             settings.model.as_deref(),

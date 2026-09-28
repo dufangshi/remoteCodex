@@ -22,7 +22,7 @@ test('service definitions preserve literal paths and keep credentials out of ser
   assert(!linux.includes('API_KEY'));
   assert(linux.includes('Restart=always'));
   assert(linux.includes('/User $$Name/a'));
-  assert(linux.includes('WorkingDirectory="/User $Name"'));
+  assert(linux.includes('WorkingDirectory=%h\n'));
   const mac = serviceDefinition('darwin', opts);
   assert(mac.includes('a&quot;b'));
   assert(mac.includes('<key>KeepAlive</key><true/>'));
@@ -59,6 +59,46 @@ test('public setup script installs the latest runtime with a permanent token', (
   assert.match(script, /--token/);
   assert.doesNotMatch(script, /__REMOTE_CODEX_VERSION__/);
   assert.match(script, /--registry=https:\/\/registry.npmjs.org/);
+});
+
+test('systemd fields use their own escaping rules rather than shell quoting', () => {
+  const linux = serviceDefinition('linux', {
+    node: '/usr/bin/node', launcher: '/home/a $USER %h/launcher.mjs',
+    home: '/home/a "quoted" \\ %h $USER',
+    config: '/home/a "quoted" \\ %h $USER/config.json',
+    searchPath: '/bin:/path\nRestart=no\r\t', log: '/unused',
+  });
+  assert.match(linux, /^WorkingDirectory=%h$/m);
+  assert.match(linux, /"\/home\/a \$\$USER %%h\/launcher.mjs"/);
+  assert(linux.includes('Environment="REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG=/home/a \\"quoted\\" \\\\ %%h $USER/config.json"'));
+  assert(linux.includes('Environment="PATH=/bin:/path\\nRestart=no\\r\\t"'));
+  assert.equal(linux.split('\n').filter(line => line.startsWith('Restart=')).length, 1);
+});
+
+// Run explicitly in Linux with systemd installed; never touch a host service.
+test('real systemd accepts generated units and rejects the old quoted working directory', {
+  skip: process.env.REMOTE_CODEX_TEST_SYSTEMD !== '1',
+}, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-systemd-test-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const unit = path.join(root, 'remote-codex-fixture.service');
+  const definition = serviceDefinition('linux', {
+    node: process.execPath, launcher: '/home/ubuntu/a "b" %h $USER/launcher.mjs',
+    home: '/home/ubuntu', config: '/home/ubuntu/a "b" %h $USER/config.json',
+    log: '/unused', searchPath: '/usr/bin:/bin',
+  });
+  const verify = () => spawnSync('systemd-analyze', ['verify', '--man=no', unit], { encoding: 'utf8' });
+  fs.writeFileSync(unit, definition.replace('WorkingDirectory=%h', 'WorkingDirectory="/home/ubuntu"'));
+  const broken = verify();
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stderr, /WorkingDirectory=.*not absolute/);
+  // Re-running setup writes the complete corrected unit before daemon-reload.
+  for (let i = 0; i < 2; i++) {
+    fs.writeFileSync(unit, definition);
+    const fixed = verify();
+    assert.equal(fixed.status, 0, fixed.stderr || String(fixed.error));
+    assert.equal(fixed.stderr, '');
+  }
 });
 
 test('legacy setup uses matching connection settings, preserving different device configurations', async (t) => {
