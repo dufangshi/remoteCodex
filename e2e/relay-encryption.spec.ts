@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Browser, type BrowserContext } from '@playwright/test';
 import WebSocket from 'ws';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -59,6 +59,14 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
   browser,
   context,
 }) => {
+  await encryptedRelayScenario(browser, context, false);
+});
+
+test('shared device workspace collection performs an encrypted handshake and respects revocation', async ({ browser, context }) => {
+  await encryptedRelayScenario(browser, context, true);
+});
+
+async function encryptedRelayScenario(browser: Browser, context: BrowserContext, sharedOnly: boolean) {
   const root = await mkdtemp(resolve('.local/security-regression-'));
   const procs: ChildProcess[] = [],
     sockets: WebSocket[] = [];
@@ -252,6 +260,32 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
       )
       .toContain('agentMessage');
     ok(await request(`${api}/threads/${tid}/shell`, 'POST', {}, owner));
+    if (sharedOnly) {
+    // A shared collection page has no thread/workspace ID for its first HPKE
+    // handshake. Exercise it in a fresh browser with no owner's cached key.
+    const reader = await account('device-reader');
+    const grant = ok(await request(`${base}/relay/grants`, 'POST', {
+      deviceId: device.device.id, targetIdentifier: 'device-reader', scope: 'device',
+      threadAccess: 'read', workspaceAccess: 'read', canCreateThreads: false,
+    }, owner));
+    const sharedContext = await browser.newContext();
+    try {
+      await sharedContext.addCookies([{ name: 'remote_codex_relay_session', value: reader, url: base }]);
+      const sharedPage = await sharedContext.newPage();
+      const keyResponse = sharedPage.waitForResponse(r => r.url().includes('/api/transport/key?'));
+      const workspaceResponse = sharedPage.waitForResponse(r => r.url() === `${api}/workspaces` && !!r.headers()['x-rcd-encrypted']);
+      await sharedPage.goto(`${base}/devices/${device.device.id}/workspaces`);
+      expect((await keyResponse).status()).toBe(200);
+      expect((await workspaceResponse).status()).toBe(200);
+      await expect(sharedPage.getByText('Encrypted workspace', { exact: true })).toBeVisible();
+      await expect(sharedPage.getByText('You no longer have access to this device.', { exact: true })).toHaveCount(0);
+      expect((await request(`${api}/management/upstreams`, 'GET', undefined, reader)).status).toBe(403);
+      ok(await request(`${base}/relay/grants/${grant.id}`, 'DELETE', undefined, owner));
+      expect((await request(`${api}/transport/key?challenge=revoked`, 'GET', undefined, reader)).status).toBe(401);
+      expect((await request(`${api}/workspaces`, 'GET', undefined, reader)).status).toBe(401);
+    } finally { await sharedContext.close(); }
+    return;
+    }
     await context.addCookies([
       { name: 'remote_codex_relay_session', value: owner, url: base },
     ]);
@@ -484,4 +518,4 @@ test('encrypted relay interoperates with Rust for HTTP, attachments, terminal an
     );
     await rm(root, { recursive: true, force: true });
   }
-});
+}
