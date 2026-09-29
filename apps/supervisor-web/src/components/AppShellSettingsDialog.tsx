@@ -1,4 +1,5 @@
 import { FormDialog } from './FormDialog';
+import { useFontSize } from '../lib/fontSize';
 import { RuntimeManagement } from './RuntimeManagement';
 import { ModelPricingSettings } from './ModelPricingSettings';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -195,6 +196,7 @@ export function AppShellSettingsDialog({
     }
   }
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
+  const [fontSize, setFontSize] = useFontSize();
   const autoCollapseCompletedTurns =
     shellNav?.autoCollapseCompletedTurns ?? true;
   const [selectedBackend, setSelectedBackend] =
@@ -848,6 +850,17 @@ export function AppShellSettingsDialog({
             </fieldset>
           ) : null}
 
+          {section === 'preferences' && (
+            <section className="py-5">
+              <label htmlFor="settings-font-size" className="block text-sm font-semibold">Text size</label>
+              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">Adjust conversation, composer and activity text. Changes apply immediately and are saved on this device.</p>
+              <div className="mt-3 flex items-center gap-4">
+                <input id="settings-font-size" aria-label="Text size" type="range" min="12" max="22" step="1" value={fontSize} onChange={(event) => setFontSize(Number(event.currentTarget.value))} className="w-48 accent-[var(--theme-accent-solid)]" />
+                <output htmlFor="settings-font-size" className="text-sm tabular-nums">{fontSize}px</output>
+                <button type="button" onClick={() => setFontSize(16)} className="relay-button-secondary">Reset</button>
+              </div>
+            </section>
+          )}
           {section === 'preferences' &&
             shellNav?.setAutoCollapseCompletedTurns && (
               <section className="py-5">
@@ -1381,6 +1394,8 @@ export function AppShellSettingsDialog({
     >
       <DialogContent
         className="thread-graph-dialog thread-graph-settings-dialog"
+        data-theme-effective={effectiveTheme}
+        data-theme-mode={selectedThemeMode}
         data-testid="settingsDialog"
         aria-describedby={undefined}
         onCloseAutoFocus={(event) => {
