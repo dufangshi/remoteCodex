@@ -3,7 +3,7 @@
 This branch is a Rust rewrite of the Remote Codex control plane.
 
 - Runtime and HTTP live under `crates/`. Do not reintroduce the TypeScript supervisor or the 15-coordinator split.
-- ACP is the default harness path. Add a thin adapter in `crates/runtime/src/acp.rs` for command/capability differences.
+- ACP is the default harness path. Add a thin adapter under `crates/runtime/src/acp/` for command/capability differences (see `catalog.rs` for the command catalog and `capabilities.rs` for capability overlays).
 - Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@remote-codex/shared`.
 - After changing `crates/`, run relevant crate/test-name regressions and formatting/compilation checks in proportion to the change. Do not default to `cargo test --workspace` or a platform matrix.
 - Routine PR CI runs lightweight, path-selected checks only. Full compatibility checks, workspace-wide tests, full browser suites, and release dry-runs require an explicit user request for that validation (or an explicitly authorized release requiring its release gates). Do not dispatch them as extra insurance after targeted checks pass. See [CI scope and manual invocation](docs/ci.md).

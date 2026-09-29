@@ -3,7 +3,7 @@
 Remote Codex is a Treer-shaped control plane for personal coding-agent sessions.
 
 ```text
-Browser / mobile WebView
+Browser / mobile WebView / native macOS app
   -> Supervisor (Axum, this repo)
       -> Runtime trait
            -> ACP stdio + thin harness adapters
@@ -22,6 +22,30 @@ Browser / mobile WebView
 | `crates/relay` | Public accounts, devices, shares |
 | `crates/cli` | `remote-codex` binary |
 
-Harness differences stay in `crates/runtime/src/acp.rs` as command catalog + capability overlays. Supervisor code does not special-case Codex vs Grok.
+## Module layout
 
-Native Android/iOS/Windows clients are not duplicated in this rewrite. They keep talking to the same HTTP/WS contract from `main`. The React thread surface stays in `remote-codex-thread-ui`.
+Harness differences stay under `crates/runtime/src/acp/` — `catalog.rs` holds the
+command catalog, `capabilities.rs` the capability overlays, and per-harness
+adapters (`grok.rs`, `codex_bridge.rs`, `deepseek.rs`) sit alongside them.
+Supervisor code does not special-case Codex vs Grok.
+
+Large modules follow a `foo.rs` + sibling `foo/` convention: the parent file
+keeps the public surface and the directory holds cohesive internals. Existing
+examples are `runtime/src/service.rs` + `service/{reliability,update}.rs`,
+`runtime/src/upstreams.rs` + `upstreams/discovery.rs`,
+`supervisor/src/secure_transport.rs` + `secure_transport/streams.rs`, and
+`relay/src/auth_api.rs` + `auth_api/passkeys.rs`. Prefer extending that pattern
+over growing a single file; see [code-structure.md](code-structure.md) for the
+current size inventory and the modules that most need it.
+
+## Clients
+
+Native Android/iOS/Windows clients are not duplicated in this rewrite. They keep
+talking to the same HTTP/WS contract from `main`. The React thread surface stays
+in `remote-codex-thread-ui`, consumed by `apps/supervisor-web` as
+`@remote-codex/thread-ui` and `@remote-codex/shared`.
+
+The native macOS/iOS/Android client apps live in a separate repository
+(`remote-codex-app`), not in this tree — `apps/ios` and `apps/android` here hold
+only built web bundles and packaging inputs. `apps/windows-device-manager` is an
+independently released bootstrap; see AGENTS.md for its release boundary.
