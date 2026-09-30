@@ -56,11 +56,18 @@ pub enum ThreadCommand {
     /// Current remoteCodex thread identity and status.
     #[command(name = "self")]
     SelfInfo,
+    /// Threads a person started, with a count of the agent threads under each.
     List {
         #[arg(long)]
         workspace: Option<String>,
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Include agent-created threads flat, instead of only lineage roots.
+        #[arg(long)]
+        all: bool,
+        /// List the descendants of one root instead of the roots themselves.
+        #[arg(long, value_name = "THREAD_ID")]
+        group: Option<String>,
     },
     Show {
         id: String,
@@ -201,7 +208,7 @@ impl Client {
     pub async fn thread(&self, command: ThreadCommand) -> Result<Value> {
         match command {
             ThreadCommand::SelfInfo=>self.request(json!({"operation":"status","threadId":self.from.as_ref().context("Current thread is unknown; use --from ID")?})).await,
-            ThreadCommand::List{workspace,limit}=>self.request(json!({"operation":"list","workspaceId":workspace,"limit":limit})).await,
+            ThreadCommand::List{workspace,limit,all,group}=>self.request(json!({"operation":"list","workspaceId":workspace,"limit":limit,"includeAgentThreads":all,"groupId":group})).await,
             ThreadCommand::Show{id}|ThreadCommand::Status{id}=>self.request(json!({"operation":"status","threadId":self.id(&id).await?})).await,
             ThreadCommand::Backends=>self.request(json!({"operation":"backends"})).await,
             ThreadCommand::Models{provider,agent}=>self.request(json!({"operation":"models","provider":provider,"agentId":agent,"fromThreadId":self.from})).await,
