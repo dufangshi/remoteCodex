@@ -3478,6 +3478,12 @@ fn sanitize_file_name(name: &str) -> String {
 /// misbehaving agent from opening an unbounded chain of live harness sessions.
 pub const MAX_LINEAGE_DEPTH: i64 = 3;
 
+/// Unfinished agent threads permitted beneath one lineage root. Matches the
+/// concurrent-subagent limit Claude Code documents, and like that limit it is a hard
+/// refusal rather than a queue: backpressure belongs with the agent deciding to
+/// delegate, not in a scheduler holding half-started harness sessions open.
+pub const MAX_OPEN_AGENT_THREADS: i64 = 20;
+
 pub(crate) struct Lineage {
     pub parent: Option<String>,
     pub root: Option<String>,
@@ -3511,12 +3517,38 @@ impl Supervisor {
             "agent thread nesting is limited to {MAX_LINEAGE_DEPTH} levels; \
              delegate from the root thread instead of chaining deeper"
         );
+        // A root stores NULL for its own root, so descendants of a root anchor on
+        // the parent id itself.
+        let root = root.unwrap_or_else(|| parent.to_string());
+        let open = self.open_agent_threads(&root)?;
+        anyhow::ensure!(
+            open < MAX_OPEN_AGENT_THREADS,
+            "this thread already has {open} unfinished agent threads, which is the \
+             limit of {MAX_OPEN_AGENT_THREADS}. Do not retry: creating another will \
+             fail the same way until some finish. Wait for the ones already running, \
+             or reuse an idle peer instead of creating more."
+        );
         Ok(Lineage {
-            // A root stores NULL for its own root, so descendants of a root anchor on
-            // the parent id itself.
-            root: Some(root.unwrap_or_else(|| parent.to_string())),
+            root: Some(root),
             parent: Some(parent.to_string()),
             depth,
+        })
+    }
+
+    /// Descendants of `root` that still hold a slot. Counting *unfinished* rather than
+    /// only *running* threads is deliberate: a freshly created thread sits at `idle`
+    /// until it is prompted, so a running-only cap would not stop an agent opening
+    /// hundreds of threads in a burst - the exact runaway this bound exists to prevent.
+    /// Finished work does not count, so a long sequential fan-out stays unrestricted.
+    pub(crate) fn open_agent_threads(&self, root: &str) -> Result<i64> {
+        self.db.with(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM threads
+                 WHERE root_thread_id=?1
+                   AND COALESCE(status,'idle') NOT IN ('completed','failed','interrupted')",
+                params![root],
+                |row| row.get(0),
+            )?)
         })
     }
 }
