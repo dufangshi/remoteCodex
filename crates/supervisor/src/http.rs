@@ -900,6 +900,10 @@ async fn workspace_delete_file(
 #[serde(rename_all = "camelCase")]
 struct ThreadListQuery {
     workspace_id: Option<String>,
+    /// Off by default: a workspace listing shows only the threads a person started.
+    /// Pass true to include agent-spawned descendants in the flat list.
+    #[serde(default)]
+    include_agent_threads: bool,
 }
 
 async fn list_threads(
@@ -909,7 +913,7 @@ async fn list_threads(
     Ok(Json(
         serde_json::to_value(
             state
-                .list_threads(query.workspace_id.as_deref())
+                .list_threads(query.workspace_id.as_deref(), query.include_agent_threads)
                 .map_err(map_err)?,
         )
         .unwrap(),

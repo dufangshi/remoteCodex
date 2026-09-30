@@ -53,6 +53,7 @@ async fn running_thread() -> (TempDir, Arc<Supervisor>, String) {
             model: "ios-e2e-stream".into(),
             reasoning_effort: None,
             approval_mode: "yolo".into(),
+            parent_thread_id: None,
         })
         .await
         .unwrap();
