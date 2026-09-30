@@ -179,3 +179,59 @@ async fn a_workspace_listing_shows_only_threads_a_person_started() {
     let everything = s.list_threads(Some(&ws), true).unwrap();
     assert_eq!(everything.len(), 7, "opting in returns the full tree");
 }
+
+#[tokio::test]
+async fn a_burst_of_idle_agent_threads_is_capped_and_finished_ones_free_slots() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = spawn(&s, &ws, None).await;
+
+    // Freshly created threads sit at `idle`, never having been prompted. A cap that
+    // only counted `running` threads would let this burst through unbounded.
+    let mut made = Vec::new();
+    for _ in 0..remote_codex_runtime::service::MAX_OPEN_AGENT_THREADS {
+        made.push(spawn(&s, &ws, Some(&root.id)).await.id);
+    }
+    let refused = s
+        .create_thread(CreateThreadInput {
+            workspace_id: ws.clone(),
+            title: None,
+            provider: Some(Provider::Codex),
+            agent_id: Some("codex".into()),
+            model: "ios-e2e-stream".into(),
+            reasoning_effort: None,
+            approval_mode: "yolo".into(),
+            parent_thread_id: Some(root.id.clone()),
+        })
+        .await;
+    let message = refused.err().expect("past the cap must fail").to_string();
+    assert!(
+        message.contains("Do not retry"),
+        "refusal must tell the agent not to retry, got: {message}"
+    );
+
+    // Completed work must not hold a slot, or a long sequential fan-out would wedge.
+    s.db.with(|conn| {
+        conn.execute(
+            "UPDATE threads SET status='completed' WHERE id=?1",
+            rusqlite::params![made[0]],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        s.create_thread(CreateThreadInput {
+            workspace_id: ws,
+            title: None,
+            provider: Some(Provider::Codex),
+            agent_id: Some("codex".into()),
+            model: "ios-e2e-stream".into(),
+            reasoning_effort: None,
+            approval_mode: "yolo".into(),
+            parent_thread_id: Some(root.id),
+        })
+        .await
+        .is_ok(),
+        "finishing a thread should free a slot"
+    );
+}
