@@ -10,13 +10,6 @@ import {
   type ThreadTurnTokenUsageDto,
 } from '@remote-codex/shared';
 
-export function effectiveSandboxMode(
-  thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,
-): 'danger-full-access' {
-  void thread;
-  return 'danger-full-access';
-}
-
 export function prependTurns(
   existing: ThreadDetailDto['turns'],
   older: ThreadDetailDto['turns'],
@@ -427,25 +420,6 @@ export function mergeGoalHistory(
   goal: NonNullable<ThreadDetailDto['goal']>,
 ) {
   return normalizeGoalHistory([goal, ...existing]);
-}
-
-export function formatGoalTokenUsage(
-  goal: NonNullable<ThreadDetailDto['goal']>,
-) {
-  const formatter = new Intl.NumberFormat(undefined, {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  });
-  return goal.tokenBudget === null
-    ? `${formatter.format(goal.tokensUsed)} tok`
-    : `${formatter.format(goal.tokensUsed)}/${formatter.format(goal.tokenBudget)} tok`;
-}
-
-export function formatGoalRuntime(seconds: number) {
-  const minutes = Math.max(0, Math.floor(seconds / 60));
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return hours > 0 ? `${hours}h ${remainingMinutes}m` : `${minutes}m`;
 }
 
 export function getReasoningEffortAvailability(

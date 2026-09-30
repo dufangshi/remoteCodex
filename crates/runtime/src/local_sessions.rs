@@ -1569,9 +1569,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
     }
 }
 
-fn truncate_title(value: &str) -> String {
-    remote_codex_protocol::truncate_title(value)
-}
+use remote_codex_protocol::truncate_title;
 
 fn nonempty(value: Option<String>) -> Option<String> {
     value.and_then(|text| {

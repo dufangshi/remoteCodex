@@ -753,14 +753,6 @@ pub struct SupervisorConnectedEnvelope {
     pub timestamp: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum WsServerMessage {
-    Connected(SupervisorConnectedEnvelope),
-    Event(ThreadEventEnvelope),
-    Other(Value),
-}
-
 pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }

@@ -844,14 +844,6 @@ export function deleteHostedOrphanCredential(credentialRef: string) {
   );
 }
 
-export function fetchHostedSandbox(id: string) {
-  return request<RelayHostedSandboxDetailDto>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}`,
-    undefined,
-    { auth: 'relay-admin' },
-  );
-}
-
 export function createHostedSandbox(input: {
   assignedUserIds: string[];
   deviceName: string;
@@ -919,17 +911,6 @@ export function snapshotHostedSandbox(id: string, name: string) {
   );
 }
 
-export function rotateHostedSandboxCredential(
-  id: string,
-  openaiApiKey: string,
-) {
-  return request<{ operation: RelayHostedSandboxOperationDto }>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/rotate-credential`,
-    { method: 'POST', body: JSON.stringify({ openaiApiKey }) },
-    { auth: 'relay-admin' },
-  );
-}
-
 export function fetchHostedCodexFiles(id: string) {
   return request<RelayHostedCodexFilesDto>(
     `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/backends/codex/files`,
@@ -955,10 +936,6 @@ export function deleteHostedSandbox(id: string) {
     { method: 'DELETE' },
     { auth: 'relay-admin' },
   );
-}
-
-export function setRelayRegistrationEnabled(enabled: boolean) {
-  return updateRelayRegistrationSettings({ enabled });
 }
 
 export function updateRelayRegistrationSettings(
@@ -1064,15 +1041,6 @@ export function fetchAgentSubscriptionUsage(provider: AgentBackendIdDto, agentId
   );
 }
 
-export function restartAgentBackend(provider: AgentBackendIdDto) {
-  return request<AgentBackendDto>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/restart`,
-    {
-      method: 'POST',
-    },
-  );
-}
-
 export function installOrUpdateAgentBackend(
   provider: AgentBackendIdDto,
   action: 'install' | 'update',
@@ -1123,16 +1091,6 @@ export function fetchAgentBackendAgents(provider: AgentBackendIdDto) {
 
 export function fetchThreadCapabilitySnapshot(threadId: string) {
   return request<AgentCapabilitySnapshotDto>(`/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
-}
-
-export function fetchAgentCapabilitySnapshot(
-  provider: AgentBackendIdDto,
-  agentId: string,
-) {
-  return request<AgentCapabilitySnapshotDto>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/capabilities?agentId=${encodeURIComponent(agentId)}`,
-    { cache: 'no-store' },
-  );
 }
 
 export function fetchProviderHostFile(
@@ -1203,15 +1161,6 @@ export function applyProviderHostConfigArchive(
 ) {
   return request<ApplyProviderHostConfigArchiveResultDto>(
     `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}/apply`,
-    {
-      method: 'POST',
-    },
-  );
-}
-
-export function buildAndRestartService() {
-  return request<{ status: 'launched'; pid: number | null; message: string }>(
-    '/api/service/build-restart',
     {
       method: 'POST',
     },

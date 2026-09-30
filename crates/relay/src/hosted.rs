@@ -11,7 +11,6 @@ use reqwest::{Client, Method};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -2136,16 +2135,10 @@ fn path_segment(value: &str) -> String {
     encoded
 }
 
-fn token_hash(token: &str) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes()))
-}
-
-fn preview_token(token: &str) -> String {
-    if token.len() <= 12 {
-        return token.to_string();
-    }
-    format!("{}...{}", &token[..7], &token[token.len() - 4..])
-}
+use super::security::token_hash;
+// Shares the parent's implementation, which clamps on char boundaries rather
+// than slicing raw bytes.
+use super::preview_token;
 
 fn nonempty_env(name: &str) -> Option<String> {
     std::env::var(name)
