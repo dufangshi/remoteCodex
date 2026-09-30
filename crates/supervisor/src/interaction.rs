@@ -17,11 +17,21 @@ pub(crate) async fn command(
         match input.get("operation").and_then(Value::as_str).unwrap_or("") {
             "info" => Ok(json!({"deviceId":state.db.host_id})),
             "list" => {
-                let threads =
-                    state.list_threads(input.get("workspaceId").and_then(Value::as_str), true)?;
+                let group = input["groupId"].as_str().map(str::to_owned);
+                // Drilling into a group, or asking for --all, needs every row; the
+                // default listing keeps to lineage roots so a fan-out stays collapsed.
+                let include_all =
+                    group.is_some() || input["includeAgentThreads"].as_bool() == Some(true);
+                let mut threads = state.list_threads(
+                    input.get("workspaceId").and_then(Value::as_str),
+                    include_all,
+                )?;
+                if let Some(group) = &group {
+                    threads.retain(|t| t.root_thread_id.as_deref() == Some(group.as_str()));
+                }
                 let limit = input["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
                 Ok(
-                    json!({"threads":threads.iter().take(limit).map(|t|json!({"id":t.id,"title":t.title,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"status":t.status,"updatedAt":t.updated_at})).collect::<Vec<_>>(),"totalCount":threads.len()}),
+                    json!({"threads":threads.iter().take(limit).map(|t|json!({"id":t.id,"title":t.title,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"status":t.status,"updatedAt":t.updated_at,"parentThreadId":t.parent_thread_id,"rootThreadId":t.root_thread_id,"agentThreadCount":t.descendant_count})).collect::<Vec<_>>(),"totalCount":threads.len()}),
                 )
             }
             "show" | "status" => state.interaction_status(id).await,

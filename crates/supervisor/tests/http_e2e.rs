@@ -692,3 +692,106 @@ async fn local_cli_requires_credentials_and_exposes_existing_threads() {
         .unwrap();
     assert_eq!(transcript["turns"][0]["items"][1]["text"], "hello");
 }
+
+/// Exercises the real path an agent takes: POST /api/cli with operation=create and
+/// fromThreadId, then the workspace listing the web client actually calls.
+#[tokio::test]
+async fn agent_created_threads_group_under_their_root_over_http() {
+    let (dir, port, ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    // /api/cli is gated on local CLI credentials, as a real agent would present them.
+    let cli_token = std::fs::read_to_string(dir.path().join("cli-token")).unwrap();
+    let workspace_path = ws_root.join("lineage");
+    std::fs::create_dir_all(&workspace_path).unwrap();
+    let workspace = json(
+        &client,
+        client.post(format!("{base}/api/workspaces")).json(&json!({
+            "absPath": workspace_path, "label": "Lineage"
+        })),
+    )
+    .await;
+    let root = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/start"))
+            .json(&json!({
+                "workspaceId": workspace["id"], "model": "default", "provider": "codex"
+            })),
+    )
+    .await;
+    let root_id = root["thread"]["id"]
+        .as_str()
+        .or_else(|| root["id"].as_str())
+        .expect("thread id")
+        .to_string();
+
+    for _ in 0..3 {
+        let spawned = json(
+            &client,
+            client
+                .post(format!("{base}/api/cli"))
+                .bearer_auth(&cli_token)
+                .json(&json!({
+                    "operation": "create",
+                    "fromThreadId": root_id,
+                    "model": "default",
+                    "provider": "codex"
+                })),
+        )
+        .await;
+        assert!(
+            spawned["threadId"].is_string(),
+            "agent create failed: {spawned}"
+        );
+    }
+
+    let ws_id = workspace["id"].as_str().unwrap();
+    let visible = json(
+        &client,
+        client.get(format!("{base}/api/threads?workspaceId={ws_id}")),
+    )
+    .await;
+    let rows = visible.as_array().expect("thread list array");
+    assert_eq!(
+        rows.len(),
+        1,
+        "the workspace listing must show only the thread the person started, got {rows:?}"
+    );
+    assert_eq!(rows[0]["id"].as_str(), Some(root_id.as_str()));
+    assert_eq!(
+        rows[0]["descendantCount"].as_i64(),
+        Some(3),
+        "the root should report how many agent threads it owns"
+    );
+
+    let everything = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads?workspaceId={ws_id}&includeAgentThreads=true"
+        )),
+    )
+    .await;
+    assert_eq!(
+        everything.as_array().unwrap().len(),
+        4,
+        "opting in returns the whole tree"
+    );
+
+    // And the CLI listing honours the same grouping.
+    let grouped = json(
+        &client,
+        client
+            .post(format!("{base}/api/cli"))
+            .bearer_auth(&cli_token)
+            .json(&json!({
+                "operation": "list", "workspaceId": ws_id, "groupId": root_id
+            })),
+    )
+    .await;
+    assert_eq!(
+        grouped["threads"].as_array().unwrap().len(),
+        3,
+        "--group lists exactly that root's descendants"
+    );
+}

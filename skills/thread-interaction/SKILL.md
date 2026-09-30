@@ -23,7 +23,29 @@ remote-codex thread models --provider acp --agent grok
 
 Use **remoteCodex thread IDs**, the last segment of `/devices/DEVICE_ID/threads/THREAD_ID`, not native Codex/ACP session IDs. A target may be a UUID or a full Web thread URL on the current device; the CLI does not route across devices. `self` identifies your caller. `list` defaults to 20 entries, capped at 100, without transcripts. `status`/`show` return lightweight metadata including `activeTurnId`, `queuedCount`, `unreadMessageCount`, `waitingForInput`, and `lastError`.
 
-Reuse a peer when its workspace, model, and earlier work fit. Read status and only enough recent transcript to assess context. Create when separate context or another model is useful. Save useful peer IDs and their purpose in working notes; there is no separate child-thread registry.
+Reuse a peer when its workspace, model, and earlier work fit. Read status and only enough recent transcript to assess context. Create when separate context or another model is useful.
+
+## Lineage: threads you create group under you
+
+A thread you create records you as its parent and inherits your lineage root — the
+thread a person actually started. `thread list` shows only those roots by default,
+each with the number of agent threads beneath it, so a fan-out does not bury the
+person's own conversations. Pass `--all` to see every thread flat, or
+`--group THREAD_ID` to list one root's descendants.
+
+Two bounds apply, and both are refusals rather than queues:
+
+- **Depth 3.** You may delegate, and your delegate may delegate once more. Past that,
+  creation fails; delegate from the root instead of chaining deeper.
+- **20 unfinished threads per root.** Completed, failed and interrupted threads release
+  their slot, so a long sequential fan-out is unrestricted — but 20 simultaneously open
+  ones is the ceiling. Note this counts threads you created and never prompted, because
+  an idle thread still holds a slot.
+
+When either refusal arrives, **do not retry the same call** — it will fail identically
+until something finishes. Wait for outstanding work, or reuse an idle peer. Prefer a
+handful of concurrent delegates over a large burst; you cannot reclaim a slot by
+creating more.
 
 Model IDs and effort options come from local discovery. Preserve explicitly requested models; do not invent an ID from a display name or silently substitute another model. Availability depends on the installed harness and working directory.
 
