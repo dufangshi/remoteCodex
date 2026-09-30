@@ -18,7 +18,7 @@ pub(crate) async fn command(
             "info" => Ok(json!({"deviceId":state.db.host_id})),
             "list" => {
                 let threads =
-                    state.list_threads(input.get("workspaceId").and_then(Value::as_str))?;
+                    state.list_threads(input.get("workspaceId").and_then(Value::as_str), true)?;
                 let limit = input["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
                 Ok(
                     json!({"threads":threads.iter().take(limit).map(|t|json!({"id":t.id,"title":t.title,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"status":t.status,"updatedAt":t.updated_at})).collect::<Vec<_>>(),"totalCount":threads.len()}),
@@ -72,6 +72,9 @@ pub(crate) async fn command(
                 let from = input["fromThreadId"].as_str().map(str::to_owned);
                 if let Some(from) = from {
                     let caller = state.get_thread(&from)?;
+                    // Record who asked, so the new thread groups under its lineage root
+                    // instead of appearing as another top-level entry in the workspace.
+                    input["parentThreadId"] = json!(from);
                     if input.get("workspaceId").is_none() {
                         input["workspaceId"] = json!(caller.workspace_id);
                     }
