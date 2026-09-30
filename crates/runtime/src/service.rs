@@ -2226,6 +2226,15 @@ impl Supervisor {
         } else {
             prompt
         };
+        // The inbox is passive by design: mail never interrupts a turn, and the
+        // receiver is expected to poll. Nothing surfaced it though, so a peer's
+        // result could sit unread while the collaboration silently stalled. Announce
+        // it at the start of a turn - the one moment the agent is about to think
+        // anyway - and say it is passive so it does not abandon work mid-task.
+        let prompt = match self.pending_mail_notice(&thread.id) {
+            Some(notice) => format!("{notice}\n\n{prompt}"),
+            None => prompt,
+        };
         let bus = self.bus.for_turn(&thread.id, &turn_id);
         let result = runtime
             .start_turn(
@@ -3533,6 +3542,26 @@ impl Supervisor {
             parent: Some(parent.to_string()),
             depth,
         })
+    }
+
+    /// A one-line notice when peer mail is waiting, or None. Returns None unless the
+    /// CLI is configured, because without credentials the agent cannot act on it and
+    /// the line would be noise. Deliberately states that the mail is passive: an agent
+    /// nudged every turn about work it is reasonably deferring might otherwise
+    /// acknowledge messages just to silence the reminder, which loses them.
+    pub fn pending_mail_notice(&self, thread: &str) -> Option<String> {
+        if self.interaction.context.read().ok()?.is_none() {
+            return None;
+        }
+        match self.inbox_unread_count(thread).ok()? {
+            0 => None,
+            count => Some(format!(
+                "[remoteCodex: {count} unread peer message{}. Passive - handle at a natural \
+                 checkpoint with `remote-codex inbox`, and acknowledge only what you have \
+                 actually dealt with.]",
+                if count == 1 { "" } else { "s" }
+            )),
+        }
     }
 
     /// Descendants of `root` that still hold a slot. Counting *unfinished* rather than

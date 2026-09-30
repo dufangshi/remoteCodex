@@ -1,7 +1,9 @@
 //! Agent-spawned threads must group under the thread a person started, so a
 //! fan-out cannot flood a workspace listing.
 use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
-use remote_codex_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
+use remote_codex_runtime::{
+    fake::FakeRuntime, interaction::SendInput, Database, RuntimeConfig, Supervisor,
+};
 use std::sync::Arc;
 
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
@@ -233,5 +235,72 @@ async fn a_burst_of_idle_agent_threads_is_capped_and_finished_ones_free_slots() 
         .await
         .is_ok(),
         "finishing a thread should free a slot"
+    );
+}
+
+#[tokio::test]
+async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let sender = spawn(&s, &ws, None).await;
+    let receiver = spawn(&s, &ws, None).await;
+
+    // Without CLI credentials the agent could not act on a notice, so we stay quiet.
+    assert_eq!(
+        s.pending_mail_notice(&receiver.id),
+        None,
+        "no notice before the CLI is configured"
+    );
+    s.configure_cli("http://127.0.0.1:1".into());
+    assert_eq!(
+        s.pending_mail_notice(&receiver.id),
+        None,
+        "an empty inbox produces no notice"
+    );
+
+    s.send_to_thread(
+        &receiver.id,
+        SendInput {
+            delivery: "inbox".into(),
+            notify_delivery: "inbox".into(),
+            text: "build finished, artifact at /tmp/out".into(),
+            from_thread_id: Some(sender.id.clone()),
+            notify_on_complete: false,
+            client_request_id: Some("mail-1".into()),
+        },
+    )
+    .unwrap();
+
+    let notice = s
+        .pending_mail_notice(&receiver.id)
+        .expect("waiting mail must be announced");
+    assert!(notice.contains("1 unread peer message"), "got: {notice}");
+    assert!(
+        notice.contains("Passive"),
+        "the notice must say it is passive so the agent does not abandon its task          or acknowledge mail just to silence the reminder: {notice}"
+    );
+    assert!(notice.contains("remote-codex inbox"), "got: {notice}");
+
+    // Pluralisation, and the sender's own inbox stays untouched.
+    s.send_to_thread(
+        &receiver.id,
+        SendInput {
+            delivery: "inbox".into(),
+            notify_delivery: "inbox".into(),
+            text: "second".into(),
+            from_thread_id: Some(sender.id.clone()),
+            notify_on_complete: false,
+            client_request_id: Some("mail-2".into()),
+        },
+    )
+    .unwrap();
+    assert!(s
+        .pending_mail_notice(&receiver.id)
+        .unwrap()
+        .contains("2 unread peer messages"));
+    assert_eq!(
+        s.pending_mail_notice(&sender.id),
+        None,
+        "sending mail must not announce anything to the sender"
     );
 }
