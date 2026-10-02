@@ -856,6 +856,7 @@ export function ThreadDetailPage() {
   useThreadListPolling({
     enabled: Boolean(id),
     setThreads,
+    includeAgentThreads: true,
   });
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -1245,7 +1246,7 @@ export function ThreadDetailPage() {
         : Promise.resolve(null);
 
       const [threadResult, statusResult, modelResult, agentResult, capabilityResult] = await Promise.allSettled([
-        fetchThreads(),
+        fetchThreads(true),
         fetchAgentBackendStatus(provider),
         modelRequest,
         agentRequest,

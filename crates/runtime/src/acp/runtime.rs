@@ -2204,17 +2204,20 @@ impl AgentRuntime for AcpRuntime {
         // Steering is an extension request, not a notification. Only acknowledge
         // delivery after the harness confirms it; never silently queue a prompt.
         // Release the sessions lock so updates and cancellation can still progress.
+        // If the turn ends during delivery, let the supervisor own any new turn;
+        // the harness must not silently start an untracked detached prompt.
         let result = process
             .request(
                 "_session/steering",
                 json!({
                     "sessionId": provider_session_id,
-                    "prompt": [{ "type": "text", "text": prompt }]
+                    "prompt": [{ "type": "text", "text": prompt }],
+                    "_meta": {"steering": {"idleBehavior": "promptRequired"}}
                 }),
             )
             .await?;
         match result.get("outcome").and_then(Value::as_str) {
-            Some("injected" | "startedNewTurn") => Ok(()),
+            Some("injected") => Ok(()),
             _ => bail!("ACP harness did not confirm steering delivery: {result}"),
         }
     }
