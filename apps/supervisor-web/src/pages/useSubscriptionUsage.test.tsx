@@ -2,7 +2,7 @@
 import { StrictMode, type PropsWithChildren } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentSubscriptionUsageDto } from '../../../../packages/shared/src/index';
+import type { AgentBackendIdDto, AgentSubscriptionUsageDto } from '../../../../packages/shared/src/index';
 import { fetchAgentSubscriptionUsage } from '../lib/api';
 import { useSubscriptionUsage } from './useSubscriptionUsage';
 
@@ -10,7 +10,7 @@ vi.mock('../lib/api', () => ({ fetchAgentSubscriptionUsage: vi.fn() }));
 const FIVE_MINUTES = 300_000;
 let deviceNumber = 0;
 function props() {
-  return { deviceId: `device-${++deviceNumber}`, threadId: 'parent', provider: 'claude' as const, agentId: null };
+  return { deviceId: `device-${++deviceNumber}`, threadId: 'parent', provider: 'claude' as AgentBackendIdDto, agentId: null as string | null };
 }
 function usage(): AgentSubscriptionUsageDto {
   return {
@@ -52,6 +52,15 @@ describe('subscription usage caching', () => {
     await settle();
     expect(fetchAgentSubscriptionUsage).toHaveBeenCalledTimes(1);
     expect(first.result.current).toEqual(second.result.current);
+  });
+
+  it('reuses the Claude account cache when a child uses the generic ACP provider', async () => {
+    const initialProps = props();
+    const { rerender } = renderHook(useSubscriptionUsage, { initialProps });
+    await settle();
+    rerender({ ...initialProps, threadId: 'child', provider: 'acp', agentId: 'claude' });
+    await settle();
+    expect(fetchAgentSubscriptionUsage).toHaveBeenCalledTimes(1);
   });
 
   it('keeps last known data on old-runtime null responses and network errors, backing off then recovering', async () => {

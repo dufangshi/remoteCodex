@@ -71,7 +71,9 @@ export function useSubscriptionUsage({
   provider?: AgentBackendIdDto | undefined;
   agentId?: string | null | undefined;
 }) {
-  const key = JSON.stringify([deviceId ?? 'local', provider ?? null, agentId ?? null]);
+  // Match the Supervisor adapter key, including Claude reached through generic ACP.
+  const accountAdapter = agentId ?? (provider === 'acp' ? 'codex' : provider);
+  const key = JSON.stringify([deviceId ?? 'local', accountAdapter ?? null]);
   const [usage, setUsage] = useScopedState<AgentSubscriptionUsageDto | null>(key, null);
   useEffect(() => {
     if (!provider) return;
