@@ -99,6 +99,47 @@ subject usually gets handled sooner than a steer that derails a peer into confus
 If you are tempted to steer because you are impatient rather than because the work is
 wrong, send inbox mail instead.
 
+## When to read your inbox
+
+Waiting mail is announced at the start of each of your turns, listing every subject
+and kind. You do not need to poll defensively - but the announcement only reaches a
+turn that is *starting*, so these are the moments to actually look:
+
+- **When the notice names something.** It tells you what is waiting; decide then
+  whether it changes what you are about to do.
+- **Before work that depends on a peer.** A result you never read is a result you do
+  not have.
+- **After a long command.** Mail may have arrived while you were blocked.
+- **Before you finish a turn while a delegate is still working.** This is the one that
+  bites - see below.
+
+Acknowledge with `inbox ack` only what you have handled or deliberately recorded.
+Acknowledging to clear the notice loses the message.
+
+### Ending your turn discards nothing, but you will not be woken
+
+An idle thread does not run, so it cannot read mail. If you delegate work and then end
+your turn, the delegate's result lands in your inbox and **sits there** until a person
+or a peer starts a new turn for you. The work is not lost; nobody is acting on it.
+
+If you need to act on a result, choose one deliberately:
+
+```bash
+# Preferred: subscribe, so finishing wakes you with the result in hand.
+remote-codex thread send PEER_ID --delivery queue --kind task \
+  --subject 'Port the auth tests' --text-file /tmp/task.txt \
+  --notify-on-complete --notify-delivery queue
+
+# Or stay in your turn and wait, checking the inbox between steps.
+```
+
+`--notify-delivery queue` starts a turn for you when the delegate finishes; the
+notification now carries the delegate's closing message, so you can usually judge the
+outcome without opening the transcript. `--notify-delivery inbox` (the default) is
+passive and will *not* wake you - use it only when you are already going to be running.
+
+Do not solve this by steering the peer or polling in a loop. Subscribe, or stay awake.
+
 ## Choose the delivery semantics explicitly
 
 | Intent | Delivery | Behavior |

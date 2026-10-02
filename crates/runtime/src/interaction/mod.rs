@@ -124,10 +124,21 @@ impl Supervisor {
         }
         let pending_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
+        // Derive a subject when the sender omitted one. Observed agents label a
+        // `create` (which defaults it from --title) but routinely skip it on a plain
+        // send, and an unlabelled message is exactly the one a receiver cannot triage.
+        // Doing it here rather than at display time means `inbox list` is labelled too.
+        let derived_subject = input.subject.clone().or_else(|| {
+            input
+                .text
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(|line| line.chars().take(72).collect())
+        });
         let prompt = match &input.from_thread_id {
             Some(from) => {
-                let subject = input
-                    .subject
+                let subject = derived_subject
                     .as_deref()
                     .map(|value| format!(" | {value}"))
                     .unwrap_or_default();
@@ -205,7 +216,7 @@ impl Supervisor {
                     &input.text,
                     &now,
                     inbox::Envelope {
-                        subject: input.subject.as_deref(),
+                        subject: derived_subject.as_deref(),
                         kind,
                         in_reply_to: input.in_reply_to.as_deref(),
                     },
