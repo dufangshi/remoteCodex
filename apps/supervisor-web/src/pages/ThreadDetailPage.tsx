@@ -2,6 +2,7 @@ import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
 import { useScopedState } from './useScopedState';
+import { useSubscriptionUsage } from './useSubscriptionUsage';
 import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
@@ -14,7 +15,6 @@ import {
   AgentProviderCapabilitiesDto,
   AgentBackendManagementSchemaDto,
   AgentRuntimeStatusDto,
-  AgentSubscriptionUsageDto,
   ModelOptionDto,
   RelayEffectiveAccessDto,
   SupervisorSocketServerEnvelope,
@@ -64,7 +64,6 @@ import {
   fetchAgentBackendModelsFor,
   fetchThreadCapabilitySnapshot,
   fetchAgentBackendStatus,
-  fetchAgentSubscriptionUsage,
   fetchProviderHostFile,
   fetchRelayAccess,
   fetchRelayPortal,
@@ -415,10 +414,12 @@ export function ThreadDetailPage() {
   const [agentOptions, setAgentOptions] = useState<ModelOptionDto[]>([]);
   const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [backendCapabilities, setBackendCapabilities] = useState<AgentProviderCapabilitiesDto | null>(null);
-  const [subscriptionUsage, setSubscriptionUsage] =
-    useState<AgentSubscriptionUsageDto | null>(null);
-  const [subscriptionUsageRefreshKey, setSubscriptionUsageRefreshKey] =
-    useState(0);
+  const subscriptionUsage = useSubscriptionUsage({
+    deviceId: relayRouteDeviceId,
+    threadId: id,
+    provider: detail?.thread.provider,
+    agentId: detail?.thread.agentId,
+  });
   const [backendManagementSchema, setBackendManagementSchema] =
     useState<AgentBackendManagementSchemaDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
@@ -1163,44 +1164,6 @@ export function ThreadDetailPage() {
   }, [detail]);
 
   useThreadTabStatus(detail?.thread ?? null);
-
-  useEffect(() => {
-    const provider = detail?.thread.provider;
-    if (!provider) {
-      setSubscriptionUsage(null);
-      return;
-    }
-    setSubscriptionUsage(null);
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const result = await fetchAgentSubscriptionUsage(provider, detail?.thread.agentId);
-        if (!cancelled) {
-          setSubscriptionUsage(
-            result.usage?.authKind === 'subscription' &&
-              result.usage.windows.length > 0
-              ? result.usage
-              : null,
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setSubscriptionUsage(null);
-        }
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(refresh, 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    detail?.thread.lastTurnCompletedAt,
-    detail?.thread.provider,
-    detail?.thread.agentId,
-    subscriptionUsageRefreshKey,
-  ]);
 
   useEffect(() => {
     if (!id) return;
@@ -2019,7 +1982,6 @@ export function ThreadDetailPage() {
         }
 
         supervisorRecoveryPendingRef.current = true;
-        setSubscriptionUsageRefreshKey((current) => current + 1);
         refreshThreadDetailSilently();
         sendSupervisorPing();
         syncRealtimeConnectionState();
