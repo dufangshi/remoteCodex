@@ -977,18 +977,31 @@ impl Supervisor {
         Ok((relative, u64::try_from(content.len()).unwrap_or(u64::MAX)))
     }
 
-    pub fn list_threads(&self, workspace_id: Option<&str>) -> Result<Vec<ThreadDto>> {
+    /// `include_agent_threads` false returns only lineage roots - the threads a person
+    /// started - so an agent fan-out cannot flood a workspace listing. Internal callers
+    /// pass true because they resolve threads by id/session and must see every row.
+    pub fn list_threads(
+        &self,
+        workspace_id: Option<&str>,
+        include_agent_threads: bool,
+    ) -> Result<Vec<ThreadDto>> {
         let mut rows = self.db.with(|conn| {
             let mut sql = String::from(
-                "SELECT id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
-                        reasoning_effort, fast_mode, collaboration_mode, approval_mode, sandbox_mode, status,
-                        summary_text, last_error, created_at, updated_at, last_turn_started_at, last_turn_completed_at,
-                        is_pinned, context_usage_json FROM threads",
+                "SELECT t.id, t.workspace_id, t.provider, t.agent_id, t.provider_session_id, t.source, t.title, t.model,
+                        t.reasoning_effort, t.fast_mode, t.collaboration_mode, t.approval_mode, t.sandbox_mode, t.status,
+                        t.summary_text, t.last_error, t.created_at, t.updated_at, t.last_turn_started_at, t.last_turn_completed_at,
+                        t.is_pinned, t.context_usage_json, t.parent_thread_id, t.root_thread_id, t.lineage_depth,
+                        (SELECT COUNT(*) FROM threads d WHERE d.root_thread_id = t.id)
+                 FROM threads t",
             );
             if workspace_id.is_some() {
-                sql.push_str(" WHERE workspace_id=?1");
+                sql.push_str(" WHERE t.workspace_id=?1");
             }
-            sql.push_str(" ORDER BY updated_at DESC");
+            if !include_agent_threads {
+                sql.push_str(if workspace_id.is_some() { " AND" } else { " WHERE" });
+                sql.push_str(" t.parent_thread_id IS NULL");
+            }
+            sql.push_str(" ORDER BY t.updated_at DESC");
             let mut stmt = conn.prepare(&sql)?;
             let map_row = |row: &rusqlite::Row| -> rusqlite::Result<ThreadDto> {
                 Ok(thread_from_row(row))
@@ -1010,7 +1023,7 @@ impl Supervisor {
 
     pub fn get_thread(&self, id: &str) -> Result<ThreadDto> {
         let mut thread = self
-            .list_threads(None)?
+            .list_threads(None, true)?
             .into_iter()
             .find(|t| t.id == id)
             .ok_or_else(|| anyhow!("thread not found"))?;
@@ -1086,11 +1099,13 @@ impl Supervisor {
             .title
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "New thread".into());
+        let lineage = self.resolve_lineage(input.parent_thread_id.as_deref())?;
         self.db.with(|conn| {
             conn.execute(
                 "INSERT INTO threads(id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
-                    reasoning_effort, collaboration_mode, approval_mode, sandbox_mode, status, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,?10,'idle',?11,?11)",
+                    reasoning_effort, collaboration_mode, approval_mode, sandbox_mode, status, created_at, updated_at,
+                    parent_thread_id, root_thread_id, lineage_depth)
+                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,?10,'idle',?11,?11,?12,?13,?14)",
                 params![
                     id,
                     input.workspace_id,
@@ -1103,6 +1118,9 @@ impl Supervisor {
                     approval_mode,
                     sandbox_mode,
                     now,
+                    lineage.parent,
+                    lineage.root,
+                    lineage.depth,
                 ],
             )?;
             Ok(())
@@ -1136,7 +1154,7 @@ impl Supervisor {
                 Err(err) => tracing::warn!(error = %err, "import candidate listing failed"),
             }
         }
-        let existing = self.list_threads(None).unwrap_or_default();
+        let existing = self.list_threads(None, true).unwrap_or_default();
         let mut out = Vec::new();
         for session in sessions {
             if session.session_id.trim().is_empty() || !Path::new(&session.cwd).is_absolute() {
@@ -1253,7 +1271,7 @@ impl Supervisor {
     }
 
     fn find_thread_by_session(&self, session_id: &str) -> Result<Option<ThreadDto>> {
-        Ok(self.list_threads(None)?.into_iter().find(|thread| {
+        Ok(self.list_threads(None, true)?.into_iter().find(|thread| {
             thread
                 .provider_session_id
                 .as_deref()
@@ -3299,7 +3317,7 @@ impl Supervisor {
     }
 
     pub fn active_turn_count(&self) -> u32 {
-        self.list_threads(None)
+        self.list_threads(None, true)
             .unwrap_or_default()
             .iter()
             .filter(|t| t.status == "running")
@@ -3455,6 +3473,86 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
+/// How deep an agent-spawned chain may go. A root is 0, so this permits a thread
+/// to delegate, and its delegate to delegate once more. Bounding it keeps a
+/// misbehaving agent from opening an unbounded chain of live harness sessions.
+pub const MAX_LINEAGE_DEPTH: i64 = 3;
+
+/// Unfinished agent threads permitted beneath one lineage root. Matches the
+/// concurrent-subagent limit Claude Code documents, and like that limit it is a hard
+/// refusal rather than a queue: backpressure belongs with the agent deciding to
+/// delegate, not in a scheduler holding half-started harness sessions open.
+pub const MAX_OPEN_AGENT_THREADS: i64 = 20;
+
+pub(crate) struct Lineage {
+    pub parent: Option<String>,
+    pub root: Option<String>,
+    pub depth: i64,
+}
+
+impl Supervisor {
+    /// Resolves a new thread's place in the tree from its parent. The root is copied
+    /// from the parent (or *is* the parent, when the parent is itself a root), so the
+    /// write costs one lookup and grouping never needs a recursive walk.
+    pub(crate) fn resolve_lineage(&self, parent: Option<&str>) -> Result<Lineage> {
+        let Some(parent) = parent.filter(|value| !value.trim().is_empty()) else {
+            return Ok(Lineage {
+                parent: None,
+                root: None,
+                depth: 0,
+            });
+        };
+        let (root, depth): (Option<String>, i64) = self.db.with(|conn| {
+            conn.query_row(
+                "SELECT root_thread_id, lineage_depth FROM threads WHERE id=?1",
+                params![parent],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| anyhow!("parent thread not found"))
+        })?;
+        let depth = depth + 1;
+        anyhow::ensure!(
+            depth <= MAX_LINEAGE_DEPTH,
+            "agent thread nesting is limited to {MAX_LINEAGE_DEPTH} levels; \
+             delegate from the root thread instead of chaining deeper"
+        );
+        // A root stores NULL for its own root, so descendants of a root anchor on
+        // the parent id itself.
+        let root = root.unwrap_or_else(|| parent.to_string());
+        let open = self.open_agent_threads(&root)?;
+        anyhow::ensure!(
+            open < MAX_OPEN_AGENT_THREADS,
+            "this thread already has {open} unfinished agent threads, which is the \
+             limit of {MAX_OPEN_AGENT_THREADS}. Do not retry: creating another will \
+             fail the same way until some finish. Wait for the ones already running, \
+             or reuse an idle peer instead of creating more."
+        );
+        Ok(Lineage {
+            root: Some(root),
+            parent: Some(parent.to_string()),
+            depth,
+        })
+    }
+
+    /// Descendants of `root` that still hold a slot. Counting *unfinished* rather than
+    /// only *running* threads is deliberate: a freshly created thread sits at `idle`
+    /// until it is prompted, so a running-only cap would not stop an agent opening
+    /// hundreds of threads in a burst - the exact runaway this bound exists to prevent.
+    /// Finished work does not count, so a long sequential fan-out stays unrestricted.
+    pub(crate) fn open_agent_threads(&self, root: &str) -> Result<i64> {
+        self.db.with(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM threads
+                 WHERE root_thread_id=?1
+                   AND COALESCE(status,'idle') NOT IN ('completed','failed','interrupted')",
+                params![root],
+                |row| row.get(0),
+            )?)
+        })
+    }
+}
+
 fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
     let provider: String = row.get(2).unwrap_or_else(|_| "codex".into());
     let provider = match provider.as_str() {
@@ -3496,6 +3594,10 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
             .ok()
             .flatten()
             .and_then(|s| serde_json::from_str(&s).ok()),
+        parent_thread_id: row.get(22).unwrap_or(None),
+        root_thread_id: row.get(23).unwrap_or(None),
+        lineage_depth: row.get(24).unwrap_or(0),
+        descendant_count: row.get::<_, i64>(25).ok().filter(|count| *count > 0),
     }
 }
 

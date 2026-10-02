@@ -216,6 +216,20 @@ pub struct ThreadDto {
     pub last_turn_completed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<Value>,
+    /// Immediate creator. None means a person started this thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_thread_id: Option<String>,
+    /// Top-level ancestor, denormalised so grouping is one indexed lookup.
+    /// None on a root; every descendant carries the root's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_thread_id: Option<String>,
+    /// 0 for a root, parent + 1 otherwise. Bounded by MAX_LINEAGE_DEPTH.
+    #[serde(default)]
+    pub lineage_depth: i64,
+    /// Number of threads anywhere beneath this one. Only populated for roots in
+    /// list responses, so a client can render "N agent threads" without a second call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descendant_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,6 +368,10 @@ pub struct CreateThreadInput {
     pub reasoning_effort: Option<String>,
     #[serde(default = "default_approval")]
     pub approval_mode: String,
+    /// Thread that asked for this one. Set by the CLI bridge from the caller's
+    /// identity; a user-created thread leaves it None and becomes a lineage root.
+    #[serde(default)]
+    pub parent_thread_id: Option<String>,
 }
 
 fn default_approval() -> String {

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ThreadDetailDto } from '@remote-codex/shared';
+import type { ThreadDetailDto, ThreadDto } from '@remote-codex/shared';
 import { useWorkbenchNavigation, workbenchThreadStatus } from './useWorkbenchNavigation';
 import { ApiError, request } from '../lib/api';
 import { useScopedState } from './useScopedState';
@@ -89,6 +89,15 @@ describe('account thread navigation', () => {
     expect(result.current.notifications[0]?.summary).toMatch(/^The image now loads correctly/);
     expect(Array.from(result.current.notifications[0]!.summary!)).toHaveLength(181);
     expect(result.current.notifications[0]?.summary).toMatch(/…$/);
+    unmount();
+  });
+  it('passes device-scoped lineage to tabs and preserves it while selecting a child', async () => {
+    vi.mocked(request).mockResolvedValue({threads: [], notifications: []});
+    const parent = {id:'root',workspaceId:'app',title:'Root',status:'idle',createdAt:'2026-09-01'} as ThreadDto;
+    const child = {...parent,id:'child',title:'Child',parentThreadId:'root',rootThreadId:'root',createdAt:'2026-09-02'};
+    const detail = {thread:child, workspace:{label:'App'}} as ThreadDetailDto;
+    const {result,unmount} = renderHook(() => useWorkbenchNavigation(detail,[parent,child],'wsl'));
+    expect(result.current.workspaceThreads.find(t=>t.key==='wsl:child')).toMatchObject({parentKey:'wsl:root',rootKey:'wsl:root'});
     unmount();
   });
   it('distinguishes running, unread completion, read idle, failure and unavailable states', () => {

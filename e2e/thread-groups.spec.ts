@@ -1,0 +1,48 @@
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { expect, test } from '@playwright/test';
+
+test('agent tabs stay grouped after polling and navigate through an unclipped menu', async ({ page, request }) => {
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const directory = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `groups-${randomUUID()}`);
+  await fs.mkdir(directory, { recursive: true });
+  const workspaceResponse = await request.post(`${base}/api/workspaces`, { data: { absPath: directory, label: 'Group regression', source: 'existing' } });
+  expect(workspaceResponse.ok()).toBe(true);
+  const workspace = await workspaceResponse.json();
+  const create = async (title: string, parentThreadId?: string) => {
+    const response = await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title, provider: 'codex', model: 'default', parentThreadId } });
+    expect(response.ok()).toBe(true);
+    const value = await response.json();
+    const thread = value.thread ?? value;
+    expect(thread.id).toEqual(expect.any(String));
+    return thread;
+  };
+  const root = await create('Research root');
+  const child = await create('Search agent', root.id);
+  await create('Scoring agent', root.id);
+  let snapshots = 0;
+  page.on('request', request => { if (request.url().includes('/api/threads?includeAgentThreads=true')) snapshots += 1; });
+  await page.goto(`/threads/${root.id}`);
+  const tabs = page.getByRole('navigation', { name: 'Workspace threads' });
+  const toggle = tabs.getByRole('button', { name: 'Research root: 2 agent threads' });
+  await expect(toggle).toBeVisible();
+  await expect(tabs.locator('a.matter-group-tab')).toHaveCount(1);
+  await expect.poll(() => snapshots).toBeGreaterThanOrEqual(2);
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  const menu = page.getByRole('region', { name: 'Research root agent threads' });
+  await expect(menu).toBeVisible();
+  expect(await menu.evaluate(element => element.closest('.matter-thread-tabs') === null)).toBe(true);
+  await expect(menu.getByRole('link', { name: 'Scoring agent' })).toBeInViewport();
+  await menu.getByRole('link', { name: 'Search agent' }).click();
+  await expect(page).toHaveURL(new RegExp(`/threads/${child.id}$`));
+  await expect(tabs.locator('a[aria-current="page"]')).toHaveText('Research root · Search agent');
+  await expect(menu).toHaveCount(0);
+  await toggle.click();
+  await expect(menu).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('grouped-tabs.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+});

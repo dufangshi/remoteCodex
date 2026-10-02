@@ -1347,8 +1347,8 @@ export function writeWorkspaceFile(
   );
 }
 
-export function fetchThreads() {
-  return request<ThreadDto[]>('/api/threads');
+export function fetchThreads(includeAgentThreads = false) {
+  return request<ThreadDto[]>(`/api/threads${includeAgentThreads ? '?includeAgentThreads=true' : ''}`);
 }
 
 export function fetchThreadDetail(

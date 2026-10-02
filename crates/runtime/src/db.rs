@@ -67,6 +67,32 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 9,
+        name: "agent_thread_lineage",
+        apply: |conn| {
+            // parent = immediate creator; root = top-level ancestor, denormalised so
+            // "list the threads a person started" stays one indexed query instead of a
+            // recursive walk. Both NULL means user-created, so existing rows need no
+            // backfill: they are already top-level by definition.
+            conn.execute("ALTER TABLE threads ADD COLUMN parent_thread_id TEXT", [])?;
+            conn.execute("ALTER TABLE threads ADD COLUMN root_thread_id TEXT", [])?;
+            conn.execute(
+                "ALTER TABLE threads ADD COLUMN lineage_depth INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS threads_root_idx
+                 ON threads(workspace_id, root_thread_id)",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS threads_parent_idx ON threads(parent_thread_id)",
+                [],
+            )?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[

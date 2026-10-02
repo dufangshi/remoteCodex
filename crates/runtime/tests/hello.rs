@@ -98,6 +98,7 @@ async fn seeded_thread(
             model: "ios-e2e-stream".into(),
             reasoning_effort: None,
             approval_mode: "yolo".into(),
+            parent_thread_id: None,
         })
         .await
         .unwrap();

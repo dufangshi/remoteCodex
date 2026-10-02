@@ -1009,6 +1009,14 @@ export interface ThreadDto {
   lastTurnStartedAt: string | null;
   lastTurnCompletedAt: string | null;
   contextUsage?: ThreadContextUsageDto;
+  /** Immediate creator. Absent when a person started this thread. */
+  parentThreadId?: string | null;
+  /** Top-level ancestor; every thread in one delegation chain shares it. */
+  rootThreadId?: string | null;
+  /** 0 for a root, parent + 1 otherwise. */
+  lineageDepth?: number;
+  /** Agent threads beneath this root. Only present on roots in list responses. */
+  descendantCount?: number | null;
 }
 
 export interface ThreadHistoryItemDto {
