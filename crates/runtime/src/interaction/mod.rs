@@ -83,8 +83,8 @@ impl Supervisor {
             "delivery must be inbox, direct, queue or steer"
         );
         ensure!(
-            ["inbox", "queue"].contains(&input.notify_delivery.as_str()),
-            "notifyDelivery must be inbox or queue"
+            input.notify_delivery == "inbox",
+            "notifyDelivery must be inbox; completion notifications are passive and cannot wake the caller. Read them with remote-codex inbox."
         );
         if input.delivery != "inbox" {
             self.ensure_prompt_allowed(&thread)?;
@@ -352,11 +352,10 @@ pub(crate) fn finish_notification(
         rows
     };
     for (key, target) in watchers {
-        // Before 0.12.32, subscriptions stored just the caller ID. Preserve that
-        // explicit wake-up request when completing a turn after upgrading.
+        // Completion is status, not a new task. Even subscriptions saved by
+        // older versions with queue delivery must remain passive after upgrade.
         let parsed: Value = serde_json::from_str(&target).unwrap_or(Value::Null);
         let from = parsed["threadId"].as_str().unwrap_or(&target).to_owned();
-        let delivery = parsed["delivery"].as_str().unwrap_or("queue");
         let exists = conn
             .query_row("SELECT 1 FROM threads WHERE id=?1", [&from], |_| Ok(()))
             .optional()?
@@ -364,11 +363,7 @@ pub(crate) fn finish_notification(
         if exists {
             let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success. Read the result with: remote-codex transcript {thread} --turn {turn} --view overview");
             let message_id = Uuid::new_v4().to_string();
-            if delivery == "inbox" {
-                inbox::store(conn, &from, &message_id, Some(thread), &text, now)?;
-            } else {
-                enqueue(conn, &message_id, &from, &text, None, now)?;
-            }
+            inbox::store(conn, &from, &message_id, Some(thread), &text, now)?;
         }
         conn.execute("DELETE FROM kv WHERE key=?1", [key])?;
     }

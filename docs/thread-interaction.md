@@ -64,7 +64,7 @@ This section supersedes the earlier default-delivery examples above. Ordinary `t
 
 `inbox` / `inbox list` returns bounded unread previews; `inbox read ID` expands one message; `inbox ack ID...` marks handled messages while retaining history. `--thread ID` selects a mailbox. Listing and reading never trigger turns or mark messages processed. `status` includes `unreadMessageCount`. Mail uses namespaced records in the existing KV store, with no schema migration or new tables.
 
-Completion subscriptions on executable messages default to inbox delivery; `--notify-delivery queue` explicitly wakes the caller. Legacy subscription values remain queued for compatibility. Passive mail rejects completion subscriptions because there is no corresponding receiving turn.
+Since 0.12.48, completion subscriptions on executable messages always deliver to the passive inbox; `--notify-delivery queue` is rejected before acceptance. Still-pending legacy subscriptions also deliver to inbox, never waking or queuing the caller. Already-enqueued input is preserved. Parents actively inspect inbox/status/transcript at checkpoints. Passive mail rejects completion subscriptions because there is no corresponding receiving turn.
 
 ## Direct delivery (0.12.33)
 
