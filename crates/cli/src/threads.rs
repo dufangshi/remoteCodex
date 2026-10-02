@@ -27,6 +27,17 @@ pub struct Body {
     /// Where the terminal-turn notification is delivered (requires --notify-on-complete).
     #[arg(long, default_value="inbox", value_parser=["inbox","queue"], requires="notify_on_complete")]
     pub notify_delivery: String,
+    /// One-line summary, shown in `inbox list` and in the unread notice so the
+    /// receiver can triage without opening the message. Strongly recommended.
+    #[arg(long)]
+    pub subject: Option<String>,
+    /// What this message is for. `question` is the only kind that implies you are
+    /// waiting on a reply; the rest are informational.
+    #[arg(long, value_parser=["result","question","status","task"])]
+    pub kind: Option<String>,
+    /// Message id this answers, so the exchange correlates.
+    #[arg(long, value_name = "MESSAGE_ID")]
+    pub in_reply_to: Option<String>,
     #[arg(long, conflicts_with = "text_file")]
     pub text: Option<String>,
     #[arg(long)]
@@ -203,7 +214,7 @@ impl Client {
         let text = body
             .text()?
             .context("send requires --text or --text-file")?;
-        self.request(json!({"operation":"send","threadId":id,"text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id})).await
+        self.request(json!({"operation":"send","threadId":id,"text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id,"subject":body.subject,"kind":body.kind,"inReplyTo":body.in_reply_to})).await
     }
     pub async fn thread(&self, command: ThreadCommand) -> Result<Value> {
         match command {
@@ -222,6 +233,13 @@ impl Client {
                 let mut result=self.request(input).await?;
                 if body.text.is_some() || body.text_file.is_some() {
                     let id=result["threadId"].as_str().context("create returned no thread ID")?.to_string();
+                    // Label the opening message by construction rather than relying on the
+                    // caller to remember: a create's initial prompt is a task by
+                    // definition, and --title is already the one-line summary of it.
+                    // Observed agents consistently omit these flags even when documented.
+                    let mut body=body;
+                    if body.kind.is_none() { body.kind=Some("task".into()); }
+                    if body.subject.is_none() { body.subject=title.clone(); }
                     result["send"]=self.send(&id,&body,"queue").await.with_context(||format!("Thread {id} was created, but initial send failed; reuse this thread"))?;
                 }
                 Ok(result)

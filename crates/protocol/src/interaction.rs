@@ -14,7 +14,24 @@ pub struct ThreadSendInput {
     pub notify_on_complete: bool,
     #[serde(default)]
     pub client_request_id: Option<String>,
+    /// One-line summary. Lets a receiver triage from a listing or an unread notice
+    /// without opening the message, and gives a sender something to name work by.
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// What the message is for: result, question, status or task. Freeform text
+    /// alone forces the receiver to read everything to find out whether anything is
+    /// expected of it. Defaults to `status` - the least demanding reading.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Message this answers, so an exchange correlates instead of relying on prose.
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
 }
+
+/// Accepted `kind` values. `question` is the only one that implies the sender is
+/// waiting on the receiver; the rest are informational, which keeps the passive
+/// inbox the right default rather than something to escalate around.
+pub const MESSAGE_KINDS: [&str; 4] = ["result", "question", "status", "task"];
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

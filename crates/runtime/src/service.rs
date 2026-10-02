@@ -3553,15 +3553,36 @@ impl Supervisor {
         if self.interaction.context.read().ok()?.is_none() {
             return None;
         }
-        match self.inbox_unread_count(thread).ok()? {
-            0 => None,
-            count => Some(format!(
-                "[remoteCodex: {count} unread peer message{}. Passive - handle at a natural \
-                 checkpoint with `remote-codex inbox`, and acknowledge only what you have \
-                 actually dealt with.]",
-                if count == 1 { "" } else { "s" }
-            )),
+        let count = self.inbox_unread_count(thread).ok()?;
+        if count == 0 {
+            return None;
         }
+        // Name what is waiting. A bare count cannot tell an agent whether looking now
+        // is worth interrupting itself; "1 question: missing API key" can.
+        let digest = self.inbox_unread_digest(thread, 5).unwrap_or_default();
+        let listed = digest
+            .iter()
+            .map(|(kind, subject)| format!("  - {kind}: {subject}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let more = count.saturating_sub(digest.len() as i64);
+        let tail = if more > 0 {
+            format!("\n  - ...and {more} more")
+        } else {
+            String::new()
+        };
+        let waiting_question = digest.iter().any(|(kind, _)| kind == "question");
+        let urgency = if waiting_question {
+            " One is a question, so a peer is waiting on you."
+        } else {
+            ""
+        };
+        Some(format!(
+            "[remoteCodex: {count} unread peer message{}.{urgency} Passive - handle at a natural \
+             checkpoint with `remote-codex inbox`, and acknowledge only what you have actually \
+             dealt with.\n{listed}{tail}]",
+            if count == 1 { "" } else { "s" }
+        ))
     }
 
     /// Descendants of `root` that still hold a slot. Counting *unfinished* rather than

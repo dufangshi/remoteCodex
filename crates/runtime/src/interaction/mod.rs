@@ -107,10 +107,40 @@ impl Supervisor {
                 "invalid clientRequestId"
             );
         }
+        if let Some(subject) = &input.subject {
+            ensure!(
+                !subject.trim().is_empty() && subject.chars().count() <= 120,
+                "subject must be nonempty and at most 120 characters"
+            );
+        }
+        let kind = input.kind.as_deref().unwrap_or("status");
+        ensure!(
+            remote_codex_protocol::MESSAGE_KINDS.contains(&kind),
+            "kind must be one of {}",
+            remote_codex_protocol::MESSAGE_KINDS.join(", ")
+        );
+        if let Some(parent) = &input.in_reply_to {
+            ensure!(!parent.trim().is_empty(), "inReplyTo must be a message id");
+        }
         let pending_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         let prompt = match &input.from_thread_id {
-            Some(from) => format!("[Message from remoteCodex thread {from}]\n{}", input.text),
+            Some(from) => {
+                let subject = input
+                    .subject
+                    .as_deref()
+                    .map(|value| format!(" | {value}"))
+                    .unwrap_or_default();
+                let reply = input
+                    .in_reply_to
+                    .as_deref()
+                    .map(|value| format!("\nIn reply to message {value}"))
+                    .unwrap_or_default();
+                format!(
+                    "[remoteCodex {kind} from thread {from}{subject}]{reply}\n{}",
+                    input.text
+                )
+            }
             None => input.text.clone(),
         };
         let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&input)?));
@@ -174,6 +204,11 @@ impl Supervisor {
                     input.from_thread_id.as_deref(),
                     &input.text,
                     &now,
+                    inbox::Envelope {
+                        subject: input.subject.as_deref(),
+                        kind,
+                        in_reply_to: input.in_reply_to.as_deref(),
+                    },
                 )?;
             } else {
                 enqueue(
@@ -362,10 +397,47 @@ pub(crate) fn finish_notification(
             .optional()?
             .is_some();
         if exists {
-            let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success. Read the result with: remote-codex transcript {thread} --turn {turn} --view overview");
+            // Carry the delegate's own closing message instead of only pointing at it.
+            // A bare "it ended" forced the caller into a second transcript call and
+            // prose-parsing before it could act on anything.
+            let reply: Option<String> = conn
+                .query_row(
+                    "SELECT json_extract(item_json,'$.text') FROM thread_history_items
+                     WHERE thread_id=?1 AND turn_id=?2
+                       AND json_extract(item_json,'$.kind')='agentMessage'
+                       AND trim(coalesce(json_extract(item_json,'$.text'),'')) <> ''
+                     ORDER BY created_at DESC LIMIT 1",
+                    params![thread, turn],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            let summary = match reply.as_deref() {
+                // Bounded: the notification lands in a context window, and a delegate
+                // that wrote an essay should not evict the caller's own work.
+                Some(text) if text.chars().count() > 4000 => {
+                    let head: String = text.chars().take(4000).collect();
+                    format!("\n\nIts closing message (truncated, full text via the transcript command above):\n{head}")
+                }
+                Some(text) => format!("\n\nIts closing message:\n{text}"),
+                None => String::new(),
+            };
+            let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: remote-codex transcript {thread} --turn {turn} --view overview{summary}");
             let message_id = Uuid::new_v4().to_string();
             if delivery == "inbox" {
-                inbox::store(conn, &from, &message_id, Some(thread), &text, now)?;
+                inbox::store(
+                    conn,
+                    &from,
+                    &message_id,
+                    Some(thread),
+                    &text,
+                    now,
+                    inbox::Envelope {
+                        subject: Some(&format!("Delegate turn {status}")),
+                        kind: "result",
+                        in_reply_to: None,
+                    },
+                )?;
             } else {
                 enqueue(conn, &message_id, &from, &text, None, now)?;
             }

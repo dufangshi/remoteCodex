@@ -10,6 +10,11 @@ fn prefix(thread: &str) -> String {
 fn key(thread: &str, id: &str) -> String {
     format!("{}{id}", prefix(thread))
 }
+pub(super) struct Envelope<'a> {
+    pub subject: Option<&'a str>,
+    pub kind: &'a str,
+    pub in_reply_to: Option<&'a str>,
+}
 pub(super) fn store(
     conn: &Connection,
     thread: &str,
@@ -17,8 +22,11 @@ pub(super) fn store(
     from: Option<&str>,
     text: &str,
     now: &str,
+    envelope: Envelope<'_>,
 ) -> Result<()> {
-    conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2)", params![key(thread,id),json!({"id":id,"threadId":thread,"fromThreadId":from,"text":text,"createdAt":now,"acknowledgedAt":null}).to_string()])?;
+    // subject/kind ride on the stored record so `inbox list`, which returns it
+    // verbatim, lets a receiver triage without opening anything.
+    conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2)", params![key(thread,id),json!({"id":id,"threadId":thread,"fromThreadId":from,"text":text,"createdAt":now,"acknowledgedAt":null,"subject":envelope.subject,"kind":envelope.kind,"inReplyTo":envelope.in_reply_to}).to_string()])?;
     Ok(())
 }
 fn get(conn: &Connection, thread: &str, id: &str) -> Result<Value> {
@@ -34,6 +42,37 @@ fn get(conn: &Connection, thread: &str, id: &str) -> Result<Value> {
     })?)?)
 }
 impl Supervisor {
+    /// Subject lines of waiting mail, newest first, for the start-of-turn notice.
+    /// Showing what is waiting is what makes a passive inbox workable: a bare count
+    /// tells an agent nothing about whether looking now is worth interrupting itself.
+    pub fn inbox_unread_digest(&self, thread: &str, limit: usize) -> Result<Vec<(String, String)>> {
+        self.db.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT value FROM kv WHERE key GLOB ?1
+                   AND json_extract(value,'$.acknowledgedAt') IS NULL
+                 ORDER BY json_extract(value,'$.createdAt') DESC LIMIT ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![format!("{}*", prefix(thread)), limit as i64], |r| {
+                    r.get::<_, String>(0)
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows
+                .iter()
+                .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+                .map(|m| {
+                    let kind = m["kind"].as_str().unwrap_or("status").to_string();
+                    let subject = m["subject"].as_str().map(str::to_owned).unwrap_or_else(|| {
+                        // Pre-envelope mail, and senders that skipped --subject.
+                        let text = m["text"].as_str().unwrap_or("");
+                        let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                        line.chars().take(60).collect()
+                    });
+                    (kind, subject)
+                })
+                .collect())
+        })
+    }
     pub fn inbox_unread_count(&self, thread: &str) -> Result<i64> {
         self.db.with(|c| Ok(c.query_row("SELECT count(*) FROM kv WHERE key GLOB ?1 AND json_extract(value,'$.acknowledgedAt') IS NULL",[format!("{}*",prefix(thread))],|r|r.get(0))?))
     }

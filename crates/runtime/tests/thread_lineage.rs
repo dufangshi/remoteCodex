@@ -267,6 +267,9 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
             from_thread_id: Some(sender.id.clone()),
             notify_on_complete: false,
             client_request_id: Some("mail-1".into()),
+            subject: None,
+            kind: None,
+            in_reply_to: None,
         },
     )
     .unwrap();
@@ -291,6 +294,9 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
             from_thread_id: Some(sender.id.clone()),
             notify_on_complete: false,
             client_request_id: Some("mail-2".into()),
+            subject: None,
+            kind: None,
+            in_reply_to: None,
         },
     )
     .unwrap();
@@ -302,5 +308,108 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
         s.pending_mail_notice(&sender.id),
         None,
         "sending mail must not announce anything to the sender"
+    );
+}
+
+fn mail(from: &str, subject: &str, kind: &str, text: &str, key: &str) -> SendInput {
+    SendInput {
+        delivery: "inbox".into(),
+        notify_delivery: "inbox".into(),
+        text: text.into(),
+        from_thread_id: Some(from.into()),
+        notify_on_complete: false,
+        client_request_id: Some(key.into()),
+        subject: Some(subject.into()),
+        kind: Some(kind.into()),
+        in_reply_to: None,
+    }
+}
+
+#[tokio::test]
+async fn the_unread_notice_names_what_is_waiting_and_flags_questions() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let sender = spawn(&s, &ws, None).await;
+    let receiver = spawn(&s, &ws, None).await;
+    s.configure_cli("http://127.0.0.1:1".into());
+
+    s.send_to_thread(
+        &receiver.id,
+        mail(
+            &sender.id,
+            "crate builds clean",
+            "result",
+            "cargo check passed",
+            "m1",
+        ),
+    )
+    .unwrap();
+    let notice = s.pending_mail_notice(&receiver.id).unwrap();
+    assert!(
+        notice.contains("result: crate builds clean"),
+        "got: {notice}"
+    );
+    assert!(
+        !notice.contains("waiting on you"),
+        "a result does not imply anyone is blocked: {notice}"
+    );
+
+    s.send_to_thread(
+        &receiver.id,
+        mail(
+            &sender.id,
+            "which API key?",
+            "question",
+            "need the staging key",
+            "m2",
+        ),
+    )
+    .unwrap();
+    let notice = s.pending_mail_notice(&receiver.id).unwrap();
+    assert!(notice.contains("question: which API key?"), "got: {notice}");
+    assert!(
+        notice.contains("waiting on you"),
+        "a question must signal that a peer is blocked: {notice}"
+    );
+}
+
+#[tokio::test]
+async fn messages_without_a_subject_still_summarise_and_bad_kinds_are_refused() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let sender = spawn(&s, &ws, None).await;
+    let receiver = spawn(&s, &ws, None).await;
+    s.configure_cli("http://127.0.0.1:1".into());
+
+    // Senders that skip --subject, and mail predating the envelope, must still be
+    // triageable - fall back to the first non-empty line.
+    let mut bare = mail(
+        &sender.id,
+        "x",
+        "status",
+        "\n\nDeploy finished on staging\nmore detail",
+        "m1",
+    );
+    bare.subject = None;
+    s.send_to_thread(&receiver.id, bare).unwrap();
+    let notice = s.pending_mail_notice(&receiver.id).unwrap();
+    assert!(
+        notice.contains("Deploy finished on staging"),
+        "a missing subject should fall back to the first line: {notice}"
+    );
+
+    let mut bogus = mail(&sender.id, "s", "urgent", "text", "m2");
+    bogus.kind = Some("urgent".into());
+    let err = s
+        .send_to_thread(&receiver.id, bogus)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("kind must be one of"), "got: {err}");
+
+    let mut long = mail(&sender.id, &"x".repeat(200), "status", "text", "m3");
+    long.subject = Some("x".repeat(200));
+    assert!(
+        s.send_to_thread(&receiver.id, long).is_err(),
+        "an oversized subject defeats the point of a one-line summary"
     );
 }

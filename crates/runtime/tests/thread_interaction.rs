@@ -78,6 +78,9 @@ fn send(from: &str, text: &str, notify: bool, key: &str) -> SendInput {
         from_thread_id: Some(from.into()),
         notify_on_complete: notify,
         client_request_id: Some(key.into()),
+        subject: None,
+        kind: None,
+        in_reply_to: None,
     }
 }
 

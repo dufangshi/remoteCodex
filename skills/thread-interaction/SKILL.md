@@ -49,6 +49,56 @@ creating more.
 
 Model IDs and effort options come from local discovery. Preserve explicitly requested models; do not invent an ID from a display name or silently substitute another model. Availability depends on the installed harness and working directory.
 
+## Always label a message
+
+Every send takes `--subject` (one line) and `--kind`. Use them. They are not
+decoration: `inbox list` and the unread notice a receiver sees at the start of its
+turn show the subject and kind, so a labelled message can be triaged without being
+opened, and an unlabelled one cannot.
+
+| `--kind` | Means | Does the receiver owe you anything? |
+| --- | --- | --- |
+| `task` | You are asking it to do work | Yes, eventually |
+| `question` | You are blocked until it answers | Yes, and you are waiting |
+| `result` | Work you were asked for is done | No |
+| `status` | Progress, FYI, context | No |
+
+`question` is the only kind that announces you are waiting; the receiver's notice
+calls it out. Do not mark routine updates as questions, or that signal stops meaning
+anything. Use `--in-reply-to MESSAGE_ID` when answering so the exchange correlates.
+
+Do not hand-write `Subject:` or `Kind:` into the message text. The flags populate a
+real envelope; prose in the body does not.
+
+```bash
+remote-codex thread send PEER_ID --kind task --subject 'Port the auth tests' \
+  --text-file /tmp/task.txt
+remote-codex thread send PEER_ID --kind question --subject 'Which staging key?' \
+  --in-reply-to MESSAGE_ID --text 'The task did not say which credential to use.'
+```
+
+## Prefer the inbox. Escalate only with a reason.
+
+Passive inbox is the default and should stay the default for nearly everything,
+including results, progress and questions. Waiting mail is announced to the receiver
+at the start of its next turn, with your subject and kind, so passive no longer means
+unnoticed - it means it arrives without destroying what the peer was doing.
+
+Reach past it only when the cost of waiting is real:
+
+- `queue` - the peer must act on this, but after its current work. The normal way to
+  assign a task to an idle or busy peer.
+- `direct` - the peer is idle and will not look at mail on its own, or a correction
+  cannot wait. The server decides between starting a turn and steering.
+- `steer` - only to correct the turn that is running right now, when letting it finish
+  would waste or damage work.
+
+Interrupting is not free: a steered agent loses its train of thought, and steering is
+not a guaranteed interruption of a blocking tool anyway. An inbox message with a clear
+subject usually gets handled sooner than a steer that derails a peer into confusion.
+If you are tempted to steer because you are impatient rather than because the work is
+wrong, send inbox mail instead.
+
 ## Choose the delivery semantics explicitly
 
 | Intent | Delivery | Behavior |
@@ -59,12 +109,15 @@ Model IDs and effort options come from local discovery. Preserve explicitly requ
 | Correct an active task immediately | `steer` | Requires an active turn and backend steering capability. Requests input in that turn; not a guaranteed interruption of a blocking tool. |
 
 ```bash
-remote-codex thread send PEER_ID --text 'Build artifact is ready at /path/to/artifact.'
-remote-codex thread send PEER_ID --delivery queue --text-file /tmp/task.txt
-remote-codex thread send PEER_ID --delivery direct --text 'Pause publication: use the corrected version number.'
+remote-codex thread send PEER_ID --kind result --subject 'Build artifact ready' \
+  --text 'Artifact at /path/to/artifact.'
+remote-codex thread send PEER_ID --delivery queue --kind task --subject 'Port auth tests' \
+  --text-file /tmp/task.txt
+remote-codex thread send PEER_ID --delivery direct --kind task --subject 'Stop: wrong version' \
+  --text 'Pause publication: use the corrected version number.'
 ```
 
-Do not use direct, queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Mail is not automatically pushed into an active model's context: the receiver must check its inbox. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
+Do not use direct, queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Unread mail is announced at the start of the receiver's next turn, listing each subject and kind, but it is still not pushed into a turn already in flight, and the announcement is a prompt to look rather than the message itself. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
 
 Use direct when the peer must act now, including an idle peer that will not check its inbox. The server chooses the route in the acceptance transaction, so callers need not check status first. Only idle and running states qualify: recovering, interrupted or failed peers require inspection before another deliberate action. Use queue when work should wait behind any active turn; use steer when only the current active turn should receive it. A provider without steering rejects the request; it is not silently downgraded to queue. Direct returns `requestedDelivery: "direct"` plus the resolved `delivery`: `queued` for an idle peer (durable new-turn dispatch, not proof of execution), or `steered` after an active backend acknowledges. The idle route keeps its accepted continuation if other work starts before dispatch; it does not later change into steering. Active direct/steer messages target the turn selected at acceptance and cannot move to a replacement turn. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
 
@@ -98,17 +151,21 @@ An idle sender will not wake for that default passive reply. If immediate handli
 ```bash
 remote-codex thread create --title 'Build helper' \
   --provider acp --agent grok --model MODEL_ID --reasoning-effort EFFORT \
+  --kind task --subject 'Build the release artifact' \
   --text-file /tmp/build-request.txt --notify-on-complete
 ```
 
-Create defaults to provider `acp`, model `default`; it does not inherit the caller's model. Workspace and approval mode inherit from the caller unless specified. `--workspace WORKSPACE_ID` selects an **existing** workspace; provide it from an unscoped shell. `--approval-mode guarded|yolo` is supported; thread creation does not expand user authorization.
+`thread create` accepts the same `--subject`/`--kind` flags as `thread send`, and the
+initial prompt is a message like any other - label it. Create defaults to provider
+`acp`, model `default`; it does not inherit the caller's model. Workspace and approval mode inherit from the caller unless specified. `--workspace WORKSPACE_ID` selects an **existing** workspace; provide it from an unscoped shell. `--approval-mode guarded|yolo` is supported; thread creation does not expand user authorization.
 
 Unlike ordinary `send`, a create's initial prompt defaults to **queue**, so the new peer actually starts its assigned task. Creating without prompt leaves it idle. `--delivery inbox` explicitly makes the initial message passive. Creation and first send are sequential, not one idempotent transaction. If send fails after creation, the error includes the created thread ID: reuse it instead of creating a duplicate.
 
 `--text` and `--text-file` are mutually exclusive. `--text-file -` reads stdin. Use a quoted heredoc or a file for multiline text so the shell cannot execute dollar expansions/backticks:
 
 ```bash
-remote-codex thread send PEER_ID --delivery queue --text-file - <<'PROMPT'
+remote-codex thread send PEER_ID --delivery queue --kind task \
+  --subject 'Build the assigned checkout' --text-file - <<'PROMPT'
 Build the assigned checkout with the documented command.
 Report command, exit code, artifact paths, and blockers.
 Send the result to CALLER_THREAD_ID using default inbox delivery.
