@@ -122,18 +122,19 @@ Replace placeholders before sending. Provide goal, checkout, relevant files, con
 
 `--notify-on-complete` subscribes to the receiving **execution turn**, so it requires direct/queue/steer delivery plus a caller identity. Passive inbox messages have no execution turn and reject this flag. It is a per-send subscription, not a permanent watch of future activity.
 
-The default completion notification goes to the caller's inbox. It includes peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. It does not automatically wake the caller.
+Completion notifications always go to the caller's passive inbox. They include peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. They never wake, steer, or queue a turn on the caller.
 
-To finish your own turn and resume when the peer completes, explicitly request a queued callback:
+At collaboration checkpoints, actively check for completion and read the relevant results:
 
 ```bash
-remote-codex thread send PEER_ID --delivery queue --text-file /tmp/task.txt \
-  --notify-on-complete --notify-delivery queue
+remote-codex inbox
+remote-codex thread status PEER_ID
+remote-codex transcript PEER_ID --limit 1
 ```
 
-An idle caller starts a new turn; a busy caller receives queued input. This choice deliberately retains a queue and can accumulate if overused. Prefer passive notifications when you are already doing independent work and can check the inbox. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit peer replies and automatic notifications together can intentionally produce two messages.
+`--notify-delivery queue` is no longer supported. Do not send direct/queue/steer messages to the parent just to report completion; keep results passive and let the parent collect them. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit inbox replies and automatic notifications together can produce two passive messages; avoid redundant reports.
 
-Existing queued input and pre-upgrade completion subscriptions retain their original delivery behavior; changing delivery defaults does not cancel queued work.
+After upgrade, still-pending legacy completion subscriptions also deliver to inbox, regardless of their stored choice. Already-enqueued input is not cancelled or moved automatically. Upgrading the runtime does not change behavior of an older Supervisor that is still running.
 
 ## Retries and progressive transcript reads
 

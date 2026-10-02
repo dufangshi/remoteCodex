@@ -73,7 +73,7 @@ async fn thread(s: &Supervisor, p: Provider) -> String {
 fn send(from: &str, text: &str, notify: bool, key: &str) -> SendInput {
     SendInput {
         delivery: "queue".into(),
-        notify_delivery: "queue".into(),
+        notify_delivery: "inbox".into(),
         text: text.into(),
         from_thread_id: Some(from.into()),
         notify_on_complete: notify,
@@ -419,7 +419,7 @@ async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
 }
 
 #[tokio::test]
-async fn completion_can_go_to_inbox_without_waking_the_sender() {
+async fn completion_goes_to_inbox_without_waking_the_sender() {
     let (_dir, state) = setup();
     let a = thread(&state, Provider::Codex).await;
     let b = thread(&state, Provider::Acp).await;
@@ -463,6 +463,77 @@ async fn completion_can_go_to_inbox_without_waking_the_sender() {
         state.interaction_status(&b).await.unwrap()["queuedCount"],
         0
     );
+}
+
+#[tokio::test]
+async fn queued_completion_callbacks_are_rejected_before_acceptance() {
+    let (_dir, state) = setup();
+    let parent = thread(&state, Provider::Codex).await;
+    let child = thread(&state, Provider::Acp).await;
+    let mut input = send(&parent, "finish task", true, "queued-callback");
+    input.notify_delivery = "queue".into();
+    let error = state.send_to_thread(&child, input).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("completion notifications are passive"));
+    assert_eq!(
+        state.interaction_status(&child).await.unwrap()["queuedCount"],
+        0
+    );
+    assert_eq!(state.inbox_unread_count(&parent).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn legacy_completion_subscriptions_never_wake_idle_or_running_parents() {
+    for running in [false, true] {
+        let (_dir, state) = setup();
+        let parent = thread(&state, Provider::Codex).await;
+        let child = thread(&state, Provider::Acp).await;
+        let parent_status = if running { "running" } else { "idle" };
+        state.db.with(|conn| {
+            conn.execute("UPDATE threads SET status=?1 WHERE id=?2", params![parent_status, parent])?;
+            if running {
+                conn.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES ('parent-active',?1,'inProgress',0)", [&parent])?;
+            }
+            for (index, status) in ["completed", "failed", "interrupted"].iter().enumerate() {
+                let turn = uuid::Uuid::new_v4().to_string();
+                conn.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES (?1,?2,?3,?4)", params![turn,child,status,index as i64])?;
+                let target = if index == 0 { parent.clone() } else { json!({"threadId":parent,"delivery":"queue"}).to_string() };
+                conn.execute("INSERT INTO kv(key,value) VALUES (?1,?2)", params![format!("cli:notify:turn:{turn}"), target])?;
+            }
+            Ok(())
+        }).unwrap();
+        state.start_interaction_worker();
+        until(|| state.inbox_unread_count(&parent).unwrap() == 3).await;
+        assert_eq!(
+            state.interaction_status(&parent).await.unwrap()["queuedCount"],
+            0
+        );
+        let after = state.get_thread(&parent).unwrap();
+        assert_eq!(after.status, parent_status);
+        assert_eq!(
+            after.active_turn_id.as_deref(),
+            if running { Some("parent-active") } else { None }
+        );
+        state
+            .db
+            .with(|conn| {
+                let turns: i64 = conn.query_row(
+                    "SELECT count(*) FROM thread_turns WHERE thread_id=?1",
+                    [&parent],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(turns, i64::from(running));
+                let watchers: i64 = conn.query_row(
+                    "SELECT count(*) FROM kv WHERE key GLOB 'cli:notify:turn:*'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(watchers, 0);
+                Ok(())
+            })
+            .unwrap();
+    }
 }
 
 #[tokio::test]

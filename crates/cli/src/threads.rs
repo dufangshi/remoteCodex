@@ -24,8 +24,8 @@ pub struct Body {
     /// inbox stores passive mail (send default); direct starts when idle or steers when running; queue waits for a continuation (create default); steer requires an active supported turn. Direct/steer never silently fall back on steering failure.
     #[arg(long, value_parser=["inbox","direct","queue","steer"])]
     pub delivery: Option<String>,
-    /// Where the terminal-turn notification is delivered (requires --notify-on-complete).
-    #[arg(long, default_value="inbox", value_parser=["inbox","queue"], requires="notify_on_complete")]
+    /// Completion notifications are passive inbox mail; they never wake or queue the caller.
+    #[arg(long, default_value="inbox", value_parser=["inbox"], requires="notify_on_complete")]
     pub notify_delivery: String,
     #[arg(long, conflicts_with = "text_file")]
     pub text: Option<String>,
