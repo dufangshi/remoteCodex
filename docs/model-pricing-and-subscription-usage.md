@@ -43,9 +43,21 @@ updates when those logs are still available. See
 
 ## OAuth allowance
 
-The small composer badge shows actual available windows, with remaining allowance
-and reset time on hover/tap. API-key authentication, expired windows, unavailable
-providers and failed queries hide it. A short cache limits account polling.
+The small composer badge shows actual available windows, with remaining allowance,
+reset time and observation time on hover/tap. Opening a thread reads a shared
+device/harness cache; successful readings refresh about every five minutes.
+Switching between parent/child threads, turn completion and WebSocket reconnects
+do not bypass this cache. The Supervisor also shares a five-minute provider cache
+across viewers and serializes refreshes to avoid concurrent upstream requests.
+
+Temporary failures preserve the last successful observation for at most thirty
+minutes, dimmed and marked `~` / `last known`, without changing its timestamp.
+Retries back off from five to ten, twenty and thirty minutes; a longer upstream
+`Retry-After` is respected and `Retry-After: 0` never causes an immediate retry.
+Expired windows remain hidden. API-key authentication, missing subscription
+credentials or rejected OAuth credentials clear the cache. The response includes
+`unavailable: true` for these definitive cases; older runtimes' ambiguous
+`usage: null` responses are treated as temporary failures by the browser.
 
 - Codex: read-only `account/read` and `account/rateLimits/read` on an independent
   app-server process. No thread is opened and no conversation writer is acquired.
