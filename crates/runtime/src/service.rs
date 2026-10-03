@@ -1,4 +1,5 @@
 mod child_delete;
+mod claude_history;
 mod generation;
 mod reliability;
 mod update;
@@ -307,6 +308,7 @@ pub struct Supervisor {
     local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
     generation: generation::GenerationCache,
+    claude_history: claude_history::HistoryCache,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
 }
 
@@ -360,6 +362,7 @@ impl Supervisor {
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
             generation: Default::default(),
+            claude_history: Default::default(),
             subscription_usage: Default::default(),
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
@@ -1630,6 +1633,7 @@ impl Supervisor {
         before_turn_id: Option<&str>,
         summary_only: bool,
     ) -> Result<ThreadDetailDto> {
+        self.sync_claude_scheduled_history(id).await?;
         self.observe_execution(id).await?;
         let thread = self.get_thread(id)?;
         let workspace = self.get_workspace(&thread.workspace_id)?;

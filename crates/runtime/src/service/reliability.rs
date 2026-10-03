@@ -160,6 +160,7 @@ impl Supervisor {
                 if let Err(error) = state.refresh_generation_speeds() {
                     tracing::warn!(%error, "generation speed refresh failed");
                 }
+                state.observe_claude_scheduled_history().await;
             }
         });
     }
