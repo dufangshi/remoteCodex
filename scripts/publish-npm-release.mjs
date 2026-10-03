@@ -42,7 +42,7 @@ export function publishRelease({
   runNpm,
   log = console.log,
   registryRetryDelayMs = 2_000,
-  registryVisibilityAttempts = 31,
+  registryVisibilityAttempts = 151,
 }) {
   if (!['next', 'latest'].includes(channel)) {
     throw new Error('Release channel must be next or latest');
@@ -113,6 +113,9 @@ export function publishRelease({
           if (attempt > 0) sleepSync(registryRetryDelayMs);
           published = registryIntegrity(spec, runNpm);
         }
+        if (!published) {
+          throw new Error(`Published package not visible in registry yet: ${spec}`);
+        }
         if (published !== entry.integrity) {
           throw new Error(`Published integrity mismatch for ${spec}`);
         }
@@ -142,7 +145,9 @@ function sleepSync(milliseconds) {
 }
 
 function registryIntegrity(spec, runNpm) {
-  const result = runNpm(['view', spec, 'dist.integrity', '--json']);
+  const result = runNpm([
+    'view', spec, 'dist.integrity', '--json', '--prefer-online',
+  ]);
   if (result.error) {
     throw new Error(`npm view failed for ${spec}: ${result.error.message}`);
   }

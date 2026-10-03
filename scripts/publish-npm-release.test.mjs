@@ -101,3 +101,44 @@ function mockNpm(initialRegistry, options = {}) {
     calls,
   };
 }
+
+test('waits for publication visibility without accepting stale registry metadata', () => {
+  let views = 0;
+  const calls = [];
+  publishRelease({
+    channel: 'latest', inputDir: '/release', manifest, allowLatest: true,
+    registryRetryDelayMs: 0, registryVisibilityAttempts: 5, log() {},
+    runNpm(args) {
+      calls.push(args);
+      if (args[0] === 'view') {
+        assert.ok(args.includes('--prefer-online'));
+        views += 1;
+        if (views < 4) return { status: 1, stdout: '', stderr: 'npm error code E404' };
+        return { status: 0, stdout: JSON.stringify('sha512-launcher'), stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+  });
+  assert.equal(views, 4);
+  assert.equal(calls.filter(args => args[0] === 'publish').length, 1);
+  assert.equal(calls.filter(args => args[0] === 'dist-tag').length, 1);
+});
+
+test('reports delayed publication separately from an immutable integrity conflict', () => {
+  for (const integrity of [null, 'sha512-wrong']) {
+    let published = false;
+    assert.throws(() => publishRelease({
+      channel: 'latest', inputDir: '/release', manifest, allowLatest: true,
+      registryRetryDelayMs: 0, registryVisibilityAttempts: 2, log() {},
+      runNpm(args) {
+        if (args[0] === 'publish') published = true;
+        if (args[0] === 'view') {
+          if (!published || !integrity) return { status: 1, stdout: '', stderr: 'E404' };
+          return { status: 0, stdout: JSON.stringify(integrity), stderr: '' };
+        }
+        assert.notEqual(args[0], 'dist-tag');
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }), integrity ? /Published integrity mismatch/ : /not visible in registry yet/);
+  }
+});
