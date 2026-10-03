@@ -157,6 +157,7 @@ impl Supervisor {
                         tracing::warn!(%id,%error,"backend state reconciliation failed");
                     }
                 }
+                state.observe_claude_scheduled_history().await;
             }
         });
     }
