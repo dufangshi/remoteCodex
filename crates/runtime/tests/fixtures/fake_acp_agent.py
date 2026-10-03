@@ -142,6 +142,15 @@ def handle(msg):
         if text == "unknown-steer":
             send({"jsonrpc": "2.0", "id": req_id, "result": {}})
             return
+        if text == "idle-race-steer":
+            # Claude's default idle fallback starts a detached turn unless the
+            # host explicitly owns the decision about what happens after idle.
+            outcome = "promptRequired" if params.get("_meta", {}).get("steering", {}).get("idleBehavior") == "promptRequired" else "startedNewTurn"
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"outcome": outcome}})
+            return
+        if text == "detached-steer":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"outcome": "startedNewTurn"}})
+            return
         send({"jsonrpc": "2.0", "method": "session/update", "params": {
             "sessionId": "fake-session", "update": {"sessionUpdate": "agent_message_chunk",
             "content": {"type": "text", "text": "handled steer: " + text}}}})

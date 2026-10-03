@@ -116,29 +116,32 @@ turn that is *starting*, so these are the moments to actually look:
 Acknowledge with `inbox ack` only what you have handled or deliberately recorded.
 Acknowledging to clear the notice loses the message.
 
-### Ending your turn discards nothing, but you will not be woken
+### Ending your turn discards nothing, but nothing will wake you
 
-An idle thread does not run, so it cannot read mail. If you delegate work and then end
-your turn, the delegate's result lands in your inbox and **sits there** until a person
-or a peer starts a new turn for you. The work is not lost; nobody is acting on it.
+An idle thread does not run, so it cannot read mail. Completion notifications are
+passive too - `--notify-on-complete` files a message, it does not start a turn for you,
+and `--notify-delivery` must be `inbox`. So if you delegate and then end your turn, the
+delegate's result lands in your inbox and **sits there** until a person or a peer starts
+your next turn. The work is not lost; nobody is acting on it.
 
-If you need to act on a result, choose one deliberately:
+Plan for that before you delegate:
+
+- **If you must act on the result, stay in your turn.** Delegate, keep working on
+  something independent, and check `remote-codex inbox` between steps.
+- **If you can hand off, say so.** Finish with what you delegated and to whom, so the
+  person reading your transcript knows a result is coming and where it will appear.
+- **Subscribe anyway** with `--notify-on-complete`. It will not wake you, but the
+  notification now carries the delegate's closing message, so whenever your next turn
+  does start you can judge the outcome without opening a transcript.
 
 ```bash
-# Preferred: subscribe, so finishing wakes you with the result in hand.
 remote-codex thread send PEER_ID --delivery queue --kind task \
-  --subject 'Port the auth tests' --text-file /tmp/task.txt \
-  --notify-on-complete --notify-delivery queue
-
-# Or stay in your turn and wait, checking the inbox between steps.
+  --subject 'Port the auth tests' --text-file /tmp/task.txt --notify-on-complete
 ```
 
-`--notify-delivery queue` starts a turn for you when the delegate finishes; the
-notification now carries the delegate's closing message, so you can usually judge the
-outcome without opening the transcript. `--notify-delivery inbox` (the default) is
-passive and will *not* wake you - use it only when you are already going to be running.
-
-Do not solve this by steering the peer or polling in a loop. Subscribe, or stay awake.
+Do not work around this by steering the peer, polling in a loop, or sending yourself
+direct messages. None of those are cheaper than simply staying awake or handing off
+cleanly.
 
 ## Choose the delivery semantics explicitly
 
@@ -220,18 +223,19 @@ Replace placeholders before sending. Provide goal, checkout, relevant files, con
 
 `--notify-on-complete` subscribes to the receiving **execution turn**, so it requires direct/queue/steer delivery plus a caller identity. Passive inbox messages have no execution turn and reject this flag. It is a per-send subscription, not a permanent watch of future activity.
 
-The default completion notification goes to the caller's inbox. It includes peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. It does not automatically wake the caller.
+Completion notifications always go to the caller's passive inbox. They include peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. They never wake, steer, or queue a turn on the caller.
 
-To finish your own turn and resume when the peer completes, explicitly request a queued callback:
+At collaboration checkpoints, actively check for completion and read the relevant results:
 
 ```bash
-remote-codex thread send PEER_ID --delivery queue --text-file /tmp/task.txt \
-  --notify-on-complete --notify-delivery queue
+remote-codex inbox
+remote-codex thread status PEER_ID
+remote-codex transcript PEER_ID --limit 1
 ```
 
-An idle caller starts a new turn; a busy caller receives queued input. This choice deliberately retains a queue and can accumulate if overused. Prefer passive notifications when you are already doing independent work and can check the inbox. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit peer replies and automatic notifications together can intentionally produce two messages.
+`--notify-delivery queue` is no longer supported. Do not send direct/queue/steer messages to the parent just to report completion; keep results passive and let the parent collect them. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit inbox replies and automatic notifications together can produce two passive messages; avoid redundant reports.
 
-Existing queued input and pre-upgrade completion subscriptions retain their original delivery behavior; changing delivery defaults does not cancel queued work.
+After upgrade, still-pending legacy completion subscriptions also deliver to inbox, regardless of their stored choice. Already-enqueued input is not cancelled or moved automatically. Upgrading the runtime does not change behavior of an older Supervisor that is still running.
 
 ## Retries and progressive transcript reads
 

@@ -2075,5 +2075,5 @@ async fn subscription_usage(
     } else {
         &provider
     });
-    Json(json!({"usage":state.subscription_usage.read(agent).await}))
+    Json(json!(state.subscription_usage.read(agent).await))
 }

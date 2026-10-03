@@ -184,7 +184,13 @@ async fn steering_is_acknowledged_and_processed_before_the_active_turn_finishes(
         .send_input(&session_id, "wrong-turn", "hello")
         .await
         .is_err());
-    for prompt in ["reject-steer", "fail-steer", "unknown-steer"] {
+    for prompt in [
+        "reject-steer",
+        "fail-steer",
+        "unknown-steer",
+        "idle-race-steer",
+        "detached-steer",
+    ] {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             runtime.send_input(&session_id, "steered-turn", prompt),

@@ -43,8 +43,9 @@ export function useThreadListPolling(input: {
   enabled: boolean;
   setThreads: Dispatch<SetStateAction<ThreadDto[]>>;
   intervalMs?: number;
+  includeAgentThreads?: boolean;
 }) {
-  const { enabled, setThreads, intervalMs = THREAD_LIST_POLL_INTERVAL_MS } = input;
+  const { enabled, setThreads, intervalMs = THREAD_LIST_POLL_INTERVAL_MS, includeAgentThreads = false } = input;
   const inFlightRef = useRef(false);
 
   const refreshThreads = useCallback(async () => {
@@ -61,14 +62,14 @@ export function useThreadListPolling(input: {
 
     inFlightRef.current = true;
     try {
-      const nextThreads = await fetchThreads();
+      const nextThreads = await fetchThreads(includeAgentThreads);
       setThreads((current) => mergeThreadListSnapshot(current, nextThreads));
     } catch {
       // Keep the existing room list stable; the next poll can recover.
     } finally {
       inFlightRef.current = false;
     }
-  }, [enabled, setThreads]);
+  }, [enabled, setThreads, includeAgentThreads]);
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') {

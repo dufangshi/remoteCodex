@@ -18,7 +18,7 @@ interface ThreadReference {
   visitedAt: string;
   readCompletedAt?: string | null;
 }
-type ThreadActivity = { status: string; lastTurnCompletedAt?: string | null };
+type ThreadActivity = { status: string; lastTurnCompletedAt?: string | null; parentThreadId?: string | null; rootThreadId?: string | null };
 export function workbenchThreadStatus(activity: ThreadActivity | undefined, readCompletedAt?: string | null) {
   if (!activity) return 'unknown';
   if (['running', 'inProgress', 'recovering'].includes(activity.status)) return 'running';
@@ -255,13 +255,16 @@ export function useWorkbenchNavigation(
       r.deviceId === deviceId
         ? (r.threadId === detail?.thread.id ? detail.thread : threads.find((t) => t.id === r.threadId))
         : undefined;
+    const activity = local ?? statuses[referenceKey(r)];
     return {
       key: referenceKey(r),
       title: local?.title ?? r.title,
       subtitle: [r.deviceName, r.workspaceLabel].filter(Boolean).join(' · '),
       href: threadHref(r.threadId, r.deviceId),
       favorite: r.favorite,
-      status: workbenchThreadStatus(local ?? statuses[referenceKey(r)], r.readCompletedAt),
+      ...(activity?.parentThreadId ? {parentKey: `${r.deviceId ?? 'local'}:${activity.parentThreadId}`} : {}),
+      ...(activity?.rootThreadId ? {rootKey: `${r.deviceId ?? 'local'}:${activity.rootThreadId}`} : {}),
+      status: workbenchThreadStatus(activity, r.readCompletedAt),
     };
   });
   const localNotifications: WorkbenchNotification[] = relay
@@ -320,6 +323,8 @@ export function useWorkbenchNavigation(
         return {
           key, title: thread.title, subtitle: tabContext.detail?.workspace.label ?? '',
           href: threadHref(thread.id, tabContext.deviceId), favorite: reference?.favorite ?? false,
+          ...(thread.parentThreadId ? {parentKey: `${tabContext.deviceId ?? 'local'}:${thread.parentThreadId}`} : {}),
+          ...(thread.rootThreadId ? {rootKey: `${tabContext.deviceId ?? 'local'}:${thread.rootThreadId}`} : {}),
           status: workbenchThreadStatus(thread.id === tabContext.detail?.thread.id ? tabContext.detail.thread : thread, reference?.readCompletedAt),
         };
       }),

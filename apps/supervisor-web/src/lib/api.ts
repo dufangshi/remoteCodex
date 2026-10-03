@@ -1035,7 +1035,7 @@ export function fetchAgentBackendStatus(provider: AgentBackendIdDto) {
 }
 
 export function fetchAgentSubscriptionUsage(provider: AgentBackendIdDto, agentId?: string | null) {
-  return request<{ usage: AgentSubscriptionUsageDto | null }>(
+  return request<{ usage: AgentSubscriptionUsageDto | null; unavailable?: boolean }>(
     `/api/agent-runtimes/${encodeURIComponent(provider)}/subscription-usage${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`,
     { cache: 'no-store' },
   );
@@ -1296,8 +1296,8 @@ export function writeWorkspaceFile(
   );
 }
 
-export function fetchThreads() {
-  return request<ThreadDto[]>('/api/threads');
+export function fetchThreads(includeAgentThreads = false) {
+  return request<ThreadDto[]>(`/api/threads${includeAgentThreads ? '?includeAgentThreads=true' : ''}`);
 }
 
 export function fetchThreadDetail(
