@@ -157,6 +157,9 @@ impl Supervisor {
                         tracing::warn!(%id,%error,"backend state reconciliation failed");
                     }
                 }
+                if let Err(error) = state.refresh_generation_speeds() {
+                    tracing::warn!(%error, "generation speed refresh failed");
+                }
             }
         });
     }

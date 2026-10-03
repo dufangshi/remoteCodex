@@ -346,14 +346,41 @@ pub(crate) fn estimate_price_with_catalog(
 }
 
 pub(crate) fn public_usage(value: &Value) -> Option<Value> {
-    Some(
-        json!({"total": Tokens::parse(value.get("total")?)?, "last": Tokens::parse(value.get("last")?)?, "modelContextWindow": value.get("modelContextWindow").filter(|v| v.is_number())}),
-    )
+    let mut usage = json!({"total": Tokens::parse(value.get("total")?)?, "last": Tokens::parse(value.get("last")?)?, "modelContextWindow": value.get("modelContextWindow").filter(|v| v.is_number())});
+    if let Some(speed) = value.get("generationSpeed") {
+        usage["generationSpeed"] = speed.clone();
+    }
+    Some(usage)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpt_61_sol_prices_caches_output_and_long_context() {
+        let usage = json!({"total":{"inputTokens":1000000,"cachedInputTokens":400000,"cacheWriteInputTokens":100000,"outputTokens":100000},"last":{"inputTokens":10000,"outputTokens":1000}});
+        let price = estimate_price(&usage, Some("gpt-6.1-sol"), None).unwrap();
+        assert!((price["totalUsd"].as_f64().unwrap() - 2.29).abs() < 1e-10);
+        assert!(
+            (estimate_price(&usage, Some("6.1 Sol"), Some("fast")).unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                - 4.58)
+                .abs()
+                < 1e-10
+        );
+        let mut long = usage.clone();
+        long["last"]["inputTokens"] = json!(272001);
+        assert!(
+            (estimate_price(&long, Some("gpt-6.1-sol"), None).unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                - 4.08)
+                .abs()
+                < 1e-10
+        );
+    }
 
     #[test]
     fn prices_cached_tokens_and_fast_mode_without_double_charging() {

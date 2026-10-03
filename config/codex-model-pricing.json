@@ -9,6 +9,20 @@
     }
   },
   "models": {
+    "gpt-6.1-sol": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.1,
+      "cacheWriteInputUsdPerMillion": 2.5,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": true,
+      "contextWindowTokens": 1050000,
+      "longContextThresholdTokens": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "verifiedAt": "2026-10-03",
+      "aliases": ["6.1 Sol", "GPT-6.1 Sol"]
+    },
     "gpt-5.6": {
       "inputUsdPerMillion": 4,
       "cachedInputUsdPerMillion": 0.4,

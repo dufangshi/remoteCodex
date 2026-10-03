@@ -1,3 +1,4 @@
+mod generation;
 mod reliability;
 mod update;
 
@@ -304,6 +305,7 @@ pub struct Supervisor {
     steer_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
+    generation: generation::GenerationCache,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
 }
 
@@ -356,6 +358,7 @@ impl Supervisor {
             steer_locks: Mutex::new(HashMap::new()),
             local_session_homes: LocalSessionHomes::from_env(),
             usage_history: Default::default(),
+            generation: Default::default(),
             subscription_usage: Default::default(),
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
@@ -420,7 +423,8 @@ impl Supervisor {
                     Ok(())
                 }
                 _ => Ok(()),
-            }
+            }?;
+            supervisor.observe_generation_event(event)
         }));
     }
 
@@ -579,6 +583,9 @@ impl Supervisor {
             let pricing_model = reported_model.map(str::to_string).or(pricing_model);
             let tier = raw.get("pricingTierKey").and_then(Value::as_str).filter(|tier| matches!(*tier,"standard" | "fast")).map(str::to_string).or(tier);
             let previous = previous.and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+            if let Some(speed) = previous.as_ref().and_then(|v| v.get("generationSpeed")) {
+                usage["generationSpeed"] = speed.clone();
+            }
             // Local Codex rollouts provide the complete turn; do not replace them with
             // codex-acp's final-request-only PromptResponse.usage fallback.
             if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("codexRollout")

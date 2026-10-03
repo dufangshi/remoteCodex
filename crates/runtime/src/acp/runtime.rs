@@ -2592,6 +2592,20 @@ async fn handle_agent_request(
                     .respond(req_id, json!({ "outcome": { "outcome": "cancelled" } }))
                     .await?;
             }
+            // Include timeout/cancellation, not just replies through HTTP. The
+            // LLM clock and question UI must not remain paused after resolution.
+            inner.pending_permissions.lock().await.remove(&request_id);
+            if let Some((thread_id, turn_id, bus)) = &active {
+                if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
+                    list.retain(|request| request.id != request_id);
+                }
+                bus.emit(ThreadEventEnvelope {
+                    event_type: "thread.request.resolved".into(),
+                    thread_id: thread_id.clone(),
+                    timestamp: now_rfc3339(),
+                    payload: json!({"requestId":request_id,"turnId":turn_id}),
+                });
+            }
         }
         "fs/read_text_file" => {
             let path = params.get("path").and_then(Value::as_str).unwrap_or("");

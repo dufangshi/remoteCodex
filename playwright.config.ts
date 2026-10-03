@@ -3,6 +3,9 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const realDsh = process.env.E2E_REAL_DSH === '1';
+const realCodex = process.env.E2E_REAL_CODEX === '1';
+if (realCodex && !process.env.E2E_CODEX_HOME) throw new Error('Real Codex E2E requires an isolated E2E_CODEX_HOME');
+if (realDsh && realCodex) throw new Error('Select one real harness for this run');
 if (realDsh && !process.env.E2E_DSH_HOME) throw new Error('Real DSH E2E requires an isolated E2E_DSH_HOME');
 
 const apiPort = Number(process.env.E2E_API_PORT ?? 8787);
@@ -34,7 +37,8 @@ export default defineConfig({
             .map((key) => [key, '']),
         ),
         REMOTE_CODEX_MODE: 'local',
-        REMOTE_CODEX_E2E_FAKE_RUNTIME: realDsh ? '' : '1',
+        REMOTE_CODEX_E2E_FAKE_RUNTIME: realDsh || realCodex ? '' : '1',
+        ...(realCodex ? { CODEX_HOME: process.env.E2E_CODEX_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex' } : {}),
         ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
         HOST: '127.0.0.1',
         PORT: String(apiPort),
