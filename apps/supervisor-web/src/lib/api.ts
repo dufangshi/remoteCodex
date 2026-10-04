@@ -1093,6 +1093,13 @@ export function fetchThreadCapabilitySnapshot(threadId: string) {
   return request<AgentCapabilitySnapshotDto>(`/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
 }
 
+export function fetchThreadModels(threadId: string) {
+  return request<ModelOptionDto[]>(`/api/threads/${encodeURIComponent(threadId)}/models`, {cache:'no-store'});
+}
+export function fetchThreadGroup(threadId: string) {
+  return request<ThreadDto[]>(`/api/threads/${encodeURIComponent(threadId)}/group`, {cache:'no-store'});
+}
+
 export function fetchProviderHostFile(
   provider: AgentBackendIdDto,
   name: string,
@@ -1298,6 +1305,13 @@ export function writeWorkspaceFile(
 
 export function fetchThreads(includeAgentThreads = false) {
   return request<ThreadDto[]>(`/api/threads${includeAgentThreads ? '?includeAgentThreads=true' : ''}`);
+}
+
+export function renameWorkspaceNode(workspaceId: string, input: {fromPath: string; toPath: string}) {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/move`, {method:'PATCH',body:JSON.stringify(input)});
+}
+export function deleteWorkspaceNode(workspaceId: string, path: string) {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({path})}`, {method:'DELETE'});
 }
 
 export function fetchThreadDetail(

@@ -316,6 +316,9 @@ pub trait AgentRuntime: Send + Sync {
     fn session_loaded(&self, _session_id: &str) -> bool {
         false
     }
+    async fn session_instance_id(&self, _session_id: &str) -> Option<String> {
+        None
+    }
 }
 
 pub type SharedRuntime = Arc<dyn AgentRuntime>;

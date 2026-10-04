@@ -41,6 +41,10 @@ impl Supervisor {
             };
             for (turn, status) in turns {
                 finish_notification(&tx, id, &turn, &status, &now)?;
+                tx.execute(
+                    "DELETE FROM kv WHERE key=?1",
+                    [format!("turn-process:{turn}")],
+                )?;
             }
             tx.execute(
                 "DELETE FROM kv WHERE key GLOB ?1 OR key GLOB ?2 OR key GLOB ?3",

@@ -12,6 +12,7 @@ mod security;
 mod share_activity;
 mod share_presence;
 mod store;
+mod thread_groups;
 mod workbench;
 use admin::*;
 use route_acl::*;
@@ -1688,7 +1689,11 @@ fn effective_access(
         conn.query_row(
             "SELECT id,thread_id,thread_access,workspace_access,workspace_id
              FROM relay_shares
-             WHERE target_user_id=?1 AND device_id=?2 AND thread_id=?3
+             WHERE target_user_id=?1 AND device_id=?2 AND (thread_id=?3 OR thread_id IN (
+               WITH RECURSIVE ancestors(id,depth) AS (
+                 SELECT parent_thread_id,1 FROM relay_thread_lineage WHERE device_id=?2 AND thread_id=?3
+                 UNION ALL SELECT t.parent_thread_id,a.depth+1 FROM relay_thread_lineage t JOIN ancestors a ON t.thread_id=a.id AND t.device_id=?2 WHERE a.depth<3
+               ) SELECT id FROM ancestors))
                AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?4)
              ORDER BY created_at DESC LIMIT 1",
             params![user_id, device_id, thread_id, now],
@@ -1698,7 +1703,7 @@ fn effective_access(
                     grant_id: None,
                     share_id: Some(row.get(0)?),
                     scope: "thread".to_string(),
-                    thread_id: Some(row.get(1)?),
+                    thread_id: Some(thread_id.to_string()),
                     thread_access: row.get(2)?,
                     workspace_access: row.get(3)?,
                     workspace_id: row.get(4)?,
@@ -1793,7 +1798,11 @@ fn effective_access(
         let selected: Vec<String> = serde_json::from_str(&workspace_ids).unwrap_or_default();
         let matches = match scope.as_str() {
             "device" => workspace_id.is_none() || workspace_access != "none",
-            "thread" => thread_id.is_some_and(|value| Some(value) == grant_thread.as_deref()),
+            "thread" => thread_id.is_some_and(|value| {
+                grant_thread
+                    .as_deref()
+                    .is_some_and(|parent| thread_groups::contains(conn, device_id, parent, value))
+            }),
             "workspace" => {
                 workspace_access != "none"
                     && workspace_id.is_some_and(|value| Some(value) == grant_workspace.as_deref())
@@ -3959,6 +3968,9 @@ async fn handle_supervisor_with_timeout(
                                     }
                                 }
                                 Some("relay.heartbeat") => {
+                                    if msg["threadLineage"].is_array() {
+                                        if let Err(error)=thread_groups::replace(&*state.store.conn.lock().await,&device_id,&msg["threadLineage"]) { tracing::warn!(%error,"invalid device lineage"); }
+                                    }
                                     // Display relay receipt time; a sleeping or clock-skewed
                                     // device cannot extend its own online lease.
                                     let timestamp = now_rfc3339();

@@ -184,6 +184,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/interrupt", post(thread_interrupt))
         .route("/api/threads/{id}/resume", post(thread_resume))
         .route("/api/threads/{id}/disconnect", post(thread_disconnect))
+        .route("/api/threads/{id}/models", get(thread_models))
+        .route("/api/threads/{id}/group", get(thread_group))
+        .route("/api/threads/{id}/watches", get(thread_watches))
         .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
         .route("/api/threads/{id}/capabilities", get(thread_capabilities))
         .route("/api/threads/{id}/fork", post(thread_fork))
@@ -889,11 +892,22 @@ async fn workspace_delete_file(
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let abs = remote_codex_runtime::files::assert_within(
+    let abs = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&path),
     )
     .map_err(map_err)?;
+    if abs
+        == std::path::Path::new(&ws.abs_path)
+            .canonicalize()
+            .map_err(|e| map_err(e.into()))?
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "The workspace root cannot be deleted",
+        ));
+    }
     if abs.is_dir() {
         std::fs::remove_dir_all(abs).map_err(|e| map_err(e.into()))?;
     } else {
@@ -1337,6 +1351,53 @@ async fn thread_disconnect(
     Ok(Json(
         serde_json::to_value(state.get_thread_detail(&id, None).await.map_err(map_err)?).unwrap(),
     ))
+}
+
+async fn thread_models(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    let thread = state.get_thread(&id).map_err(map_err)?;
+    let workspace = state.get_workspace(&thread.workspace_id).map_err(map_err)?;
+    let models = state
+        .list_models(
+            thread.provider,
+            thread.agent_id.as_deref(),
+            Some(&workspace.abs_path),
+        )
+        .await
+        .map_err(map_err)?;
+    Ok(Json(serde_json::to_value(models).unwrap()))
+}
+
+async fn thread_watches(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(state.thread_watches(&id).await.map_err(map_err)?))
+}
+
+async fn thread_group(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    state.get_thread(&id).map_err(map_err)?;
+    let ids = state.db.with(|conn| {
+        let mut query = conn.prepare("WITH RECURSIVE family(id,depth) AS (SELECT id,0 FROM threads WHERE id=?1 UNION ALL SELECT t.id,f.depth+1 FROM threads t JOIN family f ON t.parent_thread_id=f.id WHERE f.depth<3) SELECT id FROM family")?;
+        let rows = query.query_map([&id], |r|r.get::<_,String>(0))?.collect::<std::result::Result<std::collections::HashSet<_>,_>>()?;
+        Ok(rows)
+    }).map_err(map_err)?;
+    let mut threads = state.list_threads(None, true).map_err(map_err)?;
+    threads.retain(|t| ids.contains(&t.id));
+    for thread in &mut threads {
+        if thread.id == id {
+            thread.parent_thread_id = None;
+            thread.root_thread_id = None;
+        } else {
+            thread.root_thread_id = Some(id.clone());
+        }
+    }
+    Ok(Json(serde_json::to_value(threads).unwrap()))
 }
 
 async fn thread_fork(
@@ -1938,16 +1999,36 @@ async fn workspace_move(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Value>, ApiErr> {
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let from = remote_codex_runtime::files::assert_within(
+    let from = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&body.from_path),
     )
     .map_err(map_err)?;
-    let to = remote_codex_runtime::files::assert_within(
+    let to = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&body.to_path),
     )
     .map_err(map_err)?;
+    let root = std::path::Path::new(&ws.abs_path)
+        .canonicalize()
+        .map_err(|e| map_err(e.into()))?;
+    if from == root || to == root {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "The workspace root cannot be renamed",
+        ));
+    }
+    if from == to {
+        return Ok(Json(json!({"ok":true})));
+    }
+    if to.exists() {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "conflict",
+            "A file or folder with that name already exists",
+        ));
+    }
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| map_err(e.into()))?;
     }

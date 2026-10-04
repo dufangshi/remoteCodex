@@ -129,19 +129,24 @@
     },
     "fable": {
       "inputUsdPerMillion": 10,
-      "cachedInputUsdPerMillion": 1,
+      "cachedInputUsdPerMillion": 0.25,
       "outputUsdPerMillion": 50,
       "supportsFastMode": false,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 12.5
+      "cacheWriteInputUsdPerMillion": 12.5,
+      "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedAt": "2026-10-04"
     },
     "opus": {
-      "inputUsdPerMillion": 5,
-      "cachedInputUsdPerMillion": 0.5,
-      "outputUsdPerMillion": 25,
-      "supportsFastMode": false,
+      "inputUsdPerMillion": 4,
+      "cachedInputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 20,
+      "supportsFastMode": true,
+      "fastMultiplier": 2,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 6.25
+      "cacheWriteInputUsdPerMillion": 5,
+      "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedAt": "2026-10-04"
     },
     "haiku": {
       "inputUsdPerMillion": 1,
@@ -289,6 +294,7 @@
       "cacheWriteInputUsdPerMillion": 12.5,
       "aliases": [
         "claude-fable-5.1",
+        "fable[1m]",
         "fable 5 1"
       ]
     },
@@ -305,6 +311,40 @@
       ],
       "supportsFastMode": true,
       "fastMultiplier": 2
+    },
+    "claude-opus-5-5": {
+      "inputUsdPerMillion": 4,
+      "cachedInputUsdPerMillion": 0.2,
+      "cacheWriteInputUsdPerMillion": 5,
+      "outputUsdPerMillion": 20,
+      "contextWindowTokens": 1000000,
+      "supportsFastMode": true,
+      "fastMultiplier": 2,
+      "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedAt": "2026-10-04",
+      "aliases": ["claude-opus-5.5", "opus-5.5", "opus 5.5", "opus[1m]"]
+    },
+    "claude-sonnet-5-5": {
+      "inputUsdPerMillion": 2,
+      "cachedInputUsdPerMillion": 0.2,
+      "cacheWriteInputUsdPerMillion": 2.5,
+      "outputUsdPerMillion": 10,
+      "contextWindowTokens": 1000000,
+      "supportsFastMode": false,
+      "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedAt": "2026-10-04",
+      "aliases": ["claude-sonnet-5.5", "sonnet-5.5", "sonnet 5.5"]
+    },
+    "claude-mythos-5-1": {
+      "inputUsdPerMillion": 10,
+      "cachedInputUsdPerMillion": 0.25,
+      "cacheWriteInputUsdPerMillion": 12.5,
+      "outputUsdPerMillion": 50,
+      "contextWindowTokens": 1000000,
+      "supportsFastMode": false,
+      "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedAt": "2026-10-04",
+      "aliases": ["claude-mythos-5.1", "mythos 5.1"]
     },
     "grok-4.6": {
       "inputUsdPerMillion": 2,

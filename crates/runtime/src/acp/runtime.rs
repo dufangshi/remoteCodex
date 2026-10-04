@@ -1660,6 +1660,16 @@ impl AgentRuntime for AcpRuntime {
             prompt
         };
         let prompt_blocks = build_prompt_blocks(&prompt, &cwd, image_capable, &input.images)?;
+        if !input.hidden {
+            // Settings may have reloaded the process; identify the actual writer
+            // selected for this turn, rather than the one before preflight.
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.harness.ready".into(),
+                thread_id: input.thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({"turnId":input.turn_id,"instanceId":process.id}),
+            });
+        }
         let mut updates = self.inner.updates.subscribe();
         {
             let mut sessions = self.inner.sessions.lock().await;
@@ -2417,6 +2427,22 @@ impl AgentRuntime for AcpRuntime {
         live.process.shutdown().await?;
         sessions.remove(&key);
         Ok(())
+    }
+
+    async fn session_instance_id(&self, session_id: &str) -> Option<String> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .iter()
+            .find(|(key, live)| {
+                session_ids_match(key, session_id)
+                    || session_ids_match(&live.session_id, session_id)
+            })?
+            .1;
+        if live.process.connection_open().await {
+            Some(live.process.id.clone())
+        } else {
+            None
+        }
     }
 }
 

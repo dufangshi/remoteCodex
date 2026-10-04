@@ -444,6 +444,7 @@ impl RelayStore {
         share_activity::ensure_schema(&conn)?;
         notifications::ensure_schema(&conn)?;
         workbench::ensure_schema(&conn)?;
+        thread_groups::ensure_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             session_secret,

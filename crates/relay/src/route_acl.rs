@@ -120,6 +120,9 @@ pub(crate) fn shared_thread_path_allowed(
                 | "/skills"
                 | "/mcp-servers"
                 | "/hooks"
+                | "/models"
+                | "/group"
+                | "/watches"
         ) {
             return true;
         }

@@ -3,6 +3,7 @@ mod claude_history;
 mod generation;
 mod reliability;
 mod update;
+mod watches;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -400,6 +401,18 @@ impl Supervisor {
                     )
                 }
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                "thread.harness.ready" => supervisor.db.with(|conn| {
+                    if let (Some(turn), Some(instance)) = (
+                        event.payload["turnId"].as_str(),
+                        event.payload["instanceId"].as_str(),
+                    ) {
+                        conn.execute(
+                            "INSERT OR REPLACE INTO kv(key,value) VALUES(?1,?2)",
+                            params![format!("turn-process:{turn}"), instance],
+                        )?;
+                    }
+                    Ok(())
+                }),
                 "thread.context.updated" => supervisor.db.with(|conn| {
                     if let Some(context) = event
                         .payload
@@ -1136,7 +1149,29 @@ impl Supervisor {
             )?;
             Ok(())
         })?;
-        self.get_thread(&id)
+        let thread = self.get_thread(&id)?;
+        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            event_type: "thread.updated".into(),
+            thread_id: id.clone(),
+            timestamp: now_rfc3339(),
+            payload: json!({"reason":"thread_created"}),
+        });
+        for parent in [
+            thread.parent_thread_id.as_ref(),
+            thread.root_thread_id.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<HashSet<_>>()
+        {
+            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                event_type: "thread.updated".into(),
+                thread_id: parent.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({"reason":"children_changed"}),
+            });
+        }
+        Ok(thread)
     }
 
     pub async fn list_import_candidates(
