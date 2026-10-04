@@ -93,6 +93,42 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 10,
+        name: "agent_coordination",
+        apply: |conn| {
+            // name: a human address unique among the open threads of one lineage.
+            // closed_at: the delegate is done and releases its slot and its name;
+            // a finished turn alone leaves a thread `idle`, which still holds both.
+            conn.execute_batch(
+                "ALTER TABLE threads ADD COLUMN agent_name TEXT;
+                 ALTER TABLE threads ADD COLUMN agent_role TEXT;
+                 ALTER TABLE threads ADD COLUMN worktree_path TEXT;
+                 ALTER TABLE threads ADD COLUMN closed_at TEXT;
+                 CREATE UNIQUE INDEX IF NOT EXISTS threads_agent_name_idx
+                   ON threads(root_thread_id, agent_name)
+                   WHERE agent_name IS NOT NULL AND closed_at IS NULL;
+                 CREATE TABLE IF NOT EXISTS agent_tasks(
+                   root_thread_id TEXT NOT NULL,
+                   number INTEGER NOT NULL,
+                   title TEXT NOT NULL,
+                   detail TEXT,
+                   status TEXT NOT NULL DEFAULT 'pending',
+                   owner_thread_id TEXT,
+                   created_by TEXT,
+                   result TEXT,
+                   created_at TEXT NOT NULL,
+                   updated_at TEXT NOT NULL,
+                   PRIMARY KEY(root_thread_id, number));
+                 CREATE TABLE IF NOT EXISTS agent_task_deps(
+                   root_thread_id TEXT NOT NULL,
+                   number INTEGER NOT NULL,
+                   depends_on INTEGER NOT NULL,
+                   PRIMARY KEY(root_thread_id, number, depends_on));",
+            )?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[

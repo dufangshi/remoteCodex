@@ -795,3 +795,113 @@ async fn agent_created_threads_group_under_their_root_over_http() {
         "--group lists exactly that root's descendants"
     );
 }
+
+#[tokio::test]
+async fn coordination_operations_work_over_the_cli_api() {
+    let (dir, port, ws_root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let cli_token = std::fs::read_to_string(dir.path().join("cli-token")).unwrap();
+    let workspace_path = ws_root.join("coord");
+    std::fs::create_dir_all(workspace_path.join(".remote-codex/agents")).unwrap();
+    std::fs::write(
+        workspace_path.join(".remote-codex/agents/tester.md"),
+        "---\ndescription: Runs tests\n---\nRun the narrowest relevant tests.\n",
+    )
+    .unwrap();
+    let workspace = json(
+        &client,
+        client.post(format!("{base}/api/workspaces")).json(&json!({
+            "absPath": workspace_path, "label": "Coord"
+        })),
+    )
+    .await;
+    let root = json(
+        &client,
+        client
+            .post(format!("{base}/api/threads/start"))
+            .json(&json!({
+                "workspaceId": workspace["id"], "model": "default", "provider": "codex"
+            })),
+    )
+    .await;
+    let root_id = root["thread"]["id"]
+        .as_str()
+        .or_else(|| root["id"].as_str())
+        .unwrap()
+        .to_string();
+    let cli = |body: serde_json::Value| {
+        client
+            .post(format!("{base}/api/cli"))
+            .bearer_auth(&cli_token)
+            .json(&body)
+    };
+
+    let roles = json(
+        &client,
+        cli(json!({"operation":"roles","fromThreadId":root_id})),
+    )
+    .await;
+    assert_eq!(roles["roles"][0]["name"], "tester", "{roles}");
+    let made = json(
+        &client,
+        cli(json!({"operation":"create","fromThreadId":root_id,"model":"default","provider":"codex","name":"tester","role":"tester"})),
+    )
+    .await;
+    assert_eq!(made["name"], "tester", "{made}");
+    assert_eq!(made["role"], "tester");
+    let resolved = json(
+        &client,
+        cli(json!({"operation":"resolve","name":"tester","fromThreadId":root_id})),
+    )
+    .await;
+    assert_eq!(resolved["threadId"], made["threadId"]);
+
+    let task = json(
+        &client,
+        cli(json!({"operation":"taskAdd","fromThreadId":root_id,"title":"run tests","assignThreadId":made["threadId"]})),
+    )
+    .await;
+    assert_eq!(task["number"], 1, "{task}");
+    let claimed = json(
+        &client,
+        cli(json!({"operation":"taskClaim","fromThreadId":made["threadId"]})),
+    )
+    .await;
+    assert_eq!(claimed["claimed"]["number"], 1, "{claimed}");
+
+    let waited = json(
+        &client,
+        cli(json!({"operation":"wait","threadIds":[made["threadId"]],"timeoutSeconds":5})),
+    )
+    .await;
+    assert_eq!(waited["done"], true, "{waited}");
+    let tree = json(
+        &client,
+        cli(json!({"operation":"tree","fromThreadId":made["threadId"]})),
+    )
+    .await;
+    let rows = tree["threads"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{tree}");
+    assert_eq!(rows[1]["currentTask"]["number"], 1);
+    assert_eq!(rows[0]["unreadMessages"], 0);
+
+    let inbox = json(
+        &client,
+        cli(json!({"operation":"inboxWait","threadId":made["threadId"],"kinds":["task"],"timeoutSeconds":5})),
+    )
+    .await;
+    assert!(
+        inbox["messages"][0]["subject"]
+            .as_str()
+            .unwrap()
+            .contains("Task #1 assigned"),
+        "{inbox}"
+    );
+    let closed = json(
+        &client,
+        cli(json!({"operation":"close","threadId":made["threadId"],"fromThreadId":root_id})),
+    )
+    .await;
+    assert!(closed["closedAt"].is_string(), "{closed}");
+}

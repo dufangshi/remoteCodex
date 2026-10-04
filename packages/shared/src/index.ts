@@ -1017,6 +1017,14 @@ export interface ThreadDto {
   lineageDepth?: number;
   /** Agent threads beneath this root. Only present on roots in list responses. */
   descendantCount?: number | null;
+  /** Address unique among the open threads of one lineage, e.g. `reviewer`. */
+  agentName?: string | null;
+  /** Role template the thread started from. */
+  agentRole?: string | null;
+  /** Isolated git worktree the thread runs in instead of the workspace root. */
+  worktreePath?: string | null;
+  /** Set once the delegate was closed; it then holds no slot and no name. */
+  closedAt?: string | null;
 }
 
 export interface ThreadHistoryItemDto {

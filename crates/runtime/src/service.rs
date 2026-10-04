@@ -998,7 +998,8 @@ impl Supervisor {
                         t.reasoning_effort, t.fast_mode, t.collaboration_mode, t.approval_mode, t.sandbox_mode, t.status,
                         t.summary_text, t.last_error, t.created_at, t.updated_at, t.last_turn_started_at, t.last_turn_completed_at,
                         t.is_pinned, t.context_usage_json, t.parent_thread_id, t.root_thread_id, t.lineage_depth,
-                        (SELECT COUNT(*) FROM threads d WHERE d.root_thread_id = t.id)
+                        (SELECT COUNT(*) FROM threads d WHERE d.root_thread_id = t.id),
+                        t.agent_name, t.agent_role, t.worktree_path, t.closed_at
                  FROM threads t",
             );
             if workspace_id.is_some() {
@@ -1065,12 +1066,27 @@ impl Supervisor {
     }
 
     pub async fn create_thread(&self, input: CreateThreadInput) -> Result<ThreadDto> {
+        self.create_thread_with(input, crate::interaction::AgentOptions::default())
+            .await
+    }
+
+    pub async fn create_thread_with(
+        &self,
+        input: CreateThreadInput,
+        options: crate::interaction::AgentOptions,
+    ) -> Result<ThreadDto> {
         let (approval_mode, sandbox_mode) = match input.approval_mode.as_str() {
             "yolo" => ("yolo", "danger-full-access"),
             "guarded" => ("guarded", "workspace-write"),
             _ => bail!("approvalMode must be yolo or guarded"),
         };
         let workspace = self.get_workspace(&input.workspace_id)?;
+        // Refuse over-cap or misnamed delegates before a harness session or a
+        // worktree exists, so a refusal leaves nothing behind.
+        let lineage = self.resolve_lineage(input.parent_thread_id.as_deref())?;
+        if let Some(name) = &options.name {
+            self.ensure_agent_name_free(lineage.root.as_deref(), name)?;
+        }
         let provider = input.provider.unwrap_or_else(|| self.default_provider());
         let _maintenance = self
             .maintenance_gate
@@ -1088,11 +1104,26 @@ impl Supervisor {
             .map_err(|_| anyhow!("conflict: Harness maintenance in progress"))?;
         let runtime = self.runtime(provider)?;
         let id = Uuid::new_v4().to_string();
-        let started = self
+        let worktree = match &options.worktree {
+            Some(branch) => {
+                let slug = options.name.clone().unwrap_or_else(|| id[..8].to_string());
+                Some(crate::interaction::create_worktree(
+                    Path::new(&workspace.abs_path),
+                    &slug,
+                    branch.as_deref(),
+                )?)
+            }
+            None => None,
+        };
+        let cwd = worktree
+            .as_ref()
+            .map(|w| w.path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| workspace.abs_path.clone());
+        let started = match self
             .with_cli_context(
                 &id,
                 runtime.start_session(StartSessionInput {
-                    cwd: workspace.abs_path.clone(),
+                    cwd,
                     agent_id: input.agent_id.clone(),
                     model: input.model.clone(),
                     reasoning_effort: input.reasoning_effort.clone(),
@@ -1100,19 +1131,31 @@ impl Supervisor {
                     sandbox_mode: Some(sandbox_mode.into()),
                 }),
             )
-            .await?;
+            .await
+        {
+            Ok(started) => started,
+            Err(error) => {
+                if let Some(w) = &worktree {
+                    let _ = crate::interaction::remove_worktree(
+                        Path::new(&workspace.abs_path),
+                        &w.path,
+                    );
+                }
+                return Err(error);
+            }
+        };
         let now = now_rfc3339();
         let title = input
             .title
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "New thread".into());
-        let lineage = self.resolve_lineage(input.parent_thread_id.as_deref())?;
         self.db.with(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
                 "INSERT INTO threads(id, workspace_id, provider, agent_id, provider_session_id, source, title, model,
                     reasoning_effort, collaboration_mode, approval_mode, sandbox_mode, status, created_at, updated_at,
-                    parent_thread_id, root_thread_id, lineage_depth)
-                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,?10,'idle',?11,?11,?12,?13,?14)",
+                    parent_thread_id, root_thread_id, lineage_depth, agent_name, agent_role, worktree_path)
+                 VALUES (?1,?2,?3,?4,?5,'supervisor',?6,?7,?8,'default',?9,?10,'idle',?11,?11,?12,?13,?14,?15,?16,?17)",
                 params![
                     id,
                     input.workspace_id,
@@ -1128,11 +1171,27 @@ impl Supervisor {
                     lineage.parent,
                     lineage.root,
                     lineage.depth,
+                    options.name,
+                    options.role.as_ref().map(|r| &r.name),
+                    worktree.as_ref().map(|w| w.path.to_string_lossy().into_owned()),
                 ],
             )?;
+            if let Some(role) = &options.role {
+                crate::interaction::stage_role(&tx, &id, role)?;
+            }
+            tx.commit()?;
             Ok(())
         })?;
         self.get_thread(&id)
+    }
+
+    /// Where a thread's harness runs: its own worktree when it has one.
+    pub fn session_cwd(&self, thread: &ThreadDto) -> Option<String> {
+        thread.worktree_path.clone().or_else(|| {
+            self.get_workspace(&thread.workspace_id)
+                .ok()
+                .map(|ws| ws.abs_path)
+        })
     }
 
     pub async fn list_import_candidates(
@@ -2087,10 +2146,7 @@ impl Supervisor {
             .clone()
             .ok_or_else(|| anyhow!("thread has no provider session"))?;
         if !runtime.session_loaded(&session_id) {
-            let cwd = self
-                .get_workspace(&thread.workspace_id)
-                .ok()
-                .map(|ws| ws.abs_path);
+            let cwd = self.session_cwd(&thread);
             self.with_cli_context(
                 &thread.id,
                 runtime.resume_session(
@@ -2190,7 +2246,9 @@ impl Supervisor {
                 ],
             )?;
             conn.execute(
-                "UPDATE threads SET status='running', last_error=NULL, updated_at=?1, last_turn_started_at=?1, title=COALESCE(?2,title) WHERE id=?3",
+                "UPDATE threads SET status='running', last_error=NULL, updated_at=?1, last_turn_started_at=?1, title=COALESCE(?2,title), closed_at=NULL,
+                 agent_name=CASE WHEN closed_at IS NOT NULL AND EXISTS(SELECT 1 FROM threads o WHERE o.root_thread_id=threads.root_thread_id AND o.agent_name=threads.agent_name AND o.closed_at IS NULL AND o.id<>threads.id) THEN NULL ELSE agent_name END
+                 WHERE id=?3",
                 params![now, title, thread.id],
             )?;
             upsert_legacy_turn_metadata(
@@ -2238,6 +2296,11 @@ impl Supervisor {
         // result could sit unread while the collaboration silently stalled. Announce
         // it at the start of a turn - the one moment the agent is about to think
         // anyway - and say it is passive so it does not abandon work mid-task.
+        // A role template applies once, to whichever prompt first starts work.
+        let prompt = match crate::interaction::take_role(self, &thread.id) {
+            Some(role) => format!("{role}\n\n{prompt}"),
+            None => prompt,
+        };
         let prompt = match self.pending_mail_notice(&thread.id) {
             Some(notice) => format!("{notice}\n\n{prompt}"),
             None => prompt,
@@ -3066,10 +3129,7 @@ impl Supervisor {
 
     async fn reconnect_thread(&self, id: &str) -> Result<()> {
         let thread = self.get_thread(id)?;
-        let cwd = self
-            .get_workspace(&thread.workspace_id)
-            .ok()
-            .map(|ws| ws.abs_path);
+        let cwd = self.session_cwd(&thread);
         if let Some(session) = &thread.provider_session_id {
             let runtime = self.runtime(thread.provider)?;
             self.with_cli_context(
@@ -3166,14 +3226,10 @@ impl Supervisor {
                 .await;
         }
         if !runtime.session_loaded(session) {
-            let workspace = self.get_workspace(&thread.workspace_id)?;
+            let cwd = self.session_cwd(&thread);
             self.with_cli_context(
                 &thread.id,
-                runtime.resume_session(
-                    session,
-                    Some(&workspace.abs_path),
-                    thread_session_settings(&thread),
-                ),
+                runtime.resume_session(session, cwd.as_deref(), thread_session_settings(&thread)),
             )
             .await?;
         }
@@ -3378,14 +3434,10 @@ impl Supervisor {
         let Some(session) = thread.provider_session_id.as_deref() else {
             return runtime.capabilities(thread.agent_id.as_deref()).await;
         };
-        let workspace = self.get_workspace(&thread.workspace_id)?;
+        let cwd = self.session_cwd(&thread);
         self.with_cli_context(
             &thread.id,
-            runtime.resume_session(
-                session,
-                Some(&workspace.abs_path),
-                thread_session_settings(&thread),
-            ),
+            runtime.resume_session(session, cwd.as_deref(), thread_session_settings(&thread)),
         )
         .await?;
         runtime
@@ -3541,8 +3593,9 @@ impl Supervisor {
             open < MAX_OPEN_AGENT_THREADS,
             "this thread already has {open} unfinished agent threads, which is the \
              limit of {MAX_OPEN_AGENT_THREADS}. Do not retry: creating another will \
-             fail the same way until some finish. Wait for the ones already running, \
-             or reuse an idle peer instead of creating more."
+             fail the same way. Close delegates whose work you have collected with \
+             `remote-codex thread close NAME`, wait for running ones, or reuse an idle \
+             peer instead of creating more."
         );
         Ok(Lineage {
             root: Some(root),
@@ -3596,12 +3649,13 @@ impl Supervisor {
     /// only *running* threads is deliberate: a freshly created thread sits at `idle`
     /// until it is prompted, so a running-only cap would not stop an agent opening
     /// hundreds of threads in a burst - the exact runaway this bound exists to prevent.
-    /// Finished work does not count, so a long sequential fan-out stays unrestricted.
+    /// A finished turn returns a thread to `idle`, which still counts: the delegate
+    /// stays addressable until someone closes it, and closing is what frees the slot.
     pub(crate) fn open_agent_threads(&self, root: &str) -> Result<i64> {
         self.db.with(|conn| {
             Ok(conn.query_row(
                 "SELECT COUNT(*) FROM threads
-                 WHERE root_thread_id=?1
+                 WHERE root_thread_id=?1 AND closed_at IS NULL
                    AND COALESCE(status,'idle') NOT IN ('completed','failed','interrupted')",
                 params![root],
                 |row| row.get(0),
@@ -3655,6 +3709,10 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
         root_thread_id: row.get(23).unwrap_or(None),
         lineage_depth: row.get(24).unwrap_or(0),
         descendant_count: row.get::<_, i64>(25).ok().filter(|count| *count > 0),
+        agent_name: row.get(26).unwrap_or(None),
+        agent_role: row.get(27).unwrap_or(None),
+        worktree_path: row.get(28).unwrap_or(None),
+        closed_at: row.get(29).unwrap_or(None),
     }
 }
 

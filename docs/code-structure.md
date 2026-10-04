@@ -35,7 +35,7 @@ established pattern, not a proposal — follow it rather than inventing a new on
 | --- | --- |
 | `runtime/src/service.rs` | `service/{reliability,update}.rs` |
 | `runtime/src/upstreams.rs` | `upstreams/discovery.rs` |
-| `runtime/src/interaction.rs` | `interaction/{inbox,transcript}.rs` |
+| `runtime/src/interaction/mod.rs` | `interaction/{agents,inbox,tasks,transcript}.rs` |
 | `supervisor/src/secure_transport.rs` | `secure_transport/streams.rs` |
 | `relay/src/auth_api.rs` | `auth_api/passkeys.rs` |
 

@@ -1,12 +1,37 @@
 use super::http::{map_err, ApiErr};
+use anyhow::Context;
 use axum::{extract::State, Json};
 use remote_codex_protocol::{CreateThreadInput, Provider};
 use remote_codex_runtime::{
-    interaction::{SendInput, TranscriptQuery},
+    interaction::{clamp_wait, list_roles, load_role, AgentOptions, SendInput, TranscriptQuery},
     Supervisor,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
+
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Roles are looked up from the caller's workspace, or the default root.
+fn caller_cwd(state: &Supervisor, from: Option<&str>) -> anyhow::Result<String> {
+    Ok(match from {
+        Some(from) => {
+            state
+                .get_workspace(&state.get_thread(from)?.workspace_id)?
+                .abs_path
+        }
+        None => state.config.workspace_root.to_string_lossy().into_owned(),
+    })
+}
 
 pub(crate) async fn command(
     State(state): State<Arc<Supervisor>>,
@@ -14,6 +39,12 @@ pub(crate) async fn command(
 ) -> Result<Json<Value>, ApiErr> {
     async fn run(state: &Supervisor, input: Value) -> anyhow::Result<Value> {
         let id = input.get("threadId").and_then(Value::as_str).unwrap_or("");
+        let from = input["fromThreadId"].as_str();
+        let caller =
+            || from.context("this command needs the caller's thread identity; pass --from ID");
+        let number = || input["number"].as_i64().context("task number required");
+        let all = input["all"] == true;
+        let wait = clamp_wait(input["timeoutSeconds"].as_u64());
         match input.get("operation").and_then(Value::as_str).unwrap_or("") {
             "info" => Ok(json!({"deviceId":state.db.host_id})),
             "list" => {
@@ -31,7 +62,7 @@ pub(crate) async fn command(
                 }
                 let limit = input["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
                 Ok(
-                    json!({"threads":threads.iter().take(limit).map(|t|json!({"id":t.id,"title":t.title,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"status":t.status,"updatedAt":t.updated_at,"parentThreadId":t.parent_thread_id,"rootThreadId":t.root_thread_id,"agentThreadCount":t.descendant_count})).collect::<Vec<_>>(),"totalCount":threads.len()}),
+                    json!({"threads":threads.iter().take(limit).map(|t|json!({"id":t.id,"name":t.agent_name,"title":t.title,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"status":t.status,"updatedAt":t.updated_at,"parentThreadId":t.parent_thread_id,"rootThreadId":t.root_thread_id,"agentThreadCount":t.descendant_count,"closedAt":t.closed_at})).collect::<Vec<_>>(),"totalCount":threads.len()}),
                 )
             }
             "show" | "status" => state.interaction_status(id).await,
@@ -52,6 +83,59 @@ pub(crate) async fn command(
                 }
                 Ok(receipt)
             }
+            "resolve" => Ok(
+                json!({"threadId":state.resolve_agent(from, input["name"].as_str().unwrap_or(""))?}),
+            ),
+            "tree" => match input["rootThreadId"].as_str() {
+                Some(root) => state.agent_tree(root, all).await,
+                None => {
+                    state
+                        .lineage_tree(from.context("tree needs a thread; pass --from ID")?, all)
+                        .await
+                }
+            },
+            "wait" => {
+                state
+                    .wait_threads(&strings(&input["threadIds"]), input["any"] == true, wait)
+                    .await
+            }
+            "wake" => state.register_wake(
+                from.context("wake needs the caller's identity")?,
+                &strings(&input["threadIds"]),
+            ),
+            "close" => state.close_agent_thread(from, id, input["removeWorktree"] == true),
+            "roles" => Ok(list_roles(Path::new(&caller_cwd(state, from)?))),
+            "inboxWait" => {
+                state
+                    .inbox_wait(
+                        id,
+                        &strings(&input["fromThreadIds"]),
+                        &strings(&input["kinds"]),
+                        input["onlyNew"] == true,
+                        wait,
+                    )
+                    .await
+            }
+            "taskAdd" => state.task_add(
+                caller()?,
+                input["title"].as_str().unwrap_or(""),
+                input["detail"].as_str(),
+                &input["after"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+                input["assignThreadId"].as_str(),
+            ),
+            "taskList" => state.task_list(caller()?, all),
+            "taskShow" => state.task_show(caller()?, number()?),
+            "taskClaim" => state.task_claim(caller()?, input["number"].as_i64()),
+            "taskDone" => state.task_done(
+                caller()?,
+                number()?,
+                input["result"].as_str(),
+                input["failed"] == true,
+            ),
+            "taskRelease" => state.task_release(caller()?, number()?),
             "inbox" => state.inbox_list(id, &input),
             "inboxRead" => state.inbox_read(id, &input),
             "inboxAck" => state.inbox_ack(id, &input),
@@ -92,9 +176,30 @@ pub(crate) async fn command(
                         input["approvalMode"] = json!(caller.approval_mode);
                     }
                 }
-                let create: CreateThreadInput = serde_json::from_value(input)?;
-                let provider = create.provider.unwrap_or_else(|| state.default_provider());
+                let name = input["name"].as_str().map(str::to_owned);
+                let role_name = input["role"].as_str().map(str::to_owned);
+                let worktree = (input["worktree"] == true || input["worktreeBranch"].is_string())
+                    .then(|| input["worktreeBranch"].as_str().map(str::to_owned));
+                let mut create: CreateThreadInput = serde_json::from_value(input)?;
                 let cwd = state.get_workspace(&create.workspace_id)?.abs_path;
+                // A role supplies defaults; anything the caller set explicitly wins.
+                let role = role_name
+                    .map(|r| load_role(Path::new(&cwd), &r))
+                    .transpose()?;
+                if let Some(role) = &role {
+                    if create.model == "default" {
+                        if let Some(model) = &role.model {
+                            create.model = model.clone();
+                        }
+                    }
+                    if create.reasoning_effort.is_none() {
+                        create.reasoning_effort = role.reasoning_effort.clone();
+                    }
+                    if create.agent_id.is_none() {
+                        create.agent_id = role.agent.clone();
+                    }
+                }
+                let provider = create.provider.unwrap_or_else(|| state.default_provider());
                 let models = state
                     .list_models(provider, create.agent_id.as_deref(), Some(&cwd))
                     .await?;
@@ -114,9 +219,18 @@ pub(crate) async fn command(
                         "reasoning effort not available for this model"
                     );
                 }
-                let t = state.create_thread(create).await?;
+                let t = state
+                    .create_thread_with(
+                        create,
+                        AgentOptions {
+                            name,
+                            role,
+                            worktree,
+                        },
+                    )
+                    .await?;
                 Ok(
-                    json!({"threadId":t.id,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"reasoningEffort":t.reasoning_effort,"status":t.status}),
+                    json!({"threadId":t.id,"name":t.agent_name,"role":t.agent_role,"worktreePath":t.worktree_path,"workspaceId":t.workspace_id,"provider":t.provider,"agentId":t.agent_id,"model":t.model,"reasoningEffort":t.reasoning_effort,"status":t.status}),
                 )
             }
             _ => anyhow::bail!("unknown CLI operation"),

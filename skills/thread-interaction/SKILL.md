@@ -5,14 +5,45 @@ description: Create, message, and inspect peer remoteCodex threads on this devic
 
 # Interact with remoteCodex threads
 
-Threads are peers. Each can create others, message existing threads, read state/history, or receive requests. This is a Supervisor-level interface across Codex, ACP Grok, and other installed providers. Creation does not copy your conversation or allocate a separate checkout. Peers in one workspace share files; assign ownership or existing separate worktrees for overlapping edits.
+Threads are peers. Each can create others, message existing threads, read state/history, or receive requests. This is a Supervisor-level interface across Codex, ACP Grok, and other installed providers. Creation does not copy your conversation. Peers in one workspace share files unless you create them with `--worktree`; give each delegate its own files, or its own worktree, for overlapping edits.
 
 `remote-codex skill` prints this entire bundled guide. Data commands return JSON; help and this guide return text. Use `remote-codex thread send --help`, `remote-codex inbox --help`, and other command-specific help to discover exact flags. Check exit status and the returned delivery state. A receipt is not proof of task completion.
+
+## The orchestration loop
+
+Most delegation is this, and every step is one command:
+
+```bash
+remote-codex thread create --name tests --kind task --subject 'Fix the flaky auth test' \
+  --text-file /tmp/tests.txt                      # 1. delegate, with a name
+remote-codex thread create --name docs --worktree --kind task \
+  --subject 'Document the new flag' --text-file /tmp/docs.txt
+# 2. do your own independent work here, if you have any
+remote-codex thread wait tests docs --timeout 600 # 3. block until both settle
+remote-codex thread close tests docs              # 4. free their slots once collected
+```
+
+`thread wait` returns each delegate's state and its **closing message** inline, so you
+usually need no transcript call. It returns early if a delegate becomes `blocked` on
+an approval or question - deal with that, then wait again. Use `--any` to handle
+results one at a time as they land. Waiting costs nothing while it blocks, unlike
+polling, and unlike ending your turn it keeps you able to act on the result.
+
+Pick the timeout below your own shell tool's timeout and simply wait again on
+`timedOut: true`. Run `remote-codex thread tree` any time for the whole picture:
+every delegate's state, unread mail, current task and worktree.
+
+If you have nothing to do until delegates finish **and** your turn should end (for
+example, a person is waiting on your reply), hand off instead of blocking:
+`remote-codex thread wait tests docs --wake` queues exactly one turn on you when they
+all settle, carrying their closing messages. That is the only way delegates wake you,
+and only because you asked.
 
 ## Identity and discovery
 
 ```bash
 remote-codex thread self
+remote-codex thread tree
 remote-codex thread list --limit 20
 remote-codex thread list --workspace WORKSPACE_ID --limit 10
 remote-codex thread status THREAD_ID
@@ -21,7 +52,7 @@ remote-codex thread models --provider codex
 remote-codex thread models --provider acp --agent grok
 ```
 
-Use **remoteCodex thread IDs**, the last segment of `/devices/DEVICE_ID/threads/THREAD_ID`, not native Codex/ACP session IDs. A target may be a UUID or a full Web thread URL on the current device; the CLI does not route across devices. `self` identifies your caller. `list` defaults to 20 entries, capped at 100, without transcripts. `status`/`show` return lightweight metadata including `activeTurnId`, `queuedCount`, `unreadMessageCount`, `waitingForInput`, and `lastError`.
+Use **remoteCodex thread IDs**, the last segment of `/devices/DEVICE_ID/threads/THREAD_ID`, not native Codex/ACP session IDs. A target may be a UUID, a full Web thread URL on the current device, the `--name` of an open thread in your lineage, or `parent`, `root` or `self`; the CLI does not route across devices. `self` identifies your caller. `list` defaults to 20 entries, capped at 100, without transcripts. `status`/`show` return lightweight metadata including `activeTurnId`, `queuedCount`, `unreadMessageCount`, `waitingForInput`, and `lastError`.
 
 Reuse a peer when its workspace, model, and earlier work fit. Read status and only enough recent transcript to assess context. Create when separate context or another model is useful.
 
@@ -37,15 +68,33 @@ Two bounds apply, and both are refusals rather than queues:
 
 - **Depth 3.** You may delegate, and your delegate may delegate once more. Past that,
   creation fails; delegate from the root instead of chaining deeper.
-- **20 unfinished threads per root.** Completed, failed and interrupted threads release
-  their slot, so a long sequential fan-out is unrestricted — but 20 simultaneously open
-  ones is the ceiling. Note this counts threads you created and never prompted, because
-  an idle thread still holds a slot.
+- **20 open threads per root.** A delegate that finished its turn is `idle`, not gone:
+  it stays addressable and keeps its slot until you `thread close` it. Failed and
+  interrupted threads release theirs. So close delegates once you have collected their
+  work, and a long sequential fan-out stays unrestricted.
 
-When either refusal arrives, **do not retry the same call** — it will fail identically
-until something finishes. Wait for outstanding work, or reuse an idle peer. Prefer a
-handful of concurrent delegates over a large burst; you cannot reclaim a slot by
-creating more.
+When either refusal arrives, **do not retry the same call** — it will fail identically.
+Close what you have collected, wait for outstanding work, or reuse an idle peer. Prefer
+a handful of concurrent delegates (3-5) over a large burst.
+
+### Names, closing, roles and worktrees
+
+- `--name reviewer` gives a delegate an address unique among the open threads of your
+  lineage; any command that takes a thread id accepts it. Names match
+  `[a-z][a-z0-9_-]{0,31}`.
+- `remote-codex thread close NAME` frees its slot and name. History stays readable, and
+  prompting it again reopens it. Only an ancestor (or the thread itself) can close it,
+  and not while it is running or has queued work.
+- `--role ROLE` starts from `.remote-codex/agents/ROLE.md` (workspace, then
+  `~/.remote-codex/agents/`). Front matter `model`, `effort`, `agent` become defaults
+  you can still override; the body is prepended to the delegate's first prompt.
+  `remote-codex thread roles` lists them.
+- `--worktree` runs the delegate in its own git worktree, `../REPO.worktrees/NAME` on
+  branch `agent/NAME` (or `--worktree-branch`), checked out from **committed** HEAD -
+  uncommitted changes in your checkout are not in it. Tell the delegate to commit on
+  its branch; you merge it. `thread close NAME --remove-worktree` removes the checkout
+  and refuses if it has uncommitted changes. Use worktrees for parallel edits that
+  could touch the same files; skip them for read-only work.
 
 Model IDs and effort options come from local discovery. Preserve explicitly requested models; do not invent an ID from a display name or silently substitute another model. Availability depends on the installed harness and working directory.
 
@@ -110,38 +159,59 @@ turn that is *starting*, so these are the moments to actually look:
 - **Before work that depends on a peer.** A result you never read is a result you do
   not have.
 - **After a long command.** Mail may have arrived while you were blocked.
-- **Before you finish a turn while a delegate is still working.** This is the one that
-  bites - see below.
+- **When you have nothing else to do but expect mail:** block on it with
+  `remote-codex inbox wait` rather than ending your turn or looping.
 
-Acknowledge with `inbox ack` only what you have handled or deliberately recorded.
-Acknowledging to clear the notice loses the message.
+```bash
+remote-codex inbox wait --timeout 600                   # any unacknowledged mail
+remote-codex inbox wait --from-thread reviewer --kind question
+remote-codex inbox wait --new                           # ignore mail already waiting
+```
+
+`inbox wait` returns the matching messages with text inline. Unacknowledged mail
+satisfies it immediately, so acknowledge what you have handled (or use `--new` / a
+filter while deliberately deferring something). Acknowledge with `inbox ack` only what
+you have handled or deliberately recorded; acknowledging to clear the notice loses the
+message.
 
 ### Ending your turn discards nothing, but nothing will wake you
 
 An idle thread does not run, so it cannot read mail. Completion notifications are
-passive too - `--notify-on-complete` files a message, it does not start a turn for you,
-and `--notify-delivery` must be `inbox`. So if you delegate and then end your turn, the
-delegate's result lands in your inbox and **sits there** until a person or a peer starts
-your next turn. The work is not lost; nobody is acting on it.
+passive too - `--notify-on-complete` files a message, it does not start a turn for you.
+So if you delegate and then simply end your turn, the result **sits in your inbox**
+until a person or a peer starts your next turn.
 
-Plan for that before you delegate:
+- **If you must act on the result, stay in your turn** and block on it:
+  `thread wait NAME` or `inbox wait`. Do independent work first if you have any.
+- **If your turn must end, hand off explicitly** with `thread wait NAME... --wake`, and
+  say in your final message what you delegated and that you will resume when it lands.
 
-- **If you must act on the result, stay in your turn.** Delegate, keep working on
-  something independent, and check `remote-codex inbox` between steps.
-- **If you can hand off, say so.** Finish with what you delegated and to whom, so the
-  person reading your transcript knows a result is coming and where it will appear.
-- **Subscribe anyway** with `--notify-on-complete`. It will not wake you, but the
-  notification now carries the delegate's closing message, so whenever your next turn
-  does start you can judge the outcome without opening a transcript.
+Do not work around this by steering the peer, polling `status` in a loop, or sending
+yourself direct messages; `wait` is cheaper than all of them.
+
+## Share work through the task board
+
+For more than two or three pieces of work, or work with ordering between pieces, put it
+on the lineage's task board instead of in prompts. Every thread in your lineage sees
+the same board; it outlives any one agent's context.
 
 ```bash
-remote-codex thread send PEER_ID --delivery queue --kind task \
-  --subject 'Port the auth tests' --text-file /tmp/task.txt --notify-on-complete
+remote-codex task add 'Design the schema' --detail-file /tmp/schema.txt
+remote-codex task add 'Write the migration' --after 1 --assign migrator
+remote-codex task list            # open tasks: owner, blockedBy, ready
+remote-codex task claim           # take the lowest ready task for you or nobody
+remote-codex task show 2
+remote-codex task done 2 --result 'Migration in db/0042.sql; tests pass'
+remote-codex task done 3 --failed --result 'Blocked: no staging credentials'
+remote-codex task release 2       # give it back
 ```
 
-Do not work around this by steering the peer, polling in a loop, or sending yourself
-direct messages. None of those are cheaper than simply staying awake or handing off
-cleanly.
+Claims are atomic, so delegates may self-serve with `task claim` without colliding.
+`--assign` sends the assignee passive mail; finishing a task mails its creator the
+result, and mails the owners of tasks it unblocks. A task with unfinished `--after`
+dependencies cannot be claimed. A delegate given a board should loop: claim, do, `task
+done --result`, claim again, and stop when `claim` returns `claimed: null`. Keep
+results short and point at files or commits for anything long.
 
 ## Choose the delivery semantics explicitly
 
@@ -223,14 +293,12 @@ Replace placeholders before sending. Provide goal, checkout, relevant files, con
 
 `--notify-on-complete` subscribes to the receiving **execution turn**, so it requires direct/queue/steer delivery plus a caller identity. Passive inbox messages have no execution turn and reject this flag. It is a per-send subscription, not a permanent watch of future activity.
 
-Completion notifications always go to the caller's passive inbox. They include peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, and a transcript command, rather than dumping the result. They never wake, steer, or queue a turn on the caller.
-
-At collaboration checkpoints, actively check for completion and read the relevant results:
+Completion notifications always go to the caller's passive inbox. They include peer/thread IDs, terminal status (`completed`, `failed`, or `interrupted`), timestamp, a transcript command, and the delegate's closing message (truncated at 4000 characters). They never wake, steer, or queue a turn on the caller - `thread wait` and `inbox wait` are how you block on them, `--wake` how you hand off.
 
 ```bash
-remote-codex inbox
-remote-codex thread status PEER_ID
-remote-codex transcript PEER_ID --limit 1
+remote-codex thread wait PEER_ID          # usually all you need
+remote-codex inbox wait --kind result
+remote-codex transcript PEER_ID --limit 1 # when the closing message is not enough
 ```
 
 `--notify-delivery queue` is no longer supported. Do not send direct/queue/steer messages to the parent just to report completion; keep results passive and let the parent collect them. Completion describes execution, not business success: read that turn and verify artifacts/exit codes before dependent actions. Using explicit inbox replies and automatic notifications together can produce two passive messages; avoid redundant reports.

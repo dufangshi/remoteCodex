@@ -73,6 +73,84 @@ impl Supervisor {
                 .collect())
         })
     }
+    /// Blocks until unacknowledged mail matching the filters is waiting, then returns
+    /// it with text inline (bounded). `only_new` ignores mail that was already
+    /// waiting, for a caller deliberately deferring something it has seen.
+    pub async fn inbox_wait(
+        &self,
+        thread: &str,
+        from: &[String],
+        kinds: &[String],
+        only_new: bool,
+        timeout: std::time::Duration,
+    ) -> Result<Value> {
+        self.get_thread(thread)?;
+        let started = std::time::Instant::now();
+        let deadline = started + timeout;
+        let mut events = self.bus.subscribe();
+        let unread = || {
+            self.db.with(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT value FROM kv WHERE key GLOB ?1
+                       AND json_extract(value,'$.acknowledgedAt') IS NULL
+                     ORDER BY json_extract(value,'$.createdAt'), json_extract(value,'$.id') LIMIT 200",
+                )?;
+                let rows = stmt
+                    .query_map([format!("{}*", prefix(thread))], |r| r.get::<_, String>(0))?
+                    .filter_map(|raw| raw.ok().and_then(|r| serde_json::from_str::<Value>(&r).ok()))
+                    .collect::<Vec<_>>();
+                Ok(rows)
+            })
+        };
+        // By id, not timestamp: mail can share the wait's starting millisecond.
+        let seen: std::collections::HashSet<String> = if only_new {
+            unread()?
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_owned))
+                .collect()
+        } else {
+            Default::default()
+        };
+        loop {
+            let matching: Vec<Value> = unread()?
+                .into_iter()
+                .filter(|m| !m["id"].as_str().is_some_and(|id| seen.contains(id)))
+                .filter(|m| {
+                    from.is_empty()
+                        || m["fromThreadId"]
+                            .as_str()
+                            .is_some_and(|f| from.iter().any(|x| x == f))
+                })
+                .filter(|m| {
+                    kinds.is_empty()
+                        || kinds
+                            .iter()
+                            .any(|k| m["kind"].as_str().unwrap_or("status") == k)
+                })
+                .map(|mut m| {
+                    let text = m["text"].as_str().unwrap_or("").to_string();
+                    m["textLength"] = json!(text.chars().count());
+                    m["text"] = json!(super::agents::clip(&text, 4000));
+                    m
+                })
+                .collect();
+            if !matching.is_empty() || !super::agents::pause(&mut events, deadline).await {
+                let found = !matching.is_empty();
+                return Ok(json!({
+                    "threadId": thread,
+                    "timedOut": !found,
+                    "waitedSeconds": started.elapsed().as_secs(),
+                    "messages": matching,
+                    "next": if found {
+                        "Handle these, then acknowledge them with `remote-codex inbox ack ID...`; unacknowledged mail satisfies the next wait immediately."
+                    } else {
+                        "Nothing arrived. Wait again, or check `remote-codex thread tree` for delegates that are blocked or finished without writing."
+                    },
+                }));
+            }
+        }
+    }
+
     pub fn inbox_unread_count(&self, thread: &str) -> Result<i64> {
         self.db.with(|c| Ok(c.query_row("SELECT count(*) FROM kv WHERE key GLOB ?1 AND json_extract(value,'$.acknowledgedAt') IS NULL",[format!("{}*",prefix(thread))],|r|r.get(0))?))
     }

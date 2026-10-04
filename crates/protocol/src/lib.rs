@@ -230,6 +230,19 @@ pub struct ThreadDto {
     /// list responses, so a client can render "N agent threads" without a second call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descendant_count: Option<i64>,
+    /// Address unique among the open threads of one lineage (`reviewer`), so
+    /// agents need not juggle UUIDs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// Role template the thread was started from, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<String>,
+    /// Isolated git worktree this thread works in instead of the workspace root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
+    /// Set when the delegate was closed; it then holds no slot and no name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

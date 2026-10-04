@@ -1655,7 +1655,7 @@ impl AgentRuntime for AcpRuntime {
             .unwrap_or_else(|| input.prompt.clone());
         let include_context = needs_context && !input.hidden && !process.cli_env.is_empty();
         let prompt = if include_context {
-            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. `remote-codex skill` documents peer collaboration; read it before delegating. Messages default to a passive inbox, so check and acknowledge `remote-codex inbox` at checkpoints. Threads you create group under you and are bounded: 3 levels deep, 20 unfinished per root; both refusals mean stop and wait, not retry. Connection credentials are in the environment.]\n\n{prompt}")
+            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. `remote-codex skill` documents peer collaboration; read it before delegating. Messages default to a passive inbox, so check and acknowledge `remote-codex inbox` at checkpoints. To collect delegates' results, block with `remote-codex thread wait NAME...` or `remote-codex inbox wait` instead of polling or ending your turn. Threads you create group under you and are bounded: 3 levels deep, 20 open per root; close finished ones with `remote-codex thread close NAME`. Connection credentials are in the environment.]\n\n{prompt}")
         } else {
             prompt
         };

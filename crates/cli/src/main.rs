@@ -26,6 +26,11 @@ enum Commands {
     Transcript(threads::Transcript),
     /// Read and acknowledge persistent peer messages without starting turns.
     Inbox(threads::Inbox),
+    /// Shared task board for the threads of one lineage.
+    Task {
+        #[command(subcommand)]
+        command: threads::TaskCommand,
+    },
     /// Print the bundled thread interaction skill.
     Skill,
 
@@ -89,6 +94,10 @@ async fn main() -> Result<()> {
             let value = threads::Client::new(cli.connection)?
                 .thread(command)
                 .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Task { command } => {
+            let value = threads::Client::new(cli.connection)?.task(command).await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
         Commands::Inbox(args) => {

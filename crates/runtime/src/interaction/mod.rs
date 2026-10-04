@@ -1,6 +1,12 @@
 //! Provider-independent local thread operations. Uses the existing prompt queue and KV store.
+mod agents;
 mod inbox;
+mod tasks;
 mod transcript;
+pub use agents::{
+    clamp_wait, create_worktree, list_roles, load_role, remove_worktree, AgentOptions, RoleTemplate,
+};
+pub(crate) use agents::{stage_role, take_role};
 pub use transcript::TranscriptQuery;
 
 use crate::Supervisor;
@@ -88,6 +94,13 @@ impl Supervisor {
         );
         if input.delivery != "inbox" {
             self.ensure_prompt_allowed(&thread)?;
+            // Prompting a closed delegate reopens it, so it must fit under the cap again.
+            if let (Some(_), Some(root)) = (&thread.closed_at, &thread.root_thread_id) {
+                ensure!(
+                    self.open_agent_threads(root)? < crate::service::MAX_OPEN_AGENT_THREADS,
+                    "this lineage is at its open-thread limit; close another delegate before reopening this one"
+                );
+            }
         }
         ensure!(input.delivery != "inbox" || !input.notify_on_complete, "passive inbox messages have no execution turn; use direct, queue or steer with notifyOnComplete");
         ensure!(
@@ -283,7 +296,7 @@ impl Supervisor {
             )?)
         })?;
         Ok(
-            json!({"threadId":id,"title":thread.title,"workspaceId":thread.workspace_id,"provider":thread.provider,"agentId":thread.agent_id,"model":thread.model,"reasoningEffort":thread.reasoning_effort,"status":thread.status,"activeTurnId":thread.active_turn_id,"updatedAt":thread.updated_at,"lastError":thread.last_error,"waitingForInput":!pending.is_empty(),"queuedCount":queued,"unreadMessageCount":self.inbox_unread_count(id)?}),
+            json!({"threadId":id,"name":thread.agent_name,"role":thread.agent_role,"parentThreadId":thread.parent_thread_id,"rootThreadId":thread.root_thread_id,"worktreePath":thread.worktree_path,"closedAt":thread.closed_at,"title":thread.title,"workspaceId":thread.workspace_id,"provider":thread.provider,"agentId":thread.agent_id,"model":thread.model,"reasoningEffort":thread.reasoning_effort,"status":thread.status,"activeTurnId":thread.active_turn_id,"updatedAt":thread.updated_at,"lastError":thread.last_error,"waitingForInput":!pending.is_empty(),"queuedCount":queued,"unreadMessageCount":self.inbox_unread_count(id)?}),
         )
     }
 
@@ -301,6 +314,9 @@ impl Supervisor {
                 };
                 if let Err(error) = state.recover_cli_notifications() {
                     tracing::warn!(%error,"CLI notification recovery failed");
+                }
+                if let Err(error) = state.fire_wakes().await {
+                    tracing::warn!(%error,"delegate wake failed");
                 }
                 let ids = state.db.with(|c| {
                     let mut stmt = c.prepare("SELECT DISTINCT p.thread_id FROM thread_pending_steers p JOIN threads t ON t.id=p.thread_id WHERE p.delivery='continuation' AND t.status!='running'")?;
@@ -380,6 +396,26 @@ pub(crate) fn bind_notification(conn: &Connection, pending_id: &str, turn_id: &s
     Ok(())
 }
 
+/// The last nonempty agent message of a turn: what the delegate said it did.
+pub(crate) fn closing_message(
+    conn: &Connection,
+    thread: &str,
+    turn: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(item_json,'$.text') FROM thread_history_items
+             WHERE thread_id=?1 AND turn_id=?2
+               AND json_extract(item_json,'$.kind')='agentMessage'
+               AND trim(coalesce(json_extract(item_json,'$.text'),'')) <> ''
+             ORDER BY created_at DESC LIMIT 1",
+            params![thread, turn],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 pub(crate) fn finish_notification(
     conn: &Connection,
     thread: &str,
@@ -410,18 +446,7 @@ pub(crate) fn finish_notification(
             // Carry the delegate's own closing message instead of only pointing at it.
             // A bare "it ended" forced the caller into a second transcript call and
             // prose-parsing before it could act on anything.
-            let reply: Option<String> = conn
-                .query_row(
-                    "SELECT json_extract(item_json,'$.text') FROM thread_history_items
-                     WHERE thread_id=?1 AND turn_id=?2
-                       AND json_extract(item_json,'$.kind')='agentMessage'
-                       AND trim(coalesce(json_extract(item_json,'$.text'),'')) <> ''
-                     ORDER BY created_at DESC LIMIT 1",
-                    params![thread, turn],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
+            let reply = closing_message(conn, thread, turn)?;
             let summary = match reply.as_deref() {
                 // Bounded: the notification lands in a context window, and a delegate
                 // that wrote an essay should not evict the caller's own work.
