@@ -225,7 +225,8 @@ Claims are atomic, so delegates may self-serve with `task claim` without collidi
 result, and mails the owners of tasks it unblocks. A task with unfinished `--after`
 dependencies cannot be claimed. A delegate given a board should loop: `task claim
 --wait`, do it, `task done --result`, and repeat until the response has `finished:
-true`. Do **not** stop at a plain `claimed: null` with `finished: false` - that means
+true` (nothing left you could claim; `boardComplete` says whether every task is
+done or others still hold some). Do **not** stop at a plain `claimed: null` with `finished: false` - that means
 work is only blocked on tasks in progress, and a worker that quits there leaves the
 rest to one peer. Keep results short and point at files or commits for anything long.
 

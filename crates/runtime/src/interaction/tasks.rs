@@ -329,9 +329,15 @@ impl Supervisor {
                 } else {
                     (false, "Pending tasks are blocked on work in progress. Use `task claim --wait` to block until one becomes ready.")
                 };
-                Ok(
-                    json!({"claimed": null, "finished": finished, "reason": reason, "tasks": counts}),
-                )
+                // `finished`: nothing left this worker could ever claim, so stop.
+                // `boardComplete`: no task anywhere is still pending or in progress.
+                Ok(json!({
+                    "claimed": null,
+                    "finished": finished,
+                    "boardComplete": pending == 0 && running == 0,
+                    "reason": reason,
+                    "tasks": counts,
+                }))
             }
         }
     }

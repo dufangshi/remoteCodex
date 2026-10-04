@@ -95,6 +95,9 @@ async fn main() -> Result<()> {
                 .thread(command)
                 .await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
+            if value["failed"].as_array().is_some_and(|f| !f.is_empty()) {
+                std::process::exit(1);
+            }
         }
         Commands::Task { command } => {
             let value = threads::Client::new(cli.connection)?.task(command).await?;

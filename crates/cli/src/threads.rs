@@ -311,10 +311,9 @@ impl Client {
                     };
                     match result { Ok(v)=>closed.push(v), Err(e)=>failed.push(json!({"thread":id,"error":e.to_string()})) }
                 }
-                // Partial failure must fail the process, or `&&` chains treat a refusal as success.
-                let value=json!({"closed":closed,"failed":failed});
-                ensure!(failed.is_empty(),"{}",serde_json::to_string_pretty(&value)?);
-                Ok(value)
+                // The caller exits nonzero when `failed` is nonempty, so `&&` chains do
+                // not treat a refusal as success; stdout stays plain JSON either way.
+                Ok(json!({"closed":closed,"failed":failed}))
             }
             ThreadCommand::Roles=>self.request(json!({"operation":"roles","fromThreadId":self.from})).await,
             ThreadCommand::Create{workspace,title,provider,agent,model,reasoning_effort,approval_mode,name,role,worktree,worktree_branch,body}=>{

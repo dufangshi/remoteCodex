@@ -634,6 +634,7 @@ async fn claim_wait_holds_a_worker_across_a_dependency_barrier() {
         .await
         .unwrap();
     assert_eq!(done["finished"], true, "{done}");
+    assert_eq!(done["boardComplete"], true);
     assert_eq!(done["timedOut"], false);
 }
 
