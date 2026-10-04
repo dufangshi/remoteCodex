@@ -128,6 +128,11 @@ pub(crate) async fn command(
             ),
             "taskList" => state.task_list(caller()?, all),
             "taskShow" => state.task_show(caller()?, number()?),
+            "taskClaim" if input["wait"] == true => {
+                state
+                    .task_claim_wait(caller()?, input["number"].as_i64(), wait)
+                    .await
+            }
             "taskClaim" => state.task_claim(caller()?, input["number"].as_i64()),
             "taskDone" => state.task_done(
                 caller()?,

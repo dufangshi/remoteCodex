@@ -557,3 +557,119 @@ async fn worktree_delegates_run_in_their_own_checkout() {
     assert_eq!(closed["worktreeRemoved"], true);
     assert!(!path.exists());
 }
+
+#[tokio::test]
+async fn an_unanswered_question_blocks_a_wait_until_it_is_answered() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let lead = s.create_thread(input(&ws, None)).await.unwrap().id;
+    let asker = named(&s, &ws, &lead, "asker").await;
+    // Hold `asker` in a running turn so it is otherwise unsettled.
+    s.db.with(|c| {
+        c.execute(
+            "INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES('t-run',?1,'inProgress',1)",
+            [&asker],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let receipt = s
+        .send_to_thread(&lead, mail(&asker, "inbox", "question", "Which ellipsis?"))
+        .unwrap();
+    let waited = s
+        .wait_threads(&[asker.clone()], false, Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert_eq!(waited["blocked"], true, "{waited}");
+    assert!(waited["threads"][0]["waitingOn"][0]
+        .as_str()
+        .unwrap()
+        .contains("Which ellipsis?"));
+
+    // A correlated reply resolves it, without the parent having to acknowledge.
+    let mut reply = mail(&lead, "inbox", "status", "Use U+2026");
+    reply.in_reply_to = receipt["messageId"].as_str().map(str::to_owned);
+    s.send_to_thread(&asker, reply).unwrap();
+    let after = s
+        .wait_threads(&[asker.clone()], false, Duration::from_millis(300))
+        .await
+        .unwrap();
+    assert_eq!(after["blocked"], false, "{after}");
+    assert_eq!(after["threads"][0]["state"], "running");
+}
+
+#[tokio::test]
+async fn claim_wait_holds_a_worker_across_a_dependency_barrier() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let lead = s.create_thread(input(&ws, None)).await.unwrap().id;
+    let a = named(&s, &ws, &lead, "a").await;
+    let b = named(&s, &ws, &lead, "b").await;
+    s.task_add(&lead, "base", None, &[], None).unwrap();
+    s.task_add(&lead, "dependent", None, &[1], None).unwrap();
+    assert_eq!(s.task_claim(&a, None).unwrap()["claimed"]["number"], 1);
+
+    let blocked = s.task_claim(&b, None).unwrap();
+    assert_eq!(blocked["claimed"], serde_json::Value::Null);
+    assert_eq!(
+        blocked["finished"], false,
+        "work is blocked, not finished: {blocked}"
+    );
+
+    let finisher = s.clone();
+    let a2 = a.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        finisher.task_done(&a2, 1, Some("ok"), false).unwrap();
+    });
+    let got = s
+        .task_claim_wait(&b, None, Duration::from_secs(10))
+        .await
+        .unwrap();
+    assert_eq!(got["claimed"]["number"], 2, "{got}");
+
+    s.task_done(&b, 2, None, false).unwrap();
+    let done = s
+        .task_claim_wait(&b, None, Duration::from_secs(10))
+        .await
+        .unwrap();
+    assert_eq!(done["finished"], true, "{done}");
+    assert_eq!(done["timedOut"], false);
+}
+
+#[test]
+fn a_reused_name_gets_a_fresh_default_worktree_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success())
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+    ]);
+    let first = remote_codex_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
+    assert_eq!(first.branch, "agent/w");
+    remote_codex_runtime::interaction::remove_worktree(&repo, &first.path).unwrap();
+    let second = remote_codex_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
+    assert_eq!(
+        second.branch, "agent/w-2",
+        "must not silently reuse stale agent/w"
+    );
+}

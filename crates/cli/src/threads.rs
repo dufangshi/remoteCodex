@@ -303,14 +303,18 @@ impl Client {
                 self.request(json!({"operation":"tree","rootThreadId":root,"all":all,"fromThreadId":self.from})).await
             }
             ThreadCommand::Close{ids,remove_worktree}=>{
-                let mut closed=Vec::new();
+                let (mut closed,mut failed)=(Vec::new(),Vec::new());
                 for id in &ids {
-                    closed.push(match self.id(id).await {
-                        Ok(id)=>self.request(json!({"operation":"close","threadId":id,"removeWorktree":remove_worktree,"fromThreadId":self.from})).await.unwrap_or_else(|e|json!({"thread":id,"error":e.to_string()})),
-                        Err(e)=>json!({"thread":id,"error":e.to_string()}),
-                    });
+                    let result=match self.id(id).await {
+                        Ok(resolved)=>self.request(json!({"operation":"close","threadId":resolved,"removeWorktree":remove_worktree,"fromThreadId":self.from})).await,
+                        Err(e)=>Err(e),
+                    };
+                    match result { Ok(v)=>closed.push(v), Err(e)=>failed.push(json!({"thread":id,"error":e.to_string()})) }
                 }
-                Ok(json!({"closed":closed}))
+                // Partial failure must fail the process, or `&&` chains treat a refusal as success.
+                let value=json!({"closed":closed,"failed":failed});
+                ensure!(failed.is_empty(),"{}",serde_json::to_string_pretty(&value)?);
+                Ok(value)
             }
             ThreadCommand::Roles=>self.request(json!({"operation":"roles","fromThreadId":self.from})).await,
             ThreadCommand::Create{workspace,title,provider,agent,model,reasoning_effort,approval_mode,name,role,worktree,worktree_branch,body}=>{
@@ -452,7 +456,17 @@ pub enum TaskCommand {
     /// One task with its detail and result.
     Show { number: i64 },
     /// Take a task: the given one, or the lowest ready one assigned to you or nobody.
-    Claim { number: Option<i64> },
+    /// `claimed: null` with `finished: false` means work is only blocked; use --wait.
+    Claim {
+        number: Option<i64>,
+        /// Block while pending tasks are blocked on in-progress work, until one
+        /// becomes ready or the board is finished.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait (max 1800). Keep it below your shell tool's own timeout.
+        #[arg(long, default_value_t = 300, requires = "wait")]
+        timeout: u64,
+    },
     /// Finish a task you own or created. Its creator gets the result as mail, and
     /// dependents become ready.
     Done {
@@ -503,7 +517,16 @@ impl Client {
             }
             TaskCommand::List { all } => json!({"operation":"taskList","all":all}),
             TaskCommand::Show { number } => json!({"operation":"taskShow","number":number}),
-            TaskCommand::Claim { number } => json!({"operation":"taskClaim","number":number}),
+            TaskCommand::Claim {
+                number,
+                wait,
+                timeout,
+            } => {
+                let input = json!({"operation":"taskClaim","number":number,"wait":wait,"timeoutSeconds":timeout,"fromThreadId":from});
+                return self
+                    .request_for(input, if wait { timeout } else { 0 })
+                    .await;
+            }
             TaskCommand::Done {
                 number,
                 result,

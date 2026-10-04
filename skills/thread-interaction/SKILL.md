@@ -24,20 +24,29 @@ remote-codex thread close tests docs              # 4. free their slots once col
 ```
 
 `thread wait` returns each delegate's state and its **closing message** inline, so you
-usually need no transcript call. It returns early if a delegate becomes `blocked` on
-an approval or question - deal with that, then wait again. Use `--any` to handle
-results one at a time as they land. Waiting costs nothing while it blocks, unlike
-polling, and unlike ending your turn it keeps you able to act on the result.
+usually need no transcript call. It returns early with `blocked: true` when a delegate
+waits on an approval, or has mailed you a `--kind question` that nobody has answered
+(`--in-reply-to`) or acknowledged - `waitingOn` names the message; answer it, then wait
+again. `--any` returns as soon as one settles (`allSettled` tells you whether the rest
+did), so you can handle results as they land. `--any` and `--wake` cannot be combined.
 
-Pick the timeout below your own shell tool's timeout and simply wait again on
-`timedOut: true`. Run `remote-codex thread tree` any time for the whole picture:
-every delegate's state, unread mail, current task and worktree.
+Choose by how long you expect to wait:
 
-If you have nothing to do until delegates finish **and** your turn should end (for
-example, a person is waiting on your reply), hand off instead of blocking:
-`remote-codex thread wait tests docs --wake` queues exactly one turn on you when they
-all settle, carrying their closing messages. That is the only way delegates wake you,
-and only because you asked.
+- **Short (about a minute or less), or you will act immediately:** block with
+  `thread wait`. Your shell tool may return before the wait does (Codex yields about
+  every 30 s); just keep waiting on the same command. Each of those returns costs you
+  a model call, so a long blocking wait is not free.
+- **Long, and nothing else to do:** `remote-codex thread wait tests docs --wake`, then
+  end your turn saying what you are waiting for. Exactly one turn is queued on you when
+  they all settle (or one blocks), carrying their closing messages; it costs nothing
+  while you wait. That is the only way delegates wake you, and only because you asked.
+
+Run `remote-codex thread tree` any time for the whole picture: every delegate's state,
+unread mail, current task and worktree.
+
+A settled delegate finished *executing*; that is not proof the work is right. Ask
+every delegate to end with evidence - files changed, commit hash on its branch, the
+exact test command and its result - and check it before you merge or close.
 
 ## Identity and discovery
 
@@ -82,17 +91,21 @@ a handful of concurrent delegates (3-5) over a large burst.
 - `--name reviewer` gives a delegate an address unique among the open threads of your
   lineage; any command that takes a thread id accepts it. Names match
   `[a-z][a-z0-9_-]{0,31}`.
-- `remote-codex thread close NAME` frees its slot and name. History stays readable, and
-  prompting it again reopens it. Only an ancestor (or the thread itself) can close it,
-  and not while it is running or has queued work.
+- `remote-codex thread close NAME...` frees each slot and name. History stays readable,
+  and prompting it again reopens it. Only an ancestor (or the thread itself) can close
+  it, and not while it is running or has queued work. The command exits nonzero if any
+  target fails; `failed` lists which and why. After a name is reused, refer to the old,
+  closed thread by its UUID.
 - `--role ROLE` starts from `.remote-codex/agents/ROLE.md` (workspace, then
   `~/.remote-codex/agents/`). Front matter `model`, `effort`, `agent` become defaults
   you can still override; the body is prepended to the delegate's first prompt.
   `remote-codex thread roles` lists them.
 - `--worktree` runs the delegate in its own git worktree, `../REPO.worktrees/NAME` on
   branch `agent/NAME` (or `--worktree-branch`), checked out from **committed** HEAD -
-  uncommitted changes in your checkout are not in it. Tell the delegate to commit on
-  its branch; you merge it. `thread close NAME --remove-worktree` removes the checkout
+  uncommitted changes in your checkout are not in it, so commit what a delegate builds
+  on first. If `agent/NAME` already exists from an earlier delegate, a fresh
+  `agent/NAME-2` is used; pass `--worktree-branch` to continue an existing branch.
+  Tell the delegate to commit on its branch; you merge it. `thread close NAME --remove-worktree` removes the checkout
   and refuses if it has uncommitted changes. Use worktrees for parallel edits that
   could touch the same files; skip them for read-only work.
 
@@ -200,6 +213,7 @@ remote-codex task add 'Design the schema' --detail-file /tmp/schema.txt
 remote-codex task add 'Write the migration' --after 1 --assign migrator
 remote-codex task list            # open tasks: owner, blockedBy, ready
 remote-codex task claim           # take the lowest ready task for you or nobody
+remote-codex task claim --wait    # ...or block until one is ready / the board is done
 remote-codex task show 2
 remote-codex task done 2 --result 'Migration in db/0042.sql; tests pass'
 remote-codex task done 3 --failed --result 'Blocked: no staging credentials'
@@ -209,9 +223,11 @@ remote-codex task release 2       # give it back
 Claims are atomic, so delegates may self-serve with `task claim` without colliding.
 `--assign` sends the assignee passive mail; finishing a task mails its creator the
 result, and mails the owners of tasks it unblocks. A task with unfinished `--after`
-dependencies cannot be claimed. A delegate given a board should loop: claim, do, `task
-done --result`, claim again, and stop when `claim` returns `claimed: null`. Keep
-results short and point at files or commits for anything long.
+dependencies cannot be claimed. A delegate given a board should loop: `task claim
+--wait`, do it, `task done --result`, and repeat until the response has `finished:
+true`. Do **not** stop at a plain `claimed: null` with `finished: false` - that means
+work is only blocked on tasks in progress, and a worker that quits there leaves the
+rest to one peer. Keep results short and point at files or commits for anything long.
 
 ## Choose the delivery semantics explicitly
 

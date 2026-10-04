@@ -200,19 +200,35 @@ pub fn create_worktree(workspace: &Path, slug: &str, branch: Option<&str>) -> Re
         "worktree path {} already exists; pick another --name or remove it",
         path.display()
     );
-    let branch = branch.map_or_else(|| format!("agent/{slug}"), str::to_owned);
+    let exists = |b: &str| {
+        git(
+            &top,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{b}"),
+            ],
+        )
+        .is_ok()
+    };
+    // A default branch left by an earlier delegate of the same name holds stale
+    // work; start fresh rather than silently checking it out. An explicit branch
+    // is checked out as is.
+    let branch = match branch {
+        Some(b) => b.to_owned(),
+        None => {
+            let mut candidate = format!("agent/{slug}");
+            let mut n = 2;
+            while exists(&candidate) {
+                candidate = format!("agent/{slug}-{n}");
+                n += 1;
+            }
+            candidate
+        }
+    };
     let target = path.to_string_lossy().into_owned();
-    if git(
-        &top,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
-        ],
-    )
-    .is_ok()
-    {
+    if exists(&branch) {
         git(&top, &["worktree", "add", &target, &branch])?;
     } else {
         git(&top, &["worktree", "add", "-b", &branch, &target, "HEAD"])?;
@@ -348,9 +364,10 @@ impl Supervisor {
     }
 
     /// One thread's coordination state. `queued` and `running` are unsettled;
-    /// `blocked` means a running turn waits on an approval or question.
+    /// `blocked` means a running turn waits on an approval, or on an answer to a
+    /// `question` it mailed that nobody has acknowledged or replied to.
     async fn member_state(&self, id: &str) -> Result<Value> {
-        let (row, last) = self.db.with(|c| {
+        let (row, last, questions) = self.db.with(|c| {
             let row: (String, Option<String>, Option<String>, String, i64, i64, String) = c.query_row(
                 "SELECT COALESCE(t.status,'idle'), t.agent_name, t.closed_at, t.title,
                         (SELECT COUNT(*) FROM thread_turns WHERE thread_id=t.id AND status='inProgress'),
@@ -374,7 +391,28 @@ impl Supervisor {
                 }
                 None => None,
             };
-            Ok((row, last))
+            // A passive question is invisible to the harness, but it is exactly the
+            // moment a waiting parent must act, so surface it as blocking.
+            let mut stmt = c.prepare(
+                "SELECT json_extract(q.value,'$.id'), COALESCE(json_extract(q.value,'$.subject'),''), json_extract(q.value,'$.threadId')
+                 FROM kv q WHERE q.key GLOB 'cli:inbox:*'
+                   AND json_extract(q.value,'$.fromThreadId')=?1
+                   AND json_extract(q.value,'$.kind')='question'
+                   AND json_extract(q.value,'$.acknowledgedAt') IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM kv r WHERE r.key GLOB 'cli:inbox:' || ?1 || ':*'
+                                     AND json_extract(r.value,'$.inReplyTo')=json_extract(q.value,'$.id'))",
+            )?;
+            let questions = stmt
+                .query_map([id], |r| {
+                    Ok(format!(
+                        "question {} to {}: {}",
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(1)?
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok((row, last, questions))
         })?;
         let (status, name, closed, title, active, queued, provider) = row;
         let mut state = if closed.is_some() {
@@ -397,6 +435,7 @@ impl Supervisor {
                     .map(|r| r.title)
                     .collect();
             }
+            waiting_on.extend(questions);
             if !waiting_on.is_empty() {
                 state = "blocked".into();
             }
@@ -446,11 +485,14 @@ impl Supervisor {
             if done || blocked || !pause(&mut events, deadline).await {
                 return Ok(json!({
                     "done": done,
+                    "allSettled": settled == ids.len(),
                     "blocked": blocked,
                     "timedOut": !done && !blocked,
                     "waitedSeconds": started.elapsed().as_secs(),
                     "threads": states,
-                    "next": if done || blocked {
+                    "next": if blocked {
+                        "A delegate is blocked: answer its question (reply with --in-reply-to, or acknowledge it) or resolve its approval, then wait again."
+                    } else if done {
                         "Read each settled thread's closingMessage; check artifacts before acting on them. Close delegates you no longer need with `remote-codex thread close NAME`."
                     } else {
                         "Still running. Wait again, or continue other work and check `remote-codex thread tree`."
@@ -549,7 +591,7 @@ impl Supervisor {
             if let Some(path) = &thread.worktree_path {
                 let workspace = self.get_workspace(&thread.workspace_id)?;
                 remove_worktree(Path::new(&workspace.abs_path), Path::new(path)).map_err(|e| {
-                    anyhow!("{e}. Commit or discard the worktree's changes (or merge its branch) first; the thread was not closed")
+                    anyhow!("{e}. Commit or discard the worktree's changes first; the thread was not closed")
                 })?;
                 removed = true;
             }

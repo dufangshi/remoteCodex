@@ -311,15 +311,56 @@ impl Supervisor {
         match claimed {
             Some(n) => Ok(json!({"claimed": self.db.with(|c| task_json(c, &root, n, true))?})),
             None => {
-                let open = self.task_list(caller, false)?;
-                let waiting = open["tasks"]
-                    .as_array()
-                    .map_or(0, |t| t.iter().filter(|t| t["status"] == "pending").count());
-                Ok(json!({"claimed": null, "reason": if waiting > 0 {
-                    "Every pending task is blocked or assigned to someone else."
+                let counts = self.task_counts(&root)?;
+                let count = |k: &str| counts[k].as_i64().unwrap_or(0);
+                let (pending, running) = (count("pending"), count("in_progress"));
+                // `claimed: null` alone reads as "board finished"; say which it is,
+                // because a worker that stops while work is merely blocked idles
+                // through the rest of the run.
+                let (finished, reason) = if pending == 0 && running == 0 {
+                    (true, "Board finished: no pending or in-progress tasks.")
+                } else if pending == 0 {
+                    (
+                        true,
+                        "Nothing left to claim; the remaining tasks are in progress under others.",
+                    )
+                } else if running == 0 {
+                    (true, "Pending tasks remain but nothing in progress can unblock them (a dependency failed or they are assigned elsewhere).")
                 } else {
-                    "No pending tasks."
-                }, "pendingTasks": waiting}))
+                    (false, "Pending tasks are blocked on work in progress. Use `task claim --wait` to block until one becomes ready.")
+                };
+                Ok(
+                    json!({"claimed": null, "finished": finished, "reason": reason, "tasks": counts}),
+                )
+            }
+        }
+    }
+
+    /// `task claim` that blocks while pending work is only blocked on in-progress
+    /// tasks, so a worker stays available across dependency barriers.
+    pub async fn task_claim_wait(
+        &self,
+        caller: &str,
+        number: Option<i64>,
+        timeout: std::time::Duration,
+    ) -> Result<Value> {
+        let started = std::time::Instant::now();
+        let deadline = started + timeout;
+        let mut events = self.bus.subscribe();
+        loop {
+            let attempt = match self.task_claim(caller, number) {
+                // A named task that is still waiting on dependencies is worth waiting for.
+                Err(e) if number.is_some() && e.to_string().contains("is waiting on") => {
+                    json!({"claimed": null, "finished": false, "reason": e.to_string()})
+                }
+                other => other?,
+            };
+            let ready = !attempt["claimed"].is_null() || attempt["finished"] == true;
+            if ready || !super::agents::pause(&mut events, deadline).await {
+                let mut attempt = attempt;
+                attempt["timedOut"] = json!(!ready);
+                attempt["waitedSeconds"] = json!(started.elapsed().as_secs());
+                return Ok(attempt);
             }
         }
     }
