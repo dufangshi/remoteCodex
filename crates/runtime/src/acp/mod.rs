@@ -11,6 +11,7 @@ mod elicitation;
 mod grok;
 pub(crate) use grok::billing_usage as grok_billing_usage;
 mod mapper;
+pub(crate) use mapper::TurnMapper;
 mod modes;
 mod prompt;
 pub(crate) mod rpc;

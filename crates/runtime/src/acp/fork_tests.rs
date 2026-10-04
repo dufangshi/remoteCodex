@@ -92,7 +92,28 @@ async fn codex_fork_releases_writer_before_independent_load() {
         assert_eq!(params["sandbox"], "read-only");
         assert_eq!(params["approvalPolicy"], "on-request");
         assert_eq!(params["deferGoalContinuation"], true);
-        loaded.process.shutdown().await.unwrap();
+        let child_process = loaded.process.clone();
+        runtime
+            .inner
+            .sessions
+            .lock()
+            .await
+            .insert(fork.provider_session_id.clone(), loaded);
+        runtime
+            .release_session(&fork.provider_session_id)
+            .await
+            .unwrap();
+        assert!(!child_process.connection_open().await);
+        assert!(
+            source_process.connection_open().await,
+            "deleting a child must preserve its parent's process"
+        );
+        assert!(!runtime
+            .inner
+            .sessions
+            .lock()
+            .await
+            .contains_key(&fork.provider_session_id));
     }
     source_process.shutdown().await.unwrap();
 }

@@ -86,6 +86,10 @@ pub enum ThreadCommand {
     Status {
         id: String,
     },
+    /// Delete your own finished or unused direct child. Running/queued children and children with descendants are refused.
+    Delete {
+        id: String,
+    },
     Backends,
     Models {
         #[arg(long, default_value = "acp")]
@@ -287,6 +291,7 @@ impl Client {
             ThreadCommand::SelfInfo=>self.request(json!({"operation":"status","threadId":self.from.as_ref().context("Current thread is unknown; use --from ID")?})).await,
             ThreadCommand::List{workspace,limit,all,group}=>self.request(json!({"operation":"list","workspaceId":workspace,"limit":limit,"includeAgentThreads":all,"groupId":group})).await,
             ThreadCommand::Show{id}|ThreadCommand::Status{id}=>self.request(json!({"operation":"status","threadId":self.id(&id).await?})).await,
+            ThreadCommand::Delete{id}=>self.request(json!({"operation":"delete","threadId":self.id(&id).await?,"fromThreadId":self.from})).await,
             ThreadCommand::Backends=>self.request(json!({"operation":"backends"})).await,
             ThreadCommand::Models{provider,agent}=>self.request(json!({"operation":"models","provider":provider,"agentId":agent,"fromThreadId":self.from})).await,
             ThreadCommand::Send{id,body}=>self.send(&self.id(&id).await?,&body,"inbox").await,

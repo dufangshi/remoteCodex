@@ -1,6 +1,6 @@
 use super::http::{map_err, ApiErr};
 use anyhow::Context;
-use axum::{extract::State, Json};
+use axum::{extract::State, Extension, Json};
 use remote_codex_protocol::{CreateThreadInput, Provider};
 use remote_codex_runtime::{
     interaction::{clamp_wait, list_roles, load_role, AgentOptions, SendInput, TranscriptQuery},
@@ -35,13 +35,17 @@ fn caller_cwd(state: &Supervisor, from: Option<&str>) -> anyhow::Result<String> 
 
 pub(crate) async fn command(
     State(state): State<Arc<Supervisor>>,
+    Extension(caller): Extension<crate::auth::CliCaller>,
     Json(input): Json<Value>,
 ) -> Result<Json<Value>, ApiErr> {
-    async fn run(state: &Supervisor, input: Value) -> anyhow::Result<Value> {
+    async fn run(
+        state: &Supervisor,
+        input: Value,
+        caller: Option<String>,
+    ) -> anyhow::Result<Value> {
         let id = input.get("threadId").and_then(Value::as_str).unwrap_or("");
         let from = input["fromThreadId"].as_str();
-        let caller =
-            || from.context("this command needs the caller's thread identity; pass --from ID");
+        let me = || from.context("this command needs the caller's thread identity; pass --from ID");
         let number = || input["number"].as_i64().context("task number required");
         let all = input["all"] == true;
         let wait = clamp_wait(input["timeoutSeconds"].as_u64());
@@ -66,6 +70,18 @@ pub(crate) async fn command(
                 )
             }
             "show" | "status" => state.interaction_status(id).await,
+            "delete" => {
+                let caller = caller.ok_or_else(|| anyhow::anyhow!(
+                    "forbidden: deletion requires a managed thread credential; reconnect the parent session to obtain one"
+                ))?;
+                anyhow::ensure!(
+                    input["fromThreadId"]
+                        .as_str()
+                        .is_none_or(|from| from == caller),
+                    "forbidden: --from cannot override the authenticated parent for deletion"
+                );
+                state.delete_child_thread(&caller, id).await
+            }
             "send" => {
                 let body = serde_json::from_value::<SendInput>(input.clone())?;
                 let mut receipt = state.send_to_thread(id, body)?;
@@ -103,7 +119,20 @@ pub(crate) async fn command(
                 from.context("wake needs the caller's identity")?,
                 &strings(&input["threadIds"]),
             ),
-            "close" => state.close_agent_thread(from, id, input["removeWorktree"] == true),
+            "close" => {
+                // Like delete: a managed thread's own credential decides who is closing.
+                anyhow::ensure!(
+                    caller
+                        .as_deref()
+                        .is_none_or(|c| from.is_none_or(|f| f == c)),
+                    "forbidden: --from cannot override the authenticated caller for close"
+                );
+                state.close_agent_thread(
+                    caller.as_deref().or(from),
+                    id,
+                    input["removeWorktree"] == true,
+                )
+            }
             "roles" => Ok(list_roles(Path::new(&caller_cwd(state, from)?))),
             "inboxWait" => {
                 state
@@ -117,7 +146,7 @@ pub(crate) async fn command(
                     .await
             }
             "taskAdd" => state.task_add(
-                caller()?,
+                me()?,
                 input["title"].as_str().unwrap_or(""),
                 input["detail"].as_str(),
                 &input["after"]
@@ -126,28 +155,31 @@ pub(crate) async fn command(
                     .unwrap_or_default(),
                 input["assignThreadId"].as_str(),
             ),
-            "taskList" => state.task_list(caller()?, all),
-            "taskShow" => state.task_show(caller()?, number()?),
+            "taskList" => state.task_list(me()?, all),
+            "taskShow" => state.task_show(me()?, number()?),
             "taskClaim" if input["wait"] == true => {
                 state
-                    .task_claim_wait(caller()?, input["number"].as_i64(), wait)
+                    .task_claim_wait(me()?, input["number"].as_i64(), wait)
                     .await
             }
-            "taskClaim" => state.task_claim(caller()?, input["number"].as_i64()),
+            "taskClaim" => state.task_claim(me()?, input["number"].as_i64()),
             "taskDone" => state.task_done(
-                caller()?,
+                me()?,
                 number()?,
                 input["result"].as_str(),
                 input["failed"] == true,
             ),
-            "taskRelease" => state.task_release(caller()?, number()?),
+            "taskRelease" => state.task_release(me()?, number()?),
             "inbox" => state.inbox_list(id, &input),
             "inboxRead" => state.inbox_read(id, &input),
             "inboxAck" => state.inbox_ack(id, &input),
-            "transcript" => state.transcript(
-                id,
-                &serde_json::from_value::<TranscriptQuery>(input.clone())?,
-            ),
+            "transcript" => {
+                state.sync_claude_scheduled_history(id).await?;
+                state.transcript(
+                    id,
+                    &serde_json::from_value::<TranscriptQuery>(input.clone())?,
+                )
+            }
             "backends" => Ok(serde_json::to_value(state.backends())?),
             "models" => {
                 let provider = serde_json::from_value::<Provider>(
@@ -241,5 +273,5 @@ pub(crate) async fn command(
             _ => anyhow::bail!("unknown CLI operation"),
         }
     }
-    Ok(Json(run(&state, input).await.map_err(map_err)?))
+    Ok(Json(run(&state, input, caller.0).await.map_err(map_err)?))
 }

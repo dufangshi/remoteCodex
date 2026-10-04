@@ -111,6 +111,33 @@ a handful of concurrent delegates (3-5) over a large burst.
 
 Model IDs and effort options come from local discovery. Preserve explicitly requested models; do not invent an ID from a display name or silently substitute another model. Availability depends on the installed harness and working directory.
 
+## Clean up your own child threads
+
+`thread close` and `thread delete` both free a delegate's slot. Close keeps its
+history readable and lets you reopen it by prompting; delete removes its Remote Codex
+conversation for good. Close by default; delete when nothing about it is worth keeping.
+
+After recording the result you need, delete a finished direct child with:
+
+```bash
+remote-codex thread delete CHILD_THREAD_ID
+```
+
+The Supervisor verifies your managed credential and the stored parent relationship.
+You cannot delete yourself, a parent, sibling, another root, or a grandchild. `--from`
+does not change the authenticated parent. A machine connection file alone cannot
+authorize deletion; use your managed session, reconnecting it after a runtime upgrade
+if its credential predates this feature.
+
+Unused idle children may also be removed. Running/recovering children, active or
+queued turns, and children that still own descendants are refused. There is no force
+or recursive delete. Have each direct parent finish and clean up its own children
+first. Deletion removes the child's saved Remote Codex conversation/mailbox and
+releases its idle, independently owned harness process. Workspace files, branches,
+worktrees, native harness history, and results already delivered to your inbox are
+preserved. Save needed transcripts/artifacts before deleting; the Remote Codex
+conversation cannot be restored by the CLI.
+
 ## Always label a message
 
 Every send takes `--subject` (one line) and `--kind`. Use them. They are not
@@ -230,6 +257,14 @@ done or others still hold some). Do **not** stop at a plain `claimed: null` with
 work is only blocked on tasks in progress, and a worker that quits there leaves the
 rest to one peer. Keep results short and point at files or commits for anything long.
 
+A harness-native timer such as Claude `CronCreate` / `/loop` is a separate, explicit
+scheduled prompt, not a completion subscription. It can wake that native session
+while its harness process remains alive. Remote Codex recovers its finished reply
+and tool history and notifies open pages; intermediate scheduled output is backfilled
+after completion. Native timers are session-only and do not survive harness exit or
+Supervisor restart. Do not claim you configured a watch merely because you wrote
+that one will wake you: verify the scheduling tool's successful result and job ID.
+
 ## Choose the delivery semantics explicitly
 
 | Intent | Delivery | Behavior |
@@ -344,6 +379,6 @@ A selected turn defaults to a paginated item directory (tools, reasoning, comman
 
 Managed sessions receive `REMOTE_CODEX_THREAD_ID`, `REMOTE_CODEX_URL`, and credentials. Use them as supplied. Do not dump environment variables, print tokens, or send credentials in a prompt. `--from` overrides attribution for a known remoteCodex caller; it does not grant permission.
 
-A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. This is a machine-scoped local credential, not per-thread isolation.
+A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. Managed credentials identify the parent for restricted child deletion; the machine connection file cannot grant that right. Agents sharing a user account and workspace still do not have filesystem isolation.
 
 Only loopback HTTP is accepted; redirects are refused. Run on the target device. A missing connection is a configuration issue, not a reason to copy credentials into a prompt. After Supervisor restart use the current connection file if inherited credentials are stale. Invalid model, unknown thread, missing caller, and unsupported steering need corrected input, not repeated dispatch. `idle` is not task success: inspect errors, pending input, unread mail, and the relevant result.

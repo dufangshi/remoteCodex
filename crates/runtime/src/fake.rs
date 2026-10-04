@@ -177,10 +177,23 @@ impl AgentRuntime for FakeRuntime {
 
     async fn list_models(
         &self,
-        _agent_id: Option<&str>,
+        agent_id: Option<&str>,
         _cwd: Option<&str>,
     ) -> Result<Vec<ModelOptionDto>> {
-        Ok(Self::models())
+        let mut models = Self::models();
+        if self.provider == Provider::Claude || agent_id == Some("claude") {
+            let mut opus = models[0].clone();
+            opus.id = "claude-opus-5-5".into();
+            opus.model = opus.id.clone();
+            opus.display_name = "Opus 5.5".into();
+            let mut sonnet = opus.clone();
+            sonnet.id = "claude-sonnet-5-5".into();
+            sonnet.model = sonnet.id.clone();
+            sonnet.display_name = "Sonnet 5.5".into();
+            models.retain(|model| !model.id.starts_with("gpt"));
+            models.extend([opus, sonnet]);
+        }
+        Ok(models)
     }
 
     async fn list_agents(&self) -> Result<Vec<ModelOptionDto>> {

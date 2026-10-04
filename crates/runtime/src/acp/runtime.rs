@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use async_trait::async_trait;
 use remote_codex_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
@@ -1660,6 +1660,16 @@ impl AgentRuntime for AcpRuntime {
             prompt
         };
         let prompt_blocks = build_prompt_blocks(&prompt, &cwd, image_capable, &input.images)?;
+        if !input.hidden {
+            // Settings may have reloaded the process; identify the actual writer
+            // selected for this turn, rather than the one before preflight.
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.harness.ready".into(),
+                thread_id: input.thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({"turnId":input.turn_id,"instanceId":process.id}),
+            });
+        }
         let mut updates = self.inner.updates.subscribe();
         {
             let mut sessions = self.inner.sessions.lock().await;
@@ -2382,6 +2392,57 @@ impl AgentRuntime for AcpRuntime {
                 })
             })
             .unwrap_or(false)
+    }
+
+    async fn release_session(&self, session_id: &str) -> Result<()> {
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let mut sessions = self.inner.sessions.lock().await;
+        let key = sessions
+            .iter()
+            .find(|(key, live)| {
+                session_ids_match(key, session_id)
+                    || session_ids_match(&live.session_id, session_id)
+            })
+            .map(|(key, _)| key.clone());
+        let Some(key) = key else {
+            return Ok(());
+        };
+        let live = &sessions[&key];
+        ensure!(
+            live.active.is_none(),
+            "conflict: child harness is still running"
+        );
+        let _operation = live
+            .operation
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| anyhow!("conflict: child harness is busy"))?;
+        ensure!(
+            !sessions
+                .iter()
+                .any(|(other, sibling)| other != &key
+                    && Arc::ptr_eq(&sibling.process, &live.process)),
+            "conflict: child shares a harness process; reconnect it independently before deletion"
+        );
+        live.process.shutdown().await?;
+        sessions.remove(&key);
+        Ok(())
+    }
+
+    async fn session_instance_id(&self, session_id: &str) -> Option<String> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .iter()
+            .find(|(key, live)| {
+                session_ids_match(key, session_id)
+                    || session_ids_match(&live.session_id, session_id)
+            })?
+            .1;
+        if live.process.connection_open().await {
+            Some(live.process.id.clone())
+        } else {
+            None
+        }
     }
 }
 

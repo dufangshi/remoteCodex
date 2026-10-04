@@ -309,12 +309,12 @@ export function useWorkbenchNavigation(
     return () => { alive = false; controller.abort(); };
   }, [notificationKey, notificationsOpened, relay]);
   const notifications = rawNotifications.map(n => ({ ...n, ...notificationDetails[n.id] }));
-  return {
-    navigationReady,
-    threads: items,
-    workspacePath: tabContext.detail?.workspace.absPath ?? '',
-    workspaceThreads: tabContext.threads
-      .filter(thread => thread.workspaceId === tabContext.detail?.thread.workspaceId)
+  const workspaceRoots = new Set(tabContext.threads
+    .filter(thread => thread.workspaceId === tabContext.detail?.thread.workspaceId)
+    .map(thread => thread.rootThreadId ?? thread.id));
+  if (tabContext.detail) workspaceRoots.add(tabContext.detail.thread.rootThreadId ?? tabContext.detail.thread.id);
+  const workspaceThreads = tabContext.threads
+      .filter(thread => workspaceRoots.has(thread.rootThreadId ?? thread.id))
       .slice()
       .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id))
       .map(thread => {
@@ -327,7 +327,23 @@ export function useWorkbenchNavigation(
           ...(thread.rootThreadId ? {rootKey: `${tabContext.deviceId ?? 'local'}:${thread.rootThreadId}`} : {}),
           status: workbenchThreadStatus(thread.id === tabContext.detail?.thread.id ? tabContext.detail.thread : thread, reference?.readCompletedAt),
         };
-      }),
+      });
+  // Recent navigation persists visits, not a complete family. Fill each visible
+  // group from the same current workspace snapshot used by the top tabs.
+  const workspaceByKey = new Map(workspaceThreads.map(thread => [thread.key, thread]));
+  const roots = new Set(items.map(thread => thread.rootKey ?? thread.key));
+  const sidebarThreads = items.map(thread => ({...thread, ...workspaceByKey.get(thread.key)}));
+  const seen = new Set(sidebarThreads.map(thread => thread.key));
+  for (const thread of workspaceThreads) {
+    if (!seen.has(thread.key) && roots.has(thread.rootKey ?? thread.key)) {
+      sidebarThreads.push(thread); seen.add(thread.key);
+    }
+  }
+  return {
+    navigationReady,
+    threads: sidebarThreads,
+    workspacePath: tabContext.detail?.workspace.absPath ?? '',
+    workspaceThreads,
     currentKey,
     favorite,
     favoriteBusy: busy,

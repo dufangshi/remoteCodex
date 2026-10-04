@@ -383,6 +383,33 @@ mod tests {
     }
 
     #[test]
+    fn claude_55_prices_real_model_ids_aliases_caches_and_fast_mode() {
+        let usage = json!({"total":{"inputTokens":1000000,"cachedInputTokens":400000,"cacheWriteInputTokens":100000,"outputTokens":100000},"last":{"inputTokens":900000}});
+        for alias in ["claude-opus-5-5", "claude-opus-5.5", "opus 5.5", "opus[1m]"] {
+            let price = estimate_price(&usage, Some(alias), None).unwrap();
+            assert!((price["totalUsd"].as_f64().unwrap() - 4.58).abs() < 1e-10);
+            assert!(
+                (estimate_price(&usage, Some(alias), Some("fast")).unwrap()["totalUsd"]
+                    .as_f64()
+                    .unwrap()
+                    - 9.16)
+                    .abs()
+                    < 1e-10
+            );
+        }
+        let sonnet = estimate_price(&usage, Some("claude-sonnet-5-5"), None).unwrap();
+        assert!((sonnet["totalUsd"].as_f64().unwrap() - 2.33).abs() < 1e-10);
+        assert!(
+            (estimate_price(&usage, Some("claude-opus-5"), None).unwrap()["totalUsd"]
+                .as_f64()
+                .unwrap()
+                - 5.825)
+                .abs()
+                < 1e-10
+        );
+    }
+
+    #[test]
     fn prices_cached_tokens_and_fast_mode_without_double_charging() {
         let usage = json!({"total":{"inputTokens":1000000,"cachedInputTokens":600000,"outputTokens":10000},"last":{"inputTokens":200000}});
         let price = estimate_price(&usage, Some("openai/gpt-6-astra"), Some("fast")).unwrap();

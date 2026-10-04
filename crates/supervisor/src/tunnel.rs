@@ -139,7 +139,7 @@ async fn run_connected_tunnel_with_deadline(
     let mut activity = state.bus.subscribe();
 
     outgoing
-        .send(json!({ "type": "relay.heartbeat", "timestamp": now_rfc3339() }))
+        .send(json!({ "type": "relay.heartbeat", "timestamp": now_rfc3339(), "threadLineage":thread_lineage(&state) }))
         .map_err(|_| anyhow!("relay tunnel writer closed"))?;
     // Consume the interval's immediate first tick because the initial heartbeat
     // was queued explicitly above.
@@ -202,7 +202,8 @@ async fn run_connected_tunnel_with_deadline(
                 tokio::time::timeout(RELAY_RECEIVE_TIMEOUT, sink.send(Message::Ping(Vec::new().into()))).await??;
                 if outgoing.send(json!({
                     "type": "relay.heartbeat",
-                    "timestamp": now_rfc3339()
+                    "timestamp": now_rfc3339(),
+                    "threadLineage":thread_lineage(&state)
                 })).is_err() {
                     return Err(anyhow!("relay tunnel writer closed"));
                 }
@@ -210,7 +211,11 @@ async fn run_connected_tunnel_with_deadline(
             event = activity.recv() => {
                 match event {
                     Ok(event) => {
+                        if event.payload["reason"] == "thread_created" || event.payload["reason"] == "child_deleted" {
+                            let _ = outgoing.send(json!({"type":"relay.heartbeat","timestamp":now_rfc3339(),"threadLineage":thread_lineage(&state)}));
+                        }
                         if let Some(activity) = relay_activity(&event) {
+                            let _ = outgoing.send(json!({"type":"relay.heartbeat","timestamp":now_rfc3339(),"threadLineage":thread_lineage(&state)}));
                             let _ = outgoing.send(activity);
                         }
                     }
@@ -222,6 +227,18 @@ async fn run_connected_tunnel_with_deadline(
             }
         }
     }
+}
+
+fn thread_lineage(state: &Supervisor) -> Value {
+    state
+        .list_threads(None, true)
+        .map(|threads| {
+            json!(threads
+                .iter()
+                .map(|t| json!({"id":t.id,"parentThreadId":t.parent_thread_id}))
+                .collect::<Vec<_>>())
+        })
+        .unwrap_or(Value::Null)
 }
 
 fn resumed_after_pause(previous: SystemTime, now: SystemTime) -> bool {

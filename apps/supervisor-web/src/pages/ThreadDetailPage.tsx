@@ -6,6 +6,7 @@ import { useSubscriptionUsage } from './useSubscriptionUsage';
 import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
+import { ThreadWatchesControl } from '../components/ThreadWatchesControl';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, Link2, Users } from 'lucide-react';
@@ -63,6 +64,8 @@ import {
   fetchAgentBackendAgents,
   fetchAgentBackendModelsFor,
   fetchThreadCapabilitySnapshot,
+  fetchThreadModels,
+  fetchThreadGroup,
   fetchAgentBackendStatus,
   fetchProviderHostFile,
   fetchRelayAccess,
@@ -1196,20 +1199,25 @@ export function ThreadDetailPage() {
         seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex';
       const agentId = seedThread?.agentId ?? detailRef.current?.thread.agentId ?? null;
       const cwd = detailRef.current?.workspace.absPath ?? null;
-      const modelRequest = fetchAgentBackendModelsFor(provider, {
+      const threadId = seedThread?.id ?? detailRef.current?.thread.id;
+      setModelOptions([]);
+      const fallbackModels = () => fetchAgentBackendModelsFor(provider, {
         ...(provider === 'acp' && agentId ? { agentId } : {}),
         cwd,
       });
+      const modelRequest = threadId ? fetchThreadModels(threadId).catch(error => {
+        if (error instanceof ApiError && error.statusCode === 404) return fallbackModels();
+        throw error;
+      }) : fallbackModels();
       const agentRequest = provider === 'acp'
         ? fetchAgentBackendAgents(provider)
         : Promise.resolve([] as ModelOptionDto[]);
-      const threadId = seedThread?.id ?? detailRef.current?.thread.id;
       const capabilityRequest = threadId
         ? fetchThreadCapabilitySnapshot(threadId)
         : Promise.resolve(null);
 
       const [threadResult, statusResult, modelResult, agentResult, capabilityResult] = await Promise.allSettled([
-        fetchThreads(true),
+        fetchThreads(true).catch(() => threadId ? fetchThreadGroup(seedThread?.rootThreadId ?? threadId).catch(() => fetchThreadGroup(threadId)) : []),
         fetchAgentBackendStatus(provider),
         modelRequest,
         agentRequest,
@@ -1731,6 +1739,9 @@ export function ThreadDetailPage() {
         event.type === 'thread.request.created' ||
         event.type === 'thread.request.resolved'
       ) {
+        if (event.type === 'thread.updated' && ['children_changed','child_deleted'].includes(String(event.payload.reason))) {
+          void loadPageContext({seedThread:detailRef.current?.thread ?? null});
+        }
         if (event.type === 'thread.goal.updated') {
           const goal =
             event.payload.goal && typeof event.payload.goal === 'object'
@@ -2113,6 +2124,7 @@ export function ThreadDetailPage() {
     id,
     loadThreadDetail,
     queueLiveOutputDelta,
+    loadPageContext,
     syncRealtimeConnectionState,
     upsertLiveTimelineItem,
   ]);
@@ -3591,7 +3603,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, statusActions:detail ? <ThreadWatchesControl key={detail.thread.id} thread={detail.thread}/> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}

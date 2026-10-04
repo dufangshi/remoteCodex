@@ -19,6 +19,8 @@ const AUTH_COOKIE_NAME: &str = "remote_codex_session";
 // Only the authenticated tunnel can construct this extension; HTTP headers cannot.
 #[derive(Clone)]
 pub(crate) struct TrustedRelayForward;
+#[derive(Clone)]
+pub(crate) struct CliCaller(pub Option<String>);
 const DEFAULT_SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -70,23 +72,27 @@ pub fn validate_config(config: &RuntimeConfig) -> Result<()> {
 
 pub async fn require_auth(
     State(state): State<Arc<Supervisor>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     if request.uri().path() == "/api/cli" {
+        let scoped =
+            bearer_token(request.headers()).and_then(|token| state.cli_token_thread(&token));
         let valid = request.extensions().get::<TrustedRelayForward>().is_none()
-            && state
-                .interaction
-                .context
-                .read()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|context| {
-                    bearer_token(request.headers()).is_some_and(|token| {
-                        constant_time_equal(token.as_bytes(), context.token.as_bytes())
-                    })
-                });
+            && (scoped.is_some()
+                || state
+                    .interaction
+                    .context
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|context| {
+                        bearer_token(request.headers()).is_some_and(|token| {
+                            constant_time_equal(token.as_bytes(), context.token.as_bytes())
+                        })
+                    }));
         return if valid {
+            request.extensions_mut().insert(CliCaller(scoped));
             next.run(request).await
         } else {
             (

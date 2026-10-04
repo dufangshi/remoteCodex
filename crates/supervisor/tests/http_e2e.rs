@@ -22,6 +22,14 @@ async fn spawn_supervisor_seeded(
     providers: Vec<Provider>,
     seed: impl Fn(&FakeRuntime),
 ) -> (tempfile::TempDir, u16, std::path::PathBuf) {
+    let (dir, port, root, _) = spawn_supervisor_state(providers, seed).await;
+    (dir, port, root)
+}
+
+async fn spawn_supervisor_state(
+    providers: Vec<Provider>,
+    seed: impl Fn(&FakeRuntime),
+) -> (tempfile::TempDir, u16, std::path::PathBuf, Arc<Supervisor>) {
     let dir = tempdir().unwrap();
     let ws_root = dir.path().join("workspaces");
     std::fs::create_dir_all(&ws_root).unwrap();
@@ -69,8 +77,9 @@ async fn spawn_supervisor_seeded(
     let port = listener.local_addr().unwrap().port();
     let cli = state.configure_cli(format!("http://127.0.0.1:{port}"));
     std::fs::write(dir.path().join("cli-token"), cli.token).unwrap();
+    let serving = state.clone();
     tokio::spawn(async move {
-        axum::serve(listener, remote_codex_supervisor::router(state))
+        axum::serve(listener, remote_codex_supervisor::router(serving))
             .await
             .unwrap();
     });
@@ -83,7 +92,93 @@ async fn spawn_supervisor_seeded(
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    (dir, port, ws_root)
+    (dir, port, ws_root, state)
+}
+
+#[tokio::test]
+async fn cli_delete_authenticates_the_parent_and_refuses_arbitrary_targets_and_spoofing() {
+    let (dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
+    let ws = state
+        .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+            abs_path: Some(root.to_string_lossy().into()),
+            git_url: None,
+            label: None,
+        })
+        .unwrap();
+    let make = |parent| remote_codex_protocol::CreateThreadInput {
+        workspace_id: ws.id.clone(),
+        title: None,
+        provider: Some(Provider::Codex),
+        agent_id: None,
+        model: "ios-e2e-stream".into(),
+        reasoning_effort: None,
+        approval_mode: "yolo".into(),
+        parent_thread_id: parent,
+    };
+    let parent = state.create_thread(make(None)).await.unwrap();
+    let stranger = state.create_thread(make(None)).await.unwrap();
+    let child = state
+        .create_thread(make(Some(parent.id.clone())))
+        .await
+        .unwrap();
+    let parent_token = state.cli_thread_token(&parent.id);
+    let stranger_token = state.cli_thread_token(&stranger.id);
+    let child_token = state.cli_thread_token(&child.id);
+    let machine_token = std::fs::read_to_string(dir.path().join("cli-token")).unwrap();
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/cli");
+    for (token, target, claimed) in [
+        (&machine_token, &child.id, &parent.id),
+        (&stranger_token, &child.id, &stranger.id),
+        (&stranger_token, &child.id, &parent.id),
+        (&parent_token, &stranger.id, &parent.id),
+        (&child_token, &parent.id, &child.id),
+    ] {
+        let r = client
+            .post(&url)
+            .bearer_auth(token)
+            .json(&json!({"operation":"delete","threadId":target,"fromThreadId":claimed}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "{}",
+            r.text().await.unwrap()
+        );
+    }
+    // Managed tokens still perform ordinary CLI discovery and child creation.
+    let listed = client
+        .post(&url)
+        .bearer_auth(&parent_token)
+        .json(&json!({"operation":"list"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(listed.status().is_success());
+    let removed: Value = client
+        .post(&url)
+        .bearer_auth(&parent_token)
+        .json(&json!({"operation":"delete","threadId":child.id,"fromThreadId":parent.id}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(removed["deleted"], true);
+    assert!(state.get_thread(&child.id).is_err());
+    let invalidated = client
+        .post(&url)
+        .bearer_auth(child_token)
+        .json(&json!({"operation":"list"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalidated.status(), reqwest::StatusCode::UNAUTHORIZED);
 }
 
 async fn spawn_authenticated_supervisor() -> (tempfile::TempDir, u16) {

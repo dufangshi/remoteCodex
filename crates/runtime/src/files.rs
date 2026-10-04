@@ -56,6 +56,25 @@ fn normalize_path(path: &Path) -> Result<PathBuf> {
     Ok(out)
 }
 
+/// Mutation must never resolve a selected symlink into its target, or remove the
+/// workspace itself. Parent resolution still rejects escapes for new names.
+pub fn assert_mutation_within(root: &Path, candidate: &Path) -> Result<PathBuf> {
+    let canonical_root = root.canonicalize()?;
+    let lexical = normalize_path(&if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        canonical_root.join(candidate)
+    })?;
+    if std::fs::symlink_metadata(&lexical).is_ok_and(|m| m.file_type().is_symlink()) {
+        bail!("Symbolic links cannot be renamed or deleted from Explorer");
+    }
+    let resolved = assert_within(&canonical_root, candidate)?;
+    if resolved == canonical_root {
+        bail!("The workspace root cannot be renamed or deleted");
+    }
+    Ok(resolved)
+}
+
 fn resolve_existing_ancestor(path: &Path) -> Result<PathBuf> {
     let mut ancestor = path.to_path_buf();
     let mut suffix = Vec::<OsString>::new();
@@ -352,6 +371,26 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let err = write_file(&root, "../escape.txt", "no").unwrap_err();
         assert!(err.to_string().contains("outside"));
+    }
+
+    #[test]
+    fn workspace_mutations_reject_root_and_escape_without_touching_contents() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("ws");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("keep.txt"), "keep").unwrap();
+        assert!(assert_mutation_within(&root, Path::new(".")).is_err());
+        assert!(assert_mutation_within(&root, Path::new("../outside")).is_err());
+        assert_eq!(
+            assert_mutation_within(&root, Path::new("renamed.txt")).unwrap(),
+            root.canonicalize().unwrap().join("renamed.txt")
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("keep.txt"), root.join("alias.txt")).unwrap();
+            assert!(assert_mutation_within(&root, Path::new("alias.txt")).is_err());
+        }
+        assert_eq!(fs::read_to_string(root.join("keep.txt")).unwrap(), "keep");
     }
 
     #[cfg(unix)]

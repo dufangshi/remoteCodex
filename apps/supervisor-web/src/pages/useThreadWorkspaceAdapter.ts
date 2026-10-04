@@ -13,6 +13,8 @@ import {
   fetchWorkspaceFileTree,
   uploadWorkspaceFile,
   writeWorkspaceFile,
+  renameWorkspaceNode,
+  deleteWorkspaceNode,
 } from '../lib/api';
 
 interface UseThreadWorkspaceAdapterInput {
@@ -50,6 +52,8 @@ export function useThreadWorkspaceAdapter({
         ? {
             uploadFile: (input) =>
               uploadWorkspaceFile(workspaceId, { file: input.file }),
+            renameNode: async (input) => { await renameWorkspaceNode(workspaceId, input); },
+            deleteNode: async (input) => { await deleteWorkspaceNode(workspaceId, input.path); },
             writeFile: async (input) => {
               if (isLinked(input.path)) throw new Error('Linked files are read-only previews.');
               await writeWorkspaceFile(workspaceId, {

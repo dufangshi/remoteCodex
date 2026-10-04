@@ -4,6 +4,7 @@ use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
 use remote_codex_runtime::{
     fake::FakeRuntime, interaction::SendInput, Database, RuntimeConfig, Supervisor,
 };
+use serde_json::json;
 use std::sync::Arc;
 
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
@@ -180,6 +181,145 @@ async fn a_workspace_listing_shows_only_threads_a_person_started() {
 
     let everything = s.list_threads(Some(&ws), true).unwrap();
     assert_eq!(everything.len(), 7, "opting in returns the full tree");
+}
+
+#[tokio::test]
+async fn parent_can_delete_finished_direct_children_only_and_preserve_the_result() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = spawn(&s, &ws, None).await;
+    let other = spawn(&s, &ws, None).await;
+    let child = spawn(&s, &ws, Some(&root.id)).await;
+    let grandchild = spawn(&s, &ws, Some(&child.id)).await;
+    assert!(s
+        .delete_child_thread(&other.id, &child.id)
+        .await
+        .unwrap_err()
+        .to_string()
+        .starts_with("forbidden:"));
+    assert!(s.delete_child_thread(&root.id, &root.id).await.is_err());
+    assert!(s.delete_child_thread(&child.id, &root.id).await.is_err());
+    assert!(s
+        .delete_child_thread(&root.id, &grandchild.id)
+        .await
+        .is_err());
+    assert!(s
+        .delete_child_thread(&root.id, &child.id)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("still owns child"));
+    s.delete_child_thread(&child.id, &grandchild.id)
+        .await
+        .unwrap();
+    let token = s.cli_thread_token(&child.id);
+    let turn = uuid::Uuid::new_v4().to_string();
+    s.db.with(|conn| {
+        conn.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES (?1,?2,'completed',1)", rusqlite::params![turn,child.id])?;
+        let item = json!({"id":"final","kind":"agentMessage","text":"CHILD_RESULT_RETAINED"});
+        conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES ('item',?1,?2,'final',?3,'2030','2030')", rusqlite::params![child.id,turn,item.to_string()])?;
+        conn.execute("INSERT INTO kv(key,value) VALUES (?1,?2)",rusqlite::params![format!("cli:notify:turn:{turn}:pending"),json!({"threadId":root.id,"delivery":"inbox"}).to_string()])?;
+        Ok(())
+    }).unwrap();
+    let mut events = s.bus.subscribe();
+    let receipt = s.delete_child_thread(&root.id, &child.id).await.unwrap();
+    assert_eq!(receipt["deleted"], true);
+    assert!(s.get_thread(&child.id).is_err());
+    assert!(s.get_thread(&root.id).is_ok());
+    assert!(s.get_thread(&other.id).is_ok());
+    assert_eq!(s.cli_token_thread(&token), None);
+    let mail = s.inbox_list(&root.id, &json!({})).unwrap();
+    let message = &mail["messages"][0]["id"];
+    assert!(s
+        .inbox_read(&root.id, &json!({"messageId":message}))
+        .unwrap()
+        .to_string()
+        .contains("CHILD_RESULT_RETAINED"));
+    assert_eq!(
+        events.try_recv().unwrap().payload["deletedThreadId"],
+        child.id
+    );
+    assert_eq!(
+        s.list_threads(Some(&ws), false)
+            .unwrap()
+            .iter()
+            .find(|t| t.id == root.id)
+            .unwrap()
+            .descendant_count,
+        None
+    );
+    s.db.with(|conn| {
+        for table in ["threads", "thread_turns", "thread_history_items"] {
+            let column = if table == "threads" {
+                "id"
+            } else {
+                "thread_id"
+            };
+            let count: i64 = conn.query_row(
+                &format!("SELECT count(*) FROM {table} WHERE {column}=?1"),
+                [&child.id],
+                |r| r.get(0),
+            )?;
+            assert_eq!(count, 0);
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn deletion_refuses_running_recovering_and_queued_children_without_removing_work() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = spawn(&s, &ws, None).await;
+    let child = spawn(&s, &ws, Some(&root.id)).await;
+    for status in ["running", "recovering"] {
+        s.db.with(|c| {
+            c.execute(
+                "UPDATE threads SET status=?1 WHERE id=?2",
+                rusqlite::params![status, child.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(s.delete_child_thread(&root.id, &child.id).await.is_err());
+    }
+    s.db.with(|c| {c.execute("UPDATE threads SET status='idle' WHERE id=?1",[&child.id])?;c.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES ('active',?1,'inProgress',1)",[&child.id])?;Ok(())}).unwrap();
+    assert!(s.delete_child_thread(&root.id, &child.id).await.is_err());
+    s.db.with(|c| {
+        c.execute(
+            "UPDATE thread_turns SET status='completed' WHERE id='active'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    s.send_to_thread(
+        &child.id,
+        SendInput {
+            delivery: "queue".into(),
+            notify_delivery: "inbox".into(),
+            text: "work still waiting".into(),
+            from_thread_id: Some(root.id.clone()),
+            notify_on_complete: false,
+            client_request_id: None,
+            subject: None,
+            kind: None,
+            in_reply_to: None,
+        },
+    )
+    .unwrap();
+    assert!(s
+        .delete_child_thread(&root.id, &child.id)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("queued work"));
+    assert!(s.get_thread(&child.id).is_ok());
+    assert_eq!(
+        s.interaction_status(&child.id).await.unwrap()["queuedCount"],
+        1
+    );
 }
 
 #[tokio::test]
