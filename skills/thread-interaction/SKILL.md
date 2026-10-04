@@ -49,6 +49,29 @@ creating more.
 
 Model IDs and effort options come from local discovery. Preserve explicitly requested models; do not invent an ID from a display name or silently substitute another model. Availability depends on the installed harness and working directory.
 
+## Clean up your own child threads
+
+After recording the result you need, delete a finished direct child with:
+
+```bash
+remote-codex thread delete CHILD_THREAD_ID
+```
+
+The Supervisor verifies your managed credential and the stored parent relationship.
+You cannot delete yourself, a parent, sibling, another root, or a grandchild. `--from`
+does not change the authenticated parent. A machine connection file alone cannot
+authorize deletion; use your managed session, reconnecting it after a runtime upgrade
+if its credential predates this feature.
+
+Unused idle children may also be removed. Running/recovering children, active or
+queued turns, and children that still own descendants are refused. There is no force
+or recursive delete. Have each direct parent finish and clean up its own children
+first. Deletion removes the child's saved Remote Codex conversation/mailbox and
+releases its idle, independently owned harness process. Workspace files, branches,
+worktrees, native harness history, and results already delivered to your inbox are
+preserved. Save needed transcripts/artifacts before deleting; the Remote Codex
+conversation cannot be restored by the CLI.
+
 ## Always label a message
 
 Every send takes `--subject` (one line) and `--kind`. Use them. They are not
@@ -259,6 +282,6 @@ A selected turn defaults to a paginated item directory (tools, reasoning, comman
 
 Managed sessions receive `REMOTE_CODEX_THREAD_ID`, `REMOTE_CODEX_URL`, and credentials. Use them as supplied. Do not dump environment variables, print tokens, or send credentials in a prompt. `--from` overrides attribution for a known remoteCodex caller; it does not grant permission.
 
-A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. This is a machine-scoped local credential, not per-thread isolation.
+A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. Managed credentials identify the parent for restricted child deletion; the machine connection file cannot grant that right. Agents sharing a user account and workspace still do not have filesystem isolation.
 
 Only loopback HTTP is accepted; redirects are refused. Run on the target device. A missing connection is a configuration issue, not a reason to copy credentials into a prompt. After Supervisor restart use the current connection file if inherited credentials are stale. Invalid model, unknown thread, missing caller, and unsupported steering need corrected input, not repeated dispatch. `idle` is not task success: inspect errors, pending input, unread mail, and the relevant result.

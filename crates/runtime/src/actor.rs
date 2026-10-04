@@ -228,6 +228,10 @@ pub trait AgentRuntime: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<Vec<ThreadHistoryItemDto>>;
     async fn interrupt(&self, session_id: &str, turn_id: &str) -> Result<()>;
+    /// Release an idle session's owned process during explicit thread cleanup.
+    async fn release_session(&self, _session_id: &str) -> Result<()> {
+        Ok(())
+    }
     async fn respond_permission(
         &self,
         request_id: &str,

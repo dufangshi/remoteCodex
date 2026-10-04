@@ -33,12 +33,38 @@ pub fn launch_env() -> Vec<(String, String)> {
 #[derive(Default)]
 pub struct InteractionState {
     pub context: std::sync::RwLock<Option<CliContext>>,
+    thread_tokens: std::sync::RwLock<std::collections::HashMap<String, String>>,
     started: AtomicBool,
 }
 
 pub use remote_codex_protocol::ThreadSendInput as SendInput;
 
 impl Supervisor {
+    /// Managed callers receive an opaque identity-bound credential. A shell's
+    /// machine credential still supports discovery/messaging, but cannot assert
+    /// an arbitrary parent identity for destructive CLI operations.
+    pub fn cli_thread_token(&self, thread_id: &str) -> String {
+        let mut tokens = self.interaction.thread_tokens.write().unwrap();
+        tokens
+            .entry(thread_id.into())
+            .or_insert_with(|| format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()))
+            .clone()
+    }
+
+    pub fn cli_token_thread(&self, token: &str) -> Option<String> {
+        self.interaction
+            .thread_tokens
+            .read()
+            .unwrap()
+            .iter()
+            .find(|(_, saved)| saved.as_str() == token)
+            .map(|(id, _)| id.clone())
+    }
+
+    pub(crate) fn revoke_cli_thread_token(&self, id: &str) {
+        self.interaction.thread_tokens.write().unwrap().remove(id);
+    }
+
     pub fn configure_cli(&self, url: String) -> CliContext {
         let mut context = self.interaction.context.write().unwrap();
         context
@@ -55,7 +81,10 @@ impl Supervisor {
             .map(|c| {
                 let mut env = vec![
                     ("REMOTE_CODEX_URL".into(), c.url),
-                    ("REMOTE_CODEX_TOKEN".into(), c.token),
+                    (
+                        "REMOTE_CODEX_TOKEN".into(),
+                        self.cli_thread_token(thread_id),
+                    ),
                     ("REMOTE_CODEX_THREAD_ID".into(), thread_id.into()),
                 ];
                 if let Ok(exe) = std::env::current_exe() {

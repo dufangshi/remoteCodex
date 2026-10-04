@@ -1,3 +1,4 @@
+mod child_delete;
 mod generation;
 mod reliability;
 mod update;

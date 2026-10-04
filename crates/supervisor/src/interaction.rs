@@ -1,5 +1,5 @@
 use super::http::{map_err, ApiErr};
-use axum::{extract::State, Json};
+use axum::{extract::State, Extension, Json};
 use remote_codex_protocol::{CreateThreadInput, Provider};
 use remote_codex_runtime::{
     interaction::{SendInput, TranscriptQuery},
@@ -10,9 +10,14 @@ use std::sync::Arc;
 
 pub(crate) async fn command(
     State(state): State<Arc<Supervisor>>,
+    Extension(caller): Extension<crate::auth::CliCaller>,
     Json(input): Json<Value>,
 ) -> Result<Json<Value>, ApiErr> {
-    async fn run(state: &Supervisor, input: Value) -> anyhow::Result<Value> {
+    async fn run(
+        state: &Supervisor,
+        input: Value,
+        caller: Option<String>,
+    ) -> anyhow::Result<Value> {
         let id = input.get("threadId").and_then(Value::as_str).unwrap_or("");
         match input.get("operation").and_then(Value::as_str).unwrap_or("") {
             "info" => Ok(json!({"deviceId":state.db.host_id})),
@@ -35,6 +40,18 @@ pub(crate) async fn command(
                 )
             }
             "show" | "status" => state.interaction_status(id).await,
+            "delete" => {
+                let caller = caller.ok_or_else(|| anyhow::anyhow!(
+                    "forbidden: deletion requires a managed thread credential; reconnect the parent session to obtain one"
+                ))?;
+                anyhow::ensure!(
+                    input["fromThreadId"]
+                        .as_str()
+                        .is_none_or(|from| from == caller),
+                    "forbidden: --from cannot override the authenticated parent for deletion"
+                );
+                state.delete_child_thread(&caller, id).await
+            }
             "send" => {
                 let body = serde_json::from_value::<SendInput>(input.clone())?;
                 let mut receipt = state.send_to_thread(id, body)?;
@@ -122,5 +139,5 @@ pub(crate) async fn command(
             _ => anyhow::bail!("unknown CLI operation"),
         }
     }
-    Ok(Json(run(&state, input).await.map_err(map_err)?))
+    Ok(Json(run(&state, input, caller.0).await.map_err(map_err)?))
 }

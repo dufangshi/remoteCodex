@@ -428,6 +428,12 @@ pub(crate) fn map_err(e: anyhow::Error) -> ApiErr {
     } else if message.contains("already has an active writer") {
         err(StatusCode::CONFLICT, "harness_session_in_use",
             "This Codex thread is open in another app or CLI session. Close that session, then reconnect here. Importing history does not enable simultaneous editing from separate Codex processes.")
+    } else if message.starts_with("forbidden: ") {
+        err(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            message.strip_prefix("forbidden: ").unwrap_or(&message),
+        )
     } else if message.contains("not found") {
         err(StatusCode::NOT_FOUND, "not_found", message)
     } else if message.contains("Resume / Connect") || message.starts_with("conflict: ") {
