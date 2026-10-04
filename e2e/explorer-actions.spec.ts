@@ -48,11 +48,6 @@ test('Explorer shortcut downloads, copies both paths, renames and confirms delet
   await expect(
     page.getByRole('complementary', { name: 'Explorer', exact: true }),
   ).toBeVisible();
-  if (testInfo.project.name === 'desktop-chromium') {
-    const resize = page.getByRole('separator', { name: 'Resize Explorer' });
-    await resize.focus();
-    for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowLeft');
-  }
   const row = page.getByRole('treeitem', { name: 'notes.txt', exact: true });
   await expect(row).toBeVisible();
   await row.hover();
@@ -69,6 +64,7 @@ test('Explorer shortcut downloads, copies both paths, renames and confirms delet
     path.join(absPath, 'notes.txt'),
   );
   const download = page.waitForEvent('download');
+  await page.screenshot({ path: testInfo.outputPath('default-explorer.png') });
   await row.getByRole('button', { name: 'Download notes.txt' }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe('notes.txt');
