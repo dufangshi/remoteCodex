@@ -29,20 +29,23 @@ pub fn build_prompt_blocks(
 
 fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> Result<Vec<Value>> {
     let mut blocks = Vec::new();
+    // `cursor` marks text not yet emitted; `search` only advances the scan. Moving
+    // `cursor` past an ordinary bracket used to drop everything before it.
     let mut cursor = 0;
-    while cursor < prompt.len() {
-        let rest = &prompt[cursor..];
+    let mut search = 0;
+    while search < prompt.len() {
+        let rest = &prompt[search..];
         let Some(start_rel) = rest.find('[') else {
             break;
         };
-        let start = cursor + start_rel;
+        let start = search + start_rel;
         let after = &prompt[start + 1..];
         let (kind, rest_after_kind) = if after.starts_with("PHOTO ") {
             ("PHOTO", &after[6..])
         } else if after.starts_with("FILE ") {
             ("FILE", &after[5..])
         } else {
-            cursor = start + 1;
+            search = start + 1;
             continue;
         };
         let Some(end_rel) = rest_after_kind.find(']') else {
@@ -82,6 +85,7 @@ fn expand_attachment_tokens(prompt: &str, cwd: &Path, _image_capable: bool) -> R
             }));
         }
         cursor = end;
+        search = end;
     }
     if cursor == 0 {
         if !prompt.is_empty() {
@@ -108,5 +112,37 @@ fn mime_for(path: &Path) -> &'static str {
         "gif" => "image/gif",
         "webp" => "image/webp",
         _ => "image/png",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn texts(blocks: &[Value]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| b["text"].as_str())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn ordinary_brackets_keep_all_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt = "[remoteCodex: pointer]\n\n[remoteCodex role: reviewer]\nbody\n\n[remoteCodex task from thread X | s]\nfix arr[0] and see [docs](http://x)";
+        let blocks = build_prompt_blocks(prompt, dir.path(), true, &[]).unwrap();
+        assert_eq!(texts(&blocks), prompt);
+    }
+
+    #[test]
+    fn attachments_split_text_without_losing_brackets_around_them() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        let prompt = "[ctx] read [FILE notes.txt] then a[1]";
+        let blocks = build_prompt_blocks(prompt, dir.path(), true, &[]).unwrap();
+        assert_eq!(blocks.len(), 3, "{blocks:?}");
+        assert_eq!(blocks[0]["text"], "[ctx] read ");
+        assert_eq!(blocks[1]["type"], "resource_link");
+        assert_eq!(blocks[2]["text"], " then a[1]");
     }
 }
