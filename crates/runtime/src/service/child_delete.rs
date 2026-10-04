@@ -57,6 +57,7 @@ impl Supervisor {
             Ok(root)
         })?;
         self.revoke_cli_thread_token(id);
+        self.claude_history.forget(id);
         drop(live);
         for thread_id in [Some(parent), root.as_deref()]
             .into_iter()

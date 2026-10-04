@@ -166,6 +166,14 @@ Do not work around this by steering the peer, polling in a loop, or sending your
 direct messages. None of those are cheaper than simply staying awake or handing off
 cleanly.
 
+A harness-native timer such as Claude `CronCreate` / `/loop` is a separate, explicit
+scheduled prompt, not a completion subscription. It can wake that native session
+while its harness process remains alive. Remote Codex recovers its finished reply
+and tool history and notifies open pages; intermediate scheduled output is backfilled
+after completion. Native timers are session-only and do not survive harness exit or
+Supervisor restart. Do not claim you configured a watch merely because you wrote
+that one will wake you: verify the scheduling tool's successful result and job ID.
+
 ## Choose the delivery semantics explicitly
 
 | Intent | Delivery | Behavior |

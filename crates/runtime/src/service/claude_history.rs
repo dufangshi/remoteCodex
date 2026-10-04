@@ -5,6 +5,11 @@ use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Default)]
 pub(super) struct HistoryCache(std::sync::Mutex<HashMap<String, CacheEntry>>);
+impl HistoryCache {
+    pub(super) fn forget(&self, id: &str) {
+        self.0.lock().unwrap().remove(id);
+    }
+}
 struct CacheEntry {
     checked: Instant,
     stamp: Option<(PathBuf, u64, SystemTime)>,
@@ -127,7 +132,11 @@ impl Supervisor {
             .collect();
         for id in ids {
             if let Err(error) = self.sync_claude_scheduled_history(&id).await {
-                tracing::warn!(%id, %error, "Claude scheduled history recovery failed");
+                if error.to_string().contains("thread not found") {
+                    self.claude_history.forget(&id);
+                } else {
+                    tracing::warn!(%id, %error, "Claude scheduled history recovery failed");
+                }
             }
         }
     }
@@ -206,13 +215,9 @@ impl Supervisor {
         .await?
         .unwrap_or_else(|| ((PathBuf::new(), 0, SystemTime::UNIX_EPOCH), Vec::new()));
         if turns.is_empty() {
-            self.claude_history
-                .0
-                .lock()
-                .unwrap()
-                .get_mut(id)
-                .unwrap()
-                .stamp = Some(stamp);
+            if let Some(entry) = self.claude_history.0.lock().unwrap().get_mut(id) {
+                entry.stamp = Some(stamp);
+            }
             return Ok(());
         }
         // File I/O must not block admission of unrelated turns. Recheck ownership
@@ -244,13 +249,9 @@ impl Supervisor {
             tx.commit()?;
             Ok(imported)
         })?;
-        self.claude_history
-            .0
-            .lock()
-            .unwrap()
-            .get_mut(id)
-            .unwrap()
-            .stamp = Some(stamp);
+        if let Some(entry) = self.claude_history.0.lock().unwrap().get_mut(id) {
+            entry.stamp = Some(stamp);
+        }
         drop(live);
         if imported > 0 {
             self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {

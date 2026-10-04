@@ -15,6 +15,42 @@ struct Cli {
     command: Commands,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_delete_is_a_single_target_command_without_force_or_recursive_flags() {
+        let cli = Cli::try_parse_from([
+            "remote-codex",
+            "thread",
+            "delete",
+            "00000000-0000-0000-0000-000000000001",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Thread {
+                command: threads::ThreadCommand::Delete { .. }
+            }
+        ));
+        for extra in [
+            "--force",
+            "--recursive",
+            "00000000-0000-0000-0000-000000000002",
+        ] {
+            assert!(Cli::try_parse_from([
+                "remote-codex",
+                "thread",
+                "delete",
+                "00000000-0000-0000-0000-000000000001",
+                extra
+            ])
+            .is_err());
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create, contact, and inspect threads on the local Supervisor.
