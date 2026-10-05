@@ -57,8 +57,30 @@ struct ExportTranscriptQuery {
 
 pub fn router(state: AppState) -> Router {
     state.start_interaction_worker();
+    crate::peer_send::start_outbox_worker(&state);
     let router = Router::new()
         .route("/api/cli", post(crate::interaction::command))
+        // Other devices of the same owner, through the relay (docs/cross-device-peer.zh.md).
+        .route("/api/peer/cli", post(crate::peer_api::cli))
+        .route(
+            "/api/peer/files/uploads",
+            post(crate::peer_files::upload_begin),
+        )
+        .route(
+            "/api/peer/files/uploads/{id}",
+            axum::routing::put(crate::peer_files::upload_chunk),
+        )
+        .route(
+            "/api/peer/files/uploads/{id}/commit",
+            post(crate::peer_files::upload_commit),
+        )
+        .route("/api/peer/files/list", post(crate::peer_files::list))
+        .route("/api/peer/files/stat", post(crate::peer_files::stat))
+        .route("/api/peer/files/read", get(crate::peer_files::read))
+        .route(
+            "/api/config/peer-access",
+            get(crate::peer_api::access).patch(crate::peer_api::set_access),
+        )
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
@@ -419,7 +441,7 @@ impl IntoResponse for ApiErr {
     }
 }
 
-fn err(status: StatusCode, code: &str, message: impl Into<String>) -> ApiErr {
+pub(crate) fn err(status: StatusCode, code: &str, message: impl Into<String>) -> ApiErr {
     ApiErr(status, ApiError::new(code, message))
 }
 

@@ -21,6 +21,14 @@ const AUTH_COOKIE_NAME: &str = "remote_codex_session";
 pub(crate) struct TrustedRelayForward;
 #[derive(Clone)]
 pub(crate) struct CliCaller(pub Option<String>);
+/// Another device of the same relay owner. Only the tunnel constructs it, from the
+/// `peer` object the relay itself adds to a forwarded `relay.request`.
+#[derive(Clone, Debug)]
+pub(crate) struct PeerCaller {
+    pub device_id: String,
+    pub device_name: String,
+    pub user_id: String,
+}
 const DEFAULT_SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 7;
 
 type HmacSha256 = Hmac<Sha256>;

@@ -5,6 +5,16 @@ mod http;
 mod interaction;
 mod linked_files;
 mod management;
+// Device-to-device messaging and files (docs/cross-device-peer.zh.md). The
+// allowance goes away once every peer module has its implementation.
+#[allow(dead_code)]
+mod peer_api;
+#[allow(dead_code)]
+mod peer_files;
+#[allow(dead_code)]
+mod peer_link;
+#[allow(dead_code)]
+mod peer_send;
 mod secure_transport;
 mod shells;
 mod socket;

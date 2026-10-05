@@ -1,6 +1,7 @@
 //! Provider-independent local thread operations. Uses the existing prompt queue and KV store.
 mod agents;
 mod inbox;
+mod peer;
 mod tasks;
 mod transcript;
 pub use agents::{
