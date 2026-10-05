@@ -107,11 +107,22 @@ pub(super) async fn device_name(state: &AppState, device_id: &str) -> String {
         .unwrap_or_else(|_| device_id.to_string())
 }
 
+/// Peer routes are literal. Dot segments, empty segments and encodings could name a
+/// different route than the prefix check saw, depending on who normalizes the path.
+pub(super) fn literal_peer_path(pathname: &str) -> bool {
+    pathname.starts_with("/api/peer/")
+        && !pathname.contains(['%', '\\'])
+        && !pathname
+            .split('/')
+            .skip(1)
+            .any(|segment| matches!(segment, "" | "." | ".."))
+}
+
 fn request_payload(payload: &Value) -> Result<Value, Failure> {
     let method = payload["method"].as_str().ok_or_else(Failure::forbidden)?;
     let path = payload["path"].as_str().ok_or_else(Failure::forbidden)?;
     let pathname = path.split('?').next().unwrap_or(path);
-    if !matches!(method, "GET" | "POST" | "PUT") || !pathname.starts_with("/api/peer/") {
+    if !matches!(method, "GET" | "POST" | "PUT") || !literal_peer_path(pathname) {
         return Err(Failure::forbidden());
     }
     let uri = path.parse::<Uri>().map_err(|_| Failure::forbidden())?;
@@ -491,6 +502,11 @@ mod tests {
             "/api/peer?x=/api/peer/cli",
             "/api/peer-other/cli",
             "https://relay/api/peer/cli",
+            "/api/peer/../cli",
+            "/api/peer/./cli",
+            "/api/peer//cli",
+            "/api/peer/%2e%2e/cli",
+            "/api/peer/..\\cli",
         ] {
             let mut input = payload();
             input["path"] = json!(path);

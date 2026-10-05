@@ -70,6 +70,7 @@ Reuse a peer when its workspace, model, and earlier work fit. Read status and on
 Devices must belong to the same relay owner, with peer access enabled on both. The
 CLI still connects to your local Supervisor; it routes encrypted requests through
 the relay. Use a relay device ID or a unique device name (case insensitive).
+`device list` works before opting in and reports this device's `peerAccess`.
 
 ```bash
 remote-codex device list
@@ -97,7 +98,7 @@ task, close, delete and inbox operations are unavailable; inspect status/transcr
 or wait for local inbox results instead.
 
 Attachments copy up to 20 local paths; directories become zip files. The receipt's
-message includes the target's incoming paths. `fs` reads only within a target
+`attachments` and the delivered message both name where each file landed on the target. `fs` reads only within a target
 workspace. Downloads default to the caller's `.temp/threads/THREAD/downloads/`
 directory (or workspace `.temp/downloads/` without a caller).
 

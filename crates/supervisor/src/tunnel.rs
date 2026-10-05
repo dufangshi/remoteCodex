@@ -522,6 +522,17 @@ pub(crate) async fn forward_local(
     if peer.is_some() != path.starts_with("/api/peer/") {
         return relay_error_response(403, "Peer credentials only allow /api/peer/ requests");
     }
+    // Peer routes are literal; mirror the relay so neither side depends on the other
+    // normalizing dot segments or encodings into a different route.
+    if peer.is_some()
+        && (path.contains(['%', '\\'])
+            || path
+                .split('/')
+                .skip(1)
+                .any(|segment| matches!(segment, "" | "." | "..")))
+    {
+        return relay_error_response(403, "Peer requests must use literal /api/peer/ paths");
+    }
     if peer.is_some() && !state.peer_access_enabled() {
         return json!({"statusCode":403,"headers":{"content-type":"application/json"},"body":json!({"code":"peer_access_disabled","message":"Peer access is disabled on this device."}).to_string()});
     }
@@ -958,6 +969,10 @@ pub(crate) mod tests {
             "/api/config/peer-access",
             "/api/transport/key",
             "/healthz",
+            "/api/peer/../cli",
+            "/api/peer/./cli",
+            "/api/peer//cli",
+            "/api/peer/%2e%2e/cli",
         ] {
             assert_eq!(
                 forward_local(&state, json!({"method":"GET","path":path}), Some(peer())).await

@@ -67,7 +67,7 @@ remote-codex --cli-config /path/to/supervisor.cli.json thread list
 remote-codex --cli-config /path/to/supervisor.cli.json --from THREAD_ID thread send OTHER_ID --text hello
 ```
 
-Managed ACP processes receive `REMOTE_CODEX_URL`, `REMOTE_CODEX_TOKEN` and `REMOTE_CODEX_THREAD_ID`, plus a PATH containing the running binary. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the remoteCodex thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `remote-codex thread self`, `remote-codex skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
+Managed ACP processes receive `REMOTE_CODEX_URL`, `REMOTE_CODEX_TOKEN` and `REMOTE_CODEX_THREAD_ID`, plus a PATH whose first entry provides `remote-codex` for the running binary. Release binaries carry a platform suffix, so the Supervisor links `remote-codex` in `<database>.cli-bin/`; otherwise an older global install could shadow newer commands. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the remoteCodex thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `remote-codex thread self`, `remote-codex skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
 
 CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion requires the thread-bound credential and verifies the parent relationship; `--from` cannot override that identity. Other messaging attribution and shared filesystem access are not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs use `info.relayDeviceId` (with legacy `deviceId` compatibility) to select local handling or another device.
 
@@ -75,7 +75,8 @@ CLI connections use a loopback HTTP URL. Managed processes receive an opaque thr
 
 Cross-device operations stay on the local CLI connection and use end-to-end encrypted
 relay requests between devices of the same owner. Access defaults to off on each
-device. `device access` views it; `device access on|off` and `device trust DEVICE
+device. `device list` works before opting in and reports this device's `peerAccess`.
+`device access` views it; `device access on|off` and `device trust DEVICE
 --reset` require a local machine credential. Trust reset follows independent
 verification of the peer's `relay-fingerprint`.
 
@@ -102,7 +103,8 @@ return to the sender's local passive inbox. Incoming cross-device mail includes
 `replyTo` for replies. Wait/wake/tree/task/close/delete/inbox remain local operations.
 
 Up to 20 attachments are staged locally, uploaded to the target thread's incoming
-directory, and listed in the message (directories become zip files). `fs` provides
+directory, and listed in both the message and the receipt's `attachments`
+(directories become zip files). `fs` provides
 workspace-scoped read-only listing/downloads and verifies downloaded hashes.
 Without `--out`, downloads go under the caller's thread `.temp` directory or the
 local workspace's `.temp/downloads/` when no caller exists.

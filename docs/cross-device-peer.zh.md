@@ -1,6 +1,6 @@
 # 跨 device 线程通信与文件传输（同一 owner）
 
-状态：实施中。分支 `feat/cross-device-peer`。本文是各实现分支共同遵守的接口契约；签名以已提交的骨架代码为准（`crates/supervisor/src/peer_*.rs`、`auth.rs` 的 `PeerCaller`、`crates/runtime/src/interaction/peer.rs`）。改契约先改本文。
+状态：已实现（分支 `feat/cross-device-peer`），尚未发布。本文是实现时的接口契约，实施中的调整见 §17。上线需要所有参与设备升级到包含本功能的 runtime，并部署 relay；只升级其中一端不会生效。
 
 ## 1. 范围
 
@@ -197,3 +197,14 @@ KV `peer:outbox:{id}`：
 | peer-files | §13 | `peer_files.rs` |
 
 不要修改其他分支负责的文件；确实需要时在交付说明里写明。`crates/supervisor/src/lib.rs` 里 peer 模块的 `#[allow(dead_code)]` 由各自负责的分支在实现完成后移除。
+
+## 17. 实施结果与偏差
+
+- 目录不要求本机开关：它只询问 relay，不接触其他 device，便于开启前先查看。`device list` 返回 `{devices, peerAccess}`。所有发往其他 device 的请求仍要求两端开启。
+- 远程完成通知把 transcript 提示写成 `DEVICE/THREAD`，并说明 DEVICE 即该邮件的 `fromDeviceId`（runtime 不知道本机 relay ID）。
+- relay 与 supervisor 都拒绝非字面的 peer 路径：`.`、`..` 或空段，以及 `%`、`\`。两端各自检查，不依赖对方规范化路径。
+- 附件发送的回执带 `attachments`（每个文件在目标端的路径、大小与 sha256）。
+- 发布版二进制带平台后缀（如 `remote-codex-linux-x64-gnu`），受管 agent 的 `remote-codex` 曾落到 PATH 上更旧的全局安装。supervisor 现在在 `<数据库>.cli-bin/` 中链接 `remote-codex`（Unix 用 symlink，Windows 用硬链接或复制），并把该目录放在受管 PATH 的最前面。
+- 验证：
+  - 各分支的定向测试，以及合并后的 supervisor 单元测试、`http_e2e`、runtime `thread_interaction` / `agent_coordination` / `thread_lineage`、relay 单元测试、CLI 测试。
+  - `scripts/peer-e2e-live.mjs` 全部阶段通过：目录、两端开关、跨 owner 隔离、带远程署名的投信与按 `replyTo` 回信、本机/远端 URL 寻址、完成通知回到发起方 inbox、远程创建、三类附件（含 20 MiB）、`fs ls/get` 与越界拦截、离线 outbox 与重连后送达、经 relay 的 20 MiB 浏览器式上传不再断隧道。

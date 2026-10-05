@@ -31,6 +31,43 @@ use uuid::Uuid;
 pub struct CliContext {
     pub url: String,
     pub token: String,
+    /// Holds a `remote-codex` that runs this executable; first on managed PATHs.
+    pub bin_dir: Option<std::path::PathBuf>,
+}
+
+/// Agents run `remote-codex`, but release executables carry a platform suffix
+/// (`remote-codex-linux-x64-gnu`). Prepending only the executable's directory let
+/// PATH fall through to an older global install that lacks newer commands.
+fn cli_bin_dir(database: &std::path::Path) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let name = if cfg!(windows) {
+        "remote-codex.exe"
+    } else {
+        "remote-codex"
+    };
+    if exe.file_name()? == name {
+        return None;
+    }
+    let dir = database.with_extension("cli-bin");
+    let linked = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(&dir)?;
+        let staged = dir.join(format!(".{name}.{}", Uuid::new_v4().simple()));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&exe, &staged)?;
+        #[cfg(windows)]
+        std::fs::hard_link(&exe, &staged).or_else(|_| std::fs::copy(&exe, &staged).map(|_| ()))?;
+        // Replaces the link an earlier version left, without a window where it is missing.
+        std::fs::rename(&staged, dir.join(name)).inspect_err(|_| {
+            let _ = std::fs::remove_file(&staged);
+        })
+    })();
+    match linked {
+        Ok(()) => Some(dir),
+        Err(error) => {
+            tracing::warn!(%error, "managed agents may resolve another remote-codex on PATH");
+            None
+        }
+    }
 }
 
 tokio::task_local! { static CLI_ENV: Vec<(String, String)>; }
@@ -79,6 +116,7 @@ impl Supervisor {
             .get_or_insert_with(|| CliContext {
                 url,
                 token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+                bin_dir: cli_bin_dir(&self.config.database_url),
             })
             .clone()
     }
@@ -97,7 +135,10 @@ impl Supervisor {
                 ];
                 if let Ok(exe) = std::env::current_exe() {
                     if let Some(dir) = exe.parent() {
-                        let paths = std::iter::once(dir.to_path_buf())
+                        let paths = c
+                            .bin_dir
+                            .into_iter()
+                            .chain(std::iter::once(dir.to_path_buf()))
                             .chain(std::env::split_paths(
                                 &std::env::var_os("PATH").unwrap_or_default(),
                             ))
@@ -533,7 +574,19 @@ pub(crate) fn finish_notification(
                 Some(text) => format!("\n\nIts closing message:\n{text}"),
                 None => String::new(),
             };
-            let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: remote-codex transcript {thread} --turn {turn} --view overview{summary}");
+            // The caller on another device must qualify the thread with this device;
+            // runtime does not know its relay ID, but the delivered mail carries it.
+            let target = if remote_device.is_some() {
+                format!("DEVICE/{thread}")
+            } else {
+                thread.to_string()
+            };
+            let device_hint = if remote_device.is_some() {
+                " (DEVICE is this message's fromDeviceId)"
+            } else {
+                ""
+            };
+            let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: remote-codex transcript {target} --turn {turn} --view overview{device_hint}{summary}");
             let message_id = Uuid::new_v4().to_string();
             let subject = format!("Delegate turn {status}");
             if let Some(device) = remote_device {

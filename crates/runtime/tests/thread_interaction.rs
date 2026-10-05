@@ -231,6 +231,34 @@ async fn conversation_is_recent_bounded_and_every_stored_detail_is_discoverable(
 }
 
 #[tokio::test]
+async fn managed_path_resolves_remote_codex_to_this_executable() {
+    let (_dir, s) = setup();
+    // Test executables are not named remote-codex, like the suffixed release binaries.
+    let dir = s
+        .configure_cli("http://127.0.0.1:8787".into())
+        .bin_dir
+        .expect("a remote-codex link for managed agents");
+    let link = dir.join(if cfg!(windows) {
+        "remote-codex.exe"
+    } else {
+        "remote-codex"
+    });
+    #[cfg(unix)]
+    assert_eq!(
+        std::fs::read_link(&link).unwrap(),
+        std::env::current_exe().unwrap()
+    );
+    assert!(link.is_file());
+    let env = s
+        .with_cli_context("thread-a", async {
+            remote_codex_runtime::interaction::launch_env()
+        })
+        .await;
+    let path = &env.iter().find(|(key, _)| key == "PATH").unwrap().1;
+    assert_eq!(std::env::split_paths(path).next(), Some(dir));
+}
+
+#[tokio::test]
 async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() {
     use remote_codex_runtime::{
         acp::AcpRuntime,

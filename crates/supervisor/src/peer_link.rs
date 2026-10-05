@@ -190,7 +190,10 @@ async fn exchange(
     kind: ReplyKind,
     target: &str,
 ) -> Result<Value> {
-    require_access(state)?;
+    // The directory only asks the relay, so it stays available before opting in.
+    if matches!(kind, ReplyKind::Request) {
+        require_access(state)?;
+    }
     let link = link(state);
     let id = Uuid::new_v4().to_string();
     frame["requestId"] = json!(id);
@@ -458,6 +461,13 @@ pub(crate) mod tests {
                 .await
                 .is_err()
         );
+        // The directory only asks the relay, so it works before opting in.
+        let listing = tokio::spawn({
+            let state = state.clone();
+            async move { directory(&state).await }
+        });
+        assert_eq!(outbound.recv().await.unwrap()["type"], "peer.directory");
+        listing.abort();
     }
     #[tokio::test]
     async fn peer_directory_correlates_relay_error_responses() {

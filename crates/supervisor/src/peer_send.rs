@@ -114,7 +114,12 @@ pub(crate) async fn intercept(
 ) -> Result<Option<Value>> {
     let operation = input["operation"].as_str().unwrap_or("");
     match operation {
-        "devices" => return Ok(Some(json!(peer_link::directory(state).await?))),
+        "devices" => {
+            return Ok(Some(json!({
+                "devices": peer_link::directory(state).await?,
+                "peerAccess": state.peer_access_enabled(),
+            })))
+        }
         "peerAccess" => {
             if let Some(enabled) = input.get("enabled") {
                 ensure!(
@@ -397,8 +402,12 @@ async fn send(state: &Supervisor, target: String, mut request: Value) -> Result<
         }
     }
     match deliver(state, &mut record).await {
-        Ok(receipt) => {
+        Ok(mut receipt) => {
             cleanup_staging(state, &record.id);
+            // The sender learns where its files landed on the target.
+            if record.request["attachments"].is_array() {
+                receipt["attachments"] = record.request["attachments"].clone();
+            }
             Ok(receipt)
         }
         Err(error)
@@ -1006,6 +1015,8 @@ mod tests {
     #[tokio::test]
     async fn outbox_reuses_committed_attachment_paths_after_lost_acknowledgement() {
         let (_dir, state) = test_state();
+        // Opted in with no tunnel: the send fails as retryable, after the upload step.
+        state.set_peer_access(true).unwrap();
         let mut record = OutboxRecord::new(
             Uuid::new_v4().to_string(),
             json!({"operation":"send","threadId":Uuid::new_v4(),"text":"hello\n\nAttachments:\n- /remote/incoming/file","attachments":[{"path":"/remote/incoming/file"}],"clientRequestId":"stable"}),

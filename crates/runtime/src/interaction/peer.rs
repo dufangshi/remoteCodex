@@ -384,6 +384,11 @@ mod tests {
             assert_eq!(record["createdAt"], record["nextAttemptAt"]);
             assert!(record["lastError"].is_null());
             assert_eq!(record["expiresAt"], "2026-10-12T00:00:00.000Z");
+            // The caller is on another device, so the transcript hint is qualified.
+            assert!(record["request"]["text"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("remote-codex transcript DEVICE/{target} --turn")));
             let matching = local_mail["messages"]
                 .as_array()
                 .unwrap()
@@ -393,7 +398,14 @@ mod tests {
             let message = state
                 .inbox_read(&local_from, &json!({"messageId": matching["id"]}))
                 .unwrap();
-            assert_eq!(record["request"]["text"], message["text"]);
+            // Identical to the local notification apart from the qualified hint.
+            let remote = record["request"]["text"].as_str().unwrap();
+            assert_eq!(
+                remote
+                    .replace(&format!("DEVICE/{target}"), &target)
+                    .replace(" (DEVICE is this message's fromDeviceId)", ""),
+                message["text"].as_str().unwrap()
+            );
             assert_eq!(
                 message["text"]
                     .as_str()
