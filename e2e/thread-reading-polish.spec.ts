@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -34,6 +34,68 @@ test('opening a detached thread automatically connects once and hides the health
   await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeEnabled();
   await expect(page.locator('.device-connection-button')).toHaveCount(0);
   expect(connections).toHaveLength(1);
+});
+
+test('completed work agrees with the composer and the price tooltip has a matching triangle', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const items = [
+    { id: 'prompt', kind: 'userMessage', text: 'Check the final status.' },
+    { id: 'command', kind: 'commandExecution', text: 'read report', status: 'completed' },
+    { id: 'reply', kind: 'agentMessage', text: 'The work is complete.' },
+  ];
+  const turn = {
+    id: 'status-work-turn', status: 'inProgress', startedAt: '2026-10-05T17:00:00Z',
+    model: 'gpt-6.1-sol', reasoningEffort: 'high', hasDeferredItems: true, deferredItemCount: 1,
+    tokenUsage: { total: { totalTokens: 583158, inputTokens: 582158, cachedInputTokens: 579000, outputTokens: 1000, reasoningOutputTokens: 500 }, generationSpeed: { averageOutputTokensPerSecond: 23.9 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.079, inputUsd: 0.0061, cachedInputUsd: 0.058, outputUsd: 0.0149 },
+    items: [items[0], items[2]],
+  };
+  let completed = false;
+  const sockets: WebSocketRoute[] = [];
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, socket => {
+    sockets.push(socket);
+    socket.send(JSON.stringify({ type: 'supervisor.connected' }));
+    socket.onMessage(() => socket.send(JSON.stringify({ type: 'supervisor.pong' })));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: {
+    ...detail, totalTurnCount: 1,
+    thread: { ...detail.thread, status: completed ? 'idle' : 'running', activeTurnId: completed ? null : turn.id },
+    turns: [{ ...turn, status: completed ? 'completed' : 'inProgress', completedAt: completed ? '2026-10-05T17:01:12Z' : null }],
+  } }));
+  await page.route(`**/api/threads/${id}/turns/${turn.id}/detail`, route => route.fulfill({ json: {
+    ...turn, items, hasDeferredItems: false, deferredItemCount: 0,
+  } }));
+  await page.goto(`/threads/${id}`);
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  const summary = page.locator('.thread-graph-worked-summary');
+  await expect(summary.locator('.thread-graph-worked-label')).toHaveText('Working');
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(page.getByText('read report', { exact: true })).toBeVisible();
+  await summary.getByRole('button', { name: /Collapse turn 1$/ }).click();
+  completed = true;
+  expect(sockets.length).toBeGreaterThan(0);
+  for (const socket of sockets) {
+    socket.send(JSON.stringify({ type: 'thread.turn.completed', threadId: id, timestamp: '2026-10-05T17:01:12Z', payload: { turnId: turn.id, status: 'completed' } }));
+    socket.send(JSON.stringify({ type: 'thread.updated', threadId: id, timestamp: '2026-10-05T17:01:12Z', payload: {} }));
+  }
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toHaveCount(0);
+  await expect(summary.locator('.thread-graph-worked-label')).toHaveText('Worked for 1m 12s');
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+  await expect(page.getByText('The work is complete.', { exact: true })).toBeVisible();
+  await summary.locator('.thread-turn-usage-price').hover();
+  const tooltip = page.locator('[data-slot="tooltip-content"]');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip.locator(':scope > div [aria-label="Input: 3,158 tokens"]')).toBeVisible();
+  const arrow = tooltip.locator('[data-slot="tooltip-arrow"]');
+  expect(await arrow.evaluate(element => {
+    const css = getComputedStyle(element);
+    return { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height,
+      fill: css.fill, surface: getComputedStyle(element.closest('[data-slot="tooltip-content"]')!).backgroundColor,
+      background: css.backgroundColor, rotate: css.rotate, transform: css.transform };
+  })).toEqual({ width: 10, height: 5, fill: 'rgb(37, 38, 34)', surface: 'rgb(37, 38, 34)', background: 'rgba(0, 0, 0, 0)', rotate: 'none', transform: 'none' });
+  const box = (await tooltip.boundingBox())!;
+  await page.screenshot({ path: testInfo.outputPath('price-tooltip.png'), clip: { x: box.x - 4, y: box.y - 4, width: box.width + 8, height: box.height + 14 } });
 });
 
 test('mobile work summary keeps its step count and cannot scroll the conversation sideways', async ({ page, request }) => {
