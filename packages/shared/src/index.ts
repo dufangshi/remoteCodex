@@ -1446,6 +1446,15 @@ export interface ThreadPendingSteerDto {
   createdAt: string;
 }
 
+export interface ThreadSubagentDto {
+  id: string;
+  name: string | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  parentToolCallId: string | null;
+}
+
 export interface ThreadLiveItemsDto {
   turnId: string;
   items: ThreadHistoryItemDto[];
@@ -1460,6 +1469,7 @@ export interface ThreadDetailDto {
   totalTurnCount?: number;
   pendingRequests: ThreadActionRequestDto[];
   pendingSteers: ThreadPendingSteerDto[];
+  activeSubagents?: ThreadSubagentDto[];
   answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
   activityNotes?: ThreadActivityNoteDto[];
   goal?: ThreadGoalDto | null;
@@ -1762,6 +1772,10 @@ export interface ThreadEventPayloadMap {
   };
   'thread.context.updated': {
     contextUsage: ThreadContextUsageDto;
+  };
+  'thread.subagents.updated': {
+    turnId: string;
+    activeSubagents: ThreadSubagentDto[];
   };
   'thread.goal.updated': {
     turnId?: string | null;

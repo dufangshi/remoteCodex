@@ -321,6 +321,20 @@ pub struct ThreadPendingSteerDto {
     pub created_at: String,
 }
 
+/// A native subagent currently managed by the provider harness.
+/// Native Claude/Codex agents run inside the provider session and do not have
+/// their own Remote Codex thread id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSubagentDto {
+    pub id: String,
+    pub name: Option<String>,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub parent_tool_call_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoalDto {
@@ -347,6 +361,8 @@ pub struct ThreadDetailDto {
     pub total_turn_count: Option<u32>,
     pub pending_requests: Vec<ThreadActionRequestDto>,
     pub pending_steers: Vec<ThreadPendingSteerDto>,
+    #[serde(default)]
+    pub active_subagents: Vec<ThreadSubagentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_notes: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]

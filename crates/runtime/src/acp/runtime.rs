@@ -10,7 +10,8 @@ use remote_codex_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
     AgentBackendManagementSchemaDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto,
     AgentRuntimeStatusDto, ModelOptionDto, Provider, ReasoningEffortOptionDto,
-    ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ToolboxItemDto,
+    ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadSubagentDto,
+    ToolboxItemDto,
 };
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -91,6 +92,7 @@ struct LiveSession {
     current_mode_id: Option<String>,
     /// Prompt bootstrap is scoped to the loaded process and product identity.
     context_thread_id: Option<String>,
+    active_subagents: HashMap<String, ThreadSubagentDto>,
     upstream_revision: Option<Vec<u8>>,
 }
 
@@ -452,6 +454,7 @@ impl AcpRuntime {
             available_modes,
             current_mode_id,
             context_thread_id: None,
+            active_subagents: HashMap::new(),
         };
         Self::apply_product_mode(&live.process.clone(), &mut live).await?;
         startup_process.0 = None;
@@ -1594,6 +1597,16 @@ impl AgentRuntime for AcpRuntime {
         )
     }
 
+    async fn active_subagents(&self, session_id: &str) -> Vec<ThreadSubagentDto> {
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .map(|live| live.active_subagents.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     async fn start_turn(
         &self,
         input: StartTurnInput,
@@ -1684,6 +1697,7 @@ impl AgentRuntime for AcpRuntime {
                 turn_id: input.turn_id.clone(),
                 bus: bus.clone(),
             });
+            live.active_subagents.clear();
         }
         let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
         let mut usage_reader =
@@ -1790,6 +1804,21 @@ impl AgentRuntime for AcpRuntime {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
                             let mapped = mapper.apply(&update);
+                            if let Some(subagents) = mapped.active_subagents.clone() {
+                                if let Some(live) = self
+                                    .inner
+                                    .sessions
+                                    .lock()
+                                    .await
+                                    .get_mut(&input.provider_session_id)
+                                {
+                                    live.active_subagents = subagents
+                                        .iter()
+                                        .cloned()
+                                        .map(|agent| (agent.id.clone(), agent))
+                                        .collect();
+                                }
+                            }
                             if let Some(goal) = mapped.goal.clone() {
                                 if let Some(live) = self
                                     .inner
@@ -1852,6 +1881,7 @@ impl AgentRuntime for AcpRuntime {
             {
                 live.active = None;
             }
+            live.active_subagents.clear();
             if include_context && prompt_done {
                 live.context_thread_id = Some(input.thread_id.clone());
             }
@@ -1887,6 +1917,12 @@ impl AgentRuntime for AcpRuntime {
             }
         }
         if !input.hidden {
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.subagents.updated".into(),
+                thread_id: input.thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({ "turnId": input.turn_id, "activeSubagents": [] }),
+            });
             for item in &items {
                 bus.emit(ThreadEventEnvelope {
                     event_type: "thread.item.completed".into(),
@@ -2183,6 +2219,7 @@ impl AgentRuntime for AcpRuntime {
                 available_modes,
                 current_mode_id,
                 context_thread_id: None,
+                active_subagents: HashMap::new(),
                 upstream_revision: None,
             },
         );
@@ -3075,6 +3112,17 @@ fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpd
     }
     if let Some(usage) = mapped.usage {
         emit_usage(bus, thread_id, turn_id, usage, hidden);
+    }
+    if let Some(active_subagents) = mapped.active_subagents {
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.subagents.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({
+                "turnId": turn_id,
+                "activeSubagents": active_subagents,
+            }),
+        });
     }
     for (item_id, delta, sequence) in mapped.deltas {
         bus.emit(ThreadEventEnvelope {
