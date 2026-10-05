@@ -49,17 +49,123 @@ mod tests {
             .is_err());
         }
     }
+
+    #[test]
+    fn peer_cli_parses_device_file_outbox_and_remote_thread_commands() {
+        for args in [
+            vec!["device", "list"],
+            vec!["device", "access"],
+            vec!["device", "access", "on"],
+            vec!["device", "access", "off"],
+            vec!["device", "trust", "Treer", "--reset"],
+            vec!["device", "workspaces", "Treer"],
+            vec!["thread", "list", "--device", "Treer", "--workspace", "ws"],
+            vec!["thread", "backends", "--device", "Treer"],
+            vec!["thread", "models", "--device", "Treer", "--workspace", "ws"],
+            vec!["thread", "create", "--device", "Treer", "--workspace", "ws"],
+            vec![
+                "thread",
+                "show",
+                "Treer/00000000-0000-0000-0000-000000000001",
+            ],
+            vec![
+                "thread",
+                "status",
+                "00000000-0000-0000-0000-000000000001",
+                "--device",
+                "Treer",
+            ],
+            vec![
+                "transcript",
+                "Treer/00000000-0000-0000-0000-000000000001",
+                "--limit",
+                "1",
+            ],
+            vec!["fs", "ls", "Treer", "--workspace", "ws"],
+            vec!["fs", "ls", "Treer", "--workspace", "ws", "src"],
+            vec![
+                "fs",
+                "get",
+                "Treer",
+                "--workspace",
+                "ws",
+                "src/file",
+                "--out",
+                "copy",
+            ],
+            vec!["outbox"],
+        ] {
+            let argv = std::iter::once("remote-codex").chain(args.iter().copied());
+            assert!(Cli::try_parse_from(argv).is_ok(), "{args:?}");
+        }
+        let cli = Cli::try_parse_from([
+            "remote-codex",
+            "thread",
+            "send",
+            "Treer/00000000-0000-0000-0000-000000000001",
+            "--attach",
+            "file",
+            "--attach",
+            "dir",
+            "--text",
+            "review",
+        ])
+        .unwrap();
+        let Commands::Thread {
+            command: threads::ThreadCommand::Send { attach, .. },
+        } = cli.command
+        else {
+            panic!("expected send")
+        };
+        assert_eq!(
+            attach,
+            vec![
+                std::path::PathBuf::from("file"),
+                std::path::PathBuf::from("dir")
+            ]
+        );
+    }
+
+    #[test]
+    fn peer_cli_rejects_invalid_access_trust_and_missing_file_arguments() {
+        for args in [
+            vec!["device", "access", "yes"],
+            vec!["device", "trust", "Treer"],
+            vec!["fs", "ls", "Treer"],
+            vec!["fs", "get", "Treer", "--workspace", "ws"],
+            vec!["thread", "wait", "thread", "--device", "Treer"],
+            vec!["inbox", "--device", "Treer"],
+        ] {
+            assert!(
+                Cli::try_parse_from(std::iter::once("remote-codex").chain(args.iter().copied()))
+                    .is_err(),
+                "{args:?}"
+            );
+        }
+    }
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create, contact, and inspect threads on the local Supervisor.
+    /// Create, contact, and inspect local threads or same-owner device peers.
     Thread {
         #[command(subcommand)]
         command: threads::ThreadCommand,
     },
     /// Read recent conversation text, then expand one turn or item.
     Transcript(threads::Transcript),
+    /// Discover same-owner devices and manage this device's peer access/trust.
+    Device {
+        #[command(subcommand)]
+        command: threads::DeviceCommand,
+    },
+    /// Read workspace files on another device.
+    Fs {
+        #[command(subcommand)]
+        command: threads::FsCommand,
+    },
+    /// List cross-device messages waiting for delivery from this device.
+    Outbox,
     /// Read and acknowledge persistent peer messages without starting turns.
     Inbox(threads::Inbox),
     /// Shared task board for the threads of one lineage.
@@ -147,6 +253,20 @@ async fn main() -> Result<()> {
             let value = threads::Client::new(cli.connection)?
                 .transcript(query)
                 .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Device { command } => {
+            let value = threads::Client::new(cli.connection)?
+                .device(command)
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Fs { command } => {
+            let value = threads::Client::new(cli.connection)?.fs(command).await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Outbox => {
+            let value = threads::Client::new(cli.connection)?.outbox().await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
 

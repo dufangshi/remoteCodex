@@ -1,4 +1,4 @@
-# Local thread interaction
+# Thread interaction
 
 The `remote-codex` CLI can create peer threads, send prompts, inspect runtime state, and progressively read stored conversations. These operations use the Supervisor's existing threads, prompt queue, turns and history items. No database tables or separate Task/Message lifecycle are added.
 
@@ -69,7 +69,49 @@ remote-codex --cli-config /path/to/supervisor.cli.json --from THREAD_ID thread s
 
 Managed ACP processes receive `REMOTE_CODEX_URL`, `REMOTE_CODEX_TOKEN` and `REMOTE_CODEX_THREAD_ID`, plus a PATH containing the running binary. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the remoteCodex thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `remote-codex thread self`, `remote-codex skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
 
-CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion requires the thread-bound credential and verifies the parent relationship; `--from` cannot override that identity. Other messaging attribution and shared filesystem access are not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs are accepted only when their device ID matches this Supervisor.
+CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion requires the thread-bound credential and verifies the parent relationship; `--from` cannot override that identity. Other messaging attribution and shared filesystem access are not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs use `info.relayDeviceId` (with legacy `deviceId` compatibility) to select local handling or another device.
+
+## Other devices
+
+Cross-device operations stay on the local CLI connection and use end-to-end encrypted
+relay requests between devices of the same owner. Access defaults to off on each
+device. `device access` views it; `device access on|off` and `device trust DEVICE
+--reset` require a local machine credential. Trust reset follows independent
+verification of the peer's `relay-fingerprint`.
+
+```sh
+remote-codex device list
+remote-codex device workspaces DEVICE
+remote-codex thread list --device DEVICE
+remote-codex thread backends --device DEVICE
+remote-codex thread models --device DEVICE --workspace WORKSPACE_ID
+remote-codex thread create --device DEVICE --workspace WORKSPACE_ID --title helper
+remote-codex thread show DEVICE/THREAD_UUID
+remote-codex transcript DEVICE/THREAD_UUID --limit 1
+remote-codex thread send DEVICE/THREAD_UUID --text 'Review this' --attach ./file
+remote-codex fs ls DEVICE --workspace WORKSPACE_ID [PATH]
+remote-codex fs get DEVICE --workspace WORKSPACE_ID PATH --out ./download
+remote-codex outbox
+```
+
+`DEVICE` is a relay ID or unique case-insensitive name. Qualified targets and Web
+URLs require a thread UUID; lineage names and self/parent/root resolve only locally.
+Remote creation requires a target workspace and does not inherit local lineage or
+approval mode. Remote send supports all four delivery modes; completion results
+return to the sender's local passive inbox. Incoming cross-device mail includes
+`replyTo` for replies. Wait/wake/tree/task/close/delete/inbox remain local operations.
+
+Up to 20 attachments are staged locally, uploaded to the target thread's incoming
+directory, and listed in the message (directories become zip files). `fs` provides
+workspace-scoped read-only listing/downloads and verifies downloaded hashes.
+Without `--out`, downloads go under the caller's thread `.temp` directory or the
+local workspace's `.temp/downloads/` when no caller exists.
+
+Only inbox/queue sends with retryable relay/offline/timeout failures enter the local
+durable outbox. Its worker scans every five seconds, retries after 5 s, 15 s, 60 s,
+5 min, then every 15 min, and expires records after seven days. Success removes the
+record and staged files; expiry or a permanent error mails a passive status failure
+to the local sender. See [the cross-device contract](cross-device-peer.zh.md).
 
 The JSON facade has `operation` values `info`, `list`, `show`, `status`, `backends`, `models`, `create`, `send`, `transcript`, the inbox operations, and the coordination operations described below (`resolve`, `tree`, `wait`, `wake`, `close`, `roles`, `inboxWait`, `task*`). It delegates to the existing runtime service; it does not connect directly to a provider app-server. Request DTOs use camelCase in `crates/protocol/src/interaction.rs`.
 

@@ -12,7 +12,6 @@ mod peer_api;
 mod peer_files;
 #[allow(dead_code)]
 mod peer_link;
-#[allow(dead_code)]
 mod peer_send;
 mod secure_transport;
 mod shells;

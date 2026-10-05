@@ -69,6 +69,9 @@ pub enum ThreadCommand {
     SelfInfo,
     /// Threads a person started, with a count of the agent threads under each.
     List {
+        /// Relay device ID or unique device name; defaults to this device.
+        #[arg(long)]
+        device: Option<String>,
         #[arg(long)]
         workspace: Option<String>,
         #[arg(long, default_value_t = 20)]
@@ -82,22 +85,35 @@ pub enum ThreadCommand {
     },
     Show {
         id: String,
+        #[arg(long)]
+        device: Option<String>,
     },
     Status {
         id: String,
+        #[arg(long)]
+        device: Option<String>,
     },
     /// Delete your own finished or unused direct child. Running/queued children and children with descendants are refused.
-    Delete {
-        id: String,
+    Delete { id: String },
+    Backends {
+        #[arg(long)]
+        device: Option<String>,
     },
-    Backends,
     Models {
+        #[arg(long)]
+        device: Option<String>,
+        /// Workspace used for model discovery on the target device.
+        #[arg(long)]
+        workspace: Option<String>,
         #[arg(long, default_value = "acp")]
         provider: String,
         #[arg(long)]
         agent: Option<String>,
     },
     Create {
+        /// Other device; requires --workspace and creates no local lineage.
+        #[arg(long)]
+        device: Option<String>,
         #[arg(long)]
         workspace: Option<String>,
         #[arg(long)]
@@ -169,6 +185,11 @@ pub enum ThreadCommand {
     /// Send passive mail or request execution; direct/steer also await the steering acknowledgement when running.
     Send {
         id: String,
+        #[arg(long)]
+        device: Option<String>,
+        /// Copy a local file or zip a directory to the remote thread. Repeatable, up to 20.
+        #[arg(long, value_name = "PATH")]
+        attach: Vec<PathBuf>,
         #[command(flatten)]
         body: Body,
     },
@@ -176,6 +197,8 @@ pub enum ThreadCommand {
 #[derive(Args)]
 pub struct Transcript {
     pub id: String,
+    #[arg(long)]
+    pub device: Option<String>,
     #[arg(long, default_value_t = 3)]
     pub limit: u32,
     #[arg(long, conflicts_with = "turn")]
@@ -192,6 +215,121 @@ pub struct Transcript {
     pub text_offset: u32,
     #[arg(long, requires = "item")]
     pub raw: bool,
+}
+
+#[derive(Subcommand)]
+pub enum DeviceCommand {
+    /// Devices belonging to this relay owner, including this device.
+    List,
+    /// Inspect access, or enable/disable it using the local machine credential.
+    Access {
+        #[arg(value_parser = ["on", "off"])]
+        enabled: Option<String>,
+    },
+    /// Forget a peer's pinned identity after verifying its new fingerprint.
+    Trust {
+        device: String,
+        #[arg(long, required = true)]
+        reset: bool,
+    },
+    /// Workspaces available on another device.
+    Workspaces { device: String },
+}
+
+#[derive(Subcommand)]
+pub enum FsCommand {
+    /// List one directory in a remote workspace.
+    Ls {
+        device: String,
+        #[arg(long)]
+        workspace: String,
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Download a remote workspace file and verify its hash.
+    Get {
+        device: String,
+        #[arg(long)]
+        workspace: String,
+        path: String,
+        /// Local destination; defaults to the caller's .temp downloads directory.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+struct ThreadTarget {
+    thread_id: String,
+    device_id: Option<String>,
+}
+impl ThreadTarget {
+    fn apply(&self, input: &mut Value) {
+        input["threadId"] = json!(self.thread_id);
+        if let Some(device) = &self.device_id {
+            input["deviceId"] = json!(device);
+        }
+    }
+}
+
+fn thread_url(value: &str) -> bool {
+    value.starts_with("https://") || value.starts_with("http://")
+}
+
+fn parse_target(value: &str, device: Option<&str>) -> Result<Option<ThreadTarget>> {
+    ensure!(
+        device.is_none_or(|d| !d.trim().is_empty()),
+        "device is required"
+    );
+    let (target_device, thread) = if thread_url(value) {
+        let url = reqwest::Url::parse(value)?;
+        let parts = url
+            .path_segments()
+            .context("invalid thread URL")?
+            .collect::<Vec<_>>();
+        ensure!(
+            parts.len() == 4
+                && parts[0] == "devices"
+                && parts[2] == "threads"
+                && !parts[1].is_empty(),
+            "expected /devices/DEVICE/threads/THREAD URL"
+        );
+        (Some(parts[1].to_owned()), parts[3].to_owned())
+    } else if let Some((device, thread)) = value.split_once('/') {
+        ensure!(
+            !device.is_empty() && !thread.contains('/'),
+            "expected DEVICE/THREAD with a thread UUID"
+        );
+        (Some(device.to_owned()), thread.to_owned())
+    } else if let Ok(id) = uuid::Uuid::parse_str(value) {
+        return Ok(Some(ThreadTarget {
+            thread_id: id.to_string(),
+            device_id: device.map(str::to_owned),
+        }));
+    } else {
+        ensure!(device.is_none(), "thread names, self, parent and root only resolve locally; use a thread UUID on another device");
+        return Ok(None);
+    };
+    ensure!(
+        device.is_none_or(|d| target_device
+            .as_deref()
+            .is_some_and(|target| target.eq_ignore_ascii_case(d))),
+        "--device conflicts with the device in the target"
+    );
+    Ok(Some(ThreadTarget {
+        thread_id: uuid::Uuid::parse_str(&thread)
+            .context("remote thread target must be a UUID")?
+            .to_string(),
+        device_id: target_device,
+    }))
+}
+
+fn same_device(info: &Value, device: &str) -> bool {
+    ["relayDeviceId", "deviceId"].iter().any(|key| {
+        info[key]
+            .as_str()
+            .is_some_and(|id| id.eq_ignore_ascii_case(device))
+    })
 }
 
 pub struct Client {
@@ -250,101 +388,191 @@ impl Client {
         ensure!(status.is_success(), "HTTP {status}: {value}");
         Ok(value)
     }
-    async fn id(&self, value: &str) -> Result<String> {
-        if value.starts_with("https://") || value.starts_with("http://") {
-            let url = reqwest::Url::parse(value)?;
-            let parts = url
-                .path_segments()
-                .context("invalid thread URL")?
-                .collect::<Vec<_>>();
-            ensure!(
-                parts.len() == 4 && parts[0] == "devices" && parts[2] == "threads",
-                "expected /devices/DEVICE/threads/THREAD URL"
-            );
-            let info = self.request(json!({"operation":"info"})).await?;
-            ensure!(
-                info["deviceId"].as_str() == Some(parts[1]),
-                "thread URL belongs to another device"
-            );
-            return Ok(uuid::Uuid::parse_str(parts[3])?.to_string());
+    async fn target(&self, value: &str, device: Option<&str>) -> Result<ThreadTarget> {
+        if let Some(mut target) = parse_target(value, device)? {
+            if thread_url(value) {
+                let info = self.request(json!({"operation":"info"})).await?;
+                if target
+                    .device_id
+                    .as_deref()
+                    .is_some_and(|d| same_device(&info, d))
+                {
+                    target.device_id = None;
+                }
+            }
+            return Ok(target);
         }
-        if let Ok(id) = uuid::Uuid::parse_str(value) {
-            return Ok(id.to_string());
-        }
-        // A delegate name, or self/parent/root, resolved within the caller's lineage.
         let found = self
             .request(json!({"operation":"resolve","name":value,"fromThreadId":self.from}))
             .await?;
-        Ok(found["threadId"]
-            .as_str()
-            .context("resolve returned no thread")?
-            .to_string())
+        Ok(ThreadTarget {
+            thread_id: found["threadId"]
+                .as_str()
+                .context("resolve returned no thread")?
+                .into(),
+            device_id: None,
+        })
     }
-    async fn send(&self, id: &str, body: &Body, default_delivery: &str) -> Result<Value> {
+    async fn id(&self, value: &str) -> Result<String> {
+        let target = self.target(value, None).await?;
+        ensure!(
+            target.device_id.is_none(),
+            "this operation is not available across devices"
+        );
+        Ok(target.thread_id)
+    }
+    async fn send(
+        &self,
+        target: &ThreadTarget,
+        attachments: &[PathBuf],
+        body: &Body,
+        default_delivery: &str,
+    ) -> Result<Value> {
         let text = body
             .text()?
             .context("send requires --text or --text-file")?;
-        self.request(json!({"operation":"send","threadId":id,"text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id,"subject":body.subject,"kind":body.kind,"inReplyTo":body.in_reply_to})).await
+        let mut input = json!({"operation":"send","text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id,"subject":body.subject,"kind":body.kind,"inReplyTo":body.in_reply_to});
+        target.apply(&mut input);
+        if !attachments.is_empty() {
+            ensure!(
+                attachments.len() <= 20,
+                "at most 20 attachments are allowed"
+            );
+            input["attachments"] = json!(attachments
+                .iter()
+                .map(std::fs::canonicalize)
+                .collect::<std::io::Result<Vec<_>>>()?);
+        }
+        self.request(input).await
     }
     pub async fn thread(&self, command: ThreadCommand) -> Result<Value> {
         match command {
-            ThreadCommand::SelfInfo=>self.request(json!({"operation":"status","threadId":self.from.as_ref().context("Current thread is unknown; use --from ID")?})).await,
-            ThreadCommand::List{workspace,limit,all,group}=>self.request(json!({"operation":"list","workspaceId":workspace,"limit":limit,"includeAgentThreads":all,"groupId":group})).await,
-            ThreadCommand::Show{id}|ThreadCommand::Status{id}=>self.request(json!({"operation":"status","threadId":self.id(&id).await?})).await,
-            ThreadCommand::Delete{id}=>self.request(json!({"operation":"delete","threadId":self.id(&id).await?,"fromThreadId":self.from})).await,
-            ThreadCommand::Backends=>self.request(json!({"operation":"backends"})).await,
-            ThreadCommand::Models{provider,agent}=>self.request(json!({"operation":"models","provider":provider,"agentId":agent,"fromThreadId":self.from})).await,
-            ThreadCommand::Send{id,body}=>self.send(&self.id(&id).await?,&body,"inbox").await,
-            ThreadCommand::Wait{ids,any,timeout,wake}=>{
-                let mut resolved=Vec::new();
+            ThreadCommand::SelfInfo => self.request(json!({"operation":"status","threadId":self.from.as_ref().context("Current thread is unknown; use --from ID")?})).await,
+            ThreadCommand::List { device, workspace, limit, all, group } => {
+                let mut input = json!({"operation":"list","workspaceId":workspace,"limit":limit,"includeAgentThreads":all,"groupId":group});
+                if let Some(device) = device { input["deviceId"] = json!(device); }
+                self.request(input).await
+            }
+            ThreadCommand::Show { id, device } | ThreadCommand::Status { id, device } => {
+                let mut input = json!({"operation":"status"});
+                self.target(&id, device.as_deref()).await?.apply(&mut input);
+                self.request(input).await
+            }
+            ThreadCommand::Delete { id } => self.request(json!({"operation":"delete","threadId":self.id(&id).await?,"fromThreadId":self.from})).await,
+            ThreadCommand::Backends { device } => {
+                let mut input = json!({"operation":"backends"});
+                if let Some(device) = device { input["deviceId"] = json!(device); }
+                self.request(input).await
+            }
+            ThreadCommand::Models { device, workspace, provider, agent } => {
+                let mut input = json!({"operation":"models","provider":provider,"agentId":agent,"fromThreadId":self.from});
+                if let Some(device) = device { input["deviceId"] = json!(device); }
+                if let Some(workspace) = workspace { input["workspaceId"] = json!(workspace); }
+                self.request(input).await
+            }
+            ThreadCommand::Send { id, device, attach, body } => self.send(&self.target(&id, device.as_deref()).await?, &attach, &body, "inbox").await,
+            ThreadCommand::Wait { ids, any, timeout, wake } => {
+                let mut resolved = Vec::new();
                 for id in &ids { resolved.push(self.id(id).await?); }
                 if wake {
                     return self.request(json!({"operation":"wake","threadIds":resolved,"fromThreadId":self.from})).await;
                 }
-                self.request_for(json!({"operation":"wait","threadIds":resolved,"any":any,"timeoutSeconds":timeout,"fromThreadId":self.from}),timeout).await
+                self.request_for(json!({"operation":"wait","threadIds":resolved,"any":any,"timeoutSeconds":timeout,"fromThreadId":self.from}), timeout).await
             }
-            ThreadCommand::Tree{root,all}=>{
-                let root=match root { Some(r)=>Some(self.id(&r).await?), None=>None };
+            ThreadCommand::Tree { root, all } => {
+                let root = match root { Some(r) => Some(self.id(&r).await?), None => None };
                 self.request(json!({"operation":"tree","rootThreadId":root,"all":all,"fromThreadId":self.from})).await
             }
-            ThreadCommand::Close{ids,remove_worktree}=>{
-                let (mut closed,mut failed)=(Vec::new(),Vec::new());
+            ThreadCommand::Close { ids, remove_worktree } => {
+                let (mut closed, mut failed) = (Vec::new(), Vec::new());
                 for id in &ids {
-                    let result=match self.id(id).await {
-                        Ok(resolved)=>self.request(json!({"operation":"close","threadId":resolved,"removeWorktree":remove_worktree,"fromThreadId":self.from})).await,
-                        Err(e)=>Err(e),
+                    let result = match self.id(id).await {
+                        Ok(resolved) => self.request(json!({"operation":"close","threadId":resolved,"removeWorktree":remove_worktree,"fromThreadId":self.from})).await,
+                        Err(e) => Err(e),
                     };
-                    match result { Ok(v)=>closed.push(v), Err(e)=>failed.push(json!({"thread":id,"error":e.to_string()})) }
+                    match result { Ok(v) => closed.push(v), Err(e) => failed.push(json!({"thread":id,"error":e.to_string()})) }
                 }
-                // The caller exits nonzero when `failed` is nonempty, so `&&` chains do
-                // not treat a refusal as success; stdout stays plain JSON either way.
                 Ok(json!({"closed":closed,"failed":failed}))
             }
-            ThreadCommand::Roles=>self.request(json!({"operation":"roles","fromThreadId":self.from})).await,
-            ThreadCommand::Create{workspace,title,provider,agent,model,reasoning_effort,approval_mode,name,role,worktree,worktree_branch,body}=>{
-                ensure!(!body.notify_on_complete || body.text.is_some() || body.text_file.is_some(),"notification requires an initial prompt");
-                ensure!(!body.notify_on_complete || self.from.is_some(),"notification requires --from ID or managed thread context");
-                let mut input=json!({"operation":"create","title":title.clone().or_else(||name.clone()),"provider":provider,"agentId":agent,"model":model,"reasoningEffort":reasoning_effort,"fromThreadId":self.from,"name":name,"role":role,"worktree":worktree,"worktreeBranch":worktree_branch});
-                if let Some(ws)=workspace {input["workspaceId"]=json!(ws);}
-                if let Some(mode)=approval_mode {input["approvalMode"]=json!(mode);}
-                let mut result=self.request(input).await?;
+            ThreadCommand::Roles => self.request(json!({"operation":"roles","fromThreadId":self.from})).await,
+            ThreadCommand::Create { device, workspace, title, provider, agent, model, reasoning_effort, approval_mode, name, role, worktree, worktree_branch, body } => {
+                ensure!(device.is_none() || workspace.is_some(), "cross-device create requires --workspace");
+                ensure!(!body.notify_on_complete || body.text.is_some() || body.text_file.is_some(), "notification requires an initial prompt");
+                ensure!(!body.notify_on_complete || self.from.is_some(), "notification requires --from ID or managed thread context");
+                let mut input = json!({"operation":"create","title":title.clone().or_else(||name.clone()),"provider":provider,"agentId":agent,"model":model,"reasoningEffort":reasoning_effort,"fromThreadId":self.from,"name":name,"role":role,"worktree":worktree,"worktreeBranch":worktree_branch});
+                if let Some(device) = &device { input["deviceId"] = json!(device); }
+                if let Some(ws) = workspace { input["workspaceId"] = json!(ws); }
+                if let Some(mode) = approval_mode { input["approvalMode"] = json!(mode); }
+                let mut result = self.request(input).await?;
                 if body.text.is_some() || body.text_file.is_some() {
-                    let id=result["threadId"].as_str().context("create returned no thread ID")?.to_string();
-                    // Label the opening message by construction rather than relying on the
-                    // caller to remember: a create's initial prompt is a task by
-                    // definition, and --title is already the one-line summary of it.
-                    // Observed agents consistently omit these flags even when documented.
-                    let mut body=body;
-                    if body.kind.is_none() { body.kind=Some("task".into()); }
-                    if body.subject.is_none() { body.subject=title.clone(); }
-                    result["send"]=self.send(&id,&body,"queue").await.with_context(||format!("Thread {id} was created, but initial send failed; reuse this thread"))?;
+                    let id = result["threadId"].as_str().context("create returned no thread ID")?.to_string();
+                    let target = ThreadTarget { thread_id: id.clone(), device_id: device };
+                    let mut body = body;
+                    if body.kind.is_none() { body.kind = Some("task".into()); }
+                    if body.subject.is_none() { body.subject = title.clone(); }
+                    result["send"] = self.send(&target, &[], &body, "queue").await.with_context(||format!("Thread {} was created, but initial send failed; reuse this thread", target.device_id.as_ref().map(|d| format!("{d}/{id}")).unwrap_or(id)))?;
                 }
                 Ok(result)
             }
         }
     }
     pub async fn transcript(&self, q: Transcript) -> Result<Value> {
-        self.request(json!({"operation":"transcript","threadId":self.id(&q.id).await?,"limit":q.limit,"beforeTurnId":q.before_turn,"turnId":q.turn,"itemId":q.item,"view":q.view,"offset":q.offset,"textOffset":q.text_offset,"raw":q.raw})).await
+        let mut input = json!({"operation":"transcript","limit":q.limit,"beforeTurnId":q.before_turn,"turnId":q.turn,"itemId":q.item,"view":q.view,"offset":q.offset,"textOffset":q.text_offset,"raw":q.raw});
+        self.target(&q.id, q.device.as_deref())
+            .await?
+            .apply(&mut input);
+        self.request(input).await
+    }
+    pub async fn device(&self, command: DeviceCommand) -> Result<Value> {
+        let input = match command {
+            DeviceCommand::List => json!({"operation":"devices"}),
+            DeviceCommand::Access { enabled } => {
+                let mut input = json!({"operation":"peerAccess"});
+                if let Some(enabled) = enabled {
+                    input["enabled"] = json!(enabled == "on");
+                }
+                input
+            }
+            DeviceCommand::Trust { device, reset } => {
+                json!({"operation":"peerTrust","deviceId":device,"reset":reset})
+            }
+            DeviceCommand::Workspaces { device } => {
+                json!({"operation":"workspaces","deviceId":device})
+            }
+        };
+        self.request(input).await
+    }
+    pub async fn fs(&self, command: FsCommand) -> Result<Value> {
+        let input = match command {
+            FsCommand::Ls {
+                device,
+                workspace,
+                path,
+            } => {
+                json!({"operation":"fsList","deviceId":device,"workspaceId":workspace,"path":path})
+            }
+            FsCommand::Get {
+                device,
+                workspace,
+                path,
+                out,
+            } => {
+                let out = out
+                    .map(|p| -> Result<PathBuf> {
+                        Ok(if p.is_absolute() {
+                            p
+                        } else {
+                            std::env::current_dir()?.join(p)
+                        })
+                    })
+                    .transpose()?;
+                json!({"operation":"fsGet","deviceId":device,"workspaceId":workspace,"path":path,"out":out,"fromThreadId":self.from})
+            }
+        };
+        self.request(input).await
+    }
+    pub async fn outbox(&self) -> Result<Value> {
+        self.request(json!({"operation":"outbox"})).await
     }
 }
 
@@ -544,5 +772,216 @@ impl Client {
         let mut input = input;
         input["fromThreadId"] = json!(from);
         self.request(input).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const THREAD: &str = "00000000-0000-0000-0000-000000000001";
+    const RELAY_DEVICE: &str = "00000000-0000-0000-0000-000000000002";
+    const HOST: &str = "00000000-0000-0000-0000-000000000003";
+
+    #[test]
+    fn peer_cli_parses_qualified_ids_urls_and_local_names() {
+        assert_eq!(
+            parse_target(THREAD, None).unwrap().unwrap(),
+            ThreadTarget {
+                thread_id: THREAD.into(),
+                device_id: None
+            }
+        );
+        assert_eq!(
+            parse_target(THREAD, Some("Treer"))
+                .unwrap()
+                .unwrap()
+                .device_id
+                .as_deref(),
+            Some("Treer")
+        );
+        for device in ["Treer", RELAY_DEVICE] {
+            let target = parse_target(&format!("{device}/{THREAD}"), None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(target.thread_id, THREAD);
+            assert_eq!(target.device_id.as_deref(), Some(device));
+        }
+        let target = parse_target(
+            &format!(
+                "https://remote.example/devices/{RELAY_DEVICE}/threads/{THREAD}?view=full#item"
+            ),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(target.device_id.as_deref(), Some(RELAY_DEVICE));
+        for local in ["reviewer", "self", "parent", "root"] {
+            assert!(parse_target(local, None).unwrap().is_none());
+            assert!(parse_target(local, Some("Treer")).is_err());
+            assert!(parse_target(&format!("Treer/{local}"), None).is_err());
+        }
+        for invalid in [
+            "/00000000-0000-0000-0000-000000000001",
+            "Treer/a/b",
+            "https://remote.example/threads/00000000-0000-0000-0000-000000000001",
+        ] {
+            assert!(parse_target(invalid, None).is_err(), "{invalid}");
+        }
+        assert!(parse_target(&format!("Treer/{THREAD}"), Some("Desktop")).is_err());
+        assert!(parse_target(THREAD, Some("")).is_err());
+    }
+
+    #[test]
+    fn peer_cli_identifies_relay_and_legacy_host_ids_as_this_device() {
+        let info = json!({"deviceId":HOST,"relayDeviceId":RELAY_DEVICE,"deviceName":"Treer"});
+        assert!(same_device(&info, RELAY_DEVICE));
+        assert!(same_device(&info, HOST));
+        assert!(!same_device(&info, THREAD));
+        assert!(same_device(&json!({"deviceId":HOST}), HOST));
+        assert!(!same_device(&json!({"deviceId":HOST}), RELAY_DEVICE));
+    }
+
+    async fn mock_client(responses: Vec<Value>) -> (Client, tokio::task::JoinHandle<Vec<Value>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for response in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let (body_start, body_len) = loop {
+                    let mut chunk = [0; 4096];
+                    let count = stream.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&chunk[..count]);
+                    if let Some(end) = bytes.windows(4).position(|p| p == b"\r\n\r\n") {
+                        let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (key, value) = line.split_once(':')?;
+                                key.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().unwrap())
+                            })
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while bytes.len() < body_start + body_len {
+                    let mut chunk = [0; 4096];
+                    let count = stream.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&chunk[..count]);
+                }
+                requests.push(
+                    serde_json::from_slice(&bytes[body_start..body_start + body_len]).unwrap(),
+                );
+                let body = response.to_string();
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+            requests
+        });
+        (
+            Client {
+                url,
+                token: "test-token".into(),
+                from: Some(THREAD.into()),
+                http: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()
+                    .unwrap(),
+            },
+            task,
+        )
+    }
+
+    #[tokio::test]
+    async fn peer_cli_routes_local_web_urls_locally_and_remote_web_urls_by_device() {
+        for (url_device, expected_device) in
+            [(RELAY_DEVICE, None), (HOST, None), (THREAD, Some(THREAD))]
+        {
+            let (client, task) = mock_client(vec![
+                json!({"deviceId":HOST,"relayDeviceId":RELAY_DEVICE}),
+                json!({"threadId":THREAD}),
+            ])
+            .await;
+            let url = format!("https://remote.example/devices/{url_device}/threads/{THREAD}");
+            client
+                .thread(ThreadCommand::Status {
+                    id: url,
+                    device: None,
+                })
+                .await
+                .unwrap();
+            let requests = task.await.unwrap();
+            assert_eq!(requests[0]["operation"], "info");
+            assert_eq!(requests[1]["operation"], "status");
+            assert_eq!(requests[1]["threadId"], THREAD);
+            assert_eq!(requests[1]["deviceId"].as_str(), expected_device);
+        }
+        let (client, task) =
+            mock_client(vec![json!({"deviceId":HOST}), json!({"threadId":THREAD})]).await;
+        client
+            .thread(ThreadCommand::Show {
+                id: format!("http://old.example/devices/{HOST}/threads/{THREAD}"),
+                device: None,
+            })
+            .await
+            .unwrap();
+        assert!(task.await.unwrap()[1].get("deviceId").is_none());
+    }
+
+    #[tokio::test]
+    async fn peer_cli_keeps_remote_create_initial_prompt_on_the_selected_device() {
+        let (client, task) = mock_client(vec![
+            json!({"threadId":THREAD}),
+            json!({"delivery":"queued"}),
+        ])
+        .await;
+        let body = Body {
+            delivery: None,
+            notify_delivery: "inbox".into(),
+            subject: None,
+            kind: None,
+            in_reply_to: None,
+            text: Some("do the task".into()),
+            text_file: None,
+            notify_on_complete: true,
+            request_id: Some("stable".into()),
+        };
+        let result = client
+            .thread(ThreadCommand::Create {
+                device: Some("Treer".into()),
+                workspace: Some("remote-ws".into()),
+                title: Some("Task".into()),
+                provider: "acp".into(),
+                agent: None,
+                model: "default".into(),
+                reasoning_effort: None,
+                approval_mode: None,
+                name: None,
+                role: None,
+                worktree: false,
+                worktree_branch: None,
+                body,
+            })
+            .await
+            .unwrap();
+        assert_eq!(result["send"]["delivery"], "queued");
+        let requests = task.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["operation"], "create");
+        assert_eq!(requests[0]["workspaceId"], "remote-ws");
+        assert_eq!(requests[1]["operation"], "send");
+        assert_eq!(requests[1]["delivery"], "queue");
+        assert_eq!(requests[1]["kind"], "task");
+        assert_eq!(requests[1]["subject"], "Task");
+        assert_eq!(requests[1]["notifyOnComplete"], true);
+        assert!(requests
+            .iter()
+            .all(|r| r["deviceId"] == "Treer" && r["fromThreadId"] == THREAD));
     }
 }
