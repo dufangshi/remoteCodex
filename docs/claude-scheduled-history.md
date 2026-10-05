@@ -11,6 +11,12 @@ local JSONL. The saved turn contains the timer prompt, assistant progress/final
 messages, reasoning and tool calls/results. Native timestamps and stable IDs are
 used; repeated reads and runtime restarts do not create duplicate turns.
 
+Recovery also saves the native model and token breakdown for cost estimates.
+Usage is summed once per assistant request ID, keeping the latest snapshot when
+thinking/text/tool blocks repeat the same request. Already-recovered timers with
+missing usage are backfilled on the next scan, without duplicating history or
+changing the thread's execution state. Missing native usage remains unavailable.
+
 The existing background execution observer keeps checking sessions registered by
 history readers. New recovered turns emit `thread.updated` after the transaction
 commits, so an already-open idle page refreshes without a manual reload. Repeated

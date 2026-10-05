@@ -127,7 +127,7 @@ pub(crate) fn shared_thread_path_allowed(
             return true;
         }
         let parts: Vec<&str> = suffix.split('/').filter(|part| !part.is_empty()).collect();
-        if parts.len() == 3 && parts[0] == "items" && parts[2] == "detail" {
+        if parts.len() == 3 && matches!(parts[0], "items" | "turns") && parts[2] == "detail" {
             return true;
         }
         return control && matches!(suffix, "/fork-turns" | "/capabilities");
@@ -204,6 +204,40 @@ pub(crate) fn shared_workspace_path_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_detail_paths_preserve_wire_encoding_and_shared_read_access() {
+        for prefix in ["/relay", "/relay/devices/device-1"] {
+            for resource in ["turns", "items"] {
+                let encoded =
+                    format!("threads/thread-1/{resource}/thread-1%3Ascheduled%3Atimer-1/detail");
+                let uri: Uri = format!("{prefix}/api/{encoded}?token=secret&view=full")
+                    .parse()
+                    .unwrap();
+                let decoded = encoded.replace("%3A", ":");
+                let target = relay_api_target_path(&decoded, &uri);
+                assert_eq!(target, format!("/api/{encoded}?view=full"));
+                assert!(shared_thread_path_allowed(
+                    "GET",
+                    target.split('?').next().unwrap(),
+                    "thread-1",
+                    false
+                ));
+                assert!(!shared_thread_path_allowed(
+                    "POST",
+                    target.split('?').next().unwrap(),
+                    "thread-1",
+                    false
+                ));
+                assert!(!shared_thread_path_allowed(
+                    "GET",
+                    target.split('?').next().unwrap(),
+                    "other-thread",
+                    false
+                ));
+            }
+        }
+    }
 
     #[test]
     fn shared_access_uses_explicit_route_allowlists() {
