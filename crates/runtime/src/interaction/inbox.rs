@@ -41,6 +41,35 @@ fn get(conn: &Connection, thread: &str, id: &str) -> Result<Value> {
         anyhow::anyhow!("inbox message not found")
     })?)?)
 }
+
+pub(super) fn store_from_peer(
+    conn: &Connection,
+    thread: &str,
+    id: &str,
+    sender: &super::RemoteSender,
+    text: &str,
+    now: &str,
+    envelope: Envelope<'_>,
+) -> Result<()> {
+    store(
+        conn,
+        thread,
+        id,
+        sender.thread_id.as_deref(),
+        text,
+        now,
+        envelope,
+    )?;
+    let reply_to = sender
+        .thread_id
+        .as_ref()
+        .map(|from| format!("{}/{from}", sender.device_id));
+    conn.execute(
+        "UPDATE kv SET value=json_set(value,'$.fromDeviceId',?1,'$.fromDeviceName',?2,'$.replyTo',?3) WHERE key=?4",
+        params![sender.device_id, sender.device_name, reply_to, key(thread, id)],
+    )?;
+    Ok(())
+}
 impl Supervisor {
     /// Subject lines of waiting mail, newest first, for the start-of-turn notice.
     /// Showing what is waiting is what makes a passive inbox workable: a bare count
