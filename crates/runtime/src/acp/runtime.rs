@@ -62,6 +62,12 @@ struct ActiveTurn {
     bus: EventBus,
 }
 
+// Claude can emit a complete final message before its native SDK prompt RPC
+// settles. Once the final message has been quiet for this long, and no ACP
+// tool or user request remains pending, conservatively settle the turn and
+// discard the session so a later prompt cannot reuse a possibly stuck process.
+const ACP_QUIET_COMPLETION: Duration = Duration::from_secs(15);
+
 enum TurnOutcome {
     Completed,
     Interrupted,
@@ -1721,6 +1727,8 @@ impl AgentRuntime for AcpRuntime {
         }
         tokio::pin!(prompt_rpc);
         let mut prompt_done = false;
+        let mut saw_agent_output = false;
+        let mut last_agent_output = tokio::time::Instant::now();
         let mut cancel_sent = false;
         let mut cancel_deadline = tokio::time::Instant::now();
         let mut discard_session = false;
@@ -1804,6 +1812,10 @@ impl AgentRuntime for AcpRuntime {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
                             let mapped = mapper.apply(&update);
+                            if !mapped.deltas.is_empty() {
+                                saw_agent_output = true;
+                                last_agent_output = tokio::time::Instant::now();
+                            }
                             if let Some(subagents) = mapped.active_subagents.clone() {
                                 if let Some(live) = self
                                     .inner
@@ -1854,6 +1866,26 @@ impl AgentRuntime for AcpRuntime {
                     break if cancel.is_cancelled() { TurnOutcome::Interrupted } else { TurnOutcome::Completed };
                 }
                 _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
+                    let pending_request = self
+                        .inner
+                        .pending_dtos
+                        .lock()
+                        .await
+                        .get(&input.thread_id)
+                        .is_some_and(|requests| !requests.is_empty());
+                    if saw_agent_output
+                        && last_agent_output.elapsed() >= ACP_QUIET_COMPLETION
+                        && !pending_request
+                        && !mapper.has_pending_tools()
+                    {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            turn_id = %input.turn_id,
+                            "settling ACP turn after final output went quiet without prompt completion"
+                        );
+                        discard_session = true;
+                        break TurnOutcome::Completed;
+                    }
                     match process.exited().await {
                         Ok(true) => {
                             if cancel_sent { discard_session = true; break TurnOutcome::Interrupted; }
