@@ -200,6 +200,8 @@ pub(crate) async fn run(
                 state
                     .get_workspace(&state.get_thread(from)?.workspace_id)?
                     .abs_path
+            } else if let Some(workspace) = input["workspaceId"].as_str() {
+                state.get_workspace(workspace)?.abs_path
             } else {
                 state.config.workspace_root.to_string_lossy().into_owned()
             };

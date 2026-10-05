@@ -8,6 +8,7 @@ pub use agents::{
     clamp_wait, create_worktree, list_roles, load_role, remove_worktree, AgentOptions, RoleTemplate,
 };
 pub(crate) use agents::{stage_role, take_role};
+pub use peer::RemoteSender;
 pub use transcript::TranscriptQuery;
 
 use crate::Supervisor;
@@ -113,6 +114,15 @@ impl Supervisor {
     }
 
     pub fn send_to_thread(&self, id: &str, input: SendInput) -> Result<Value> {
+        self.send_to_thread_inner(id, input, None)
+    }
+
+    fn send_to_thread_inner(
+        &self,
+        id: &str,
+        input: SendInput,
+        remote: Option<RemoteSender>,
+    ) -> Result<Value> {
         let thread = self.get_thread(id)?;
         ensure!(
             ["inbox", "direct", "queue", "steer"].contains(&input.delivery.as_str()),
@@ -137,8 +147,10 @@ impl Supervisor {
             !input.text.trim().is_empty() && input.text.len() <= 256 * 1024,
             "text must be nonempty and at most 256 KiB"
         );
-        if let Some(from) = &input.from_thread_id {
-            self.get_thread(from)?;
+        if remote.is_none() {
+            if let Some(from) = &input.from_thread_id {
+                self.get_thread(from)?;
+            }
         }
         ensure!(
             !input.notify_on_complete || input.from_thread_id.is_some(),
@@ -179,7 +191,23 @@ impl Supervisor {
                 .find(|line| !line.is_empty())
                 .map(|line| line.chars().take(72).collect())
         });
-        let prompt = match &input.from_thread_id {
+        let sender = remote
+            .as_ref()
+            .map(|sender| {
+                format!(
+                    "{}/{} (device \"{}\")",
+                    sender.device_id,
+                    sender.thread_id.as_deref().unwrap_or("local"),
+                    sender.device_name
+                )
+            })
+            .or_else(|| {
+                input
+                    .from_thread_id
+                    .as_ref()
+                    .map(|from| format!("thread {from}"))
+            });
+        let prompt = match sender {
             Some(from) => {
                 let subject = derived_subject
                     .as_deref()
@@ -191,20 +219,31 @@ impl Supervisor {
                     .map(|value| format!("\nIn reply to message {value}"))
                     .unwrap_or_default();
                 format!(
-                    "[remoteCodex {kind} from thread {from}{subject}]{reply}\n{}",
+                    "[remoteCodex {kind} from {from}{subject}]{reply}\n{}",
                     input.text
                 )
             }
             None => input.text.clone(),
         };
-        let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&input)?));
+        let encoded = match &remote {
+            Some(sender) => serde_json::to_vec(&(&input, sender))?,
+            None => serde_json::to_vec(&input)?,
+        };
+        let fingerprint = hex::encode(Sha256::digest(encoded));
         let result = self.db.with(|conn| {
             let tx = conn.unchecked_transaction()?;
             let retry_key = input.client_request_id.as_ref().map(|key| {
-                format!(
-                    "cli:request:{id}:{}:{key}",
-                    input.from_thread_id.as_deref().unwrap_or("local")
-                )
+                match &remote {
+                    Some(sender) => format!(
+                        "cli:request:{id}:peer:{}:{}:{key}",
+                        sender.device_id,
+                        sender.thread_id.as_deref().unwrap_or("local")
+                    ),
+                    None => format!(
+                        "cli:request:{id}:{}:{key}",
+                        input.from_thread_id.as_deref().unwrap_or("local")
+                    ),
+                }
             });
             if let Some(key) = &retry_key {
                 if let Some(raw) = tx
@@ -251,19 +290,20 @@ impl Supervisor {
             }
             let receipt = json!({"threadId":id,"pendingSteerId":if delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if delivery == "queue" {"queued"} else {delivery},"requestedDelivery":input.delivery,"acceptedAt":now,"messageId":pending_id});
             if delivery == "inbox" {
-                inbox::store(
-                    &tx,
-                    id,
-                    &pending_id,
-                    input.from_thread_id.as_deref(),
-                    &input.text,
-                    &now,
-                    inbox::Envelope {
-                        subject: derived_subject.as_deref(),
-                        kind,
-                        in_reply_to: input.in_reply_to.as_deref(),
-                    },
-                )?;
+                let envelope = inbox::Envelope {
+                    subject: derived_subject.as_deref(),
+                    kind,
+                    in_reply_to: input.in_reply_to.as_deref(),
+                };
+                match &remote {
+                    Some(sender) => inbox::store_from_peer(
+                        &tx, id, &pending_id, sender, &input.text, &now, envelope,
+                    )?,
+                    None => inbox::store(
+                        &tx, id, &pending_id, input.from_thread_id.as_deref(),
+                        &input.text, &now, envelope,
+                    )?,
+                }
             } else {
                 enqueue(
                     &tx,
@@ -281,12 +321,16 @@ impl Supervisor {
                 }
             }
             if input.notify_on_complete {
+                let mut subscription = json!({"threadId":input.from_thread_id,"delivery":input.notify_delivery});
+                if let Some(sender) = &remote {
+                    subscription["deviceId"] = json!(sender.device_id);
+                    subscription["deviceName"] = json!(sender.device_name);
+                }
                 tx.execute(
                     "INSERT INTO kv(key,value) VALUES(?1,?2)",
                     params![
                         format!("cli:notify:pending:{pending_id}"),
-                        json!({"threadId":input.from_thread_id,"delivery":input.notify_delivery})
-                            .to_string()
+                        subscription.to_string()
                     ],
                 )?;
             }
@@ -468,10 +512,12 @@ pub(crate) fn finish_notification(
         // older versions with queue delivery must remain passive after upgrade.
         let parsed: Value = serde_json::from_str(&target).unwrap_or(Value::Null);
         let from = parsed["threadId"].as_str().unwrap_or(&target).to_owned();
-        let exists = conn
-            .query_row("SELECT 1 FROM threads WHERE id=?1", [&from], |_| Ok(()))
-            .optional()?
-            .is_some();
+        let remote_device = parsed["deviceId"].as_str();
+        let exists = remote_device.is_some()
+            || conn
+                .query_row("SELECT 1 FROM threads WHERE id=?1", [&from], |_| Ok(()))
+                .optional()?
+                .is_some();
         if exists {
             // Carry the delegate's own closing message instead of only pointing at it.
             // A bare "it ended" forced the caller into a second transcript call and
@@ -489,23 +535,25 @@ pub(crate) fn finish_notification(
             };
             let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: remote-codex transcript {thread} --turn {turn} --view overview{summary}");
             let message_id = Uuid::new_v4().to_string();
-            // Always passive, per main: completion is status, not a new task, so it
-            // never enqueues a turn. That makes carrying the delegate's closing
-            // message inline more important, not less - an agent that cannot be woken
-            // should at least find the outcome waiting rather than a pointer to it.
-            inbox::store(
-                conn,
-                &from,
-                &message_id,
-                Some(thread),
-                &text,
-                now,
-                inbox::Envelope {
-                    subject: Some(&format!("Delegate turn {status}")),
-                    kind: "result",
-                    in_reply_to: None,
-                },
-            )?;
+            let subject = format!("Delegate turn {status}");
+            if let Some(device) = remote_device {
+                // The supervisor owns transport/retries; runtime only persists the result.
+                peer::completion_outbox(conn, device, &from, thread, &text, &subject, now)?;
+            } else {
+                inbox::store(
+                    conn,
+                    &from,
+                    &message_id,
+                    Some(thread),
+                    &text,
+                    now,
+                    inbox::Envelope {
+                        subject: Some(&subject),
+                        kind: "result",
+                        in_reply_to: None,
+                    },
+                )?;
+            }
         }
         conn.execute("DELETE FROM kv WHERE key=?1", [key])?;
     }
