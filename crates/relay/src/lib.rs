@@ -6,6 +6,7 @@ mod device_tokens;
 mod hosted;
 mod notifications;
 mod oauth;
+mod peer;
 mod public_links;
 mod route_acl;
 mod security;
@@ -64,6 +65,7 @@ struct DeviceSocket {
 struct PendingDeviceRequest {
     device_id: String,
     connection_id: Uuid,
+    peer_device_id: Option<String>,
     tx: tokio::sync::oneshot::Sender<Value>,
 }
 
@@ -3668,12 +3670,6 @@ async fn forward_device_with_timeout(
     headers: Value,
     response_timeout: Duration,
 ) -> axum::response::Response {
-    let request_id = Uuid::new_v4().to_string();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let _pending_guard = PendingRequestGuard {
-        pending: &state.pending,
-        request_id: &request_id,
-    };
     let mut request_payload = json!({
         "method": method,
         "path": path,
@@ -3683,28 +3679,93 @@ async fn forward_device_with_timeout(
     if let Some(body_encoding) = body_encoding {
         request_payload["bodyEncoding"] = Value::String(body_encoding);
     }
-    let payload = json!({
+    match forward_device_payload_with_timeout(
+        state,
+        device_id,
+        request_payload,
+        None,
+        response_timeout,
+    )
+    .await
+    {
+        Ok(value) => forwarded_device_response(value),
+        Err(DeviceForwardError::Busy) => StatusCode::TOO_MANY_REQUESTS.into_response(),
+        Err(DeviceForwardError::Offline) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "code": "service_unavailable", "message": "device is offline" })),
+        )
+            .into_response(),
+        Err(DeviceForwardError::Timeout) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(json!({ "code": "timeout", "message": "device did not respond" })),
+        )
+            .into_response(),
+    }
+}
+
+enum DeviceForwardError {
+    Offline,
+    Timeout,
+    Busy,
+}
+
+async fn forward_device_payload_with_timeout(
+    state: Arc<AppState>,
+    device_id: String,
+    request_payload: Value,
+    peer: Option<peer::Caller>,
+    response_timeout: Duration,
+) -> Result<Value, DeviceForwardError> {
+    let request_id = Uuid::new_v4().to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _pending_guard = PendingRequestGuard {
+        pending: &state.pending,
+        request_id: &request_id,
+    };
+    let mut frame = json!({
         "type": "relay.request",
         "timestamp": now_rfc3339(),
         "requestId": request_id,
         "deviceId": device_id,
         "payload": request_payload
-    })
-    .to_string();
+    });
+    if let Some(caller) = peer.as_ref() {
+        frame["peer"] = caller.identity();
+    }
+    let payload = frame.to_string();
     let sent = {
         let sockets = state.sockets.read().await;
+        if let Some(caller) = peer.as_ref() {
+            if !sockets
+                .get(&caller.device_id)
+                .is_some_and(|socket| socket.connection_id == caller.connection_id)
+            {
+                return Err(DeviceForwardError::Offline);
+            }
+        }
         if let Some(socket) = sockets.get(&device_id) {
             // Register against the exact connection while it is still current.
             // A replaced connection must only cancel its own pending requests.
             let mut pending = state.pending.lock().unwrap_or_else(|e| e.into_inner());
-            if pending.len() >= 256 {
-                return StatusCode::TOO_MANY_REQUESTS.into_response();
+            if pending.len() >= 256
+                || peer.as_ref().is_some_and(|caller| {
+                    pending
+                        .values()
+                        .filter(|request| {
+                            request.peer_device_id.as_deref() == Some(caller.device_id.as_str())
+                        })
+                        .count()
+                        >= peer::MAX_IN_FLIGHT
+                })
+            {
+                return Err(DeviceForwardError::Busy);
             }
             pending.insert(
                 request_id.clone(),
                 PendingDeviceRequest {
                     device_id: device_id.clone(),
                     connection_id: socket.connection_id,
+                    peer_device_id: peer.as_ref().map(|caller| caller.device_id.clone()),
                     tx,
                 },
             );
@@ -3714,24 +3775,12 @@ async fn forward_device_with_timeout(
         }
     };
     if !sent {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "code": "service_unavailable", "message": "device is offline" })),
-        )
-            .into_response();
+        return Err(DeviceForwardError::Offline);
     }
     match tokio::time::timeout(response_timeout, rx).await {
-        Ok(Ok(value)) => forwarded_device_response(value),
-        Ok(Err(_)) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "code": "service_unavailable", "message": "device is offline" })),
-        )
-            .into_response(),
-        Err(_) => (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(json!({ "code": "timeout", "message": "device did not respond" })),
-        )
-            .into_response(),
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) => Err(DeviceForwardError::Offline),
+        Err(_) => Err(DeviceForwardError::Timeout),
     }
 }
 
@@ -3854,7 +3903,9 @@ async fn supervisor_tunnel(
             tracing::warn!(%error, "Could not retain authenticated device setup credential");
         }
     }
-    ws.on_upgrade(move |socket| handle_supervisor(socket, state, device_id))
+    ws.max_message_size(128 * 1024 * 1024)
+        .max_frame_size(128 * 1024 * 1024)
+        .on_upgrade(move |socket| handle_supervisor(socket, state, device_id))
         .into_response()
 }
 
@@ -3903,12 +3954,14 @@ async fn handle_supervisor_with_timeout(
     );
     state.hosted.mark_online(&device_id).await;
     schedule_hosted_bootstraps(state.clone(), device_id.clone()).await;
+    let device_name = peer::device_name(&state, &device_id).await;
     let (mut sink, mut stream) = socket.split();
     let greeting = Message::Text(
         json!({
             "type": "relay.connected",
             "timestamp": connected_at,
-            "deviceId": device_id
+            "deviceId": device_id,
+            "deviceName": device_name
         })
         .to_string()
         .into(),
@@ -3935,6 +3988,12 @@ async fn handle_supervisor_with_timeout(
                         if !state.sockets.read().await.get(&device_id).is_some_and(|socket|socket.connection_id==connection_id) {break;}
                         if let Ok(msg) = serde_json::from_str::<Value>(&text) {
                             match msg.get("type").and_then(Value::as_str) {
+                                Some("peer.request") => {
+                                    peer::request(state.clone(), device_id.clone(), connection_id, msg);
+                                }
+                                Some("peer.directory") => {
+                                    peer::directory(&state, &device_id, connection_id, msg).await;
+                                }
                                 Some("relay.response") => {
                                     if let Some(request_id) = msg.get("requestId").and_then(Value::as_str) {
                                         let mut pending=state.pending.lock().unwrap_or_else(|p|p.into_inner());
@@ -4773,6 +4832,7 @@ mod tests {
                 PendingDeviceRequest {
                     device_id: device_id.into(),
                     connection_id: old_connection_id,
+                    peer_device_id: None,
                     tx: old_tx,
                 },
             );
@@ -4781,6 +4841,7 @@ mod tests {
                 PendingDeviceRequest {
                     device_id: device_id.into(),
                     connection_id: new_connection_id,
+                    peer_device_id: None,
                     tx: new_tx,
                 },
             );
