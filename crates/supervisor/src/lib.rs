@@ -9,7 +9,6 @@ mod management;
 // allowance goes away once every peer module has its implementation.
 mod peer_api;
 mod peer_files;
-#[allow(dead_code)]
 mod peer_link;
 mod peer_send;
 mod secure_transport;

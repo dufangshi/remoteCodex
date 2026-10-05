@@ -83,6 +83,22 @@ pub async fn require_auth(
     mut request: Request,
     next: Next,
 ) -> Response {
+    let peer_path = request.uri().path().starts_with("/api/peer/");
+    let peer = request.extensions().get::<PeerCaller>().is_some();
+    if peer || peer_path {
+        return if peer && peer_path && request.extensions().get::<TrustedRelayForward>().is_some() {
+            next.run(request).await
+        } else {
+            (
+                axum::http::StatusCode::FORBIDDEN,
+                Json(ApiError::new(
+                    "peer_forbidden",
+                    "Peer credentials are required and only allow /api/peer/ requests.",
+                )),
+            )
+                .into_response()
+        };
+    }
     if request.uri().path() == "/api/cli" {
         let scoped =
             bearer_token(request.headers()).and_then(|token| state.cli_token_thread(&token));
@@ -310,4 +326,103 @@ fn timestamp_string(timestamp_millis: i64) -> Option<String> {
     Utc.timestamp_millis_opt(timestamp_millis)
         .single()
         .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tunnel::tests::state_with_relay_url;
+    use axum::{body::Body, http::StatusCode};
+    use tower::ServiceExt;
+
+    fn peer() -> PeerCaller {
+        PeerCaller {
+            device_id: "remote-device".into(),
+            device_name: "Remote device".into(),
+            user_id: "owner".into(),
+        }
+    }
+    #[tokio::test]
+    async fn peer_caller_and_peer_routes_require_each_other_even_without_auth() {
+        for auth_required in [true, false] {
+            let (_dir, mut state) = state_with_relay_url("http://127.0.0.1:1");
+            Arc::get_mut(&mut state).unwrap().config.auth_required = auth_required;
+            state.set_peer_access(true).unwrap();
+            let router = crate::http::router(state.clone());
+            for (trusted, caller) in [(false, false), (true, false), (false, true)] {
+                let mut request = axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/peer/cli")
+                    .header("content-type", "application/json")
+                    .header("x-remote-codex-relay-forwarded", "1")
+                    .header("x-remote-codex-peer-device", "remote-device");
+                if trusted {
+                    request = request.extension(TrustedRelayForward);
+                }
+                if caller {
+                    request = request.extension(peer());
+                }
+                let response = router
+                    .clone()
+                    .oneshot(request.body(Body::from(r#"{"operation":"info"}"#)).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            }
+            let token = login(&state.config, "admin", "secret123").unwrap().0;
+            let response = router
+                .clone()
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/api/peer/cli")
+                        .header("authorization", format!("Bearer {token}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"operation":"info"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            for path in [
+                "/api/version",
+                "/api/config/peer-access",
+                "/api/cli",
+                "/healthz",
+                "/api/peers/cli",
+            ] {
+                let response = router
+                    .clone()
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .uri(path)
+                            .extension(TrustedRelayForward)
+                            .extension(peer())
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+            }
+            let response = router
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/api/peer/cli")
+                        .header("content-type", "application/json")
+                        .extension(TrustedRelayForward)
+                        .extension(peer())
+                        .body(Body::from(r#"{"operation":"info"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_ne!(value["code"], "peer_forbidden");
+        }
+    }
 }

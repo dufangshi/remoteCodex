@@ -14,6 +14,7 @@ hex.workspace = true
 hmac.workspace = true
 portable-pty.workspace = true
 rand.workspace = true
+rand09 = { package = "rand", version = "0.9" }
 remote-codex-protocol.workspace = true
 reqwest.workspace = true
 remote-codex-runtime.workspace = true
@@ -33,7 +34,6 @@ aes-gcm = "0.10"
 p256 = { version = "0.13", features = ["ecdsa"] }
 
 [dev-dependencies]
-rand09 = { package = "rand", version = "0.9" }
 tempfile = "3"
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
 zip.workspace = true
