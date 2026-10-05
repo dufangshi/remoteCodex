@@ -42,10 +42,11 @@ export function publishRelease({
   runNpm,
   log = console.log,
   // npm accepts the tarball before every edge can answer `npm view`. Probe
-  // immediately, then give propagation at most 30 seconds per package. The
-  // old 151 x 2s loop could hold a successful release for over five minutes.
+  // immediately, then give processing/propagation at most three minutes per
+  // package. The old 151 x 2s loop could hold a successful release for over
+  // five minutes, while a 30-second window rejected freshly accepted tarballs.
   registryRetryDelayMs = 1_000,
-  registryVisibilityAttempts = 31,
+  registryVisibilityAttempts = 181,
 }) {
   if (!['next', 'latest'].includes(channel)) {
     throw new Error('Release channel must be next or latest');
