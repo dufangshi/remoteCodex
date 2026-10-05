@@ -1,6 +1,6 @@
 ---
 name: thread-interaction
-description: Create, message, and inspect peer remoteCodex threads on this device. Use for cross-provider collaboration, passive inbox exchange, explicit task dispatch or steering, completion callbacks, and progressively reading conversation history.
+description: Create, message, and inspect peer remoteCodex threads locally or on another device of the same owner. Use for cross-provider collaboration, passive inbox exchange, explicit task dispatch or steering, completion callbacks, file exchange, and progressively reading conversation history.
 ---
 
 # Interact with remoteCodex threads
@@ -61,9 +61,51 @@ remote-codex thread models --provider codex
 remote-codex thread models --provider acp --agent grok
 ```
 
-Use **remoteCodex thread IDs**, the last segment of `/devices/DEVICE_ID/threads/THREAD_ID`, not native Codex/ACP session IDs. A target may be a UUID, a full Web thread URL on the current device, the `--name` of an open thread in your lineage, or `parent`, `root` or `self`; the CLI does not route across devices. `self` identifies your caller. `list` defaults to 20 entries, capped at 100, without transcripts. `status`/`show` return lightweight metadata including `activeTurnId`, `queuedCount`, `unreadMessageCount`, `waitingForInput`, and `lastError`.
+Use **remoteCodex thread IDs**, the last segment of `/devices/DEVICE_ID/threads/THREAD_ID`, not native Codex/ACP session IDs. A target may be a UUID, a full Web thread URL, or `DEVICE/THREAD_UUID`. Names of open threads in your lineage and `parent`, `root` or `self` resolve only locally. `self` identifies your caller. `list` defaults to 20 entries, capped at 100, without transcripts. `status`/`show` return lightweight metadata including `activeTurnId`, `queuedCount`, `unreadMessageCount`, `waitingForInput`, and `lastError`.
 
 Reuse a peer when its workspace, model, and earlier work fit. Read status and only enough recent transcript to assess context. Create when separate context or another model is useful.
+
+## Other devices
+
+Devices must belong to the same relay owner, with peer access enabled on both. The
+CLI still connects to your local Supervisor; it routes encrypted requests through
+the relay. Use a relay device ID or a unique device name (case insensitive).
+
+```bash
+remote-codex device list
+remote-codex device access                    # inspect; managed threads can view
+remote-codex device access on                 # local machine credential required
+remote-codex device workspaces DEVICE
+remote-codex thread list --device DEVICE --workspace WORKSPACE_ID
+remote-codex thread backends --device DEVICE
+remote-codex thread models --device DEVICE --workspace WORKSPACE_ID
+remote-codex thread create --device DEVICE --workspace WORKSPACE_ID --title helper
+remote-codex thread status DEVICE/THREAD_UUID
+remote-codex transcript DEVICE/THREAD_UUID --limit 1
+remote-codex thread send DEVICE/THREAD_UUID --text 'Please inspect these files' \
+  --attach ./report.txt --attach ./sources
+remote-codex fs ls DEVICE --workspace WORKSPACE_ID
+remote-codex fs get DEVICE --workspace WORKSPACE_ID path/to/file --out ./copy
+remote-codex outbox
+```
+
+Remote creation requires an existing target workspace and creates no local lineage;
+it does not inherit your approval mode. Remote send supports inbox/direct/queue/steer
+and `--notify-on-complete`; results return to your local passive inbox. Reply to
+cross-device mail using its `replyTo` (`DEVICE/THREAD_UUID`). Remote wait, wake, tree,
+task, close, delete and inbox operations are unavailable; inspect status/transcript
+or wait for local inbox results instead.
+
+Attachments copy up to 20 local paths; directories become zip files. The receipt's
+message includes the target's incoming paths. `fs` reads only within a target
+workspace. Downloads default to the caller's `.temp/threads/THREAD/downloads/`
+directory (or workspace `.temp/downloads/` without a caller).
+
+Retryable relay/offline/timeout failures save only inbox/queue sends in this device's
+outbox (`delivery: "outboxed"`); direct/steer and create fail immediately. Outboxed
+mail retries for seven days, then reports failure to the local sender's inbox.
+Identity changes stop delivery. Verify the peer's `remote-codex relay-fingerprint`
+before `remote-codex device trust DEVICE --reset` with a local machine credential.
 
 ## Lineage: threads you create group under you
 
@@ -381,4 +423,4 @@ Managed sessions receive `REMOTE_CODEX_THREAD_ID`, `REMOTE_CODEX_URL`, and crede
 
 A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. Managed credentials identify the parent for restricted child deletion; the machine connection file cannot grant that right. Agents sharing a user account and workspace still do not have filesystem isolation.
 
-Only loopback HTTP is accepted; redirects are refused. Run on the target device. A missing connection is a configuration issue, not a reason to copy credentials into a prompt. After Supervisor restart use the current connection file if inherited credentials are stale. Invalid model, unknown thread, missing caller, and unsupported steering need corrected input, not repeated dispatch. `idle` is not task success: inspect errors, pending input, unread mail, and the relevant result.
+Only loopback HTTP is accepted; redirects are refused. Run on the sending device and select another device explicitly when needed. A missing connection is a configuration issue, not a reason to copy credentials into a prompt. After Supervisor restart use the current connection file if inherited credentials are stale. Invalid model, unknown thread, missing caller, and unsupported steering need corrected input, not repeated dispatch. `idle` is not task success: inspect errors, pending input, unread mail, and the relevant result.

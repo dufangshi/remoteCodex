@@ -61,7 +61,12 @@ pub(crate) async fn run(
     let all = input["all"] == true;
     let wait = clamp_wait(input["timeoutSeconds"].as_u64());
     match input.get("operation").and_then(Value::as_str).unwrap_or("") {
-        "info" => Ok(json!({"deviceId":state.db.host_id})),
+        "info" => {
+            let identity = crate::peer_link::relay_identity(state);
+            Ok(
+                json!({"deviceId":state.db.host_id,"relayDeviceId":identity.as_ref().map(|i| &i.device_id),"deviceName":identity.as_ref().map(|i| &i.device_name)}),
+            )
+        }
         "list" => {
             let group = input["groupId"].as_str().map(str::to_owned);
             // Drilling into a group, or asking for --all, needs every row; the
