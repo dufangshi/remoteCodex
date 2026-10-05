@@ -11,7 +11,7 @@ This branch is a Rust rewrite of the Remote Codex control plane.
 - Treat `apps/windows-device-manager` as a stable, independently released bootstrap. A runtime, HTTP, ACP, model, or harness fix must not by itself bump the Device Manager version, change its bundled seed version, or create a `windows-device-manager-v*` release. Publish the new `remote-codex` runtime/npm version and let existing Device Managers install it through Check/Update.
 - Bump or release Windows Device Manager only when its WinForms UI, installer, tray/startup behavior, self-update path, or other bootstrap-owned behavior changes. Keep the independent Manager release separate from runtime releases.
 - A versioned runtime release is immutable and includes the supported platform assets at one version. Path-filter PR CI to the affected code, but do not publish a partial replacement of one platform under an existing runtime version.
-- Do not copy Android/iOS/Windows sources into this tree; stay under 50k lines.
+- Do not copy Android/iOS/Windows sources into this tree.
 - After completing a change and its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
 - For runtime/npm releases or installed-version troubleshooting, follow the project [release-runtime skill](.agents/skills/release-runtime/SKILL.md).
 

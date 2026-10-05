@@ -1,16 +1,15 @@
-# Code structure and size budget
+# Code structure
 
-AGENTS.md sets a hard ceiling for this tree: **stay under 50k lines**. That
-budget is why the code is deliberately dense. Do not "clean up" by expanding
-terse-but-clear code across more lines, and do not treat a low line count as a
-goal in itself — the budget constrains scope, it does not reward golfing.
+There is no line-count ceiling for this tree. The code is still deliberately
+dense: do not "clean up" by expanding terse-but-clear code across more lines,
+and do not golf it either. Keep scope deliberate rather than measured in lines.
 
 ## Measuring
 
 Regenerate the numbers below rather than trusting them; they drift.
 
 ```sh
-# Rust total against the 50k budget
+# Rust total
 find crates -name '*.rs' -not -path '*/target/*' | xargs wc -l | tail -1
 
 # Largest Rust modules
@@ -22,8 +21,8 @@ find remote-codex-thread-ui/packages -name '*.ts*' -o -name '*.css' \
   | grep -v node_modules | grep -v /dist/ | xargs wc -l | sort -rn | head -15
 ```
 
-Snapshot at 2026-09-29: Rust 43.2k (86% of budget), `apps/supervisor-web` 30.0k,
-`remote-codex-thread-ui` 59.7k.
+Snapshot at 2026-09-29: Rust 43.2k, `apps/supervisor-web` 30.0k,
+`remote-codex-thread-ui` 59.7k. Rust was 49.1k on 2026-10-04.
 
 ## The split convention
 
