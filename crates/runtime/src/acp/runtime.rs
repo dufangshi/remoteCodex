@@ -1688,6 +1688,8 @@ impl AgentRuntime for AcpRuntime {
         let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
         let mut usage_reader =
             (adapter_id == "codex").then(|| super::usage::CodexUsageReader::new(&session_id));
+        let mut claude_usage_reader = (adapter_id == "claude")
+            .then(|| super::claude_usage::ClaudeUsageReader::new(&session_id));
         let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
         let prompt_rpc = process.request(
             "session/prompt",
@@ -1737,6 +1739,9 @@ impl AgentRuntime for AcpRuntime {
                             if let Some(reader) = usage_reader.as_mut() {
                                 for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
                             }
+                            if let Some(reader) = claude_usage_reader.as_mut() {
+                                for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                            }
                             if let Some(usage) = response.get("usage").filter(|v| v.is_object() && !matches!(adapter_id.as_str(), "codex" | "copilot")) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage.clone(), input.hidden);
                             }
@@ -1769,8 +1774,11 @@ impl AgentRuntime for AcpRuntime {
                         }
                     }
                 }
-                _ = usage_tick.tick(), if usage_reader.is_some() => {
+                _ = usage_tick.tick(), if usage_reader.is_some() || claude_usage_reader.is_some() => {
                     if let Some(reader) = usage_reader.as_mut() {
+                        for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                    }
+                    if let Some(reader) = claude_usage_reader.as_mut() {
                         for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
                     }
                 }
@@ -1864,6 +1872,11 @@ impl AgentRuntime for AcpRuntime {
                 .remove(&input.provider_session_id);
         }
         if let Some(reader) = usage_reader.as_mut() {
+            for usage in reader.poll_final() {
+                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+            }
+        }
+        if let Some(reader) = claude_usage_reader.as_mut() {
             for usage in reader.poll_final() {
                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
             }

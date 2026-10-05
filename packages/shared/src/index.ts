@@ -1189,6 +1189,11 @@ export interface ThreadTurnTokenUsageDto {
     active: boolean;
     state: 'llm' | 'tool';
     measurement: 'usageIntervals';
+    outputTimeMs?: number;
+    averageOutputTokensPerSecond?: number | null;
+    latestOutputTokensPerSecond?: number | null;
+    latestOutputTimeMs?: number;
+    latestOutputMeasuredAt?: string | null;
     updatedAt: string;
   } | null;
 }
