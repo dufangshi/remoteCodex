@@ -17,7 +17,9 @@ struct Entry {
 }
 fn scope(path: &str) -> String {
     let parts: Vec<_> = path.split('?').next().unwrap_or("").split('/').collect();
-    if parts.len() > 3
+    if parts.get(2) == Some(&"peer") {
+        "/api/peer".into()
+    } else if parts.len() > 3
         && matches!(parts[2], "threads" | "workspaces")
         && Uuid::parse_str(parts[3]).is_ok()
     {
@@ -164,6 +166,39 @@ impl Streams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn peer_download_scope_stays_under_peer_and_cannot_cross_owner_scope() {
+        let streams = Streams::default();
+        let (_, next) = streams
+            .begin(
+                "/api/peer/files/read?workspaceId=secret",
+                Body::from(vec![3u8; CHUNK + 7]),
+            )
+            .await
+            .unwrap();
+        let next = next.unwrap();
+        assert!(next.starts_with("/api/peer/transport/stream/"));
+        assert!(streams
+            .read(&next.replacen("/api/peer", "/api", 1))
+            .await
+            .is_err());
+        let last = streams.read(&next).await.unwrap();
+        assert!(last["streamNext"].is_null());
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(last["body"].as_str().unwrap())
+                .unwrap(),
+            vec![3u8; 7]
+        );
+        let (_, next) = streams
+            .begin("/api/config/runtime", Body::from(vec![4u8; CHUNK + 1]))
+            .await
+            .unwrap();
+        assert!(streams
+            .read(&next.unwrap().replacen("/api", "/api/peer", 1))
+            .await
+            .is_err());
+    }
     #[tokio::test]
     async fn bounded_chunks_keep_scope_sequence_and_binary_bytes() {
         let streams = Streams::default();

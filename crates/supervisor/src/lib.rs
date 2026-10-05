@@ -11,7 +11,6 @@ mod management;
 mod peer_api;
 #[allow(dead_code)]
 mod peer_files;
-#[allow(dead_code)]
 mod peer_link;
 #[allow(dead_code)]
 mod peer_send;

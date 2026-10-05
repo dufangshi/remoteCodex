@@ -1,5 +1,6 @@
 //! RFC 9180 HPKE protects request contents from the relay. Short-lived recipient
 //! keys are signed by a persistent device identity, which the browser pins.
+pub(crate) mod client;
 mod streams;
 use aes_gcm::{
     aead::{Aead, Payload},

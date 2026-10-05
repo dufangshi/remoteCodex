@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::auth::PeerCaller;
 use crate::bounded_channel as mpsc;
 use anyhow::{anyhow, Result};
 use base64::Engine;
@@ -9,8 +10,10 @@ use futures_util::{SinkExt, StreamExt};
 use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
 use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest, protocol::WebSocketConfig, Message,
+};
 use tower::ServiceExt;
 use url::Url;
 
@@ -19,6 +22,7 @@ const RELAY_RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
 const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RELAY_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const RELAY_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(3);
+const TUNNEL_MESSAGE_LIMIT: usize = 128 * 1024 * 1024;
 
 struct RelayClientSession {
     socket: crate::socket::SocketSession,
@@ -67,7 +71,15 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
         handshake
             .headers_mut()
             .insert("authorization", format!("Bearer {token}").parse()?);
-        match tokio::time::timeout(RELAY_CONNECT_TIMEOUT, connect_async(handshake)).await {
+        let socket_config = WebSocketConfig::default()
+            .max_message_size(Some(TUNNEL_MESSAGE_LIMIT))
+            .max_frame_size(Some(TUNNEL_MESSAGE_LIMIT));
+        match tokio::time::timeout(
+            RELAY_CONNECT_TIMEOUT,
+            connect_async_with_config(handshake, Some(socket_config), false),
+        )
+        .await
+        {
             Ok(Ok((socket, _))) => {
                 tracing::info!(relay_origin = %tunnel_url.origin().ascii_serialization(), "relay tunnel connected");
                 reconnect_delay = RELAY_RECONNECT_INITIAL_DELAY;
@@ -133,6 +145,7 @@ async fn run_connected_tunnel_with_deadline(
     let mut last_received = tokio::time::Instant::now();
     let mut last_tick = SystemTime::now();
     let (outgoing, mut outbound) = mpsc::channel::<Value>();
+    let peer_connection = crate::peer_link::TunnelConnection::new(&state, outgoing.clone());
     let mut clients = HashMap::<String, RelayClientSession>::new();
     let mut heartbeat = tokio::time::interval(RELAY_HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -169,6 +182,15 @@ async fn run_connected_tunnel_with_deadline(
                         }
                         if message["type"] == "relay.connected" {
                             state.relay_connected.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let identity = message["deviceId"].as_str().map(|id| crate::peer_link::RelayIdentity {
+                                device_id: id.into(),
+                                device_name: message["deviceName"].as_str().unwrap_or("").into(),
+                            });
+                            peer_connection.connected(identity);
+                        }
+                        if matches!(message["type"].as_str(), Some("peer.response" | "peer.directory.result")) {
+                            peer_connection.receive(&message);
+                            continue;
                         }
                         handle_relay_message(
                             state.clone(),
@@ -265,6 +287,15 @@ fn handle_relay_message(
                 return;
             };
             let payload = message.get("payload").cloned().unwrap_or_else(|| json!({}));
+            let peer = if let Some(value) = message.get("peer") {
+                let Some(peer) = peer_caller(value) else {
+                    let _ = outgoing.send(json!({"type":"relay.response","requestId":request_id,"payload":relay_error_response(403,"Invalid peer identity")}));
+                    return;
+                };
+                Some(peer)
+            } else {
+                None
+            };
             static REQUESTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
                 std::sync::OnceLock::new();
             static HANDSHAKES: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
@@ -302,8 +333,11 @@ fn handle_relay_message(
             let outgoing = outgoing.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let payload =
-                    bounded_forward(forward_local(&state, payload), Duration::from_secs(60)).await;
+                let payload = bounded_forward(
+                    forward_local(&state, payload, peer),
+                    Duration::from_secs(60),
+                )
+                .await;
                 let _ = outgoing.send(json!({
                     "type": "relay.response",
                     "timestamp": now_rfc3339(),
@@ -363,6 +397,17 @@ fn handle_relay_message(
         }
         _ => {}
     }
+}
+
+fn peer_caller(value: &Value) -> Option<PeerCaller> {
+    Some(PeerCaller {
+        device_id: value["deviceId"]
+            .as_str()
+            .filter(|id| !id.is_empty())?
+            .into(),
+        device_name: value["deviceName"].as_str()?.into(),
+        user_id: value["userId"].as_str().filter(|id| !id.is_empty())?.into(),
+    })
 }
 
 fn connect_relay_client(
@@ -463,13 +508,33 @@ async fn bounded_forward(
         })
 }
 
-async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
+pub(crate) async fn forward_local(
+    state: &Arc<Supervisor>,
+    payload: Value,
+    peer: Option<PeerCaller>,
+) -> Value {
     let path = payload["path"]
         .as_str()
         .unwrap_or("")
         .split('?')
         .next()
         .unwrap_or("");
+    if peer.is_some() != path.starts_with("/api/peer/") {
+        return relay_error_response(403, "Peer credentials only allow /api/peer/ requests");
+    }
+    if peer.is_some() && !state.peer_access_enabled() {
+        return json!({"statusCode":403,"headers":{"content-type":"application/json"},"body":json!({"code":"peer_access_disabled","message":"Peer access is disabled on this device."}).to_string()});
+    }
+    let key_path = path.ends_with("/transport/key");
+    let session_path = peer.is_none() && path.ends_with("/transport/session");
+    let encrypted = payload["headers"]["x-rcd-key"].is_string();
+    if peer.is_some()
+        && !encrypted
+        && !(key_path && payload["method"] == "GET")
+        && !path.starts_with("/api/peer/transport/stream/")
+    {
+        return relay_error_response(400, "An encrypted peer request is required");
+    }
     if path.ends_with("/transport/shell-scope") && payload["method"] == "GET" {
         let thread = path
             .strip_prefix("/api/threads/")
@@ -481,9 +546,6 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
             None => relay_error_response(404, "Thread not found"),
         };
     }
-    let key_path = path.ends_with("/transport/key");
-    let session_path = path.ends_with("/transport/session");
-    let encrypted = payload["headers"]["x-rcd-key"].is_string();
     if path.starts_with("/api/threads/") && path.ends_with("/publications") && !encrypted {
         return relay_error_response(
             400,
@@ -552,9 +614,9 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
                 "/api/workspaces" | "/api/threads" | "/api/threads/start"
             )
         {
-            dispatch_local(state, opened.request.clone()).await
+            dispatch_local(state, opened.request.clone(), peer.clone()).await
         } else {
-            dispatch_streaming(state, opened.request.clone(), &transport).await
+            dispatch_streaming(state, opened.request.clone(), &transport, peer.clone()).await
         };
         let (response, resources) = filter_hosted_response(&payload, response);
         let mut sealed = opened
@@ -565,7 +627,7 @@ async fn forward_local(state: &Arc<Supervisor>, payload: Value) -> Value {
         }
         return sealed;
     }
-    dispatch_local(state, payload).await
+    dispatch_local(state, payload, peer).await
 }
 // Policy is inserted by the relay after authentication, never copied from client headers.
 fn filter_hosted_response(request: &Value, mut response: Value) -> (Value, Option<Value>) {
@@ -626,6 +688,7 @@ fn json_response(value: Value) -> Value {
 async fn dispatch_raw(
     state: &Arc<Supervisor>,
     payload: Value,
+    peer: Option<PeerCaller>,
 ) -> Result<axum::response::Response, Value> {
     let method = payload
         .get("method")
@@ -642,6 +705,9 @@ async fn dispatch_raw(
         .method(method)
         .uri(path)
         .extension(crate::auth::TrustedRelayForward);
+    if let Some(peer) = peer {
+        request = request.extension(peer);
+    }
     if let Some(headers) = payload.get("headers").and_then(Value::as_object) {
         for name in ["content-type", "accept", "if-none-match", "range"] {
             if let Some(value) = headers.get(name).and_then(Value::as_str) {
@@ -667,9 +733,10 @@ async fn dispatch_streaming(
     state: &Arc<Supervisor>,
     payload: Value,
     transport: &crate::secure_transport::Transport,
+    peer: Option<PeerCaller>,
 ) -> Value {
     let path = payload["path"].as_str().unwrap_or("").to_string();
-    let response = match dispatch_raw(state, payload).await {
+    let response = match dispatch_raw(state, payload, peer).await {
         Ok(response) => response,
         Err(error) => return error,
     };
@@ -700,8 +767,12 @@ async fn dispatch_streaming(
         Err(_) => relay_error_response(502, "Device download could not continue"),
     }
 }
-async fn dispatch_local(state: &Arc<Supervisor>, payload: Value) -> Value {
-    match dispatch_raw(state, payload).await {
+async fn dispatch_local(
+    state: &Arc<Supervisor>,
+    payload: Value,
+    peer: Option<PeerCaller>,
+) -> Value {
+    match dispatch_raw(state, payload, peer).await {
         Ok(response) => {
             let status = response.status().as_u16();
             let headers = response
@@ -794,7 +865,7 @@ fn relay_error_response(status_code: u16, message: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use remote_codex_protocol::{Mode, Provider};
     use remote_codex_runtime::actor::SharedRuntime;
@@ -803,7 +874,7 @@ mod tests {
     use remote_codex_runtime::fake::FakeRuntime;
     use tempfile::TempDir;
 
-    fn state_with_relay_url(relay_url: &str) -> (TempDir, Arc<Supervisor>) {
+    pub(crate) fn state_with_relay_url(relay_url: &str) -> (TempDir, Arc<Supervisor>) {
         let directory = tempfile::tempdir().unwrap();
         let config = RuntimeConfig {
             mode: Mode::Relay,
@@ -834,10 +905,166 @@ mod tests {
         )
     }
 
+    fn peer() -> PeerCaller {
+        PeerCaller {
+            device_id: "source".into(),
+            device_name: "Source device".into(),
+            user_id: "owner".into(),
+        }
+    }
+    async fn relay_frame(
+        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        kind: &str,
+    ) -> Value {
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                match socket.next().await.unwrap().unwrap() {
+                    Message::Text(text) => {
+                        let value: Value = serde_json::from_str(&text).unwrap();
+                        if value["type"] == kind {
+                            return value;
+                        }
+                    }
+                    Message::Ping(data) => socket.send(Message::Pong(data)).await.unwrap(),
+                    other => panic!("unexpected frame: {other:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn peer_forwarding_requires_identity_opt_in_and_ciphertext() {
+        let (_dir, state) = state_with_relay_url("http://127.0.0.1:1");
+        let key = json!({"method":"GET","path":"/api/peer/transport/key?challenge=fresh"});
+        assert_eq!(
+            forward_local(&state, key.clone(), None).await["statusCode"],
+            403
+        );
+        let disabled = forward_local(&state, key.clone(), Some(peer())).await;
+        assert_eq!(disabled["statusCode"], 403);
+        assert!(disabled["body"]
+            .as_str()
+            .unwrap()
+            .contains("peer_access_disabled"));
+        state.set_peer_access(true).unwrap();
+        let response = forward_local(&state, key, Some(peer())).await;
+        assert_eq!(response["statusCode"], 200);
+        let descriptor: Value = serde_json::from_str(response["body"].as_str().unwrap()).unwrap();
+        assert_eq!(descriptor["challenge"], "fresh");
+        for path in [
+            "/api/cli",
+            "/api/config/peer-access",
+            "/api/transport/key",
+            "/healthz",
+        ] {
+            assert_eq!(
+                forward_local(&state, json!({"method":"GET","path":path}), Some(peer())).await
+                    ["statusCode"],
+                403,
+                "{path}"
+            );
+        }
+        assert_eq!(
+            forward_local(
+                &state,
+                json!({"method":"POST","path":"/api/peer/cli","body":"{}"}),
+                Some(peer())
+            )
+            .await["statusCode"],
+            400
+        );
+        assert_eq!(
+            forward_local(
+                &state,
+                json!({"method":"GET","path":"/api/peer/transport/key?challenge=bad%2Fchallenge"}),
+                Some(peer())
+            )
+            .await["statusCode"],
+            400
+        );
+        assert!(
+            peer_caller(&json!({"deviceId":"source","deviceName":"Source","userId":"owner"}))
+                .is_some()
+        );
+        assert!(peer_caller(&json!({"deviceId":"source","deviceName":"Source"})).is_none());
+    }
+
+    #[tokio::test]
+    async fn peer_tunnel_routes_frames_accepts_large_messages_and_fails_pending_on_close() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, state) =
+            state_with_relay_url(&format!("ws://{}", listener.local_addr().unwrap()));
+        state.set_peer_access(true).unwrap();
+        let tunnel = tokio::spawn(run_relay_tunnel(state.clone()));
+        let (tcp, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut relay = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        relay.send(Message::Text(json!({"type":"relay.connected","deviceId":"local-device","deviceName":"Local device"}).to_string().into())).await.unwrap();
+        // A single relay frame over the old 16 MiB limit must survive decoding.
+        relay.send(Message::Text(json!({"type":"relay.request","requestId":"large","payload":{"method":"GET","path":"/healthz","body":"x".repeat(20*1024*1024)}}).to_string().into())).await.unwrap();
+        let response = relay_frame(&mut relay, "relay.response").await;
+        assert_eq!(response["requestId"], "large");
+        assert_eq!(response["payload"]["statusCode"], 200);
+        let identity = crate::peer_link::relay_identity(&state).unwrap();
+        assert_eq!(identity.device_id, "local-device");
+        assert_eq!(identity.device_name, "Local device");
+        relay.send(Message::Text(json!({"type":"relay.request","requestId":"peer-key","peer":{"deviceId":"source","deviceName":"Source device","userId":"owner"},"payload":{"method":"GET","path":"/api/peer/transport/key?challenge=from-relay-frame"}}).to_string().into())).await.unwrap();
+        let response = relay_frame(&mut relay, "relay.response").await;
+        assert_eq!(response["requestId"], "peer-key");
+        assert_eq!(response["payload"]["statusCode"], 200);
+        relay.send(Message::Text(json!({"type":"relay.request","requestId":"invalid-peer","peer":{"deviceId":"source"},"payload":{"method":"GET","path":"/api/peer/transport/key"}}).to_string().into())).await.unwrap();
+        let response = relay_frame(&mut relay, "relay.response").await;
+        assert_eq!(response["requestId"], "invalid-peer");
+        assert_eq!(response["payload"]["statusCode"], 403);
+        let directory = tokio::spawn({
+            let state = state.clone();
+            async move { crate::peer_link::directory(&state).await }
+        });
+        let request = relay_frame(&mut relay, "peer.directory").await;
+        relay.send(Message::Text(json!({"type":"peer.directory.result","requestId":request["requestId"],"devices":[{"deviceId":"local-device","name":"Local device","online":true,"self":true}]}).to_string().into())).await.unwrap();
+        assert_eq!(directory.await.unwrap().unwrap()[0]["self"], true);
+        let pending = tokio::spawn({
+            let state = state.clone();
+            async move {
+                crate::peer_link::relay_request(
+                    &state,
+                    "remote-device",
+                    json!({"method":"GET","path":"/api/peer/transport/key"}),
+                )
+                .await
+            }
+        });
+        let request = relay_frame(&mut relay, "peer.request").await;
+        assert_eq!(request["targetDeviceId"], "remote-device");
+        relay.send(Message::Text(json!({"type":"peer.response","requestId":request["requestId"],"payload":{"statusCode":503,"headers":{},"body":"offline"}}).to_string().into())).await.unwrap();
+        assert_eq!(pending.await.unwrap().unwrap()["statusCode"], 503);
+        let pending = tokio::spawn({
+            let state = state.clone();
+            async move { crate::peer_link::directory(&state).await }
+        });
+        relay_frame(&mut relay, "peer.directory").await;
+        relay.close(None).await.unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(2), pending)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+                .downcast_ref(),
+            Some(crate::peer_link::PeerError::RelayUnavailable)
+        ));
+        tunnel.abort();
+        let _ = tunnel.await;
+    }
+
     #[tokio::test]
     async fn publication_consent_cannot_be_forged_by_plaintext_relay_forwarding() {
         let (_dir, state) = state_with_relay_url("http://localhost:8788");
-        let response = forward_local(&state, json!({"method":"POST","path":format!("/api/threads/{}/publications", uuid::Uuid::new_v4()),"body":"{}"})).await;
+        let response = forward_local(&state, json!({"method":"POST","path":format!("/api/threads/{}/publications", uuid::Uuid::new_v4()),"body":"{}"}), None).await;
         assert_eq!(response["statusCode"], 400);
         assert!(response["body"]
             .as_str()
@@ -859,8 +1086,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), 401);
-        let forwarded =
-            forward_local(&state, json!({"method":"GET","path":"/api/workspaces"})).await;
+        let forwarded = forward_local(
+            &state,
+            json!({"method":"GET","path":"/api/workspaces"}),
+            None,
+        )
+        .await;
         assert_eq!(forwarded["statusCode"], 200);
     }
 
