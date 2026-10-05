@@ -60,7 +60,12 @@ impl Tokens {
                 &["reasoning_tokens"],
             )
         })
-        .or_else(|| number(value.get("output_tokens_details")?, &["reasoning_tokens"]))
+        .or_else(|| {
+            number(
+                value.get("output_tokens_details")?,
+                &["reasoning_tokens", "thinking_tokens"],
+            )
+        })
         .unwrap_or_default();
         if value.get("candidatesTokenCount").is_some() {
             output = output.saturating_add(reasoning);

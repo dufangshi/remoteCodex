@@ -607,6 +607,11 @@ impl Supervisor {
             // codex-acp's final-request-only PromptResponse.usage fallback.
             if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("codexRollout")
                 && raw.get("source").and_then(Value::as_str) != Some("codexRollout") { return Ok(None); }
+            // Claude native assistant records give per-response snapshots during
+            // tool work. A late ACP report must not replace that turn total with
+            // only the final request's usage or mix accounting sources.
+            if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("claudeRollout")
+                && raw.get("source").and_then(Value::as_str) != Some("claudeRollout") { return Ok(None); }
             if usage["cumulative"] == true {
                 let baseline = usage.get("baselineTotal").and_then(crate::usage::Tokens::parse)
                     .or_else(|| previous.as_ref().and_then(|v| v.get("baselineTotal")).and_then(crate::usage::Tokens::parse))

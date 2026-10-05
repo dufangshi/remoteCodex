@@ -1,6 +1,7 @@
 mod adapter;
 mod capabilities;
 pub(crate) mod catalog;
+mod claude_usage;
 mod codex_bridge;
 mod codex_models;
 mod codex_permissions;

@@ -1,6 +1,6 @@
 //! Output throughput from actual usage counters, not text length. Tool and user
-//! waits are excluded; request-level counters are apportioned over their LLM time
-//! for the trailing wall-clock minute. Old turns without timing remain unavailable.
+//! waits are excluded. Live speed uses the latest confirmed response interval;
+//! the legacy rolling minute is retained. Old turns without timing stay unavailable.
 use super::*;
 use std::collections::VecDeque;
 
@@ -21,6 +21,10 @@ struct Tracker {
     tools: HashSet<String>,
     pending: Vec<Span>,
     samples: VecDeque<Span>,
+    output_ms: i64,
+    latest_rate: Option<f64>,
+    latest_ms: i64,
+    latest_at: Option<i64>,
 }
 
 impl Tracker {
@@ -32,6 +36,10 @@ impl Tracker {
             tools: HashSet::new(),
             pending: vec![],
             samples: VecDeque::new(),
+            output_ms: 0,
+            latest_rate: None,
+            latest_ms: 0,
+            latest_at: None,
         }
     }
 
@@ -73,6 +81,16 @@ impl Tracker {
         let delta = output - self.output;
         self.output = output;
         if elapsed > 0 {
+            // Measure the latest confirmed response instead of dividing old
+            // tokens by a new, not-yet-reported request's growing duration.
+            // Include latency/reasoning: SDKs may batch streamed chunks and
+            // token totals cover hidden output too. Visible chunk timestamps
+            // alone cannot establish decoder throughput for those tokens.
+            let measured_ms = elapsed;
+            self.output_ms += measured_ms;
+            self.latest_ms = measured_ms;
+            self.latest_rate = Some(delta as f64 * 1000.0 / measured_ms as f64);
+            self.latest_at = Some(self.at);
             for mut span in self.pending.drain(..) {
                 span.tokens = delta as f64 * (span.end - span.start) as f64 / elapsed as f64;
                 if span.end > self.at - 60000 {
@@ -86,7 +104,9 @@ impl Tracker {
         self.advance(at);
         let mut recent_ms = 0;
         let mut recent_tokens = 0.0;
-        for span in self.samples.iter().chain(self.pending.iter()) {
+        // Unreported pending spans have no matching token count yet. Treating
+        // them as zero-token samples made the displayed speed collapse mid-reply.
+        for span in &self.samples {
             let ms = (span.end - span.start.max(self.at - 60000)).max(0);
             recent_ms += ms;
             recent_tokens += span.tokens * ms as f64 / (span.end - span.start) as f64;
@@ -95,7 +115,12 @@ impl Tracker {
             "averageTokensPerSecond":(self.llm_ms > 0 && self.output > 0).then(||self.output as f64 * 1000.0 / self.llm_ms as f64),
             "recentTokensPerSecond":(recent_ms > 0 && recent_tokens > 0.0).then(||recent_tokens * 1000.0 / recent_ms as f64),
             "windowSeconds":60,"active":active,"state":if self.tools.is_empty() {"llm"} else {"tool"},
-            "measurement":"usageIntervals","updatedAt":chrono::DateTime::from_timestamp_millis(self.at).map(|at|at.to_rfc3339())})
+            "measurement":"usageIntervals","updatedAt":chrono::DateTime::from_timestamp_millis(self.at).map(|at|at.to_rfc3339()),
+            "outputTimeMs":self.output_ms,
+            "averageOutputTokensPerSecond":(self.output_ms > 0 && self.output > 0).then(||self.output as f64 * 1000.0 / self.output_ms as f64),
+            "latestOutputTokensPerSecond":self.latest_rate,
+            "latestOutputTimeMs":self.latest_ms,
+            "latestOutputMeasuredAt":self.latest_at.and_then(chrono::DateTime::from_timestamp_millis).map(|at|at.to_rfc3339())})
     }
 }
 
@@ -262,6 +287,37 @@ impl Supervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unreported_reply_and_idle_tail_do_not_dilute_confirmed_output_speed() {
+        let mut t = Tracker::new(0);
+        t.usage(10000, 1000);
+        let reported = t.snapshot(10000, true);
+        let pending = t.snapshot(50000, true);
+        assert_eq!(
+            pending["recentTokensPerSecond"],
+            reported["recentTokensPerSecond"]
+        );
+        assert_eq!(pending["latestOutputTokensPerSecond"], 100.0);
+        let done = t.snapshot(80000, false);
+        assert_eq!(done["averageOutputTokensPerSecond"], 100.0);
+        assert_eq!(done["outputTimeMs"], 10000);
+        assert_eq!(done["recentTokensPerSecond"], Value::Null);
+    }
+
+    #[test]
+    fn latest_response_is_not_the_turn_average_or_diluted_by_the_previous_response() {
+        let mut t = Tracker::new(0);
+        t.usage(10000, 1000);
+        t.tool(10000, "tool", true);
+        t.tool(110000, "tool", false);
+        t.usage(112000, 2000);
+        let s = t.snapshot(112000, false);
+        assert_eq!(s["latestOutputTokensPerSecond"], 500.0);
+        assert_eq!(s["latestOutputTimeMs"], 2000);
+        assert_eq!(s["llmTimeMs"], 12000);
+        assert!((s["averageOutputTokensPerSecond"].as_f64().unwrap() - 2000.0 / 12.0).abs() < 1e-8);
+    }
+
     #[test]
     fn tool_minute_is_not_llm_time_and_parallel_tools_pause_only_once() {
         let mut t = Tracker::new(0);
