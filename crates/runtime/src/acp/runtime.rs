@@ -44,6 +44,10 @@ use super::terminal::AgentTerminals;
 #[path = "fork_tests.rs"]
 mod fork_tests;
 
+#[cfg(all(test, unix))]
+#[path = "completion_tests.rs"]
+mod completion_tests;
+
 // Startup and cancelled probes must not leave the notification mux holding a child alive.
 struct StartupProcess(Option<Arc<AcpProcess>>);
 impl Drop for StartupProcess {
@@ -1726,7 +1730,8 @@ impl AgentRuntime for AcpRuntime {
         let mut cancel_sent = false;
         let mut cancel_deadline = tokio::time::Instant::now();
         let mut discard_session = false;
-        let outcome = loop {
+        let mut pending_claude_error = None;
+        let mut outcome = loop {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if !cancel_sent => {
@@ -1773,6 +1778,16 @@ impl AgentRuntime for AcpRuntime {
                             if cancel_sent || cancel.is_cancelled() {
                                 discard_session = process.exited().await.unwrap_or(true);
                                 break TurnOutcome::Interrupted;
+                            }
+                            if adapter_id == "claude"
+                                && super::claude_completion::incomplete_tool_ids(&err.to_string()).is_some()
+                                && process.connection_open().await
+                            {
+                                // Drain queued final text/tool updates before comparing
+                                // against the native transcript. This is not a retry.
+                                pending_claude_error = Some(err);
+                                prompt_done = true;
+                                continue;
                             }
                             tracing::warn!(
                                 error = %err,
@@ -1875,6 +1890,26 @@ impl AgentRuntime for AcpRuntime {
                 }
             }
         };
+        if let Some(reader) = claude_usage_reader.as_mut() {
+            for usage in reader.poll_final() {
+                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+            }
+        }
+        let mut abandoned_tools = Vec::new();
+        if matches!(outcome, TurnOutcome::Completed) {
+            if let Some(error) = pending_claude_error {
+                if let Some(ids) = claude_usage_reader.as_ref().and_then(|reader| {
+                    reader.abandoned_tools(&error.to_string(), mapper.final_agent_text())
+                }) {
+                    tracing::warn!(session_id = %session_id, tool_ids = ?ids,
+                        "Reconciled Claude ACP tool placeholders discarded during steering");
+                    mapper.reconcile_abandoned_tools(&ids);
+                    abandoned_tools = ids;
+                } else {
+                    outcome = TurnOutcome::Failed(anyhow!("ACP session/prompt failed: {error}"));
+                }
+            }
+        }
         if let Some(live) = self
             .inner
             .sessions
@@ -1906,11 +1941,6 @@ impl AgentRuntime for AcpRuntime {
                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
             }
         }
-        if let Some(reader) = claude_usage_reader.as_mut() {
-            for usage in reader.poll_final() {
-                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
-            }
-        }
         let (status, error) = match &outcome {
             TurnOutcome::Completed => ("completed", None),
             TurnOutcome::Interrupted => ("interrupted", None),
@@ -1925,7 +1955,7 @@ impl AgentRuntime for AcpRuntime {
         };
         let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
         for item in &mut items {
-            if item.status.as_deref() != Some("failed") {
+            if item.status.as_deref() != Some("failed") && !abandoned_tools.contains(&item.id) {
                 item.status = Some(status.into());
             }
         }

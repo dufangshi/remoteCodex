@@ -313,6 +313,32 @@ impl TurnMapper {
         items.sort_by_key(|item| item.sequence.unwrap_or(i64::MAX));
         items
     }
+
+    pub(super) fn final_agent_text(&self) -> Option<&str> {
+        self.agent_segments
+            .last()
+            .map(|segment| segment.text.as_str())
+    }
+
+    pub(super) fn reconcile_abandoned_tools(&mut self, ids: &[String]) {
+        for id in ids {
+            if let Some(payload) = self.tool_payloads.get_mut(id) {
+                payload["status"] = Value::String("interrupted".into());
+                payload["content"] = serde_json::json!([{"type":"content","content":{
+                    "type":"text","text":"Streaming tool call discarded after steering; no execution recorded."
+                }}]);
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.remove("rawOutput");
+                }
+                if let Some(item) = self.tools.iter_mut().find(|tool| tool.id == *id) {
+                    let mut reconciled = tool_item(&self.turn_id, payload);
+                    reconciled.created_at = item.created_at.clone();
+                    reconciled.sequence = item.sequence;
+                    *item = reconciled;
+                }
+            }
+        }
+    }
 }
 
 fn acp_update_created_at(update: &Value) -> Option<String> {
@@ -425,7 +451,7 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
         .or_else(|| tool_name.map(str::to_string))
         .unwrap_or_else(|| "Tool call".into());
     let status = match body.get("status").and_then(Value::as_str).unwrap_or("") {
-        "completed" | "failed" => body.get("status").and_then(Value::as_str),
+        "completed" | "failed" | "interrupted" => body.get("status").and_then(Value::as_str),
         "in_progress" => Some("running"),
         _ => Some("running"),
     };
