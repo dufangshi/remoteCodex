@@ -1690,6 +1690,14 @@ impl Supervisor {
         } else {
             vec![]
         };
+        let active_subagents = if let (Ok(runtime), Some(session_id)) = (
+            self.runtime(thread.provider),
+            thread.provider_session_id.as_deref(),
+        ) {
+            runtime.active_subagents(session_id).await
+        } else {
+            vec![]
+        };
         Ok(ThreadDetailDto {
             thread,
             workspace_path_status: if Path::new(&workspace.abs_path).exists() {
@@ -1704,6 +1712,7 @@ impl Supervisor {
             total_turn_count: None,
             pending_requests,
             pending_steers: self.load_steers(id)?,
+            active_subagents,
             activity_notes: None,
             goal: self
                 .stored_goal(id)?
@@ -1759,6 +1768,13 @@ impl Supervisor {
         } else {
             vec![]
         };
+        let active_subagents = if let (Some(runtime), Some(session_id)) =
+            (runtime.as_ref(), thread.provider_session_id.as_deref())
+        {
+            runtime.active_subagents(session_id).await
+        } else {
+            vec![]
+        };
         let goal = if summary_only && thread.status != "running" {
             None
         } else {
@@ -1781,6 +1797,7 @@ impl Supervisor {
             total_turn_count: Some(total),
             pending_requests,
             pending_steers,
+            active_subagents,
             activity_notes: Some(vec![]),
             goal,
         })

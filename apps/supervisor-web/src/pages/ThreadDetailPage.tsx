@@ -7,6 +7,7 @@ import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { ThreadWatchesControl } from '../components/ThreadWatchesControl';
+import { ThreadSubagentsControl } from '../components/ThreadSubagentsControl';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, Link2, Users } from 'lucide-react';
@@ -1656,6 +1657,18 @@ export function ThreadDetailPage() {
                 : entry,
             ),
           );
+        }
+      }
+
+      if (event.type === 'thread.subagents.updated') {
+        const activeSubagents = Array.isArray(event.payload.activeSubagents)
+          ? event.payload.activeSubagents
+          : [];
+        setDetail((current) =>
+          current ? { ...current, activeSubagents } : current,
+        );
+        if (detailRef.current) {
+          detailRef.current = { ...detailRef.current, activeSubagents };
         }
       }
 
@@ -3603,7 +3616,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, statusActions:detail ? <ThreadWatchesControl key={detail.thread.id} thread={detail.thread}/> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}

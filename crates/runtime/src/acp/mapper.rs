@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use remote_codex_protocol::{now_rfc3339, ThreadHistoryItemDto};
+use remote_codex_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadSubagentDto};
 use serde_json::Value;
 
 use crate::actor::GoalState;
@@ -13,6 +13,7 @@ pub struct MappedUpdate {
     pub usage: Option<Value>,
     pub goal: Option<Option<GoalState>>,
     pub plan: Option<Vec<(String, String)>>,
+    pub active_subagents: Option<Vec<ThreadSubagentDto>>,
 }
 
 pub struct TurnMapper {
@@ -27,6 +28,7 @@ pub struct TurnMapper {
     tool_payloads: HashMap<String, Value>,
     plans: Vec<ThreadHistoryItemDto>,
     compactions: Vec<ThreadHistoryItemDto>,
+    subagents: HashMap<String, ThreadSubagentDto>,
     seq: i64,
 }
 
@@ -44,6 +46,7 @@ impl TurnMapper {
             tool_payloads: HashMap::new(),
             plans: Vec::new(),
             compactions: Vec::new(),
+            subagents: HashMap::new(),
             seq: 0,
         }
     }
@@ -156,7 +159,7 @@ impl TurnMapper {
                     let mut item = tool_item(&self.turn_id, &payload);
                     let (existing_created_at, existing_sequence) =
                         existing_metadata.unwrap_or((None, None));
-                    if let Some(created_at) = existing_created_at.or(created_at) {
+                    if let Some(created_at) = existing_created_at.clone().or(created_at.clone()) {
                         item.created_at = Some(created_at);
                     }
                     item.sequence = existing_sequence.or_else(|| Some(self.next_sequence()));
@@ -168,6 +171,39 @@ impl TurnMapper {
                         *existing = item.clone();
                     } else {
                         self.tools.push(item.clone());
+                    }
+                    if item.kind == "agentToolCall" {
+                        let status = item.status.clone().unwrap_or_else(|| "running".into());
+                        if matches!(status.as_str(), "completed" | "failed" | "interrupted") {
+                            self.subagents.remove(tool_id);
+                        } else {
+                            let name = payload
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .or_else(|| payload.get("title").and_then(Value::as_str))
+                                .map(str::to_string);
+                            let started_at = existing_created_at
+                                .clone()
+                                .or_else(|| item.created_at.clone())
+                                .or_else(|| created_at.clone());
+                            let parent_tool_call_id = payload
+                                .get("parentToolCallId")
+                                .or_else(|| payload.get("parent_tool_call_id"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string);
+                            self.subagents.insert(
+                                tool_id.to_string(),
+                                ThreadSubagentDto {
+                                    id: tool_id.to_string(),
+                                    name,
+                                    status,
+                                    started_at,
+                                    completed_at: None,
+                                    parent_tool_call_id,
+                                },
+                            );
+                        }
+                        mapped.active_subagents = Some(self.subagents.values().cloned().collect());
                     }
                     mapped.items.push(item);
                 }
@@ -348,21 +384,25 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
         body.get("title").and_then(Value::as_str).unwrap_or("")
     )
     .to_ascii_lowercase();
-    let kind = match raw_kind {
-        "edit" | "delete" | "move" => "fileChange",
-        "read" => "fileRead",
-        "fetch" => "webSearch",
-        "think" => "reasoning",
-        "execute" => "commandExecution",
-        _ if normalized_name.contains("web") || normalized_name.contains("http") => "webSearch",
-        _ if normalized_name.contains("read") => "fileRead",
-        _ if normalized_name.contains("edit")
-            || normalized_name.contains("write")
-            || normalized_name.contains("patch") =>
-        {
-            "fileChange"
+    let kind = if is_subagent_tool(raw_kind, &normalized_name) {
+        "agentToolCall"
+    } else {
+        match raw_kind {
+            "edit" | "delete" | "move" => "fileChange",
+            "read" => "fileRead",
+            "fetch" => "webSearch",
+            "think" => "reasoning",
+            "execute" => "commandExecution",
+            _ if normalized_name.contains("web") || normalized_name.contains("http") => "webSearch",
+            _ if normalized_name.contains("read") => "fileRead",
+            _ if normalized_name.contains("edit")
+                || normalized_name.contains("write")
+                || normalized_name.contains("patch") =>
+            {
+                "fileChange"
+            }
+            _ => "toolCall",
         }
-        _ => "toolCall",
     };
     let location_text = tool_locations(body)
         .into_iter()
@@ -403,6 +443,22 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
         apply_file_changes(&mut mapped, body);
     }
     mapped
+}
+
+fn is_subagent_tool(raw_kind: &str, normalized_name: &str) -> bool {
+    let primary_name = normalized_name.split_whitespace().next().unwrap_or("");
+    matches!(
+        raw_kind,
+        "agent"
+            | "agent_tool_call"
+            | "agentToolCall"
+            | "subagent"
+            | "subagent_tool_call"
+            | "collabAgentToolCall"
+            | "collab_agent_tool_call"
+    ) || matches!(primary_name, "task" | "agent" | "subagent")
+        || normalized_name.contains("subagent")
+        || normalized_name.contains("spawn_agent")
 }
 
 fn apply_file_changes(mapped: &mut ThreadHistoryItemDto, body: &Value) {
@@ -750,6 +806,32 @@ mod presentation_tests {
         assert!(detail.contains("-    old();"));
         assert!(detail.contains("+    new();"));
         assert!(detail.contains("@@"));
+    }
+
+    #[test]
+    fn native_agent_tool_calls_are_reported_as_active_subagents() {
+        let mut mapper = TurnMapper::new("turn");
+        let started = mapper.apply(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "agent-1",
+            "kind": "agent",
+            "name": "Task",
+            "title": "Investigate the failing test",
+            "status": "in_progress"
+        }));
+        assert_eq!(started.items[0].kind, "agentToolCall");
+        assert_eq!(started.active_subagents.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            started.active_subagents.as_ref().unwrap()[0].status,
+            "running"
+        );
+
+        let finished = mapper.apply(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "agent-1",
+            "status": "completed"
+        }));
+        assert!(finished.active_subagents.as_ref().unwrap().is_empty());
     }
 }
 
