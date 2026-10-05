@@ -36,6 +36,71 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
+test('mobile work summary keeps its step count and cannot scroll the conversation sideways', async ({ page, request }) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const items = [
+    { id: 'prompt', kind: 'userMessage', text: 'Review the research results.' },
+    { id: 'progress', kind: 'agentMessage', text: 'Checking the final reports.' },
+    { id: 'thought', kind: 'reasoning', text: 'Compare the reports independently.' },
+    { id: 'command-a', kind: 'commandExecution', text: 'read report A', status: 'completed' },
+    { id: 'command-b', kind: 'commandExecution', text: 'read report B', status: 'completed' },
+    { id: 'read', kind: 'fileRead', text: '/home/ubuntu/a-long-workspace-path/reports/final-results.md' },
+    { id: 'reply', kind: 'agentMessage', text: 'Final report.\n\n' +
+      '| Year | Trades | Average holding time | Average position | Annual return | Maximum drawdown | Sharpe | Notes |\n' +
+      '| --- | --- | --- | --- | --- | --- | --- | --- |\n' +
+      '| 2026 | 1904 | 48 hours | 34 positions | 39.6% | 12.1% | 1.75 | Independently reproduced |\n\n' +
+      '`/home/ubuntu/' + 'long-research-workspace-path/'.repeat(10) + 'report.md`\n\n' +
+      'Research results remain readable on a narrow phone.\n\n'.repeat(25) },
+  ];
+  const turn = {
+    id: 'mobile-work-turn', status: 'completed', startedAt: '2026-10-05T16:58:02Z', completedAt: '2026-10-05T16:58:50Z',
+    model: 'claude-opus-5-5', reasoningEffort: 'max', hasDeferredItems: true, deferredItemCount: 5,
+    tokenUsage: { total: { totalTokens: 2500000, inputTokens: 2495000, cachedInputTokens: 2400000, outputTokens: 5000, reasoningOutputTokens: 1000 }, generationSpeed: { averageOutputTokensPerSecond: 131.8 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.61 },
+    items: [items[0], items.at(-1)],
+  };
+  let priceAvailable = true;
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, turns: [{ ...turn, priceEstimate: priceAvailable ? turn.priceEstimate : null }], totalTurnCount: 1 } }));
+  await page.route(`**/api/threads/${id}/turns/mobile-work-turn/detail`, route => route.fulfill({ json: { ...turn, items, hasDeferredItems: false, deferredItemCount: 0 } }));
+  await page.goto(`/threads/${id}`);
+  await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+  await page.getByRole('button', { name: 'Jump to previous turn' }).click();
+  const scroll = page.getByTestId('thread-scroll-container');
+  const summary = page.locator('.thread-graph-worked-summary');
+  const count = summary.locator('.thread-execution-step-count');
+  const checkWidth = async () => {
+    expect(await scroll.evaluate(e => ({ width: e.clientWidth, content: e.scrollWidth }))).toEqual({ width: page.viewportSize()!.width, content: page.viewportSize()!.width });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(page.viewportSize()!.width);
+    for (const selector of ['.thread-execution-step-count', '.thread-turn-usage-effort', '.thread-turn-usage-tokens', '.thread-turn-usage-price, .thread-turn-usage-unavailable', '.thread-turn-token-speed']) {
+      const box = await summary.locator(selector).boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+  };
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(summary.getByRole('button', { name: /Collapse turn 1$/ })).toBeVisible();
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  await summary.getByRole('button', { name: /Collapse turn 1$/ }).click();
+  await expect(count).toHaveText('5 steps');
+  await page.setViewportSize({ width: 320, height: 740 });
+  await checkWidth();
+  await scroll.evaluate(e => e.scrollTo({ top: 100, left: 100, behavior: 'instant' }));
+  expect(await scroll.evaluate(e => e.scrollLeft)).toBe(0);
+  expect(await scroll.evaluate(e => e.scrollTop)).toBeGreaterThan(0);
+  await page.reload();
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  priceAvailable = false;
+  await page.reload();
+  await expect(summary.locator('.thread-turn-usage-unavailable')).toBeVisible();
+  await checkWidth();
+});
+
 test('reading layout stays still with bounded images, visible effort and ten recent notifications', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
@@ -50,7 +115,7 @@ test('reading layout stays still with bounded images, visible effort and ten rec
   }];
   await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, turns, totalTurnCount: 1 } }));
   await page.route('**/reading-test-image.png', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="3000"><rect width="2400" height="3000" fill="#3458dc"/></svg>' }));
-  await page.route('**/api/threads', route => route.fulfill({ json: [detail.thread, ...Array.from({ length: 15 }, (_, i) => ({ ...detail.thread, id: `notice-${i}`, title: `Notice ${i}`, lastTurnCompletedAt: new Date(Date.UTC(2026, 8, 19, i)).toISOString() }))] }));
+  await page.route(/\/api\/threads(?:\?.*)?$/, route => route.fulfill({ json: [detail.thread, ...Array.from({ length: 15 }, (_, i) => ({ ...detail.thread, id: `notice-${i}`, title: `Notice ${i}`, lastTurnCompletedAt: new Date(Date.UTC(2026, 8, 19, i)).toISOString() }))] }));
   await page.goto(`/threads/${id}`);
   const scroll = page.getByTestId('thread-scroll-container');
   await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
