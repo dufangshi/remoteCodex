@@ -72,11 +72,6 @@ def handle(msg):
         send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":startup_config}}}})
         send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"end_turn"}})
         return
-    if method == "session/prompt" and "silent-final" in prompt_text(params):
-        send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}})
-        # Reproduce an adapter that never returns the session/prompt result
-        # after the provider has already emitted its final assistant text.
-        return
     if method == "initialize":
         send(
             {

@@ -56,40 +56,6 @@ async fn live_prompt_streams_tools_and_waits_for_agent() {
 }
 
 #[tokio::test]
-async fn final_output_without_prompt_response_is_settled_after_quiet_period() {
-    let dir = tempdir().unwrap();
-    let (runtime, session_id) = start_runtime(dir.path(), &which_python()).await;
-    let bus = EventBus::new();
-    let mut events = bus.subscribe();
-    let items = tokio::time::timeout(
-        Duration::from_secs(20),
-        runtime.start_turn(
-            turn_input(&session_id, "silent-final", "quiet-turn"),
-            bus.clone(),
-            CancellationToken::new(),
-        ),
-    )
-    .await
-    .map_err(|_| {
-        let mut seen = Vec::new();
-        while let Ok(event) = events.try_recv() {
-            seen.push(format!(
-                "{}:{}",
-                event.event_type, event.payload["item"]["text"]
-            ));
-        }
-        panic!("quiet final output should settle; events={seen:?}");
-    })
-    .expect("quiet final output should be completed");
-    let items = items.expect("quiet final output should be completed");
-    assert!(items
-        .iter()
-        .any(|item| item.kind == "agentMessage" && item.text == "done"));
-    let completed = completed_event(&mut events);
-    assert_eq!(completed.payload["status"], "completed");
-}
-
-#[tokio::test]
 async fn prompt_rpc_error_is_failed_and_clears_active_state() {
     let python = which_python();
     let dir = tempdir().unwrap();

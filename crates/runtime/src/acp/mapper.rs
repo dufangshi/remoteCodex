@@ -265,18 +265,6 @@ impl TurnMapper {
         mapped
     }
 
-    /// A provider can emit the final assistant text and then get stuck while
-    /// resolving an internal tool. The runtime may only use the quiet-output
-    /// fallback when no ACP tool is still marked as pending.
-    pub fn has_pending_tools(&self) -> bool {
-        self.tools.iter().any(|item| {
-            !matches!(
-                item.status.as_deref(),
-                Some("completed" | "failed" | "interrupted")
-            )
-        }) || !self.subagents.is_empty()
-    }
-
     fn next_sequence(&mut self) -> i64 {
         self.seq += 1;
         self.seq
