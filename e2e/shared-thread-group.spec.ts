@@ -226,12 +226,13 @@ test('shared Claude families keep provider models, effort controls and consisten
     await page
       .getByRole('button', { name: 'Watches (1)', exact: true })
       .click();
-    const watches = page.getByRole('dialog', { name: 'Thread watches' });
+    const watches = page.getByRole('dialog', { name: 'Watches', exact: true });
     await expect(watches).toContainText('Every 30 minutes');
+    await watches.getByRole('button', { name: 'Show details', exact: true }).click();
     await expect(watches).toContainText('Check all agent threads for results.');
     await expect(watches).toContainText('Status unconfirmed');
     await page.screenshot({ path: testInfo.outputPath('shared-watch.png') });
-    await watches.getByRole('button', { name: 'Close watches dialog' }).click();
+    await watches.getByRole('button', { name: 'Close', exact: true }).click();
     const cancelAt = new Date(Date.now() + 1).toISOString();
     const cancelled = {
       id: 'watch-cancel',
@@ -260,7 +261,7 @@ test('shared Claude families keep provider models, effort controls and consisten
     cancelling.close();
     expect(
       (await api(deviceApi + `/threads/${parent}/watches`, viewer)).watches,
-    ).toEqual([]);
+    ).toMatchObject([{ id: 'watch-ui', status: 'deleted' }]);
     const settings = page.getByRole('button', { name: /Model and effort:/ });
     await expect(settings).toBeEnabled();
     await settings.click();

@@ -12,6 +12,93 @@ vi.mock('../lib/api', () => ({
 }));
 
 describe('account thread navigation', () => {
+  it('loads complete sidebar families without selecting them, deduplicates visits and replaces polled children', async () => {
+    const parent = { id: 'root', workspaceId: 'research', title: 'Reaxys', status: 'idle' } as ThreadDto;
+    const children = Array.from({ length: 8 }, (_, index) => ({
+      ...parent, id: `agent-${index}`, title: `Agent ${index}`, workspaceId: index === 7 ? 'other-workspace' : parent.workspaceId,
+      parentThreadId: index === 7 ? 'agent-0' : parent.id, rootThreadId: parent.id,
+    }));
+    let family = [parent, ...children];
+    let offline = false;
+    let groupRequests = 0;
+    const references = [parent, children[0]!].map(thread => ({ deviceId: 'wsl', threadId: thread.id, title: thread.title, workspaceLabel: 'Research', favorite: false }));
+    vi.mocked(request).mockImplementation(async url => {
+      if (url === '/relay/account/workbench') return { threads: references, notifications: [] };
+      if (offline) throw new ApiError(503, { code: 'service_unavailable', message: 'Device offline' });
+      if (String(url).includes('includeAgentThreads')) throw new ApiError(403, { code: 'forbidden', message: 'Thread-scoped access' });
+      if (String(url).endsWith('/root/group')) { groupRequests++; return family; }
+      const id = String(url).split('/threads/')[1]?.split('?')[0];
+      return { thread: family.find(thread => thread.id === id) };
+    });
+    const mac = { thread: { ...parent, id: 'mac-root' }, workspace: { label: 'App' } } as ThreadDetailDto;
+    const wsl = { thread: parent, workspace: { label: 'Research' } } as ThreadDetailDto;
+    const { result, rerender, unmount } = renderHook(({ detail, threads, device }) =>
+      useWorkbenchNavigation(detail, threads, device), {
+        initialProps: { detail: mac, threads: [mac.thread], device: 'mac' },
+      });
+    const agents = () => result.current.threads.filter(thread => thread.rootKey === 'wsl:root');
+    await waitFor(() => expect(agents()).toHaveLength(8));
+    expect(groupRequests).toBe(1); // Root and previously visited child share one query.
+    expect(agents().find(thread => thread.key === 'wsl:agent-7')).toMatchObject({ parentKey: 'wsl:agent-0' });
+    rerender({ detail: wsl, threads: family, device: 'wsl' });
+    expect(agents()).toHaveLength(8);
+    await waitFor(() => expect(groupRequests).toBe(2));
+    rerender({ detail: mac, threads: [mac.thread], device: 'mac' });
+    expect(agents()).toHaveLength(8);
+    await waitFor(() => expect(groupRequests).toBe(3));
+    family = [parent, ...children.slice(0, 7)];
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(agents()).toHaveLength(7));
+    offline = true;
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(result.current.threads.find(thread => thread.key === 'wsl:root')?.status).toBe('unknown'));
+    expect(agents()).toHaveLength(7);
+    unmount();
+    offline = false;
+    const reloaded = renderHook(() => useWorkbenchNavigation(mac, [mac.thread], 'mac'));
+    await waitFor(() => expect(reloaded.result.current.threads.filter(thread => thread.rootKey === 'wsl:root')).toHaveLength(7));
+    reloaded.unmount();
+  });
+
+  it('fills recent families from every local workspace, independently of workspace tabs', async () => {
+    const selected = { id: 'selected', workspaceId: 'app', title: 'App', status: 'idle' } as ThreadDto;
+    const root = { ...selected, id: 'research-root', workspaceId: 'research' };
+    const children = Array.from({ length: 8 }, (_, index) => ({ ...root, id: `research-${index}`, parentThreadId: root.id, rootThreadId: root.id }));
+    vi.mocked(request).mockImplementation(async url => url === '/relay/account/workbench'
+      ? { threads: [{ deviceId: 'wsl', threadId: root.id, title: root.title, favorite: false }], notifications: [] }
+      : { thread: root });
+    const detail = { thread: selected, workspace: { label: 'App' } } as ThreadDetailDto;
+    const { result, unmount } = renderHook(() => useWorkbenchNavigation(detail, [selected, root, ...children], 'wsl'));
+    await waitFor(() => expect(result.current.navigationReady).toBe(true));
+    expect(result.current.workspaceThreads.map(thread => thread.key)).toEqual(['wsl:selected']);
+    expect(result.current.threads.filter(thread => thread.rootKey === 'wsl:research-root')).toHaveLength(8);
+    unmount();
+  });
+
+  it('batches complete lists per device and keeps same-ID families separate', async () => {
+    const refs = ['mac', 'wsl'].flatMap(deviceId => ['root', 'child'].map(threadId => ({ deviceId, threadId, title: threadId, favorite: false })));
+    const root = { id: 'root', workspaceId: 'app', title: 'Root', status: 'idle' } as ThreadDto;
+    const child = { ...root, id: 'child', parentThreadId: 'root', rootThreadId: 'root' };
+    const calls: string[] = [];
+    vi.mocked(request).mockImplementation(async url => {
+      calls.push(String(url));
+      if (url === '/relay/account/workbench') return { threads: refs, notifications: [] };
+      if (String(url).includes('/mac/api/threads?')) return [root, child];
+      if (String(url).includes('/wsl/api/threads?')) return [root, child, { ...child, id: 'another-child' }];
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const { result, unmount } = renderHook(() => useWorkbenchNavigation(null, [], 'elsewhere'));
+    await waitFor(() => expect(result.current.threads).toHaveLength(5));
+    expect(result.current.threads.filter(thread => thread.rootKey === 'mac:root')).toHaveLength(1);
+    expect(result.current.threads.filter(thread => thread.rootKey === 'wsl:root')).toHaveLength(2);
+    expect(calls).toEqual([
+      '/relay/account/workbench',
+      '/relay/devices/mac/api/threads?includeAgentThreads=true',
+      '/relay/devices/wsl/api/threads?includeAgentThreads=true',
+    ]);
+    unmount();
+  });
+
   it('retains account navigation during device switches without recording the previous device transcript', async () => {
     const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     const refs = ['mac', 'wsl'].map(deviceId => ({ deviceId, threadId: `${deviceId}-thread`, title: deviceId, workspaceLabel: 'App', favorite: false, visitedAt: '' }));

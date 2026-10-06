@@ -63,6 +63,7 @@ export function useWorkbenchNavigation(
     notifications: [],
   });
   const [statuses, setStatuses] = useState<Record<string, ThreadActivity>>({});
+  const [families, setFamilies] = useState<Record<string, ThreadDto[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [navigationReady, setNavigationReady] = useState(false);
@@ -97,15 +98,31 @@ export function useWorkbenchNavigation(
         setError(null);
         if (relay) {
           // Explicit device + thread paths: never switch the browser's selected device to poll.
+          const deviceSnapshots = new Map<string, ThreadDto[]>();
+          const pendingDevices = [...new Set(next.threads.map(r => r.deviceId).filter((id): id is string => !!id))];
+          await Promise.all(Array.from({ length: Math.min(6, pendingDevices.length) }, async () => {
+            while (alive && pendingDevices.length) {
+              const id = pendingDevices.shift()!;
+              try {
+                const list = await request<ThreadDto[]>(
+                  `/relay/devices/${encodeURIComponent(id)}/api/threads?includeAgentThreads=true`,
+                  { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), cache: 'no-store' },
+                );
+                if (Array.isArray(list)) deviceSnapshots.set(id, list);
+              } catch { /* Thread-scoped access falls back to summary/group endpoints below. */ }
+            }
+          }));
           const pending = [...next.threads];
           const missing: ThreadReference[] = [];
           const updates: Record<string, ThreadActivity> = {};
+          const groups = new Map<string, ThreadReference>();
           await Promise.all(
             Array.from({ length: Math.min(6, pending.length) }, async () => {
               while (alive && pending.length) {
                 const r = pending.shift()!;
                 try {
-                  const value = await request<ThreadDetailDto>(
+                  const listed = deviceSnapshots.get(r.deviceId!)?.find(thread => thread.id === r.threadId);
+                  const value = listed ? { thread: listed } : await request<ThreadDetailDto>(
                     `/relay/devices/${encodeURIComponent(r.deviceId!)}/api/threads/${encodeURIComponent(r.threadId)}?view=summary&limit=1`,
                     {
                       signal: AbortSignal.any([
@@ -115,6 +132,8 @@ export function useWorkbenchNavigation(
                     },
                   );
                   updates[referenceKey(r)] = value.thread;
+                  const root = { ...r, threadId: value.thread.rootThreadId ?? r.threadId };
+                  groups.set(referenceKey(root), root);
                 } catch (error) {
                   if (error instanceof ApiError && error.statusCode === 404 && /thread.*not found/i.test(error.message)) missing.push(r);
                   updates[referenceKey(r)] = { status: 'unknown' };
@@ -122,8 +141,33 @@ export function useWorkbenchNavigation(
               }
             }),
           );
+          // Visits are shortcuts, not complete thread groups. Query each visible
+          // family once, including on devices/workspaces that are not selected.
+          // The group endpoint also respects thread-scoped sharing permissions.
+          const familyUpdates: Record<string, ThreadDto[]> = {};
+          const pendingGroups = [...groups.values()].filter(root => {
+            const list = deviceSnapshots.get(root.deviceId!);
+            if (!list) return true;
+            familyUpdates[referenceKey(root)] = list.filter(thread => thread.id === root.threadId || thread.rootThreadId === root.threadId);
+            return false;
+          });
+          await Promise.all(Array.from({ length: Math.min(6, pendingGroups.length) }, async () => {
+            while (alive && pendingGroups.length) {
+              const root = pendingGroups.shift()!;
+              try {
+                const family = await request<ThreadDto[]>(
+                  `/relay/devices/${encodeURIComponent(root.deviceId!)}/api/threads/${encodeURIComponent(root.threadId)}/group`,
+                  { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), cache: 'no-store' },
+                );
+                if (Array.isArray(family)) familyUpdates[referenceKey(root)] = family;
+              } catch { /* Preserve the last family while its device is unavailable. */ }
+            }
+          }));
           if (alive) {
-            setStatuses(updates);
+            setStatuses(previous => Object.fromEntries(Object.entries(updates).map(([key, activity]) => [key,
+              activity.status === 'unknown' ? { ...previous[key], ...activity } : activity,
+            ])));
+            setFamilies(previous => ({ ...previous, ...familyUpdates }));
             // Only a definitive response from the addressed device can remove
             // stale navigation. Offline, timeouts and access errors preserve it.
             for (const r of missing) {
@@ -328,13 +372,33 @@ export function useWorkbenchNavigation(
           status: workbenchThreadStatus(thread.id === tabContext.detail?.thread.id ? tabContext.detail.thread : thread, reference?.readCompletedAt),
         };
       });
-  // Recent navigation persists visits, not a complete family. Fill each visible
-  // group from the same current workspace snapshot used by the top tabs.
-  const workspaceByKey = new Map(workspaceThreads.map(thread => [thread.key, thread]));
+  // Sidebar families are independent of the selected workspace. Current-device
+  // list snapshots supply live updates; other devices use their scoped groups.
+  const familyThreads = Object.entries(families).flatMap(([rootKey, family]) => {
+    const familyDevice = rootKey.slice(0, rootKey.indexOf(':'));
+    return family.map(thread => ({ deviceId: familyDevice, thread }));
+  });
+  familyThreads.push(...threads.map(thread => ({ deviceId: deviceId ?? 'local', thread })));
+  const familyByKey = new Map(familyThreads.map(({ deviceId: familyDevice, thread }) => {
+    const key = `${familyDevice}:${thread.id}`;
+    const reference = snapshot.threads.find(r => referenceKey(r) === key);
+    const activity = familyDevice === (deviceId ?? 'local') && thread.id === detail?.thread.id ? detail.thread : thread;
+    return [key, {
+      key, title: activity.title,
+      subtitle: [reference?.deviceName, reference?.workspaceLabel ?? snapshot.threads.find(r =>
+        r.deviceId === familyDevice && r.threadId === (thread.rootThreadId ?? thread.id))?.workspaceLabel].filter(Boolean).join(' · '),
+      href: threadHref(thread.id, familyDevice === 'local' ? null : familyDevice),
+      favorite: reference?.favorite ?? false,
+      ...(thread.parentThreadId ? { parentKey: `${familyDevice}:${thread.parentThreadId}` } : {}),
+      ...(thread.rootThreadId ? { rootKey: `${familyDevice}:${thread.rootThreadId}` } : {}),
+      status: workbenchThreadStatus(statuses[key]?.status === 'unknown' && familyDevice !== (deviceId ?? 'local')
+        ? { ...activity, status: 'unknown' } : activity, reference?.readCompletedAt),
+    } satisfies WorkbenchThread] as const;
+  }));
   const roots = new Set(items.map(thread => thread.rootKey ?? thread.key));
-  const sidebarThreads = items.map(thread => ({...thread, ...workspaceByKey.get(thread.key)}));
+  const sidebarThreads = items.map(thread => ({...thread, ...familyByKey.get(thread.key)}));
   const seen = new Set(sidebarThreads.map(thread => thread.key));
-  for (const thread of workspaceThreads) {
+  for (const thread of familyByKey.values()) {
     if (!seen.has(thread.key) && roots.has(thread.rootKey ?? thread.key)) {
       sidebarThreads.push(thread); seen.add(thread.key);
     }
