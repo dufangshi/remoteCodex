@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { fetchThreadDetail, request, steerPendingPrompt } from './api';
+import { steerPendingPrompt, steerSubmittedPrompt } from './api';
 
 const detail = {
   thread: { id: 'thread' },
@@ -51,4 +51,34 @@ it('does not mistake a missing queue entry for a successful steer', async () => 
   expect(
     fetch.mock.calls.filter(([, init]) => init?.method === 'POST'),
   ).toHaveLength(1);
+});
+
+it('steers only the receipt belonging to the submitted message', async () => {
+  const queued = { ...detail, thread: { id: 'thread', status: 'running', activeTurnId: 'turn' }, pendingSteers: [
+    { id: 'other', clientRequestId: 'someone-else', delivery: 'continuation' },
+    { id: 'mine', clientRequestId: 'request-1', delivery: 'continuation' },
+  ] };
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(queued)).mockResolvedValueOnce(Response.json(detail));
+  vi.stubGlobal('fetch', fetch);
+  await steerSubmittedPrompt('thread', 'request-1', 'turn');
+  expect(fetch.mock.calls[1]?.[0]).toContain('/pending-steers/mine/steer');
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+});
+
+it('keeps a saved continuation when its original turn has finished', async () => {
+  const newer = { ...detail, thread: { id: 'thread', status: 'running', activeTurnId: 'new-turn' } };
+  const fetch = vi.fn().mockResolvedValue(Response.json(newer));
+  vi.stubGlobal('fetch', fetch);
+  expect(await steerSubmittedPrompt('thread', 'request-1', 'old-turn')).toEqual(newer);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('does not steer another queued message if the submitted receipt is missing', async () => {
+  const queued = { ...detail, thread: { id: 'thread', status: 'running', activeTurnId: 'turn' }, pendingSteers: [
+    { id: 'other', clientRequestId: 'someone-else', delivery: 'continuation' },
+  ] };
+  const fetch = vi.fn().mockResolvedValue(Response.json(queued));
+  vi.stubGlobal('fetch', fetch);
+  await expect(steerSubmittedPrompt('thread', 'request-1', 'turn')).rejects.toThrow('saved message');
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

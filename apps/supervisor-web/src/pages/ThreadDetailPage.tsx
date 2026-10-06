@@ -95,6 +95,7 @@ import {
   buildThreadImageAssetUrl,
   cancelPendingSteer,
   steerPendingPrompt,
+  steerSubmittedPrompt,
 } from '../lib/api';
 import {
   appendLiveAgentDeltaToItems,
@@ -2261,6 +2262,11 @@ export function ThreadDetailPage() {
       setError('A prompt can include at most 10 attachments. Remove extra attachments and try again. Your draft has been kept.');
       return false;
     }
+    if (input.delivery === 'steer' && detailRef.current?.thread.status === 'running'
+      && backendCapabilities?.turns.steer === false) {
+      setError('This backend does not support steering an active turn. Send the message normally to queue it.');
+      return false;
+    }
 
     setBusy(true);
     setError(null);
@@ -2472,6 +2478,15 @@ export function ThreadDetailPage() {
             : current,
         );
         setLivePlan(null);
+      }
+      if (input.delivery === 'steer' && shouldSteer && steerTargetTurnId) {
+        try {
+          await runDetailMutation(() => steerSubmittedPrompt(id, clientRequestId, steerTargetTurnId));
+        } catch (caught) {
+          // Acceptance succeeded. Keep the durable message and clear the draft,
+          // rather than inviting a second submission of the same prompt.
+          setError(`Message saved, but steer could not be confirmed: ${caught instanceof Error ? caught.message : 'Try the queued message after reconnecting.'}`);
+        }
       }
       setChatDraft({
         prompt: '',
@@ -3340,6 +3355,7 @@ export function ThreadDetailPage() {
   );
   const chatComposerProps = detail
     ? ({
+        sendShortcut: shellNav?.sendShortcut ?? 'ctrlEnter',
         busy: activeView === 'chat' ? busy : false,
         settingsBusy,
         error: null,

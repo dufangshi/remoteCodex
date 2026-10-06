@@ -6,6 +6,7 @@ mod device_tokens;
 mod hosted;
 mod notifications;
 mod oauth;
+mod preferences;
 mod public_links;
 mod route_acl;
 mod security;
@@ -229,6 +230,7 @@ pub async fn serve() -> Result<()> {
         .merge(auth_api::routes())
         .merge(notifications::routes())
         .merge(workbench::routes())
+        .merge(preferences::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
