@@ -38,7 +38,7 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
         model_list_command: None,
     };
     let runtime = AcpRuntime::bound(Provider::Acp, "claude", 5_000);
-    for scenario in ["abandoned", "real", "missing"] {
+    for scenario in ["abandoned", "real", "missing", "background"] {
         let (session, live) = runtime
             .spawn_session(
                 &def,
@@ -50,6 +50,7 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
             .await
             .unwrap();
         let cleanup = StartupProcess(Some(live.process.clone()));
+        let native_session = live.session_id.clone();
         runtime
             .inner
             .sessions
@@ -58,26 +59,59 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
             .insert(session.clone(), live);
         let bus = EventBus::new();
         let mut events = bus.subscribe();
-        let result = runtime
-            .start_turn(
-                StartTurnInput {
-                    provider_session_id: session.clone(),
-                    prompt: scenario.into(),
-                    model: None,
-                    reasoning_effort: None,
-                    sandbox_mode: None,
-                    collaboration_mode: None,
-                    approval_mode: None,
-                    performance_mode: None,
-                    thread_id: "fixture".into(),
-                    turn_id: scenario.into(),
-                    hidden: false,
-                    images: Vec::new(),
-                },
-                bus,
-                CancellationToken::new(),
+        let turn = runtime.start_turn(
+            StartTurnInput {
+                provider_session_id: session.clone(),
+                prompt: scenario.into(),
+                model: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                collaboration_mode: None,
+                approval_mode: None,
+                performance_mode: None,
+                thread_id: "fixture".into(),
+                turn_id: scenario.into(),
+                hidden: false,
+                images: Vec::new(),
+            },
+            bus,
+            CancellationToken::new(),
+        );
+        tokio::pin!(turn);
+        if scenario == "background" {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    tokio::select! {
+                        result = &mut turn => panic!("Turn settled while its background agent was running: {result:?}"),
+                        event = events.recv() => {
+                            let event = event.unwrap();
+                            if event.event_type == "thread.subagents.updated"
+                                && event.payload["activeSubagents"][0]["isBackground"] == true
+                            { break; }
+                        }
+                    }
+                }
+            }).await.unwrap();
+            let active = runtime.active_subagents(&session).await;
+            assert_eq!(active.len(), 1);
+            assert_eq!(active[0].name.as_deref(), Some("Independent review"));
+            assert_eq!(active[0].status, "running");
+            assert!(matches!(
+                runtime.execution_state(&session).await,
+                crate::actor::ExecutionState::Running { .. }
+            ));
+            let home = std::env::var_os("CLAUDE_CONFIG_DIR").unwrap();
+            std::fs::write(
+                PathBuf::from(home)
+                    .join("projects/fixture")
+                    .join(format!("{native_session}.release")),
+                "",
             )
-            .await;
+            .unwrap();
+        }
+        let result = tokio::time::timeout(Duration::from_secs(5), &mut turn)
+            .await
+            .unwrap();
         let mut completed = None;
         while let Ok(event) = events.try_recv() {
             if event.event_type == "thread.turn.completed" {
@@ -85,7 +119,14 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
             }
         }
         let completed = completed.unwrap();
-        if scenario == "abandoned" {
+        if scenario == "background" {
+            assert!(result
+                .unwrap()
+                .iter()
+                .any(|item| item.text == "Review processed"));
+            assert_eq!(completed.payload["status"], "completed");
+            assert!(runtime.active_subagents(&session).await.is_empty());
+        } else if scenario == "abandoned" {
             let items = result.unwrap();
             assert_eq!(completed.payload["status"], "completed");
             assert!(completed.payload["error"].is_null());

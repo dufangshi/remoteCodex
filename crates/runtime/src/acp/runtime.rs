@@ -136,6 +136,28 @@ pub struct AcpRuntime {
 }
 
 impl AcpRuntime {
+    async fn update_subagents(&self, input: &StartTurnInput, agents: &[ThreadSubagentDto]) -> bool {
+        let next = agents
+            .iter()
+            .cloned()
+            .map(|agent| (agent.id.clone(), agent))
+            .collect();
+        let mut sessions = self.inner.sessions.lock().await;
+        let Some(live) = sessions.get_mut(&input.provider_session_id) else {
+            return false;
+        };
+        if !live
+            .active
+            .as_ref()
+            .is_some_and(|active| active.turn_id == input.turn_id)
+            || live.active_subagents == next
+        {
+            return false;
+        }
+        live.active_subagents = next;
+        true
+    }
+
     pub fn catalog(custom: Option<String>, timeout_ms: u64) -> Self {
         Self::new(Provider::Acp, None, custom, timeout_ms)
     }
@@ -1809,6 +1831,11 @@ impl AgentRuntime for AcpRuntime {
                     }
                     if let Some(reader) = claude_usage_reader.as_mut() {
                         for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                        let subagents = merge_active_subagents(mapper.active_subagents(), Some(reader));
+                        if self.update_subagents(&input, &subagents).await {
+                            emit_mapped(&bus, &input.thread_id, &input.turn_id,
+                                MappedUpdate { active_subagents: Some(subagents), ..Default::default() }, input.hidden);
+                        }
                     }
                 }
                 recv = updates.recv() => {
@@ -1826,20 +1853,11 @@ impl AgentRuntime for AcpRuntime {
                             if let Some(context) = adapter.context_usage(&update, &harness_state) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
-                            let mapped = mapper.apply(&update);
-                            if let Some(subagents) = mapped.active_subagents.clone() {
-                                if let Some(live) = self
-                                    .inner
-                                    .sessions
-                                    .lock()
-                                    .await
-                                    .get_mut(&input.provider_session_id)
-                                {
-                                    live.active_subagents = subagents
-                                        .iter()
-                                        .cloned()
-                                        .map(|agent| (agent.id.clone(), agent))
-                                        .collect();
+                            let mut mapped = mapper.apply(&update);
+                            if let Some(subagents) = mapped.active_subagents.take() {
+                                let subagents = merge_active_subagents(subagents, claude_usage_reader.as_ref());
+                                if self.update_subagents(&input, &subagents).await {
+                                    mapped.active_subagents = Some(subagents);
                                 }
                             }
                             if let Some(goal) = mapped.goal.clone() {
@@ -3147,6 +3165,24 @@ fn apply_config_option_caps(caps: &mut AgentProviderCapabilitiesDto, options: &V
     }) {
         caps.controls.performance_mode = true;
     }
+}
+
+fn merge_active_subagents(
+    agents: Vec<ThreadSubagentDto>,
+    claude: Option<&super::claude_usage::ClaudeUsageReader>,
+) -> Vec<ThreadSubagentDto> {
+    let mut agents: HashMap<_, _> = agents
+        .into_iter()
+        .map(|agent| (agent.id.clone(), agent))
+        .collect();
+    if let Some(reader) = claude {
+        for agent in reader.background_subagents() {
+            agents.insert(agent.id.clone(), agent);
+        }
+    }
+    let mut agents: Vec<_> = agents.into_values().collect();
+    agents.sort_by(|a, b| a.id.cmp(&b.id));
+    agents
 }
 
 fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpdate, hidden: bool) {

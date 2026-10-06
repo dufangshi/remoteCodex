@@ -27,6 +27,7 @@ describe('ThreadSubagentsControl', () => {
             startedAt: null,
             completedAt: null,
             parentToolCallId: null,
+            isBackground: true,
           },
           {
             id: 'agent-2',
@@ -47,6 +48,7 @@ describe('ThreadSubagentsControl', () => {
       'Task',
     );
     expect(screen.getByText('1 currently running')).toBeVisible();
+    expect(screen.getByText('Running in background')).toBeVisible();
   });
 
   it('hides itself when no native subagent is running', () => {

@@ -93,7 +93,7 @@ export function ThreadSubagentsControl({ detail }: { detail: ThreadDetailDto }) 
                   <div className="flex items-center justify-between gap-2">
                     <strong className="text-sm">{agent.name || agent.id}</strong>
                     <span className="text-xs text-[var(--theme-fg-muted)]">
-                      {statusLabel(agent.status)}
+                      {agent.isBackground && agent.status === 'running' ? 'Running in background' : statusLabel(agent.status)}
                     </span>
                   </div>
                   <code className="mt-1 block text-[11px] text-[var(--theme-fg-muted)]">

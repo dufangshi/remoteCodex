@@ -36,6 +36,72 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
+test('background agents remain visible after the main reply, survive reload, and clear on completion', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const turn = {
+    id: 'background-review-turn', status: 'inProgress', startedAt,
+    model: 'claude-opus-5-5', reasoningEffort: 'high',
+    tokenUsage: { total: { totalTokens: 3_700_000, inputTokens: 3_695_000, outputTokens: 5_000, cachedInputTokens: 3_600_000 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.86 },
+    items: [
+      { id: 'prompt', kind: 'userMessage', text: 'Review the results.' },
+      { id: 'launch', kind: 'agentToolCall', text: 'Independent review', status: 'completed' },
+      { id: 'reply', kind: 'agentMessage', text: 'Main reply done. The independent review is running in the background.' },
+    ],
+  };
+  const agent = { id: 'launch', name: 'Independent review', status: 'running', startedAt,
+    completedAt: null, parentToolCallId: 'launch', isBackground: true };
+  let background = true;
+  let completed = false;
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, current => {
+    socket = current;
+    current.send(JSON.stringify({ type: 'supervisor.connected' }));
+    current.onMessage(() => current.send(JSON.stringify({ type: 'supervisor.pong' })));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: {
+    ...detail, totalTurnCount: 1, activeSubagents: background ? [agent] : [],
+    thread: { ...detail.thread, status: completed ? 'idle' : 'running', activeTurnId: completed ? null : turn.id },
+    turns: [{ ...turn, status: completed ? 'completed' : 'inProgress', completedAt: completed ? new Date().toISOString() : null }],
+  } }));
+  await page.goto(`/threads/${id}`);
+  const label = page.locator('.thread-background-agent-status');
+  await expect(page.getByText(turn.items[2]!.text, { exact: true })).toBeVisible();
+  await expect(label).toHaveText('1 background agent running');
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Subagents (1)', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Native subagents', exact: true });
+  await expect(panel).toContainText('Independent review');
+  await expect(panel).toContainText('Running in background');
+  await page.getByRole('button', { name: 'Close subagents dialog', exact: true }).click();
+  await page.reload();
+  await expect(label).toHaveText('1 background agent running');
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect(label).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  const scroll = page.getByTestId('thread-scroll-container');
+  expect(await scroll.evaluate(e => e.scrollWidth)).toBe(320);
+  const bounds = (await label.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: testInfo.outputPath('background-agent-running.png') });
+  background = false;
+  expect(socket).toBeDefined();
+  socket!.send(JSON.stringify({ type: 'thread.subagents.updated', threadId: id,
+    timestamp: new Date().toISOString(), payload: { turnId: turn.id, activeSubagents: [] } }));
+  await expect(label).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Subagents (1)', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  completed = true;
+  socket!.send(JSON.stringify({ type: 'thread.turn.completed', threadId: id,
+    timestamp: new Date().toISOString(), payload: { turnId: turn.id, status: 'completed' } }));
+  socket!.send(JSON.stringify({ type: 'thread.updated', threadId: id, timestamp: new Date().toISOString(), payload: {} }));
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+});
+
 test('completed work agrees with the composer and the price tooltip has a matching triangle', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();

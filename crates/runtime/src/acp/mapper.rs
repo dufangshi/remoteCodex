@@ -200,6 +200,7 @@ impl TurnMapper {
                                     started_at,
                                     completed_at: None,
                                     parent_tool_call_id,
+                                    is_background: None,
                                 },
                             );
                         }
@@ -268,6 +269,10 @@ impl TurnMapper {
     fn next_sequence(&mut self) -> i64 {
         self.seq += 1;
         self.seq
+    }
+
+    pub fn active_subagents(&self) -> Vec<ThreadSubagentDto> {
+        self.subagents.values().cloned().collect()
     }
 
     fn close_text_segments(&mut self) {

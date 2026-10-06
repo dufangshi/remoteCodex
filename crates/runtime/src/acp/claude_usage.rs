@@ -20,6 +20,7 @@ pub(super) struct ClaudeUsageReader {
     next_lookup: Instant,
     messages: HashMap<String, Tokens>,
     completion: super::claude_completion::ClaudeCompletion,
+    background: super::claude_background::ClaudeBackgroundAgents,
     complete_tail: bool,
 }
 
@@ -41,6 +42,7 @@ impl ClaudeUsageReader {
             next_lookup: Instant::now(),
             messages: HashMap::new(),
             completion: Default::default(),
+            background: Default::default(),
             complete_tail: false,
         };
         reader.find_path();
@@ -76,6 +78,7 @@ impl ClaudeUsageReader {
         };
         if file.metadata().is_ok_and(|m| m.len() < self.offset) {
             self.completion.invalidate();
+            self.background = Default::default();
             self.offset = 0;
         }
         if file.seek(SeekFrom::Start(self.offset)).is_err() {
@@ -125,6 +128,10 @@ impl ClaudeUsageReader {
         self.completion.abandoned_tools(error, delivered_text)
     }
 
+    pub fn background_subagents(&self) -> Vec<remote_codex_protocol::ThreadSubagentDto> {
+        self.background.active()
+    }
+
     fn record(&mut self, entry: &Value) -> Option<Value> {
         let at = entry["timestamp"].as_str()?;
         if entry["sessionId"] != self.session
@@ -135,6 +142,7 @@ impl ClaudeUsageReader {
         }
         let message = &entry["message"];
         self.completion.record(entry);
+        self.background.record(entry);
         if entry["type"] != "assistant" {
             return None;
         }
@@ -163,6 +171,50 @@ impl ClaudeUsageReader {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn background_agents_exclude_history_foreign_sessions_and_sidechains() {
+        let home = tempfile::tempdir().unwrap();
+        let session = uuid::Uuid::new_v4().to_string();
+        let project = home.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        let file = project.join(format!("{session}.jsonl"));
+        let launch = json!({"type":"assistant","timestamp":"2099-01-01T00:00:00Z","sessionId":session,
+            "message":{"content":[{"type":"tool_use","id":"tool","name":"Agent","input":{"description":"Review"}}]}});
+        let receipt = json!({"type":"user","timestamp":"2099-01-01T00:00:01Z","sessionId":session,
+            "toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"agent"},
+            "message":{"content":[{"type":"tool_result","tool_use_id":"tool"}]}});
+        std::fs::write(&file, format!("{launch}\n{receipt}\n")).unwrap();
+        let mut reader = ClaudeUsageReader::with_home(home.path().into(), &session);
+        reader.poll();
+        assert!(reader.background_subagents().is_empty());
+        let mut out = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
+        for mut entry in [launch.clone(), receipt.clone()] {
+            entry["sessionId"] = json!("foreign");
+            writeln!(out, "{entry}").unwrap();
+            entry["sessionId"] = json!(session);
+            entry["isSidechain"] = json!(true);
+            writeln!(out, "{entry}").unwrap();
+        }
+        reader.poll();
+        assert!(reader.background_subagents().is_empty());
+        writeln!(out, "{launch}\n{receipt}").unwrap();
+        reader.poll();
+        assert_eq!(reader.background_subagents().len(), 1);
+        let mut finished = json!({"type":"user","timestamp":"2099-01-01T00:00:02Z","sessionId":session,
+            "origin":{"kind":"task-notification"},"isSidechain":true,
+            "message":{"content":"<task-notification><task-id>agent</task-id><status>completed</status></task-notification>"}});
+        writeln!(out, "{finished}").unwrap();
+        reader.poll();
+        assert_eq!(reader.background_subagents().len(), 1);
+        finished["isSidechain"] = json!(false);
+        writeln!(out, "{finished}").unwrap();
+        reader.poll();
+        assert!(reader.background_subagents().is_empty());
+    }
 
     #[test]
     fn first_tool_response_is_visible_before_turn_completion_without_rebilling_history_or_blocks() {

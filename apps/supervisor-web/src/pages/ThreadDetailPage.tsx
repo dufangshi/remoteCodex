@@ -3312,6 +3312,7 @@ export function ThreadDetailPage() {
     () => ({
       livePlan,
       liveItems,
+      backgroundAgentCount: detail?.activeSubagents?.filter((agent) => agent.isBackground && agent.status === 'running').length ?? 0,
       respondingRequestId,
       onRespondToRequest: handleRespondToRequest,
       scrollRequestKey,
@@ -3337,6 +3338,7 @@ export function ThreadDetailPage() {
       detail?.answeredRequestNotes,
       detail?.activityNotes,
       detail?.pendingSteers,
+      detail?.activeSubagents,
       handleLoadEarlierTurns,
       handleRespondToRequest,
       liveItems,
