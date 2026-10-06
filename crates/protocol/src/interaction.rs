@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const THREAD_INTERACTION_SKILL: &str =
+    include_str!("../../../skills/thread-interaction/SKILL.md");
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSendInput {
@@ -26,6 +29,14 @@ pub struct ThreadSendInput {
     /// Message this answers, so an exchange correlates instead of relying on prose.
     #[serde(default)]
     pub in_reply_to: Option<String>,
+    /// Why handling this at the next checkpoint would cause harm or wasted work.
+    /// Required for peer direct/steer; omitted fields preserve legacy retry hashes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_reason: Option<String>,
+    /// Opt in to replacing older full status snapshots from this sender on this
+    /// topic. Never used to merge results, questions, tasks or incremental patches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic_key: Option<String>,
 }
 
 /// Accepted `kind` values. `question` is the only one that implies the sender is

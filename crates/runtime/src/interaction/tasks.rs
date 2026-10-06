@@ -110,6 +110,7 @@ fn notify(
             subject: Some(subject),
             kind,
             in_reply_to: None,
+            topic_key: None,
         },
     )
 }

@@ -13,7 +13,7 @@ remote-codex thread delete CHILD_THREAD_ID
 remote-codex thread models --provider acp --agent grok
 remote-codex thread create --provider acp --agent grok \
   --model grok-4.6 --reasoning-effort xhigh --title helper
-remote-codex thread send THREAD_ID --text-file task.txt --notify-on-complete
+remote-codex thread send THREAD_ID --delivery queue --kind task --text-file task.txt --notify-on-complete
 remote-codex transcript THREAD_ID
 remote-codex transcript THREAD_ID --limit 5 --before-turn TURN_ID
 remote-codex transcript THREAD_ID --turn TURN_ID
@@ -24,11 +24,11 @@ remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 
 `thread create` also accepts `--text` / `--text-file` for an initial prompt. Without a managed caller, specify `--workspace`. Model IDs and reasoning levels must be advertised by the target harness. Creation inherits the caller's workspace and approval mode unless explicitly overridden. It does not copy the caller's history.
 
-Messages can be sent repeatedly, to one or several threads, without waiting for a reply. `send` durably inserts into the existing continuation queue and returns a small receipt with `pendingSteerId`. Idle recipients start automatically; running recipients process continuations serially. The receiver sees the sender's remoteCodex thread ID and can use the same CLI to reply. `--request-id KEY` makes retries of the same send return the original receipt; reusing a key with different content is rejected. A send receipt does not mean execution has completed.
+Ordinary `send` stores passive inbox mail and never starts or interrupts a turn. Explicit `queue --kind task` assigns executable work: idle recipients start automatically and busy recipients process it after current work. Urgent peer corrections/unblock requests may use direct/steer with an interrupt reason. The receiver sees the sender's remoteCodex thread ID and can use the same CLI to reply. `--request-id KEY` makes retries of the same send return the original receipt; reusing a key with different content is rejected. A send receipt does not mean execution has completed.
 
 `--notify-on-complete` is optional per executable send. It requires a caller identity. When that receiving turn ends, the Supervisor stores a passive inbox result with the peer/turn IDs and completed, failed or interrupted status. It never wakes the caller or queues a turn. Multiple opted-in messages steered into one turn keep independent subscriptions; cancelling an unconsumed queued prompt removes its subscription.
 
-An Agent may instead be asked to send a message at any appropriate point. That is independent of the automatic turn-end option. No protocol rule enforces one message, one reply or a fixed parent/child hierarchy.
+An agent can explicitly mail usable intermediate batches independently of the automatic turn-end option. Avoid duplicate completion reports, reflexive acknowledgement replies and notifying peers that do not depend on the change. See the bundled skill for handoff and waiting rules.
 
 ## Restricted child cleanup
 
@@ -69,15 +69,15 @@ remote-codex --cli-config /path/to/supervisor.cli.json --from THREAD_ID thread s
 
 Managed ACP processes receive `REMOTE_CODEX_URL`, `REMOTE_CODEX_TOKEN` and `REMOTE_CODEX_THREAD_ID`, plus a PATH containing the running binary. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the remoteCodex thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `remote-codex thread self`, `remote-codex skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
 
-CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion requires the thread-bound credential and verifies the parent relationship; `--from` cannot override that identity. Other messaging attribution and shared filesystem access are not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs are accepted only when their device ID matches this Supervisor.
+CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion verifies the authenticated parent. Managed peer sends bind attribution to the credential: omitting `fromThreadId` cannot bypass delivery checks and a conflicting `--from` is rejected. Machine credentials still support explicit attribution. Shared filesystem access is not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs are accepted only when their device ID matches this Supervisor.
 
-The JSON facade has `operation` values `info`, `list`, `show`, `status`, `backends`, `models`, `create`, `send`, `transcript`, the inbox operations, and the coordination operations described below (`resolve`, `tree`, `wait`, `wake`, `close`, `roles`, `inboxWait`, `task*`). It delegates to the existing runtime service; it does not connect directly to a provider app-server. Request DTOs use camelCase in `crates/protocol/src/interaction.rs`.
+The JSON facade has `operation` values `info`, `skill`, `list`, `show`, `status`, `backends`, `models`, `create`, `send`, `transcript`, the inbox operations, and the coordination operations described below (`resolve`, `tree`, `wait`, `wake`, `close`, `roles`, `inboxWait`, `task*`). It delegates to the existing runtime service; it does not connect directly to a provider app-server. Request DTOs use camelCase in `crates/protocol/src/interaction.rs`.
 
 Optional notification subscriptions and explicit retry receipts use the existing KV table. Retry records store a content hash rather than duplicate prompt text. Subscriptions bind to the consumed turn in the queue-consumption transaction; turn completion and notification enqueue commit together. A lightweight worker resumes pending continuations and checks terminal subscriptions. Harness setup failures leave the accepted prompt queued, expose `lastError` and back off before retrying. An in-progress external operation interrupted by a process crash is not automatically re-executed by this feature.
 
 ## Validation
 
-See [the Docker E2E record](thread-interaction-e2e.md). The bundled [skill](../skills/thread-interaction/SKILL.md) teaches discovery, reuse, creation, messaging and reading only the relevant detail. `remote-codex skill` prints that same embedded file.
+See [the Docker E2E record](thread-interaction-e2e.md). The [skill](../skills/thread-interaction/SKILL.md) teaches discovery, handoff, waiting, creation and progressive reads. `remote-codex skill` fetches the running Supervisor's embedded guide, falling back to the CLI's copy if offline or talking to an older Supervisor.
 
 ## 0.12.32 delivery and inbox revision
 
@@ -93,7 +93,31 @@ Since 0.12.48, completion subscriptions on executable messages always deliver to
 
 Unsupported active steering is rejected without enqueueing. Accepted steering targets that specific turn; failures or a replaced/finished turn remain held, never silently becoming a continuation or steering a replacement turn. Retries reuse the original route. Existing unpinned steering from older versions retains its previous behavior.
 
-Inbox remains passive by default. Use direct for immediate correction or to wake an idle collaborator; use queue when processing after current work is intentional. Completion notification delivery is always inbox. Claude `CronCreate` / `/loop` can independently wake its native session while the harness process remains alive; that is not an automatic completion callback. See [scheduled history recovery](claude-scheduled-history.md) for visibility and persistence limits.
+Inbox remains passive by default. Peer direct/steer is reserved for urgent correction or unblocking, with `--kind task|question --interrupt-reason REASON`; use `queue --kind task` for assignments. Completion notification delivery is always inbox. Claude `CronCreate` / `/loop` can independently wake its native session while the harness process remains alive; that is not an automatic completion callback. See [scheduled history recovery](claude-scheduled-history.md) for visibility and persistence limits.
+
+## Peer communication policy and inbox snapshots
+
+The runtime enforces peer delivery rules at acceptance, including calls from older
+CLIs: queue requires `kind=task`; direct/steer requires `kind=task|question` and a
+nonempty `interruptReason` (CLI `--interrupt-reason`, up to 500 characters). Rejected
+messages are not stored or dispatched, and the error names the required delivery.
+There is no silent downgrade. Human Web prompts and unattributed machine sends retain
+their execution routes. Accepted legacy request-ID retries return their saved receipt;
+omitted new fields preserve the pre-policy fingerprint.
+
+`topicKey` (CLI `--topic-key`, up to 120 characters) opts a **full inbox status
+snapshot** into replacing older active status from the same sender to the same
+recipient on that topic. Results, questions, tasks and correlated replies cannot
+coalesce. Replaced records retain their text/ack state and identify `supersededBy`;
+read/list --all exposes them, while unread counts, notices, list and wait omit them.
+The receipt reports `supersededMessageCount`. Publish snapshots in order, using stable
+request IDs for retries; do not use this for patches or safety corrections.
+
+Inbox list/wait accepts `fromThreadIds` and `kinds` (repeatable `--from-thread` and
+`--kind` on the CLI). Filtering and `--new` exclusions happen before pagination/limits,
+so a backlog cannot hide a matching result. The start-of-turn notice prioritizes
+questions and tasks, then results, then status. Receive at natural checkpoints;
+when blocked on results, include questions in the wait to avoid mutual deadlock.
 
 ## Coordination (0.12.53)
 

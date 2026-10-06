@@ -304,8 +304,10 @@ async fn deletion_refuses_running_recovering_and_queued_children_without_removin
             notify_on_complete: false,
             client_request_id: None,
             subject: None,
-            kind: None,
+            kind: Some("task".into()),
             in_reply_to: None,
+            interrupt_reason: None,
+            topic_key: None,
         },
     )
     .unwrap();
@@ -410,6 +412,8 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
             subject: None,
             kind: None,
             in_reply_to: None,
+            interrupt_reason: None,
+            topic_key: None,
         },
     )
     .unwrap();
@@ -437,6 +441,8 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
             subject: None,
             kind: None,
             in_reply_to: None,
+            interrupt_reason: None,
+            topic_key: None,
         },
     )
     .unwrap();
@@ -462,6 +468,8 @@ fn mail(from: &str, subject: &str, kind: &str, text: &str, key: &str) -> SendInp
         subject: Some(subject.into()),
         kind: Some(kind.into()),
         in_reply_to: None,
+        interrupt_reason: None,
+        topic_key: None,
     }
 }
 
@@ -510,6 +518,28 @@ async fn the_unread_notice_names_what_is_waiting_and_flags_questions() {
     assert!(
         notice.contains("waiting on you"),
         "a question must signal that a peer is blocked: {notice}"
+    );
+    for n in 0..10 {
+        s.send_to_thread(
+            &receiver.id,
+            mail(
+                &sender.id,
+                "newer progress",
+                "status",
+                "running",
+                &format!("status-{n}"),
+            ),
+        )
+        .unwrap();
+    }
+    let notice = s.pending_mail_notice(&receiver.id).unwrap();
+    assert!(
+        notice.contains("question: which API key?"),
+        "new status must not bury a question: {notice}"
+    );
+    assert!(
+        notice.contains("result: crate builds clean"),
+        "usable results precede progress: {notice}"
     );
 }
 

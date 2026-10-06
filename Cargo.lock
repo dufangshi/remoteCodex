@@ -2456,6 +2456,7 @@ version = "0.12.60"
 dependencies = [
  "anyhow",
  "clap",
+ "remote-codex-protocol",
  "remote-codex-relay",
  "remote-codex-runtime",
  "remote-codex-supervisor",

@@ -1,5 +1,7 @@
 mod interaction;
-pub use interaction::{ThreadSendInput, ThreadTranscriptQuery, MESSAGE_KINDS};
+pub use interaction::{
+    ThreadSendInput, ThreadTranscriptQuery, MESSAGE_KINDS, THREAD_INTERACTION_SKILL,
+};
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

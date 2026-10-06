@@ -788,6 +788,87 @@ async fn local_cli_requires_credentials_and_exposes_existing_threads() {
     assert_eq!(transcript["turns"][0]["items"][1]["text"], "hello");
 }
 
+#[tokio::test]
+async fn managed_peer_delivery_cannot_bypass_policy_by_omitting_or_overriding_identity() {
+    let (_dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
+    let ws = state
+        .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+            abs_path: Some(root.to_string_lossy().into()),
+            git_url: None,
+            label: None,
+        })
+        .unwrap();
+    let input = || remote_codex_protocol::CreateThreadInput {
+        workspace_id: ws.id.clone(),
+        title: None,
+        provider: Some(Provider::Codex),
+        agent_id: None,
+        model: "default".into(),
+        reasoning_effort: None,
+        approval_mode: "yolo".into(),
+        parent_thread_id: None,
+    };
+    let sender = state.create_thread(input()).await.unwrap().id;
+    let receiver = state.create_thread(input()).await.unwrap().id;
+    let other = state.create_thread(input()).await.unwrap().id;
+    let token = state.cli_thread_token(&sender);
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/cli");
+    for body in [
+        json!({"operation":"send","threadId":receiver,"delivery":"direct","text":"result ready"}),
+        json!({"operation":"send","threadId":receiver,"delivery":"queue","kind":"result","text":"result ready"}),
+        json!({"operation":"send","threadId":receiver,"delivery":"direct","kind":"task","text":"correct the calculation"}),
+        json!({"operation":"send","threadId":receiver,"fromThreadId":other,"delivery":"queue","kind":"task","text":"spoofed assignment"}),
+    ] {
+        let response = client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_client_error(),
+            "{body}: {:?}",
+            response.status()
+        );
+        assert_eq!(
+            state.interaction_status(&receiver).await.unwrap()["queuedCount"],
+            0
+        );
+        assert_eq!(state.inbox_unread_count(&receiver).unwrap(), 0);
+    }
+    let accepted: Value = client.post(&url).bearer_auth(&token)
+        .json(&json!({"operation":"send","threadId":receiver,"delivery":"inbox","kind":"result","text":"artifact is ready"}))
+        .send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+    let mail = state
+        .inbox_read(&receiver, &json!({"messageId":accepted["messageId"]}))
+        .unwrap();
+    assert_eq!(mail["fromThreadId"], sender);
+    assert_eq!(accepted["delivery"], "inbox");
+    let assigned: Value = client.post(&url).bearer_auth(&token)
+        .json(&json!({"operation":"send","threadId":receiver,"delivery":"queue","kind":"task","text":"perform the assigned calculation"}))
+        .send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+    assert_eq!(assigned["delivery"], "queued");
+    let guide: Value = client
+        .post(&url)
+        .bearer_auth(&token)
+        .json(&json!({"operation":"skill"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(guide["version"], remote_codex_protocol::APP_VERSION);
+    assert_eq!(
+        guide["text"],
+        remote_codex_protocol::THREAD_INTERACTION_SKILL
+    );
+}
+
 /// Exercises the real path an agent takes: POST /api/cli with operation=create and
 /// fromThreadId, then the workspace listing the web client actually calls.
 #[tokio::test]

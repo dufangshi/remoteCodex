@@ -14,6 +14,7 @@ pub(super) struct Envelope<'a> {
     pub subject: Option<&'a str>,
     pub kind: &'a str,
     pub in_reply_to: Option<&'a str>,
+    pub topic_key: Option<&'a str>,
 }
 pub(super) fn store(
     conn: &Connection,
@@ -26,7 +27,62 @@ pub(super) fn store(
 ) -> Result<()> {
     // subject/kind ride on the stored record so `inbox list`, which returns it
     // verbatim, lets a receiver triage without opening anything.
-    conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2)", params![key(thread,id),json!({"id":id,"threadId":thread,"fromThreadId":from,"text":text,"createdAt":now,"acknowledgedAt":null,"subject":envelope.subject,"kind":envelope.kind,"inReplyTo":envelope.in_reply_to}).to_string()])?;
+    conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2)", params![key(thread,id),json!({"id":id,"threadId":thread,"fromThreadId":from,"text":text,"createdAt":now,"acknowledgedAt":null,"subject":envelope.subject,"kind":envelope.kind,"inReplyTo":envelope.in_reply_to,"topicKey":envelope.topic_key,"supersededBy":null}).to_string()])?;
+    Ok(())
+}
+/// The sender explicitly opted into full snapshots. Retain old mail for read/all,
+/// but do not repeatedly present obsolete status as work requiring attention.
+pub(super) fn supersede_status(
+    conn: &Connection,
+    thread: &str,
+    id: &str,
+    from: Option<&str>,
+    topic: &str,
+) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE kv SET value=json_set(value,'$.supersededBy',?2)
+         WHERE key GLOB ?1 AND json_extract(value,'$.id') != ?2
+           AND json_extract(value,'$.fromThreadId') IS ?3
+           AND json_extract(value,'$.topicKey')=?4
+           AND json_extract(value,'$.kind')='status'
+           AND json_extract(value,'$.inReplyTo') IS NULL
+           AND json_extract(value,'$.acknowledgedAt') IS NULL
+           AND json_extract(value,'$.supersededBy') IS NULL",
+        params![format!("{}*", prefix(thread)), id, from, topic],
+    )?)
+}
+
+const FILTERED_UNREAD: &str = "key GLOB ?1
+    AND json_extract(value,'$.acknowledgedAt') IS NULL
+    AND json_extract(value,'$.supersededBy') IS NULL
+    AND (?2='[]' OR json_extract(value,'$.fromThreadId') IN (SELECT value FROM json_each(?2)))
+    AND (?3='[]' OR COALESCE(json_extract(value,'$.kind'),'status') IN (SELECT value FROM json_each(?3)))
+    AND json_extract(value,'$.id') NOT IN (SELECT value FROM json_each(?4))";
+
+fn string_filter(query: &Value, field: &str) -> Result<Vec<String>> {
+    if query[field].is_null() {
+        return Ok(vec![]);
+    }
+    let values = query[field]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("{field} must be an array of strings"))?;
+    values
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| anyhow::anyhow!("{field} must contain nonempty strings"))
+        })
+        .collect()
+}
+fn validate_kinds(kinds: &[String]) -> Result<()> {
+    ensure!(
+        kinds
+            .iter()
+            .all(|k| remote_codex_protocol::MESSAGE_KINDS.contains(&k.as_str())),
+        "kinds must contain only result, question, status or task"
+    );
     Ok(())
 }
 fn get(conn: &Connection, thread: &str, id: &str) -> Result<Value> {
@@ -42,7 +98,7 @@ fn get(conn: &Connection, thread: &str, id: &str) -> Result<Value> {
     })?)?)
 }
 impl Supervisor {
-    /// Subject lines of waiting mail, newest first, for the start-of-turn notice.
+    /// Waiting questions and tasks first, so newer status cannot hide a blocker.
     /// Showing what is waiting is what makes a passive inbox workable: a bare count
     /// tells an agent nothing about whether looking now is worth interrupting itself.
     pub fn inbox_unread_digest(&self, thread: &str, limit: usize) -> Result<Vec<(String, String)>> {
@@ -50,7 +106,10 @@ impl Supervisor {
             let mut stmt = c.prepare(
                 "SELECT value FROM kv WHERE key GLOB ?1
                    AND json_extract(value,'$.acknowledgedAt') IS NULL
-                 ORDER BY json_extract(value,'$.createdAt') DESC LIMIT ?2",
+                   AND json_extract(value,'$.supersededBy') IS NULL
+                 ORDER BY CASE json_extract(value,'$.kind')
+                   WHEN 'question' THEN 0 WHEN 'task' THEN 1 WHEN 'result' THEN 2 ELSE 3 END,
+                   json_extract(value,'$.createdAt') DESC, json_extract(value,'$.id') DESC LIMIT ?2",
             )?;
             let rows = stmt
                 .query_map(params![format!("{}*", prefix(thread)), limit as i64], |r| {
@@ -85,48 +144,44 @@ impl Supervisor {
         timeout: std::time::Duration,
     ) -> Result<Value> {
         self.get_thread(thread)?;
+        validate_kinds(kinds)?;
         let started = std::time::Instant::now();
         let deadline = started + timeout;
         let mut events = self.bus.subscribe();
+        let mailbox = format!("{}*", prefix(thread));
+        let from_json = serde_json::to_string(from)?;
+        let kinds_json = serde_json::to_string(kinds)?;
+        // Capture every matching id, not just the first page. Exclude them in SQL
+        // before LIMIT, otherwise --new is starved by a backlog of old messages.
+        let seen: Vec<String> = if only_new {
+            self.db.with(|c| {
+                let mut stmt = c.prepare(&format!(
+                    "SELECT json_extract(value,'$.id') FROM kv WHERE {FILTERED_UNREAD}"
+                ))?;
+                let ids = stmt
+                    .query_map(params![mailbox, from_json, kinds_json, "[]"], |r| r.get(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(ids)
+            })?
+        } else {
+            vec![]
+        };
+        let seen_json = serde_json::to_string(&seen)?;
         let unread = || {
             self.db.with(|c| {
-                let mut stmt = c.prepare(
-                    "SELECT value FROM kv WHERE key GLOB ?1
-                       AND json_extract(value,'$.acknowledgedAt') IS NULL
-                     ORDER BY json_extract(value,'$.createdAt'), json_extract(value,'$.id') LIMIT 200",
-                )?;
+                let mut stmt = c.prepare(&format!(
+                    "SELECT value FROM kv WHERE {FILTERED_UNREAD}
+                     ORDER BY json_extract(value,'$.createdAt'), json_extract(value,'$.id') LIMIT 200"
+                ))?;
                 let rows = stmt
-                    .query_map([format!("{}*", prefix(thread))], |r| r.get::<_, String>(0))?
-                    .filter_map(|raw| raw.ok().and_then(|r| serde_json::from_str::<Value>(&r).ok()))
-                    .collect::<Vec<_>>();
-                Ok(rows)
+                    .query_map(params![mailbox, from_json, kinds_json, seen_json], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows.iter().map(|raw| serde_json::from_str::<Value>(raw)).collect::<std::result::Result<Vec<_>, _>>()?)
             })
-        };
-        // By id, not timestamp: mail can share the wait's starting millisecond.
-        let seen: std::collections::HashSet<String> = if only_new {
-            unread()?
-                .iter()
-                .filter_map(|m| m["id"].as_str().map(str::to_owned))
-                .collect()
-        } else {
-            Default::default()
         };
         loop {
             let matching: Vec<Value> = unread()?
                 .into_iter()
-                .filter(|m| !m["id"].as_str().is_some_and(|id| seen.contains(id)))
-                .filter(|m| {
-                    from.is_empty()
-                        || m["fromThreadId"]
-                            .as_str()
-                            .is_some_and(|f| from.iter().any(|x| x == f))
-                })
-                .filter(|m| {
-                    kinds.is_empty()
-                        || kinds
-                            .iter()
-                            .any(|k| m["kind"].as_str().unwrap_or("status") == k)
-                })
                 .map(|mut m| {
                     let text = m["text"].as_str().unwrap_or("").to_string();
                     m["textLength"] = json!(text.chars().count());
@@ -152,18 +207,28 @@ impl Supervisor {
     }
 
     pub fn inbox_unread_count(&self, thread: &str) -> Result<i64> {
-        self.db.with(|c| Ok(c.query_row("SELECT count(*) FROM kv WHERE key GLOB ?1 AND json_extract(value,'$.acknowledgedAt') IS NULL",[format!("{}*",prefix(thread))],|r|r.get(0))?))
+        self.db.with(|c| Ok(c.query_row("SELECT count(*) FROM kv WHERE key GLOB ?1 AND json_extract(value,'$.acknowledgedAt') IS NULL AND json_extract(value,'$.supersededBy') IS NULL",[format!("{}*",prefix(thread))],|r|r.get(0))?))
     }
     pub fn inbox_list(&self, thread: &str, query: &Value) -> Result<Value> {
         self.get_thread(thread)?;
         let limit = query["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
         let all = query["all"].as_bool().unwrap_or(false);
+        let from = string_filter(query, "fromThreadIds")?;
+        let kinds = string_filter(query, "kinds")?;
+        validate_kinds(&kinds)?;
+        let from_json = serde_json::to_string(&from)?;
+        let kinds_json = serde_json::to_string(&kinds)?;
         self.db.with(|c| {
             let before=query["before"].as_str().map(|id|get(c,thread,id)).transpose()?;
             let date=before.as_ref().and_then(|v|v["createdAt"].as_str());
             let id=query["before"].as_str();
-            let mut stmt=c.prepare("SELECT value FROM kv WHERE key GLOB ?1 AND (?2 OR json_extract(value,'$.acknowledgedAt') IS NULL) AND (?3 IS NULL OR (json_extract(value,'$.createdAt'),json_extract(value,'$.id')) < (?3,?4)) ORDER BY json_extract(value,'$.createdAt') DESC,json_extract(value,'$.id') DESC LIMIT ?5")?;
-            let raw=stmt.query_map(params![format!("{}*",prefix(thread)),all,date,id,limit+1],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let mut stmt=c.prepare("SELECT value FROM kv WHERE key GLOB ?1
+                AND (?2 OR (json_extract(value,'$.acknowledgedAt') IS NULL AND json_extract(value,'$.supersededBy') IS NULL))
+                AND (?3 IS NULL OR (json_extract(value,'$.createdAt'),json_extract(value,'$.id')) < (?3,?4))
+                AND (?6='[]' OR json_extract(value,'$.fromThreadId') IN (SELECT value FROM json_each(?6)))
+                AND (?7='[]' OR COALESCE(json_extract(value,'$.kind'),'status') IN (SELECT value FROM json_each(?7)))
+                ORDER BY json_extract(value,'$.createdAt') DESC,json_extract(value,'$.id') DESC LIMIT ?5")?;
+            let raw=stmt.query_map(params![format!("{}*",prefix(thread)),all,date,id,limit+1,from_json,kinds_json],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
             let has_more=raw.len()>limit;
             let mut messages=raw.iter().take(limit).map(|r|serde_json::from_str::<Value>(r)).collect::<std::result::Result<Vec<_>,_>>()?;
             let next=if has_more {messages.last().map(|m|m["id"].clone())} else {None};

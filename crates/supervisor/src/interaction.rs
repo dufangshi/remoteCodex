@@ -51,6 +51,10 @@ pub(crate) async fn command(
         let wait = clamp_wait(input["timeoutSeconds"].as_u64());
         match input.get("operation").and_then(Value::as_str).unwrap_or("") {
             "info" => Ok(json!({"deviceId":state.db.host_id})),
+            "skill" => Ok(json!({
+                "version": remote_codex_protocol::APP_VERSION,
+                "text": remote_codex_protocol::THREAD_INTERACTION_SKILL,
+            })),
             "list" => {
                 let group = input["groupId"].as_str().map(str::to_owned);
                 // Drilling into a group, or asking for --all, needs every row; the
@@ -83,7 +87,17 @@ pub(crate) async fn command(
                 state.delete_child_thread(&caller, id).await
             }
             "send" => {
-                let body = serde_json::from_value::<SendInput>(input.clone())?;
+                let mut body = serde_json::from_value::<SendInput>(input.clone())?;
+                if let Some(caller) = &caller {
+                    anyhow::ensure!(
+                        body.from_thread_id
+                            .as_deref()
+                            .is_none_or(|from| from == caller),
+                        "forbidden: --from cannot override the authenticated caller for peer sends"
+                    );
+                    // Omitting attribution must not bypass the peer delivery policy.
+                    body.from_thread_id = Some(caller.clone());
+                }
                 let mut receipt = state.send_to_thread(id, body)?;
                 if receipt["delivery"] == "steer" {
                     let pending = receipt["pendingSteerId"].as_str().unwrap();

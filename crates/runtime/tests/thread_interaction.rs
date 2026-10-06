@@ -79,8 +79,10 @@ fn send(from: &str, text: &str, notify: bool, key: &str) -> SendInput {
         notify_on_complete: notify,
         client_request_id: Some(key.into()),
         subject: None,
-        kind: None,
+        kind: Some("task".into()),
         in_reply_to: None,
+        interrupt_reason: None,
+        topic_key: None,
     }
 }
 
@@ -422,16 +424,155 @@ async fn inbox_is_passive_bounded_durable_and_acknowledged_explicitly() {
 }
 
 #[tokio::test]
+async fn peer_reports_cannot_wake_idle_or_interrupt_running_threads() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Codex).await;
+    for running in [false, true] {
+        if running {
+            state.db.with(|c| {
+                c.execute("UPDATE threads SET status='running' WHERE id=?1", [&b])?;
+                c.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES ('active',?1,'inProgress',0)", [&b])?;
+                Ok(())
+            }).unwrap();
+        }
+        for kind in [None, Some("status"), Some("result"), Some("question")] {
+            for delivery in ["queue", "direct", "steer"] {
+                let mut report = send(&a, "batch ready; please read", false, "rejected-report");
+                report.kind = kind.map(str::to_owned);
+                report.delivery = delivery.into();
+                let error = state.send_to_thread(&b, report).unwrap_err().to_string();
+                assert!(error.contains("peer "), "{kind:?}/{delivery}: {error}");
+            }
+        }
+        assert_eq!(
+            state.interaction_status(&b).await.unwrap()["queuedCount"],
+            0
+        );
+        assert_eq!(state.inbox_unread_count(&b).unwrap(), 0);
+
+        let mut passive = send(
+            &a,
+            "batch ready at /artifacts/r1",
+            false,
+            if running {
+                "running-result"
+            } else {
+                "idle-result"
+            },
+        );
+        passive.kind = Some("result".into());
+        passive.delivery = "inbox".into();
+        let receipt = state.send_to_thread(&b, passive).unwrap();
+        assert_eq!(receipt["delivery"], "inbox");
+        assert_eq!(
+            state.interaction_status(&b).await.unwrap()["queuedCount"],
+            0
+        );
+        assert_eq!(
+            state.get_thread(&b).unwrap().status,
+            if running { "running" } else { "idle" }
+        );
+        state
+            .inbox_ack(&b, &json!({"messageIds":[receipt["messageId"]]}))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn urgent_peer_corrections_require_a_reason_and_expose_it_in_the_prompt() {
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Codex).await;
+    let mut correction = send(&a, "Stop using the invalid inputs", false, "correction");
+    correction.delivery = "direct".into();
+    for reason in [None, Some(" ".into()), Some("x".repeat(501))] {
+        correction.interrupt_reason = reason;
+        assert!(state.send_to_thread(&b, correction.clone()).is_err());
+        assert_eq!(
+            state.interaction_status(&b).await.unwrap()["queuedCount"],
+            0
+        );
+    }
+    correction.interrupt_reason =
+        Some("The running calculation is based on an invalid dataset".into());
+    let receipt = state.send_to_thread(&b, correction.clone()).unwrap();
+    assert_eq!(receipt["delivery"], "queued");
+    assert_eq!(
+        receipt["interruptReason"],
+        correction.interrupt_reason.as_deref().unwrap()
+    );
+    let prompt: String = state
+        .db
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT submitted_prompt FROM thread_pending_steers WHERE id=?1",
+                [receipt["pendingSteerId"].as_str().unwrap()],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert!(prompt.contains(correction.interrupt_reason.as_deref().unwrap()));
+    assert_eq!(state.send_to_thread(&b, correction).unwrap(), receipt);
+    assert_eq!(
+        state.interaction_status(&b).await.unwrap()["queuedCount"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn pre_policy_retry_receipts_keep_the_original_fingerprint_and_route() {
+    use sha2::{Digest, Sha256};
+    let (_dir, state) = setup();
+    let a = thread(&state, Provider::Codex).await;
+    let b = thread(&state, Provider::Codex).await;
+    // Exact field order and omitted new fields from the pre-policy DTO. The saved
+    // receipt must win even though a NEW report like this is no longer eligible.
+    let legacy = format!(
+        r#"{{"text":"legacy report","delivery":"direct","notifyDelivery":"inbox","fromThreadId":"{a}","notifyOnComplete":false,"clientRequestId":"old-report","subject":null,"kind":null,"inReplyTo":null}}"#
+    );
+    let fingerprint = hex::encode(Sha256::digest(legacy.as_bytes()));
+    let saved = json!({"threadId":b,"delivery":"steer","messageId":"accepted-before-upgrade","requestedDelivery":"direct"});
+    state
+        .db
+        .with(|c| {
+            c.execute(
+                "INSERT INTO kv(key,value) VALUES (?1,?2)",
+                params![
+                    format!("cli:request:{b}:{a}:old-report"),
+                    json!({"fingerprint":fingerprint,"receipt":saved}).to_string(),
+                ],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let input: SendInput = serde_json::from_str(&legacy).unwrap();
+    assert_eq!(state.send_to_thread(&b, input.clone()).unwrap(), saved);
+    assert_eq!(
+        state.interaction_status(&b).await.unwrap()["queuedCount"],
+        0
+    );
+    assert_eq!(state.inbox_unread_count(&b).unwrap(), 0);
+    let mut conflicting = input;
+    conflicting.interrupt_reason = Some("different request".into());
+    assert!(state
+        .send_to_thread(&b, conflicting)
+        .unwrap_err()
+        .to_string()
+        .contains("conflict: clientRequestId"));
+}
+
+#[tokio::test]
 async fn completion_goes_to_inbox_without_waking_the_sender() {
     let (_dir, state) = setup();
     let a = thread(&state, Provider::Codex).await;
     let b = thread(&state, Provider::Acp).await;
     let mut input = send(&a, "finish task", true, "finish");
-    input.delivery = "direct".into();
+    input.delivery = "queue".into();
     input.notify_delivery = "inbox".into();
     let receipt = state.send_to_thread(&b, input.clone()).unwrap();
     assert_eq!(receipt["delivery"], "queued");
-    assert_eq!(receipt["requestedDelivery"], "direct");
+    assert_eq!(receipt["requestedDelivery"], "queue");
     state.start_interaction_worker();
     until(|| state.inbox_unread_count(&a).unwrap() == 1).await;
     assert_eq!(state.send_to_thread(&b, input).unwrap(), receipt);
@@ -552,6 +693,7 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
     let turn = state.get_thread(&b).unwrap().active_turn_id.unwrap();
     let mut urgent = send(&a, "urgent correction", true, "urgent");
     urgent.delivery = "direct".into();
+    urgent.interrupt_reason = Some("The active task is using invalid inputs".into());
     urgent.notify_delivery = "inbox".into();
     let receipt = state.send_to_thread(&b, urgent.clone()).unwrap();
     assert_eq!(receipt["delivery"], "steer");
@@ -582,6 +724,7 @@ async fn explicit_steer_uses_active_turn_and_held_input_never_auto_runs() {
     until(|| state.get_thread(&b).unwrap().status == "running").await;
     let mut held = send(&a, "late steering request", false, "held");
     held.delivery = "direct".into();
+    held.interrupt_reason = Some("The active task must stop using the invalid inputs".into());
     let receipt = state.send_to_thread(&b, held).unwrap();
     until(|| state.get_thread(&b).unwrap().status != "running").await;
     state
@@ -616,6 +759,7 @@ async fn direct_rejects_unavailable_state_and_unsupported_steering_without_queue
     );
     let mut input = send(&a, "act now", false, "direct-rejected");
     input.delivery = "direct".into();
+    input.interrupt_reason = Some("Stop the invalid calculation before it wastes more work".into());
     for status in ["recovering", "interrupted", "failed", "running"] {
         state
             .db

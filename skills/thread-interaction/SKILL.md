@@ -1,13 +1,13 @@
 ---
 name: thread-interaction
-description: Create, message, and inspect peer remoteCodex threads on this device. Use for cross-provider collaboration, passive inbox exchange, explicit task dispatch or steering, completion callbacks, and progressively reading conversation history.
+description: Coordinate peer remoteCodex threads on this device through passive result handoffs, dependency-aware waiting, explicit task dispatch and urgent corrections. Use when creating, messaging or collecting work from remoteCodex peers.
 ---
 
 # Interact with remoteCodex threads
 
 Threads are peers. Each can create others, message existing threads, read state/history, or receive requests. This is a Supervisor-level interface across Codex, ACP Grok, and other installed providers. Creation does not copy your conversation. Peers in one workspace share files unless you create them with `--worktree`; give each delegate its own files, or its own worktree, for overlapping edits.
 
-`remote-codex skill` prints this entire bundled guide. Data commands return JSON; help and this guide return text. Use `remote-codex thread send --help`, `remote-codex inbox --help`, and other command-specific help to discover exact flags. Check exit status and the returned delivery state. A receipt is not proof of task completion.
+`remote-codex skill` reads the running Supervisor's guide, falling back to the CLI's bundled guide offline or with an older Supervisor. Data commands return JSON; help and this guide return text. Use command-specific help to discover exact flags. If your CLI lacks a flag required by this guide, use the installed runtime's CLI; do not bypass the delivery rule. Check exit status and the returned delivery state. A receipt is not proof of task completion.
 
 ## The orchestration loop
 
@@ -160,7 +160,7 @@ Do not hand-write `Subject:` or `Kind:` into the message text. The flags populat
 real envelope; prose in the body does not.
 
 ```bash
-remote-codex thread send PEER_ID --kind task --subject 'Port the auth tests' \
+remote-codex thread send PEER_ID --delivery queue --kind task --subject 'Port the auth tests' \
   --text-file /tmp/task.txt
 remote-codex thread send PEER_ID --kind question --subject 'Which staging key?' \
   --in-reply-to MESSAGE_ID --text 'The task did not say which credential to use.'
@@ -168,51 +168,108 @@ remote-codex thread send PEER_ID --kind question --subject 'Which staging key?' 
 
 ## Prefer the inbox. Escalate only with a reason.
 
-Passive inbox is the default and should stay the default for nearly everything,
-including results, progress and questions. Waiting mail is announced to the receiver
-at the start of its next turn, with your subject and kind, so passive no longer means
-unnoticed - it means it arrives without destroying what the peer was doing.
+Results, progress, ordinary questions and acknowledgements must stay passive. Do not
+request `direct` merely because a result is important, the recipient is idle, a parent
+asked for frequent reports, or you want a quicker acknowledgement. The recipient
+controls when to collect results; sending mail does not entitle you to start its turn.
 
-Reach past it only when the cost of waiting is real:
+| Intent | Delivery |
+| --- | --- |
+| A usable result or a question awaiting a decision | `inbox`, kind `result` or `question` |
+| A concrete assignment that should execute after current work | `queue`, kind `task` |
+| Correction/unblock request that cannot wait for a checkpoint | `direct` or `steer`, kind `task` or `question`, with `--interrupt-reason` |
+| Routine progress | Shared progress file; send a batched inbox `status` only if a dependent needs it |
 
-- `queue` - the peer must act on this, but after its current work. The normal way to
-  assign a task to an idle or busy peer.
-- `direct` - the peer is idle and will not look at mail on its own, or a correction
-  cannot wait. The server decides between starting a turn and steering.
-- `steer` - only to correct the turn that is running right now, when letting it finish
-  would waste or damage work.
+For peer sends the server rejects queued reports and direct/steer without the proper
+kind and a nonempty reason. Explain the actual harm or wasted work if handling waits;
+"urgent", "please read now" and "peer is idle" are not useful reasons. Examples of
+valid urgency: a running calculation uses invalid inputs, a worker exceeds an agreed
+resource allocation, or an imminent publication must stop. A new task belongs in
+queue, and a routine milestone belongs in inbox. Do not relabel a report as a task or
+invent urgency to evade this rule. Explicit user instructions take precedence over
+workflow preferences, but do not bypass the API's delivery requirements.
 
-Interrupting is not free: a steered agent loses its train of thought, and steering is
-not a guaranteed interruption of a blocking tool anyway. An inbox message with a clear
-subject usually gets handled sooner than a steer that derails a peer into confusion.
-If you are tempted to steer because you are impatient rather than because the work is
-wrong, send inbox mail instead.
+Steering is not guaranteed to interrupt a blocking tool. Check the receipt; a held
+correction requires inspection, not a flood of retries.
+
+## Deliver usable batches to actual dependents
+
+At assignment time agree on the artifact owner, dependent recipients, usable handoff
+condition, final result location and when consumers will check or wait. A parent
+should request inbox milestones and collect them, not instruct every child to
+"direct me when done". Keep the same contract in subsequent prompts and runbooks.
+
+Publish one notification per usable batch, with a stable batch/topic name, revision,
+changed scope, artifact path/commit/hash, limitations and any action the consumer
+needs. Finish writing the artifact before declaring it ready. Keep detailed evidence
+in files and maintain one authoritative index; do not paste long reports into every
+mailbox. Notify only agents that depend on that change. Preserve independent-review
+or blinded-data boundaries when selecting recipients.
+
+First usable output, a material correction and final delivery should be timely.
+Combine intermediate progress at a useful batch boundary; do not create a timer just
+to send progress. A build, report, QA commit and archive of the same unchanged result
+are one handoff, not four. Formatting/translations do not require consumers to redo
+work. Distinct financial, safety and independent verification results remain distinct.
+
+For a full replaceable progress snapshot, opt into status coalescing:
+
+```bash
+remote-codex thread send PEER_ID --kind status --subject 'Simulation batch progress' \
+  --topic-key simulation-progress --request-id progress-r3 --text-file /tmp/progress.txt
+```
+
+The newest accepted snapshot replaces older unread status from **you**, to this
+recipient, on this topic. Old records remain readable with `read` / `list --all` and
+show `supersededBy`; replacing is not acknowledging. Send snapshots in order, and
+retry with the same request ID. Do not use topics for incremental patches, independent
+results, questions, corrections, tasks or replies. Topic similarity is never inferred.
+
+Read/verify/record ordinary mail, then ack it without replying "received", "SHA
+checked" or "archived". Reply only with a needed answer, new dependent result,
+conflict or correction. Use `--in-reply-to` for answers. A question is not resolved
+by "received": answer it before ack, or leave it visible while blocked. Choose one
+business completion signal (explicit result, task done or automatic completion)
+instead of sending the same outcome through all three. Do not subscribe peers to
+each other's completion just to keep them active.
 
 ## When to read your inbox
 
-Waiting mail is announced at the start of each of your turns, listing every subject
-and kind. You do not need to poll defensively - but the announcement only reaches a
-turn that is *starting*, so these are the moments to actually look:
+Waiting mail is announced at the start of a turn with a bounded digest, prioritizing
+questions/tasks over results/status. It is not a complete mailbox and does not enter
+an already running turn. Batch reads at natural boundaries:
 
 - **When the notice names something.** It tells you what is waiting; decide then
   whether it changes what you are about to do.
 - **Before work that depends on a peer.** A result you never read is a result you do
   not have.
-- **After a long command.** Mail may have arrived while you were blocked.
+- **After a meaningful build/test/batch finishes.** Mail may have arrived meanwhile;
+  do not reread the entire inbox after every small tool call.
 - **When you have nothing else to do but expect mail:** block on it with
   `remote-codex inbox wait` rather than ending your turn or looping.
 
 ```bash
-remote-codex inbox wait --timeout 600                   # any unacknowledged mail
-remote-codex inbox wait --from-thread reviewer --kind question
-remote-codex inbox wait --new                           # ignore mail already waiting
+remote-codex inbox list --kind question --kind task
+remote-codex inbox list --from-thread producer --kind result
+remote-codex inbox wait --kind result --kind question   # result or an upstream blocker
+remote-codex inbox wait --from-thread reviewer --kind result --kind question
+remote-codex inbox wait --new                           # deliberately defer old mail
 ```
 
 `inbox wait` returns the matching messages with text inline. Unacknowledged mail
 satisfies it immediately, so acknowledge what you have handled (or use `--new` / a
-filter while deliberately deferring something). Acknowledge with `inbox ack` only what
-you have handled or deliberately recorded; acknowledging to clear the notice loses the
-message.
+filter while deliberately deferring something). Filtering happens before the bounded
+page is selected. Preserve the filters when paging with `--before`. Acknowledge only
+what you have handled or deliberately recorded. Ack removes mail from unread views;
+it neither deletes history nor proves task success. Do not ack an unanswered question
+merely to hide it: current thread waits treat its ack as no longer waiting.
+
+When waiting for results, include questions so a producer asking you for missing input
+can unblock you. Sender filters must include any peer whose question you must answer.
+Do not have two agents wait on each other's result without naming and resolving the
+dependency; expose blockers in the task board or a question instead of repeatedly
+waking both to ask for status. For a long-lived producer's intermediate batches, wait
+for inbox results rather than its whole thread to finish.
 
 ### Ending your turn discards nothing, but nothing will wake you
 
@@ -226,6 +283,9 @@ until a person or a peer starts your next turn.
 - **If your turn must end, hand off explicitly** with `thread wait NAME... --wake`, and
   say in your final message what you delegated and that you will resume when it lands.
 
+`--wake` is a receiver-owned, one-shot wait for your descendants, not a subscription
+to arbitrary sibling artifacts. Only register it when you need the continuation.
+
 Do not work around this by steering the peer, polling `status` in a loop, or sending
 yourself direct messages; `wait` is cheaper than all of them.
 
@@ -234,6 +294,10 @@ yourself direct messages; `wait` is cheaper than all of them.
 For more than two or three pieces of work, or work with ordering between pieces, put it
 on the lineage's task board instead of in prompts. Every thread in your lineage sees
 the same board; it outlives any one agent's context.
+
+Use tasks for meaningful phases and dependencies, not every progress update, SHA
+check or formatting change. An assigned task sends passive mail; an idle assignee
+still needs an explicit queued assignment or an already-running claim/wait loop.
 
 ```bash
 remote-codex task add 'Design the schema' --detail-file /tmp/schema.txt
@@ -265,14 +329,7 @@ after completion. Native timers are session-only and do not survive harness exit
 Supervisor restart. Do not claim you configured a watch merely because you wrote
 that one will wake you: verify the scheduling tool's successful result and job ID.
 
-## Choose the delivery semantics explicitly
-
-| Intent | Delivery | Behavior |
-| --- | --- | --- |
-| Report, question, result, intermediate finding | `inbox` (send default) | Durable passive mail. Does not start, queue, or interrupt a turn. Receiver reads it via CLI. |
-| Wake an idle peer or correct a running task promptly | `direct` | Server selects a new turn when idle or steering when running. Use only when immediate handling is needed. |
-| Intentionally execute after current work | `queue` | Durable continuation. Starts when idle; waits behind active execution. |
-| Correct an active task immediately | `steer` | Requires an active turn and backend steering capability. Requests input in that turn; not a guaranteed interruption of a blocking tool. |
+## Execution receipts and steering failures
 
 ```bash
 remote-codex thread send PEER_ID --kind result --subject 'Build artifact ready' \
@@ -280,18 +337,18 @@ remote-codex thread send PEER_ID --kind result --subject 'Build artifact ready' 
 remote-codex thread send PEER_ID --delivery queue --kind task --subject 'Port auth tests' \
   --text-file /tmp/task.txt
 remote-codex thread send PEER_ID --delivery direct --kind task --subject 'Stop: wrong version' \
+  --interrupt-reason 'Publication is about to use an invalid version; waiting risks publishing it' \
   --text 'Pause publication: use the corrected version number.'
 ```
 
-Do not use direct, queue or steer for every acknowledgement. Passive mail avoids chains of agents repeatedly creating turns for each other. Unread mail is announced at the start of the receiver's next turn, listing each subject and kind, but it is still not pushed into a turn already in flight, and the announcement is a prompt to look rather than the message itself. When collaborating, check at natural checkpoints, after relevant long commands, before dependent work, and before ending a turn while expecting a peer result. There is no automatic hidden polling or guaranteed response deadline.
-
-Use direct when the peer must act now, including an idle peer that will not check its inbox. The server chooses the route in the acceptance transaction, so callers need not check status first. Only idle and running states qualify: recovering, interrupted or failed peers require inspection before another deliberate action. Use queue when work should wait behind any active turn; use steer when only the current active turn should receive it. A provider without steering rejects the request; it is not silently downgraded to queue. Direct returns `requestedDelivery: "direct"` plus the resolved `delivery`: `queued` for an idle peer (durable new-turn dispatch, not proof of execution), or `steered` after an active backend acknowledges. The idle route keeps its accepted continuation if other work starts before dispatch; it does not later change into steering. Active direct/steer messages target the turn selected at acceptance and cannot move to a replacement turn. If a steering race or backend error occurs after acceptance, the receipt reports `delivery: "held"`, an `error`, and the pending ID. The held message cannot auto-run as a continuation. Inspect history/status before retrying an uncertain acknowledgement. Successful steering reports `steered`; a provider acknowledgement does not prove the agent followed the instruction.
+For an eligible urgent request, direct resolves idle to a new turn and running to steering in the acceptance transaction. Only idle and running states qualify; inspect other states before acting. Unsupported steering is rejected, with no silent queue fallback. Receipts include `requestedDelivery`, resolved `delivery`, kind and any interrupt reason. `queued` is acceptance, not execution. An idle route stays queued if other work starts first; an active route stays pinned to its selected turn. A race/backend failure returns `held` plus an error and pending ID, never an automatic continuation. Inspect status/history before retrying uncertain acknowledgement. `steered` proves backend acknowledgement, not that the agent followed it.
 
 ## Read and acknowledge your inbox
 
 ```bash
 remote-codex inbox
 remote-codex inbox list --limit 10
+remote-codex inbox list --kind result --kind question --from-thread producer
 remote-codex inbox read MESSAGE_ID
 remote-codex inbox ack MESSAGE_ID
 remote-codex inbox list --all --limit 10
@@ -299,18 +356,21 @@ remote-codex inbox list --all --limit 10
 
 The caller's identity selects the mailbox. `--thread THREAD_ID` explicitly selects another mailbox, including from a shell without managed thread identity. IDs/URLs address the same local Supervisor; attribution is not a per-agent security boundary.
 
-List returns bounded previews (240 characters), sender, recipient, creation timestamp, and acknowledgement timestamp. It defaults to 20 unread messages, capped at 100, displaying the selected page chronologically. Follow `nextBefore` with `inbox list --before MESSAGE_ID` for older pages, preserving `--all` if used. Default listing does not guarantee every unread message fits on one page.
+List returns bounded previews (240 characters) and envelope metadata. It defaults to 20 active unread messages, capped at 100, displaying the selected page chronologically. `--kind` and `--from-thread` are repeatable on list/wait. Follow `nextBefore` with `--before MESSAGE_ID`, preserving filters and `--all` if used. `--all` includes acknowledged and superseded history. One page need not contain every unread message.
 
 Read returns at most 8192 Unicode characters. Follow `nextTextOffset` with `inbox read MESSAGE_ID --text-offset OFFSET` when needed. Reading does **not** mark mail processed, including after a crash. Acknowledge only messages you have handled or deliberately recorded for later action. `ack` accepts 1–100 explicit IDs atomically and is safe to repeat; acknowledged messages remain accessible with `--all` or `read`. Do not mark messages acknowledged merely to hide a queue count.
 
 A reply uses the sender's `fromThreadId`:
 
 ```bash
-remote-codex thread send SENDER_ID --text-file /tmp/result.txt
+remote-codex thread send SENDER_ID --kind result --subject 'Requested build result' \
+  --in-reply-to MESSAGE_ID --text-file /tmp/result.txt
 remote-codex inbox ack MESSAGE_ID
 ```
 
-An idle sender will not wake for that default passive reply. If immediate handling is needed and authorized, use `--delivery direct`; it wakes an idle sender or steers a running sender. Use queue only when the reply should wait behind current work. Include the concrete response destination and delivery expectation in delegated instructions. Avoid reflexive mutual acknowledgements or reciprocal completion subscriptions.
+An idle sender will not wake for a passive reply. The sender must collect or register
+its own wake; do not upgrade results to direct/queue to compensate. Include the
+concrete response destination and handoff conditions in delegated instructions.
 
 ## Create and dispatch a task
 
