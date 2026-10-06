@@ -154,11 +154,15 @@ mod tests {
     }
 
     fn input(delivery: &str) -> SendInput {
-        serde_json::from_value(json!({
+        let mut input = json!({
             "text": "hello peer", "delivery": delivery, "subject": "Review", "kind": "task",
             "inReplyTo": "prior-message", "clientRequestId": "shared-key",
-        }))
-        .unwrap()
+        });
+        // The peer policy applies to remote senders too.
+        if matches!(delivery, "direct" | "steer") {
+            input["interruptReason"] = json!("the remote task depends on this now");
+        }
+        serde_json::from_value(input).unwrap()
     }
 
     #[tokio::test]
@@ -301,7 +305,12 @@ mod tests {
             )?)
                 })
                 .unwrap();
-            let expected = "[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nIn reply to message prior-message\nhello peer";
+            let reason = if delivery == "queue" {
+                ""
+            } else {
+                "\nImmediate handling needed: the remote task depends on this now"
+            };
+            let expected = format!("[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nIn reply to message prior-message{reason}\nhello peer");
             assert_eq!(prompt.0, expected);
             assert_eq!(prompt.1, expected);
         }

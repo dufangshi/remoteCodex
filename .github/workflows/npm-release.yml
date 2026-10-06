@@ -36,6 +36,22 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # 0.12.55/0.12.56 were cut from a branch missing 0.12.53's migration, so
+      # devices that had updated refused to start. A release must contain
+      # whatever npm currently serves as latest.
+      - name: Refuse releases that drop already-published commits
+        if: inputs.channel != 'dry-run'
+        shell: bash
+        run: |
+          latest="$(npm view remote-codex dist-tags.latest)"
+          git fetch --force origin "refs/tags/v${latest}:refs/tags/v${latest}"
+          if ! git merge-base --is-ancestor "v${latest}" HEAD; then
+            echo "::error::HEAD does not contain v${latest}, the current npm latest. Merge it before releasing."
+            exit 1
+          fi
 
       - name: Install pinned Rust toolchain
         shell: bash

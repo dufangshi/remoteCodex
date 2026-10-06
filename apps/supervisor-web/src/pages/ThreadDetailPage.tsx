@@ -7,6 +7,7 @@ import { useThreadTabStatus } from '../lib/useThreadTabStatus';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { ThreadWatchesControl } from '../components/ThreadWatchesControl';
+import { ThreadSubagentsControl } from '../components/ThreadSubagentsControl';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, Link2, Users } from 'lucide-react';
@@ -94,6 +95,7 @@ import {
   buildThreadImageAssetUrl,
   cancelPendingSteer,
   steerPendingPrompt,
+  steerSubmittedPrompt,
 } from '../lib/api';
 import {
   appendLiveAgentDeltaToItems,
@@ -1659,6 +1661,18 @@ export function ThreadDetailPage() {
         }
       }
 
+      if (event.type === 'thread.subagents.updated') {
+        const activeSubagents = Array.isArray(event.payload.activeSubagents)
+          ? event.payload.activeSubagents
+          : [];
+        setDetail((current) =>
+          current ? { ...current, activeSubagents } : current,
+        );
+        if (detailRef.current) {
+          detailRef.current = { ...detailRef.current, activeSubagents };
+        }
+      }
+
       if (
         event.type === 'thread.turn.token.updated' &&
         typeof event.payload.turnId === 'string' &&
@@ -2248,6 +2262,11 @@ export function ThreadDetailPage() {
       setError('A prompt can include at most 10 attachments. Remove extra attachments and try again. Your draft has been kept.');
       return false;
     }
+    if (input.delivery === 'steer' && detailRef.current?.thread.status === 'running'
+      && backendCapabilities?.turns.steer === false) {
+      setError('This backend does not support steering an active turn. Send the message normally to queue it.');
+      return false;
+    }
 
     setBusy(true);
     setError(null);
@@ -2459,6 +2478,15 @@ export function ThreadDetailPage() {
             : current,
         );
         setLivePlan(null);
+      }
+      if (input.delivery === 'steer' && shouldSteer && steerTargetTurnId) {
+        try {
+          await runDetailMutation(() => steerSubmittedPrompt(id, clientRequestId, steerTargetTurnId));
+        } catch (caught) {
+          // Acceptance succeeded. Keep the durable message and clear the draft,
+          // rather than inviting a second submission of the same prompt.
+          setError(`Message saved, but steer could not be confirmed: ${caught instanceof Error ? caught.message : 'Try the queued message after reconnecting.'}`);
+        }
       }
       setChatDraft({
         prompt: '',
@@ -3284,6 +3312,7 @@ export function ThreadDetailPage() {
     () => ({
       livePlan,
       liveItems,
+      backgroundAgentCount: detail?.activeSubagents?.filter((agent) => agent.isBackground && agent.status === 'running').length ?? 0,
       respondingRequestId,
       onRespondToRequest: handleRespondToRequest,
       scrollRequestKey,
@@ -3309,6 +3338,7 @@ export function ThreadDetailPage() {
       detail?.answeredRequestNotes,
       detail?.activityNotes,
       detail?.pendingSteers,
+      detail?.activeSubagents,
       handleLoadEarlierTurns,
       handleRespondToRequest,
       liveItems,
@@ -3327,6 +3357,7 @@ export function ThreadDetailPage() {
   );
   const chatComposerProps = detail
     ? ({
+        sendShortcut: shellNav?.sendShortcut ?? 'ctrlEnter',
         busy: activeView === 'chat' ? busy : false,
         settingsBusy,
         error: null,
@@ -3603,7 +3634,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
-      workbench={{ ...workbenchNavigation, statusActions:detail ? <ThreadWatchesControl key={detail.thread.id} thread={detail.thread}/> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}
       status={status}

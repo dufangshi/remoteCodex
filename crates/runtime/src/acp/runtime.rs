@@ -10,7 +10,8 @@ use remote_codex_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
     AgentBackendManagementSchemaDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto,
     AgentRuntimeStatusDto, ModelOptionDto, Provider, ReasoningEffortOptionDto,
-    ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ToolboxItemDto,
+    ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadSubagentDto,
+    ToolboxItemDto,
 };
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -42,6 +43,10 @@ use super::terminal::AgentTerminals;
 #[cfg(all(test, unix))]
 #[path = "fork_tests.rs"]
 mod fork_tests;
+
+#[cfg(all(test, unix))]
+#[path = "completion_tests.rs"]
+mod completion_tests;
 
 // Startup and cancelled probes must not leave the notification mux holding a child alive.
 struct StartupProcess(Option<Arc<AcpProcess>>);
@@ -91,6 +96,7 @@ struct LiveSession {
     current_mode_id: Option<String>,
     /// Prompt bootstrap is scoped to the loaded process and product identity.
     context_thread_id: Option<String>,
+    active_subagents: HashMap<String, ThreadSubagentDto>,
     upstream_revision: Option<Vec<u8>>,
 }
 
@@ -130,6 +136,28 @@ pub struct AcpRuntime {
 }
 
 impl AcpRuntime {
+    async fn update_subagents(&self, input: &StartTurnInput, agents: &[ThreadSubagentDto]) -> bool {
+        let next = agents
+            .iter()
+            .cloned()
+            .map(|agent| (agent.id.clone(), agent))
+            .collect();
+        let mut sessions = self.inner.sessions.lock().await;
+        let Some(live) = sessions.get_mut(&input.provider_session_id) else {
+            return false;
+        };
+        if !live
+            .active
+            .as_ref()
+            .is_some_and(|active| active.turn_id == input.turn_id)
+            || live.active_subagents == next
+        {
+            return false;
+        }
+        live.active_subagents = next;
+        true
+    }
+
     pub fn catalog(custom: Option<String>, timeout_ms: u64) -> Self {
         Self::new(Provider::Acp, None, custom, timeout_ms)
     }
@@ -452,6 +480,7 @@ impl AcpRuntime {
             available_modes,
             current_mode_id,
             context_thread_id: None,
+            active_subagents: HashMap::new(),
         };
         Self::apply_product_mode(&live.process.clone(), &mut live).await?;
         startup_process.0 = None;
@@ -1594,6 +1623,16 @@ impl AgentRuntime for AcpRuntime {
         )
     }
 
+    async fn active_subagents(&self, session_id: &str) -> Vec<ThreadSubagentDto> {
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .map(|live| live.active_subagents.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     async fn start_turn(
         &self,
         input: StartTurnInput,
@@ -1655,7 +1694,7 @@ impl AgentRuntime for AcpRuntime {
             .unwrap_or_else(|| input.prompt.clone());
         let include_context = needs_context && !input.hidden && !process.cli_env.is_empty();
         let prompt = if include_context {
-            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. `remote-codex skill` documents peer collaboration; read it before delegating. Messages default to a passive inbox, so check and acknowledge `remote-codex inbox` at checkpoints. To collect delegates' results, block with `remote-codex thread wait NAME...` or `remote-codex inbox wait` instead of polling or ending your turn. Threads you create group under you and are bounded: 3 levels deep, 20 open per root; close finished ones with `remote-codex thread close NAME`. Connection credentials are in the environment.]\n\n{prompt}")
+            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. Read `remote-codex skill` before collaborating. Results, progress and routine questions must use passive inbox; only urgent corrections/unblock requests may use direct/steer with --interrupt-reason. Assign concrete tasks with queue, batch notifications to actual dependents, and do not send acknowledgement replies. Check inbox at natural checkpoints and ack after handling. To collect results, block with `remote-codex thread wait NAME...` or `remote-codex inbox wait --kind result --kind question` instead of polling or asking peers to wake you. Threads you create group under you: 3 levels deep, 20 open per root; close finished ones with `remote-codex thread close NAME`. Connection credentials are in the environment.]\n\n{prompt}")
         } else {
             prompt
         };
@@ -1684,10 +1723,13 @@ impl AgentRuntime for AcpRuntime {
                 turn_id: input.turn_id.clone(),
                 bus: bus.clone(),
             });
+            live.active_subagents.clear();
         }
         let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
         let mut usage_reader =
             (adapter_id == "codex").then(|| super::usage::CodexUsageReader::new(&session_id));
+        let mut claude_usage_reader = (adapter_id == "claude")
+            .then(|| super::claude_usage::ClaudeUsageReader::new(&session_id));
         let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
         let prompt_rpc = process.request(
             "session/prompt",
@@ -1710,7 +1752,8 @@ impl AgentRuntime for AcpRuntime {
         let mut cancel_sent = false;
         let mut cancel_deadline = tokio::time::Instant::now();
         let mut discard_session = false;
-        let outcome = loop {
+        let mut pending_claude_error = None;
+        let mut outcome = loop {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if !cancel_sent => {
@@ -1737,6 +1780,9 @@ impl AgentRuntime for AcpRuntime {
                             if let Some(reader) = usage_reader.as_mut() {
                                 for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
                             }
+                            if let Some(reader) = claude_usage_reader.as_mut() {
+                                for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                            }
                             if let Some(usage) = response.get("usage").filter(|v| v.is_object() && !matches!(adapter_id.as_str(), "codex" | "copilot")) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage.clone(), input.hidden);
                             }
@@ -1755,6 +1801,16 @@ impl AgentRuntime for AcpRuntime {
                                 discard_session = process.exited().await.unwrap_or(true);
                                 break TurnOutcome::Interrupted;
                             }
+                            if adapter_id == "claude"
+                                && super::claude_completion::incomplete_tool_ids(&err.to_string()).is_some()
+                                && process.connection_open().await
+                            {
+                                // Drain queued final text/tool updates before comparing
+                                // against the native transcript. This is not a retry.
+                                pending_claude_error = Some(err);
+                                prompt_done = true;
+                                continue;
+                            }
                             tracing::warn!(
                                 error = %err,
                                 session_id = %session_id,
@@ -1769,9 +1825,17 @@ impl AgentRuntime for AcpRuntime {
                         }
                     }
                 }
-                _ = usage_tick.tick(), if usage_reader.is_some() => {
+                _ = usage_tick.tick(), if usage_reader.is_some() || claude_usage_reader.is_some() => {
                     if let Some(reader) = usage_reader.as_mut() {
                         for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                    }
+                    if let Some(reader) = claude_usage_reader.as_mut() {
+                        for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                        let subagents = merge_active_subagents(mapper.active_subagents(), Some(reader));
+                        if self.update_subagents(&input, &subagents).await {
+                            emit_mapped(&bus, &input.thread_id, &input.turn_id,
+                                MappedUpdate { active_subagents: Some(subagents), ..Default::default() }, input.hidden);
+                        }
                     }
                 }
                 recv = updates.recv() => {
@@ -1789,7 +1853,13 @@ impl AgentRuntime for AcpRuntime {
                             if let Some(context) = adapter.context_usage(&update, &harness_state) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
                             }
-                            let mapped = mapper.apply(&update);
+                            let mut mapped = mapper.apply(&update);
+                            if let Some(subagents) = mapped.active_subagents.take() {
+                                let subagents = merge_active_subagents(subagents, claude_usage_reader.as_ref());
+                                if self.update_subagents(&input, &subagents).await {
+                                    mapped.active_subagents = Some(subagents);
+                                }
+                            }
                             if let Some(goal) = mapped.goal.clone() {
                                 if let Some(live) = self
                                     .inner
@@ -1838,6 +1908,26 @@ impl AgentRuntime for AcpRuntime {
                 }
             }
         };
+        if let Some(reader) = claude_usage_reader.as_mut() {
+            for usage in reader.poll_final() {
+                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+            }
+        }
+        let mut abandoned_tools = Vec::new();
+        if matches!(outcome, TurnOutcome::Completed) {
+            if let Some(error) = pending_claude_error {
+                if let Some(ids) = claude_usage_reader.as_ref().and_then(|reader| {
+                    reader.abandoned_tools(&error.to_string(), mapper.final_agent_text())
+                }) {
+                    tracing::warn!(session_id = %session_id, tool_ids = ?ids,
+                        "Reconciled Claude ACP tool placeholders discarded during steering");
+                    mapper.reconcile_abandoned_tools(&ids);
+                    abandoned_tools = ids;
+                } else {
+                    outcome = TurnOutcome::Failed(anyhow!("ACP session/prompt failed: {error}"));
+                }
+            }
+        }
         if let Some(live) = self
             .inner
             .sessions
@@ -1852,6 +1942,7 @@ impl AgentRuntime for AcpRuntime {
             {
                 live.active = None;
             }
+            live.active_subagents.clear();
             if include_context && prompt_done {
                 live.context_thread_id = Some(input.thread_id.clone());
             }
@@ -1882,11 +1973,17 @@ impl AgentRuntime for AcpRuntime {
         };
         let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
         for item in &mut items {
-            if item.status.as_deref() != Some("failed") {
+            if item.status.as_deref() != Some("failed") && !abandoned_tools.contains(&item.id) {
                 item.status = Some(status.into());
             }
         }
         if !input.hidden {
+            bus.emit(ThreadEventEnvelope {
+                event_type: "thread.subagents.updated".into(),
+                thread_id: input.thread_id.clone(),
+                timestamp: now_rfc3339(),
+                payload: json!({ "turnId": input.turn_id, "activeSubagents": [] }),
+            });
             for item in &items {
                 bus.emit(ThreadEventEnvelope {
                     event_type: "thread.item.completed".into(),
@@ -2183,6 +2280,7 @@ impl AgentRuntime for AcpRuntime {
                 available_modes,
                 current_mode_id,
                 context_thread_id: None,
+                active_subagents: HashMap::new(),
                 upstream_revision: None,
             },
         );
@@ -3069,12 +3167,41 @@ fn apply_config_option_caps(caps: &mut AgentProviderCapabilitiesDto, options: &V
     }
 }
 
+fn merge_active_subagents(
+    agents: Vec<ThreadSubagentDto>,
+    claude: Option<&super::claude_usage::ClaudeUsageReader>,
+) -> Vec<ThreadSubagentDto> {
+    let mut agents: HashMap<_, _> = agents
+        .into_iter()
+        .map(|agent| (agent.id.clone(), agent))
+        .collect();
+    if let Some(reader) = claude {
+        for agent in reader.background_subagents() {
+            agents.insert(agent.id.clone(), agent);
+        }
+    }
+    let mut agents: Vec<_> = agents.into_values().collect();
+    agents.sort_by(|a, b| a.id.cmp(&b.id));
+    agents
+}
+
 fn emit_mapped(bus: &EventBus, thread_id: &str, turn_id: &str, mapped: MappedUpdate, hidden: bool) {
     if hidden {
         return;
     }
     if let Some(usage) = mapped.usage {
         emit_usage(bus, thread_id, turn_id, usage, hidden);
+    }
+    if let Some(active_subagents) = mapped.active_subagents {
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.subagents.updated".into(),
+            thread_id: thread_id.into(),
+            timestamp: now_rfc3339(),
+            payload: json!({
+                "turnId": turn_id,
+                "activeSubagents": active_subagents,
+            }),
+        });
     }
     for (item_id, delta, sequence) in mapped.deltas {
         bus.emit(ThreadEventEnvelope {

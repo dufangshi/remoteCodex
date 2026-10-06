@@ -47,6 +47,10 @@ The verifier is read-only and prints no credentials or full history. Keep live s
 python3 /src/e2e/thread-interaction/inbox.py
 ```
 
-The candidate native binary defaults to `/build/debug/remote-codex` (`E2E_BINARY` overrides it); `/src` must contain the candidate launcher and `/test-state` must be a disposable writable directory. The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail without a turn, explicit acknowledgement, idempotent sends, initial-task execution, passive and queued completion notifications, direct idle wakeup and same-turn steering, retry after completion without duplicate execution, and real launcher subcommand help. No model credentials or real model calls are used. It writes `/test-state/result.json`.
+The candidate binary defaults to `/build/debug/remote-codex` (`E2E_BINARY` overrides it); `/src` contains the launcher (`E2E_SOURCE_DIR` overrides it), and `/test-state` is disposable (`E2E_STATE_DIR` overrides it). The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail/ack, idempotent sends, initial-task execution, passive completion, rejection of queued callbacks and ordinary report dispatch, explicit status coalescing, filtered list/wait, urgent same-turn steering and retry without duplicate execution, and launcher help. No model credentials/calls are used. It writes `result.json` under the state directory.
 
-Earlier real-model scenarios above describe 0.12.30 defaults. When repeating a task-dispatch scenario on 0.12.32, use `--delivery queue` and opt into waking callbacks with `--notify-delivery queue`; ordinary replies now default to the inbox.
+Earlier real-model scenarios above describe historical defaults. Current assignments
+use `--delivery queue --kind task`; results stay in inbox and queued completion
+callbacks are rejected. The receiver collects with `thread wait` / `inbox wait`, or
+registers `thread wait --wake` for its descendants. Urgent direct/steer requires a
+concrete correction/unblock request and `--interrupt-reason`.

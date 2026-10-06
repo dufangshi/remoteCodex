@@ -100,12 +100,19 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             // name: a human address unique among the open threads of one lineage.
             // closed_at: the delegate is done and releases its slot and its name;
             // a finished turn alone leaves a thread `idle`, which still holds both.
+            // Idempotent: 0.12.55/0.12.56 were cut without this migration, so a
+            // device that ran 0.12.53 and then downgraded had its ledger row removed
+            // while these columns stayed. Re-running must not fail on them.
+            for column in ["agent_name", "agent_role", "worktree_path", "closed_at"] {
+                let exists = conn
+                    .prepare("SELECT 1 FROM pragma_table_info('threads') WHERE name=?1")?
+                    .exists([column])?;
+                if !exists {
+                    conn.execute(&format!("ALTER TABLE threads ADD COLUMN {column} TEXT"), [])?;
+                }
+            }
             conn.execute_batch(
-                "ALTER TABLE threads ADD COLUMN agent_name TEXT;
-                 ALTER TABLE threads ADD COLUMN agent_role TEXT;
-                 ALTER TABLE threads ADD COLUMN worktree_path TEXT;
-                 ALTER TABLE threads ADD COLUMN closed_at TEXT;
-                 CREATE UNIQUE INDEX IF NOT EXISTS threads_agent_name_idx
+                "CREATE UNIQUE INDEX IF NOT EXISTS threads_agent_name_idx
                    ON threads(root_thread_id, agent_name)
                    WHERE agent_name IS NOT NULL AND closed_at IS NULL;
                  CREATE TABLE IF NOT EXISTS agent_tasks(

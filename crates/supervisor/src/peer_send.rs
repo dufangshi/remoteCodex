@@ -502,6 +502,8 @@ fn remove_record(state: &Supervisor, record: &OutboxRecord, failure: Option<&str
                     from_thread_id: None,
                     notify_on_complete: false,
                     in_reply_to: None,
+                    interrupt_reason: None,
+                    topic_key: None,
                 },
             )?;
         }

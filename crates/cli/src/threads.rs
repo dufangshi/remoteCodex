@@ -21,7 +21,7 @@ pub struct Connection {
 }
 #[derive(Args)]
 pub struct Body {
-    /// inbox stores passive mail (send default); direct starts when idle or steers when running; queue waits for a continuation (create default); steer requires an active supported turn. Direct/steer never silently fall back on steering failure.
+    /// inbox is passive (send default); queue assigns a task (create default); direct/steer require an urgent correction or unblock request plus --interrupt-reason for peer sends.
     #[arg(long, value_parser=["inbox","direct","queue","steer"])]
     pub delivery: Option<String>,
     /// Completion notifications are passive inbox mail; they never wake or queue the caller.
@@ -38,6 +38,14 @@ pub struct Body {
     /// Message id this answers, so the exchange correlates.
     #[arg(long, value_name = "MESSAGE_ID")]
     pub in_reply_to: Option<String>,
+    /// Why waiting for the next checkpoint would cause harm or wasted work.
+    /// Required for peer direct/steer; ordinary results and progress stay in inbox.
+    #[arg(long)]
+    pub interrupt_reason: Option<String>,
+    /// Replace older full inbox status snapshots on this topic, from you only.
+    /// Never use for results, questions, replies or incremental patches.
+    #[arg(long)]
+    pub topic_key: Option<String>,
     #[arg(long, conflicts_with = "text_file")]
     pub text: Option<String>,
     #[arg(long)]
@@ -373,6 +381,17 @@ impl Client {
     async fn request(&self, input: Value) -> Result<Value> {
         self.request_for(input, 0).await
     }
+    pub async fn skill(&self) -> Result<String> {
+        let value = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            self.request(json!({"operation":"skill"})),
+        )
+        .await??;
+        Ok(value["text"]
+            .as_str()
+            .context("Supervisor did not return a skill")?
+            .to_owned())
+    }
     /// `wait_seconds` extends the HTTP timeout for operations that block server-side.
     async fn request_for(&self, input: Value, wait_seconds: u64) -> Result<Value> {
         let response = self
@@ -431,7 +450,7 @@ impl Client {
         let text = body
             .text()?
             .context("send requires --text or --text-file")?;
-        let mut input = json!({"operation":"send","text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id,"subject":body.subject,"kind":body.kind,"inReplyTo":body.in_reply_to});
+        let mut input = json!({"operation":"send","text":text,"delivery":body.delivery.as_deref().unwrap_or(default_delivery),"notifyDelivery":body.notify_delivery,"fromThreadId":self.from,"notifyOnComplete":body.notify_on_complete,"clientRequestId":body.request_id,"subject":body.subject,"kind":body.kind,"inReplyTo":body.in_reply_to,"interruptReason":body.interrupt_reason,"topicKey":body.topic_key});
         target.apply(&mut input);
         if !attachments.is_empty() {
             ensure!(
@@ -594,6 +613,12 @@ pub enum InboxCommand {
         before: Option<String>,
         #[arg(long)]
         all: bool,
+        /// Only mail from these threads (ids or names). Repeatable.
+        #[arg(long = "from-thread", value_name = "ID_OR_NAME")]
+        from_threads: Vec<String>,
+        /// Only these kinds. Repeatable; include question while waiting on results.
+        #[arg(long, value_parser=["result","question","status","task"])]
+        kind: Vec<String>,
     },
     /// Read one message, expanding long text in bounded chunks.
     Read {
@@ -635,9 +660,21 @@ impl Client {
             limit: 20,
             before: None,
             all: false,
+            from_threads: vec![],
+            kind: vec![],
         }) {
-            InboxCommand::List { limit, before, all } => {
-                json!({"operation":"inbox","limit":limit,"before":before,"all":all})
+            InboxCommand::List {
+                limit,
+                before,
+                all,
+                from_threads,
+                kind,
+            } => {
+                let mut from = Vec::new();
+                for id in &from_threads {
+                    from.push(self.id(id).await?);
+                }
+                json!({"operation":"inbox","limit":limit,"before":before,"all":all,"fromThreadIds":from,"kinds":kind})
             }
             InboxCommand::Read { id, text_offset } => {
                 json!({"operation":"inboxRead","messageId":id,"textOffset":text_offset})
@@ -947,6 +984,8 @@ mod tests {
             subject: None,
             kind: None,
             in_reply_to: None,
+            interrupt_reason: None,
+            topic_key: None,
             text: Some("do the task".into()),
             text_file: None,
             notify_on_complete: true,

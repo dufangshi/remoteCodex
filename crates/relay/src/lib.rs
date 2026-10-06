@@ -7,6 +7,7 @@ mod hosted;
 mod notifications;
 mod oauth;
 mod peer;
+mod preferences;
 mod public_links;
 mod route_acl;
 mod security;
@@ -231,6 +232,7 @@ pub async fn serve() -> Result<()> {
         .merge(auth_api::routes())
         .merge(notifications::routes())
         .merge(workbench::routes())
+        .merge(preferences::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
@@ -3592,7 +3594,10 @@ async fn internal_forward_json(
 }
 
 fn relay_api_target_path(rest: &str, uri: &Uri) -> String {
-    let mut path = format!("/api/{rest}");
+    // Axum's wildcard Path has already percent-decoded `rest`. Preserve the
+    // wire spelling: the browser and device bind this exact path into HPKE AAD.
+    let raw_rest = uri.path().split_once("/api/").map(|(_, rest)| rest);
+    let mut path = format!("/api/{}", raw_rest.unwrap_or(rest));
     if let Some(raw) = uri.query() {
         let filtered: Vec<&str> = raw
             .split('&')

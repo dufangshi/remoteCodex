@@ -173,7 +173,7 @@ try {
   step('reply');
 
   // Execution with a completion notification delivered back to the caller's inbox.
-  await rc(alpha, ['thread', 'send', `beta/${target}`, '--delivery', 'queue', '--notify-on-complete', '--text', 'run the remote task'], { from: caller });
+  await rc(alpha, ['thread', 'send', `beta/${target}`, '--delivery', 'queue', '--kind', 'task', '--notify-on-complete', '--text', 'run the remote task'], { from: caller });
   const result = await until(async () => {
     const inbox = (await rc(alpha, ['inbox', '--thread', caller])).json;
     return inbox.messages.find(m => m.kind === 'result' && m.fromDeviceId === beta.id);

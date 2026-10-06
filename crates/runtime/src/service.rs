@@ -607,6 +607,11 @@ impl Supervisor {
             // codex-acp's final-request-only PromptResponse.usage fallback.
             if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("codexRollout")
                 && raw.get("source").and_then(Value::as_str) != Some("codexRollout") { return Ok(None); }
+            // Claude native assistant records give per-response snapshots during
+            // tool work. A late ACP report must not replace that turn total with
+            // only the final request's usage or mix accounting sources.
+            if previous.as_ref().and_then(|v| v.get("source")).and_then(Value::as_str) == Some("claudeRollout")
+                && raw.get("source").and_then(Value::as_str) != Some("claudeRollout") { return Ok(None); }
             if usage["cumulative"] == true {
                 let baseline = usage.get("baselineTotal").and_then(crate::usage::Tokens::parse)
                     .or_else(|| previous.as_ref().and_then(|v| v.get("baselineTotal")).and_then(crate::usage::Tokens::parse))
@@ -1685,6 +1690,14 @@ impl Supervisor {
         } else {
             vec![]
         };
+        let active_subagents = if let (Ok(runtime), Some(session_id)) = (
+            self.runtime(thread.provider),
+            thread.provider_session_id.as_deref(),
+        ) {
+            runtime.active_subagents(session_id).await
+        } else {
+            vec![]
+        };
         Ok(ThreadDetailDto {
             thread,
             workspace_path_status: if Path::new(&workspace.abs_path).exists() {
@@ -1699,6 +1712,7 @@ impl Supervisor {
             total_turn_count: None,
             pending_requests,
             pending_steers: self.load_steers(id)?,
+            active_subagents,
             activity_notes: None,
             goal: self
                 .stored_goal(id)?
@@ -1754,6 +1768,13 @@ impl Supervisor {
         } else {
             vec![]
         };
+        let active_subagents = if let (Some(runtime), Some(session_id)) =
+            (runtime.as_ref(), thread.provider_session_id.as_deref())
+        {
+            runtime.active_subagents(session_id).await
+        } else {
+            vec![]
+        };
         let goal = if summary_only && thread.status != "running" {
             None
         } else {
@@ -1776,6 +1797,7 @@ impl Supervisor {
             total_turn_count: Some(total),
             pending_requests,
             pending_steers,
+            active_subagents,
             activity_notes: Some(vec![]),
             goal,
         })

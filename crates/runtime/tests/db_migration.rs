@@ -686,3 +686,39 @@ fn rolls_back_the_whole_upgrade_when_legacy_turn_ids_conflict() {
         .unwrap();
     assert_eq!(legacy_rows, 3);
 }
+
+/// 0.12.55/0.12.56 shipped without migration 10. A device that had run 0.12.53
+/// was repaired by dropping the ledger row while the columns stayed; reapplying
+/// migration 10 on top of that state must succeed rather than fail on duplicates.
+#[test]
+fn migration_10_reapplies_over_columns_left_by_a_downgrade() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("downgraded.sqlite");
+    drop(Database::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "DELETE FROM __remote_codex_runtime_migrations WHERE version=10",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    drop(Database::open(&path).expect("reapplying migration 10 must be idempotent"));
+    let conn = Connection::open(&path).unwrap();
+    let name: String = conn
+        .query_row(
+            "SELECT name FROM __remote_codex_runtime_migrations WHERE version=10",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(name, "agent_coordination");
+    let columns: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('threads') WHERE name IN ('agent_name','agent_role','worktree_path','closed_at')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(columns, 4);
+}

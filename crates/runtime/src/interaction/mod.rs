@@ -218,6 +218,26 @@ impl Supervisor {
         if let Some(parent) = &input.in_reply_to {
             ensure!(!parent.trim().is_empty(), "inReplyTo must be a message id");
         }
+        if let Some(reason) = &input.interrupt_reason {
+            ensure!(
+                !reason.trim().is_empty() && reason.chars().count() <= 500,
+                "interruptReason must be nonempty and at most 500 characters"
+            );
+            ensure!(
+                matches!(input.delivery.as_str(), "direct" | "steer"),
+                "interruptReason is only for direct/steer corrections; use inbox for ordinary reports"
+            );
+        }
+        if let Some(topic) = &input.topic_key {
+            ensure!(
+                !topic.trim().is_empty() && topic.chars().count() <= 120,
+                "topicKey must be nonempty and at most 120 characters"
+            );
+            ensure!(
+                input.delivery == "inbox" && kind == "status" && input.in_reply_to.is_none(),
+                "topicKey only replaces full inbox status snapshots; results, questions, tasks and replies must stay distinct"
+            );
+        }
         let pending_id = Uuid::new_v4().to_string();
         let now = now_rfc3339();
         // Derive a subject when the sender omitted one. Observed agents label a
@@ -259,8 +279,13 @@ impl Supervisor {
                     .as_deref()
                     .map(|value| format!("\nIn reply to message {value}"))
                     .unwrap_or_default();
+                let reason = input
+                    .interrupt_reason
+                    .as_deref()
+                    .map(|value| format!("\nImmediate handling needed: {value}"))
+                    .unwrap_or_default();
                 format!(
-                    "[remoteCodex {kind} from {from}{subject}]{reply}\n{}",
+                    "[remoteCodex {kind} from {from}{subject}]{reply}{reason}\n{}",
                     input.text
                 )
             }
@@ -301,6 +326,27 @@ impl Supervisor {
                     return Ok(saved["receipt"].clone());
                 }
             }
+            // Apply the peer policy after retry lookup: work already accepted by an
+            // older runtime must retain its receipt, without dispatching it again.
+            if input.from_thread_id.is_some() {
+                match input.delivery.as_str() {
+                    "queue" => ensure!(
+                        kind == "task",
+                        "peer queue requires kind=task for a concrete assignment; send reports, results and questions to inbox"
+                    ),
+                    "direct" | "steer" => {
+                        ensure!(
+                            matches!(kind, "task" | "question"),
+                            "peer direct/steer is only for urgent corrections or unblock requests (kind=task/question); send ordinary status/results to inbox"
+                        );
+                        ensure!(
+                            input.interrupt_reason.is_some(),
+                            "peer direct/steer requires interruptReason (--interrupt-reason): explain why waiting for the next checkpoint would cause harm or wasted work; otherwise use inbox or queue a task"
+                        );
+                    }
+                    _ => {}
+                }
+            }
             // Resolve only after deduplication, inside the acceptance transaction.
             // A retry must keep its original route even when the peer changes state.
             let (status, active_turn): (String, Option<String>) = tx.query_row(
@@ -329,12 +375,16 @@ impl Supervisor {
                     "conflict: this backend does not support steering"
                 );
             }
-            let receipt = json!({"threadId":id,"pendingSteerId":if delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if delivery == "queue" {"queued"} else {delivery},"requestedDelivery":input.delivery,"acceptedAt":now,"messageId":pending_id});
+            let mut receipt = json!({"threadId":id,"pendingSteerId":if delivery == "inbox" {None} else {Some(&pending_id)},"clientRequestId":input.client_request_id,"delivery":if delivery == "queue" {"queued"} else {delivery},"requestedDelivery":input.delivery,"acceptedAt":now,"messageId":pending_id,"kind":kind});
+            if let Some(reason) = &input.interrupt_reason {
+                receipt["interruptReason"] = json!(reason);
+            }
             if delivery == "inbox" {
                 let envelope = inbox::Envelope {
                     subject: derived_subject.as_deref(),
                     kind,
                     in_reply_to: input.in_reply_to.as_deref(),
+                    topic_key: input.topic_key.as_deref(),
                 };
                 match &remote {
                     Some(sender) => inbox::store_from_peer(
@@ -344,6 +394,12 @@ impl Supervisor {
                         &tx, id, &pending_id, input.from_thread_id.as_deref(),
                         &input.text, &now, envelope,
                     )?,
+                }
+                if let Some(topic) = &input.topic_key {
+                    receipt["topicKey"] = json!(topic);
+                    receipt["supersededMessageCount"] = json!(inbox::supersede_status(
+                        &tx, id, &pending_id, input.from_thread_id.as_deref(), topic,
+                    )?);
                 }
             } else {
                 enqueue(
@@ -604,6 +660,7 @@ pub(crate) fn finish_notification(
                         subject: Some(&subject),
                         kind: "result",
                         in_reply_to: None,
+                        topic_key: None,
                     },
                 )?;
             }

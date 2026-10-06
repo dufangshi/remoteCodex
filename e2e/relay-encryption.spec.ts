@@ -1,6 +1,6 @@
 import { test, expect, type Browser, type BrowserContext } from '@playwright/test';
 import WebSocket from 'ws';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { randomBytes, webcrypto } from 'node:crypto';
@@ -66,7 +66,11 @@ test('shared device workspace collection performs an encrypted handshake and res
   await encryptedRelayScenario(browser, context, true);
 });
 
-async function encryptedRelayScenario(browser: Browser, context: BrowserContext, sharedOnly: boolean) {
+test('scheduled history with encoded IDs expands over encrypted relay for owners and readers', async ({ browser, context }) => {
+  await encryptedRelayScenario(browser, context, false, true);
+});
+
+async function encryptedRelayScenario(browser: Browser, context: BrowserContext, sharedOnly: boolean, historyOnly = false) {
   const root = await mkdtemp(resolve('.local/security-regression-'));
   const procs: ChildProcess[] = [],
     sockets: WebSocket[] = [];
@@ -259,6 +263,45 @@ async function encryptedRelayScenario(browser: Browser, context: BrowserContext,
         ),
       )
       .toContain('agentMessage');
+    if (historyOnly) {
+      const scheduledId = `${tid}:scheduled:timer-history`;
+      // Seed only the isolated device database, as if a finished native timer
+      // had been recovered while no browser was connected.
+      execFileSync('python3', ['-c', `
+import sqlite3,json,sys
+db,thread,turn=sys.argv[1:]
+with sqlite3.connect(db) as conn:
+    at='2030-01-01T00:00:00Z'
+    conn.execute("INSERT INTO thread_turns(id,thread_id,status,model,started_at,completed_at,ordinal) VALUES(?,?,'completed','fake',?,?,99)",(turn,thread,at,at))
+    for n,(kind,text) in enumerate([('userMessage','SCHEDULED_HISTORY_PROMPT'),('commandExecution','echo HISTORY_STEP_MARKER'),('agentMessage','SCHEDULED_HISTORY_REPLY')]):
+        item={'id':turn+':'+str(n),'sourceTurnId':turn,'kind':kind,'text':text,'status':'completed','createdAt':at,'sequence':n}
+        if kind=='commandExecution': item['detailText']='HISTORY_STEP_MARKER'
+        conn.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(item['id'],thread,turn,item['id'],json.dumps(item),at,at))
+`, join(root, 'supervisor.sqlite'), tid, scheduledId]);
+      const reader = await account('history-reader');
+      ok(await request(`${base}/relay/grants`, 'POST', {
+        deviceId: device.device.id, targetIdentifier: 'history-reader', scope: 'thread', threadId: tid,
+        threadAccess: 'read', workspaceAccess: 'none', canCreateThreads: false,
+      }, owner));
+      for (const token of [owner, reader]) {
+        const historyContext = await browser.newContext();
+        try {
+          await historyContext.addCookies([{ name: 'remote_codex_relay_session', value: token, url: base }]);
+          const page = await historyContext.newPage();
+          await page.goto(`${base}/devices/${device.device.id}/threads/${tid}`);
+          await expect(page.getByText('SCHEDULED_HISTORY_REPLY', { exact: true })).toBeVisible();
+          const detailResponse = page.waitForResponse(r => r.url().includes(`/turns/${encodeURIComponent(scheduledId)}/detail`));
+          await page.getByRole('button', { name: /Expand turn 2$/ }).click();
+          const response = await detailResponse;
+          expect(response.status()).toBe(200);
+          expect(response.headers()['x-rcd-encrypted']).toBeTruthy();
+          await expect(page.getByRole('button', { name: /Collapse turn 2$/ })).toBeVisible();
+          await expect(page.getByText('History unavailable, retry', { exact: true })).toHaveCount(0);
+          await expect(page.locator('.thread-execution-timeline')).toContainText('HISTORY_STEP_MARKER');
+        } finally { await historyContext.close(); }
+      }
+      return;
+    }
     ok(await request(`${api}/threads/${tid}/shell`, 'POST', {}, owner));
     if (sharedOnly) {
     // A shared collection page has no thread/workspace ID for its first HPKE

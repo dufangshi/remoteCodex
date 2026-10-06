@@ -4,8 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use remote_codex_protocol::{
     AgentBackendDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto, ModelOptionDto,
-    Provider, ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadTurnDto,
-    ToolboxItemDto,
+    Provider, ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadSubagentDto,
+    ThreadTurnDto, ToolboxItemDto,
 };
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -189,6 +189,9 @@ pub trait AgentRuntime: Send + Sync {
     fn provider(&self) -> Provider;
     async fn execution_state(&self, _session_id: &str) -> ExecutionState {
         ExecutionState::Unknown
+    }
+    async fn active_subagents(&self, _session_id: &str) -> Vec<ThreadSubagentDto> {
+        Vec::new()
     }
     fn descriptor(&self) -> AgentBackendDto;
     async fn start(&self) -> Result<()>;

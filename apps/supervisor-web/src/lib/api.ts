@@ -539,6 +539,7 @@ function withAuthInit(
 
 export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
   attachments?: PromptAttachmentUpload[];
+  delivery?: 'steer';
 }
 
 function normalizedUploadFileName(
@@ -1560,6 +1561,23 @@ export async function steerPendingPrompt(id: string, pendingSteerId: string) {
     }
     throw new Error('Steer delivery is not yet confirmed. Check again after reconnecting; the message may already have been delivered.');
   }
+}
+
+export async function steerSubmittedPrompt(
+  id: string,
+  clientRequestId: string,
+  targetTurnId: string,
+) {
+  const delivery = await fetchThreadDelivery(id);
+  // If the original turn finished, the saved continuation starts normally.
+  // Skip if it has already progressed to a new turn, and only use our receipt.
+  if (delivery.thread.status !== 'running' || delivery.thread.activeTurnId !== targetTurnId) {
+    return delivery;
+  }
+  const pending = delivery.pendingSteers.find(item => item.clientRequestId === clientRequestId);
+  if (!pending) throw new Error('The saved message is not available to steer. Check its delivery after reconnecting.');
+  if (pending.delivery === 'steer') return delivery;
+  return steerPendingPrompt(id, pending.id);
 }
 
 export function updateThreadSettings(

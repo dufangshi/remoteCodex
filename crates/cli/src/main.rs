@@ -20,6 +20,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn peer_send_accepts_explicit_interrupt_reason_and_status_topic() {
+        let cli = Cli::try_parse_from([
+            "remote-codex",
+            "thread",
+            "send",
+            "worker",
+            "--delivery",
+            "direct",
+            "--kind",
+            "task",
+            "--interrupt-reason",
+            "Invalid inputs would waste the active calculation",
+            "--text",
+            "stop",
+        ])
+        .unwrap();
+        let Commands::Thread {
+            command: threads::ThreadCommand::Send { body, .. },
+        } = cli.command
+        else {
+            panic!("expected send")
+        };
+        assert_eq!(
+            body.interrupt_reason.as_deref(),
+            Some("Invalid inputs would waste the active calculation")
+        );
+        let cli = Cli::try_parse_from([
+            "remote-codex",
+            "thread",
+            "send",
+            "worker",
+            "--kind",
+            "status",
+            "--topic-key",
+            "simulation",
+            "--text",
+            "20 of 100",
+        ])
+        .unwrap();
+        let Commands::Thread {
+            command: threads::ThreadCommand::Send { body, .. },
+        } = cli.command
+        else {
+            panic!("expected send")
+        };
+        assert_eq!(body.topic_key.as_deref(), Some("simulation"));
+    }
+
+    #[test]
+    fn inbox_listing_supports_repeatable_sender_and_kind_filters() {
+        let cli = Cli::try_parse_from([
+            "remote-codex",
+            "inbox",
+            "list",
+            "--from-thread",
+            "producer",
+            "--from-thread",
+            "reviewer",
+            "--kind",
+            "result",
+            "--kind",
+            "question",
+        ])
+        .unwrap();
+        let Commands::Inbox(args) = cli.command else {
+            panic!("expected inbox")
+        };
+        let Some(threads::InboxCommand::List {
+            from_threads, kind, ..
+        }) = args.command
+        else {
+            panic!("expected list")
+        };
+        assert_eq!(from_threads, ["producer", "reviewer"]);
+        assert_eq!(kind, ["result", "question"]);
+    }
+
+    #[test]
     fn child_delete_is_a_single_target_command_without_force_or_recursive_flags() {
         let cli = Cli::try_parse_from([
             "remote-codex",
@@ -173,7 +251,7 @@ enum Commands {
         #[command(subcommand)]
         command: threads::TaskCommand,
     },
-    /// Print the bundled thread interaction skill.
+    /// Print the running Supervisor's interaction skill, or the bundled guide offline.
     Skill,
 
     /// Run the local supervisor HTTP API.
@@ -228,10 +306,19 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
-        Commands::Skill => println!(
-            "{}",
-            include_str!("../../../skills/thread-interaction/SKILL.md")
-        ),
+        Commands::Skill => {
+            let text = match threads::Client::new(cli.connection) {
+                Ok(client) => match client.skill().await {
+                    Ok(text) => text,
+                    Err(_) => {
+                        eprintln!("Supervisor skill unavailable; using the CLI's bundled guide.");
+                        remote_codex_protocol::THREAD_INTERACTION_SKILL.to_owned()
+                    }
+                },
+                Err(_) => remote_codex_protocol::THREAD_INTERACTION_SKILL.to_owned(),
+            };
+            println!("{text}");
+        }
         Commands::Thread { command } => {
             let value = threads::Client::new(cli.connection)?
                 .thread(command)

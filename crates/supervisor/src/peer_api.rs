@@ -546,6 +546,7 @@ mod tests {
             let input = json!({
                 "operation":"send","threadId":target,"fromThreadId":"foreign-thread","text":"correction",
                 "delivery":delivery,"clientRequestId":"steer","subject":"Review","kind":"task",
+                "interruptReason":"the active turn is working from stale input",
             });
             let (status, receipt) = request(&router, input.clone(), Some(caller("device-a"))).await;
             assert_eq!(status, StatusCode::OK, "{receipt}");
@@ -565,7 +566,7 @@ mod tests {
                 .unwrap();
             let items = transcript["turns"][0]["items"].as_array().unwrap();
             assert_eq!(items.len(), 1);
-            assert_eq!(items[0]["text"], "[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\ncorrection");
+            assert_eq!(items[0]["text"], "[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nImmediate handling needed: the active turn is working from stale input\ncorrection");
         }
     }
 
@@ -576,7 +577,7 @@ mod tests {
         let target = thread(&state, &workspace).await;
         let input = json!({
             "operation":"send","threadId":target,"fromThreadId":"foreign-thread","text":"hello",
-            "delivery":"queue","notifyOnComplete":true,"clientRequestId":"notify","subject":"Review",
+            "delivery":"queue","notifyOnComplete":true,"clientRequestId":"notify","subject":"Review","kind":"task",
         });
         let (status, receipt) = request(&router, input.clone(), Some(caller("device-a"))).await;
         assert_eq!(status, StatusCode::OK, "{receipt}");

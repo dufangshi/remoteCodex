@@ -54,6 +54,7 @@ import {
   updatePlugin,
 } from './lib/api';
 import { builtinFrontendPlugins } from './plugins/builtin-plugin-modules';
+import { useComposerPreferences } from './lib/useComposerPreferences';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -205,6 +206,7 @@ function AppShell({
   effectiveTheme: 'light' | 'dark';
 }) {
   const [navOpen, setNavOpen] = useState(false);
+  const composerPreferences = useComposerPreferences();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showReasoningSummaries, setShowReasoningSummaries] = useState(() => {
     try { return localStorage.getItem('remote-codex-show-reasoning-summaries') === 'true'; } catch { return false; }
@@ -276,6 +278,7 @@ function AppShell({
   }
 
   const shellNavValue = {
+    ...composerPreferences,
     navOpen,
     openNav: () => setNavOpen(true),
     toggleNav: () => setNavOpen((current) => !current),

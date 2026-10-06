@@ -2,6 +2,7 @@ import { FormDialog } from './FormDialog';
 import { useFontSize } from '../lib/fontSize';
 import { RuntimeManagement } from './RuntimeManagement';
 import { ModelPricingSettings } from './ModelPricingSettings';
+import { ComposerShortcutSettings } from './ComposerShortcutSettings';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
@@ -850,6 +851,7 @@ export function AppShellSettingsDialog({
             </fieldset>
           ) : null}
 
+          {section === 'preferences' && <ComposerShortcutSettings />}
           {section === 'preferences' && (
             <section className="py-5">
               <label htmlFor="settings-font-size" className="block text-sm font-semibold">Text size</label>

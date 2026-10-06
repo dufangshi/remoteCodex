@@ -94,6 +94,8 @@ fn mail(from: &str, delivery: &str, kind: &str, text: &str) -> SendInput {
         subject: None,
         kind: Some(kind.into()),
         in_reply_to: None,
+        interrupt_reason: None,
+        topic_key: None,
     }
 }
 
@@ -292,6 +294,227 @@ async fn inbox_wait_blocks_until_matching_mail_arrives() {
         .await
         .unwrap();
     assert_eq!(kinds["timedOut"], true);
+}
+
+#[tokio::test]
+async fn inbox_filters_and_pagination_reach_results_beyond_a_noisy_backlog() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = s.create_thread(input(&ws, None)).await.unwrap().id;
+    let a = named(&s, &ws, &root, "a").await;
+    let b = named(&s, &ws, &root, "b").await;
+    for n in 0..220 {
+        let (sender, kind) = if n % 2 == 0 {
+            (&a, "status")
+        } else {
+            (&b, "result")
+        };
+        s.send_to_thread(
+            &root,
+            mail(sender, "inbox", kind, "unrelated progress/result"),
+        )
+        .unwrap();
+    }
+    // Make the desired results strictly later than the first 200 unread records,
+    // independent of clock resolution and UUID tie-breaking.
+    s.db.with(|c| {
+        c.execute("UPDATE kv SET value=json_set(value,'$.createdAt','2026-01-01T00:00:00Z') WHERE key GLOB 'cli:inbox:*'", [])?;
+        Ok(())
+    }).unwrap();
+    let mut ids = Vec::new();
+    for n in 1..=3 {
+        let receipt = s
+            .send_to_thread(
+                &root,
+                mail(&a, "inbox", "result", &format!("usable batch {n}")),
+            )
+            .unwrap();
+        ids.push(receipt["messageId"].clone());
+    }
+    let got = s
+        .inbox_wait(
+            &root,
+            &[a.clone()],
+            &["result".into()],
+            false,
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap();
+    assert_eq!(got["timedOut"], false, "{got}");
+    assert_eq!(got["messages"].as_array().unwrap().len(), 3);
+    assert!(got["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|m| m["text"].as_str().unwrap().starts_with("usable batch")));
+
+    let first = s
+        .inbox_list(
+            &root,
+            &json!({"limit":2,"fromThreadIds":[a],"kinds":["result"]}),
+        )
+        .unwrap();
+    assert_eq!(first["messages"].as_array().unwrap().len(), 2);
+    assert!(first["nextBefore"].is_string(), "{first}");
+    let older = s
+        .inbox_list(
+            &root,
+            &json!({"limit":2,"fromThreadIds":[a],"kinds":["result"],"before":first["nextBefore"]}),
+        )
+        .unwrap();
+    assert_eq!(older["messages"].as_array().unwrap().len(), 1);
+    let listed = first["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(older["messages"].as_array().unwrap())
+        .map(|m| m["id"].clone())
+        .collect::<Vec<_>>();
+    assert!(ids.iter().all(|id| listed.contains(id)));
+    assert!(older["nextBefore"].is_null());
+    assert!(s.inbox_list(&root, &json!({"kinds":["unknown"]})).is_err());
+    assert!(s
+        .inbox_list(&root, &json!({"fromThreadIds":"not-an-array"}))
+        .is_err());
+}
+
+#[tokio::test]
+async fn inbox_wait_new_ignores_the_entire_backlog_without_hiding_new_mail() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = s.create_thread(input(&ws, None)).await.unwrap().id;
+    let a = named(&s, &ws, &root, "a").await;
+    for _ in 0..220 {
+        s.send_to_thread(&root, mail(&a, "inbox", "result", "old batch"))
+            .unwrap();
+    }
+    s.db.with(|c| {
+        c.execute("UPDATE kv SET value=json_set(value,'$.createdAt','2026-01-01T00:00:00Z') WHERE key GLOB 'cli:inbox:*'", [])?;
+        Ok(())
+    }).unwrap();
+    let empty = s
+        .inbox_wait(&root, &[], &[], true, Duration::from_millis(30))
+        .await
+        .unwrap();
+    assert_eq!(empty["timedOut"], true);
+
+    let sender = s.clone();
+    let (root2, a2) = (root.clone(), a.clone());
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        sender
+            .send_to_thread(
+                &root2,
+                mail(&a2, "inbox", "question", "need a decision to finish"),
+            )
+            .unwrap();
+    });
+    let got = s
+        .inbox_wait(
+            &root,
+            &[a],
+            &["result".into(), "question".into()],
+            true,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+    assert_eq!(got["timedOut"], false, "{got}");
+    assert_eq!(got["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(got["messages"][0]["kind"], "question");
+    assert_eq!(
+        s.inbox_unread_count(&root).unwrap(),
+        221,
+        "wait/read never ack old mail"
+    );
+}
+
+#[tokio::test]
+async fn status_snapshots_coalesce_only_the_same_sender_topic_and_recipient() {
+    let (_dir, s) = setup();
+    let ws = workspace(&s);
+    let root = s.create_thread(input(&ws, None)).await.unwrap().id;
+    let a = named(&s, &ws, &root, "a").await;
+    let b = named(&s, &ws, &root, "b").await;
+    let snapshot = |sender: &str, topic: &str, text: &str| {
+        let mut input = mail(sender, "inbox", "status", text);
+        input.topic_key = Some(topic.into());
+        input.client_request_id = Some(text.into());
+        input
+    };
+    let first = snapshot(&a, "simulation", "r1: 10 of 100");
+    let old = s.send_to_thread(&root, first.clone()).unwrap();
+    s.send_to_thread(&root, snapshot(&b, "simulation", "b: 30 of 100"))
+        .unwrap();
+    s.send_to_thread(&root, snapshot(&a, "other-stage", "other: 5 of 10"))
+        .unwrap();
+    s.send_to_thread(&b, snapshot(&a, "simulation", "r1: 10 of 100"))
+        .unwrap();
+    s.send_to_thread(
+        &root,
+        mail(&a, "inbox", "question", "simulation: which inputs?"),
+    )
+    .unwrap();
+    s.send_to_thread(
+        &root,
+        mail(&a, "inbox", "result", "simulation batch 1 ready"),
+    )
+    .unwrap();
+    let latest = s
+        .send_to_thread(&root, snapshot(&a, "simulation", "r2: 20 of 100"))
+        .unwrap();
+    assert_eq!(latest["supersededMessageCount"], 1);
+    assert_eq!(s.inbox_unread_count(&root).unwrap(), 5);
+    assert_eq!(s.inbox_unread_count(&b).unwrap(), 1);
+    let history = s
+        .inbox_read(&root, &json!({"messageId":old["messageId"]}))
+        .unwrap();
+    assert_eq!(history["supersededBy"], latest["messageId"]);
+    assert!(
+        history["acknowledgedAt"].is_null(),
+        "replacement does not imply handling"
+    );
+    assert_eq!(history["text"], "r1: 10 of 100");
+    assert_eq!(
+        s.inbox_list(&root, &json!({"all":true})).unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    let active = s.inbox_list(&root, &json!({})).unwrap();
+    assert!(!active["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == old["messageId"]));
+    let waited = s
+        .inbox_wait(
+            &root,
+            &[a.clone()],
+            &["status".into()],
+            false,
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap();
+    assert_eq!(waited["messages"].as_array().unwrap().len(), 2);
+    assert!(!waited.to_string().contains("r1: 10 of 100"));
+    assert_eq!(
+        s.send_to_thread(&root, first).unwrap(),
+        old,
+        "retry cannot resurrect an obsolete snapshot"
+    );
+
+    for kind in ["question", "result", "task"] {
+        let mut invalid = snapshot(&a, "simulation", kind);
+        invalid.kind = Some(kind.into());
+        assert!(s.send_to_thread(&root, invalid).is_err());
+    }
+    let mut reply = snapshot(&a, "simulation", "reply cannot replace a status");
+    reply.in_reply_to = Some("message".into());
+    assert!(s.send_to_thread(&root, reply).is_err());
 }
 
 #[tokio::test]

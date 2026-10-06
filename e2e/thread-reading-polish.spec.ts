@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -36,6 +36,199 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
+test('background agents remain visible after the main reply, survive reload, and clear on completion', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const turn = {
+    id: 'background-review-turn', status: 'inProgress', startedAt,
+    model: 'claude-opus-5-5', reasoningEffort: 'high',
+    tokenUsage: { total: { totalTokens: 3_700_000, inputTokens: 3_695_000, outputTokens: 5_000, cachedInputTokens: 3_600_000 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.86 },
+    items: [
+      { id: 'prompt', kind: 'userMessage', text: 'Review the results.' },
+      { id: 'launch', kind: 'agentToolCall', text: 'Independent review', status: 'completed' },
+      { id: 'reply', kind: 'agentMessage', text: 'Main reply done. The independent review is running in the background.' },
+    ],
+  };
+  const agent = { id: 'launch', name: 'Independent review', status: 'running', startedAt,
+    completedAt: null, parentToolCallId: 'launch', isBackground: true };
+  let background = true;
+  let completed = false;
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, current => {
+    socket = current;
+    current.send(JSON.stringify({ type: 'supervisor.connected' }));
+    current.onMessage(() => current.send(JSON.stringify({ type: 'supervisor.pong' })));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: {
+    ...detail, totalTurnCount: 1, activeSubagents: background ? [agent] : [],
+    thread: { ...detail.thread, status: completed ? 'idle' : 'running', activeTurnId: completed ? null : turn.id },
+    turns: [{ ...turn, status: completed ? 'completed' : 'inProgress', completedAt: completed ? new Date().toISOString() : null }],
+  } }));
+  await page.goto(`/threads/${id}`);
+  const label = page.locator('.thread-background-agent-status');
+  await expect(page.getByText(turn.items[2]!.text, { exact: true })).toBeVisible();
+  await expect(label).toHaveText('1 background agent running');
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Subagents (1)', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Native subagents', exact: true });
+  await expect(panel).toContainText('Independent review');
+  await expect(panel).toContainText('Running in background');
+  await page.getByRole('button', { name: 'Close subagents dialog', exact: true }).click();
+  await page.reload();
+  await expect(label).toHaveText('1 background agent running');
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect(label).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  const scroll = page.getByTestId('thread-scroll-container');
+  expect(await scroll.evaluate(e => e.scrollWidth)).toBe(320);
+  const bounds = (await label.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: testInfo.outputPath('background-agent-running.png') });
+  background = false;
+  expect(socket).toBeDefined();
+  socket!.send(JSON.stringify({ type: 'thread.subagents.updated', threadId: id,
+    timestamp: new Date().toISOString(), payload: { turnId: turn.id, activeSubagents: [] } }));
+  await expect(label).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Subagents (1)', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  completed = true;
+  socket!.send(JSON.stringify({ type: 'thread.turn.completed', threadId: id,
+    timestamp: new Date().toISOString(), payload: { turnId: turn.id, status: 'completed' } }));
+  socket!.send(JSON.stringify({ type: 'thread.updated', threadId: id, timestamp: new Date().toISOString(), payload: {} }));
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+});
+
+test('completed work agrees with the composer and the price tooltip has a matching triangle', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const items = [
+    { id: 'prompt', kind: 'userMessage', text: 'Check the final status.' },
+    { id: 'command', kind: 'commandExecution', text: 'read report', status: 'completed' },
+    { id: 'reply', kind: 'agentMessage', text: 'The work is complete.' },
+  ];
+  const turn = {
+    id: 'status-work-turn', status: 'inProgress', startedAt: '2026-10-05T17:00:00Z',
+    model: 'gpt-6.1-sol', reasoningEffort: 'high', hasDeferredItems: true, deferredItemCount: 1,
+    tokenUsage: { total: { totalTokens: 583158, inputTokens: 582158, cachedInputTokens: 579000, outputTokens: 1000, reasoningOutputTokens: 500 }, generationSpeed: { averageOutputTokensPerSecond: 23.9 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.079, inputUsd: 0.0061, cachedInputUsd: 0.058, outputUsd: 0.0149 },
+    items: [items[0], items[2]],
+  };
+  let completed = false;
+  const sockets: WebSocketRoute[] = [];
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, socket => {
+    sockets.push(socket);
+    socket.send(JSON.stringify({ type: 'supervisor.connected' }));
+    socket.onMessage(() => socket.send(JSON.stringify({ type: 'supervisor.pong' })));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: {
+    ...detail, totalTurnCount: 1,
+    thread: { ...detail.thread, status: completed ? 'idle' : 'running', activeTurnId: completed ? null : turn.id },
+    turns: [{ ...turn, status: completed ? 'completed' : 'inProgress', completedAt: completed ? '2026-10-05T17:01:12Z' : null }],
+  } }));
+  await page.route(`**/api/threads/${id}/turns/${turn.id}/detail`, route => route.fulfill({ json: {
+    ...turn, items, hasDeferredItems: false, deferredItemCount: 0,
+  } }));
+  await page.goto(`/threads/${id}`);
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  const summary = page.locator('.thread-graph-worked-summary');
+  await expect(summary.locator('.thread-graph-worked-label')).toHaveText('Working');
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(page.getByText('read report', { exact: true })).toBeVisible();
+  await summary.getByRole('button', { name: /Collapse turn 1$/ }).click();
+  completed = true;
+  expect(sockets.length).toBeGreaterThan(0);
+  for (const socket of sockets) {
+    socket.send(JSON.stringify({ type: 'thread.turn.completed', threadId: id, timestamp: '2026-10-05T17:01:12Z', payload: { turnId: turn.id, status: 'completed' } }));
+    socket.send(JSON.stringify({ type: 'thread.updated', threadId: id, timestamp: '2026-10-05T17:01:12Z', payload: {} }));
+  }
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toHaveCount(0);
+  await expect(summary.locator('.thread-graph-worked-label')).toHaveText('Worked for 1m 12s');
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+  await expect(page.getByText('The work is complete.', { exact: true })).toBeVisible();
+  await summary.locator('.thread-turn-usage-price').hover();
+  const tooltip = page.locator('[data-slot="tooltip-content"]');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip.locator(':scope > div [aria-label="Input: 3,158 tokens"]')).toBeVisible();
+  const arrow = tooltip.locator('[data-slot="tooltip-arrow"]');
+  expect(await arrow.evaluate(element => {
+    const css = getComputedStyle(element);
+    return { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height,
+      fill: css.fill, surface: getComputedStyle(element.closest('[data-slot="tooltip-content"]')!).backgroundColor,
+      background: css.backgroundColor, rotate: css.rotate, transform: css.transform };
+  })).toEqual({ width: 10, height: 5, fill: 'rgb(37, 38, 34)', surface: 'rgb(37, 38, 34)', background: 'rgba(0, 0, 0, 0)', rotate: 'none', transform: 'none' });
+  const box = (await tooltip.boundingBox())!;
+  await page.screenshot({ path: testInfo.outputPath('price-tooltip.png'), clip: { x: box.x - 4, y: box.y - 4, width: box.width + 8, height: box.height + 14 } });
+});
+
+test('mobile work summary keeps its step count and cannot scroll the conversation sideways', async ({ page, request }) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const items = [
+    { id: 'prompt', kind: 'userMessage', text: 'Review the research results.' },
+    { id: 'progress', kind: 'agentMessage', text: 'Checking the final reports.' },
+    { id: 'thought', kind: 'reasoning', text: 'Compare the reports independently.' },
+    { id: 'command-a', kind: 'commandExecution', text: 'read report A', status: 'completed' },
+    { id: 'command-b', kind: 'commandExecution', text: 'read report B', status: 'completed' },
+    { id: 'read', kind: 'fileRead', text: '/home/ubuntu/a-long-workspace-path/reports/final-results.md' },
+    { id: 'reply', kind: 'agentMessage', text: 'Final report.\n\n' +
+      '| Year | Trades | Average holding time | Average position | Annual return | Maximum drawdown | Sharpe | Notes |\n' +
+      '| --- | --- | --- | --- | --- | --- | --- | --- |\n' +
+      '| 2026 | 1904 | 48 hours | 34 positions | 39.6% | 12.1% | 1.75 | Independently reproduced |\n\n' +
+      '`/home/ubuntu/' + 'long-research-workspace-path/'.repeat(10) + 'report.md`\n\n' +
+      'Research results remain readable on a narrow phone.\n\n'.repeat(25) },
+  ];
+  const turn = {
+    id: 'mobile-work-turn', status: 'completed', startedAt: '2026-10-05T16:58:02Z', completedAt: '2026-10-05T16:58:50Z',
+    model: 'claude-opus-5-5', reasoningEffort: 'max', hasDeferredItems: true, deferredItemCount: 5,
+    tokenUsage: { total: { totalTokens: 2500000, inputTokens: 2495000, cachedInputTokens: 2400000, outputTokens: 5000, reasoningOutputTokens: 1000 }, generationSpeed: { averageOutputTokensPerSecond: 131.8 } },
+    priceEstimate: { currency: 'USD', totalUsd: 0.61 },
+    items: [items[0], items.at(-1)],
+  };
+  let priceAvailable = true;
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, turns: [{ ...turn, priceEstimate: priceAvailable ? turn.priceEstimate : null }], totalTurnCount: 1 } }));
+  await page.route(`**/api/threads/${id}/turns/mobile-work-turn/detail`, route => route.fulfill({ json: { ...turn, items, hasDeferredItems: false, deferredItemCount: 0 } }));
+  await page.goto(`/threads/${id}`);
+  await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
+  await page.getByRole('button', { name: 'Jump to previous turn' }).click();
+  const scroll = page.getByTestId('thread-scroll-container');
+  const summary = page.locator('.thread-graph-worked-summary');
+  const count = summary.locator('.thread-execution-step-count');
+  const checkWidth = async () => {
+    expect(await scroll.evaluate(e => ({ width: e.clientWidth, content: e.scrollWidth }))).toEqual({ width: page.viewportSize()!.width, content: page.viewportSize()!.width });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(page.viewportSize()!.width);
+    for (const selector of ['.thread-execution-step-count', '.thread-turn-usage-effort', '.thread-turn-usage-tokens', '.thread-turn-usage-price, .thread-turn-usage-unavailable', '.thread-turn-token-speed']) {
+      const box = await summary.locator(selector).boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+  };
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(summary.getByRole('button', { name: /Collapse turn 1$/ })).toBeVisible();
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  await summary.getByRole('button', { name: /Collapse turn 1$/ }).click();
+  await expect(count).toHaveText('5 steps');
+  await page.setViewportSize({ width: 320, height: 740 });
+  await checkWidth();
+  await scroll.evaluate(e => e.scrollTo({ top: 100, left: 100, behavior: 'instant' }));
+  expect(await scroll.evaluate(e => e.scrollLeft)).toBe(0);
+  expect(await scroll.evaluate(e => e.scrollTop)).toBeGreaterThan(0);
+  await page.reload();
+  await expect(count).toHaveText('5 steps');
+  await checkWidth();
+  priceAvailable = false;
+  await page.reload();
+  await expect(summary.locator('.thread-turn-usage-unavailable')).toBeVisible();
+  await checkWidth();
+});
+
 test('reading layout stays still with bounded images, visible effort and ten recent notifications', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
@@ -50,7 +243,7 @@ test('reading layout stays still with bounded images, visible effort and ten rec
   }];
   await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, turns, totalTurnCount: 1 } }));
   await page.route('**/reading-test-image.png', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="3000"><rect width="2400" height="3000" fill="#3458dc"/></svg>' }));
-  await page.route('**/api/threads', route => route.fulfill({ json: [detail.thread, ...Array.from({ length: 15 }, (_, i) => ({ ...detail.thread, id: `notice-${i}`, title: `Notice ${i}`, lastTurnCompletedAt: new Date(Date.UTC(2026, 8, 19, i)).toISOString() }))] }));
+  await page.route(/\/api\/threads(?:\?.*)?$/, route => route.fulfill({ json: [detail.thread, ...Array.from({ length: 15 }, (_, i) => ({ ...detail.thread, id: `notice-${i}`, title: `Notice ${i}`, lastTurnCompletedAt: new Date(Date.UTC(2026, 8, 19, i)).toISOString() }))] }));
   await page.goto(`/threads/${id}`);
   const scroll = page.getByTestId('thread-scroll-container');
   await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();

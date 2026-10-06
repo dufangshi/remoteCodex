@@ -7,17 +7,33 @@ parallel tool waits). They resume it only once every outstanding tool completes.
 This includes model response latency and reasoning, but excludes tool execution
 and explicit user-input/permission waits.
 
-The finished turn displays actual total output tokens divided by this accumulated
-LLM response time. Output includes reasoning and tool arguments, matching billing.
-The live footer displays a trailing **wall-clock** 60-second average using only
-LLM intervals within that window; a minute spent entirely in tools is unavailable,
-not a low model speed. The runtime refreshes it every two seconds. Until a usage
-counter arrives, the UI displays `— tok/s`, never a character-count estimate.
+The live footer displays the **latest confirmed response interval**: its actual
+output token delta divided by the LLM time accumulated since the previous report.
+Output includes reasoning and tool arguments, matching billing. Response latency,
+including time to first output, is included; tool lifecycles and user waits are
+excluded. Tool boundaries follow the harness notifications: adapters which omit
+an execution-start event may include some streamed arguments in the tool phase,
+so this cannot promise exact decoder timing. The tooltip
+shows the interval duration and when it was measured. While a new response is
+still waiting to report tokens, the last confirmed rate stays visible rather than
+dividing old tokens by that new wait. Before the first actual usage report, the
+UI displays `— tok/s`, never a character-count estimate.
+
+Finished turns use total output divided by confirmed response time. Unreported
+idle tails after the last counter cannot dilute this value. Historical timing and
+the legacy trailing 60-second fields remain supported by the UI. Total tokens,
+price and speed stay inline; input/output/cache breakdowns live in price details.
 
 Usage counters arrive at API-request boundaries, not necessarily per streamed
-token. The live window apportions each reported request's actual output uniformly
-over its observed LLM intervals; it is an interval average, not instantaneous
-decoder throughput. Final timing is stored with the turn usage and survives reload
+token. This is an interval average, not instantaneous decoder throughput. Stream
+chunks can be batched and do not time hidden reasoning reliably. Claude ACP may
+only report context occupancy during a turn, so the runtime also reads native
+assistant JSONL usage as each response completes, including the response leading
+to the first tool call. Repeated content blocks sharing a native message ID are
+snapshots, never additive token charges. Old turns, sidechains and unrelated
+sessions are excluded. Late ACP summaries cannot overwrite native turn totals.
+If native usage is unavailable, ACP usage remains the fallback. Codex retains
+its native rollout reader. Final timing is stored with turn usage and survives reload
 and restart. Tools never alter billable token counts or price categories.
 
 Targeted checks:
@@ -26,6 +42,15 @@ Targeted checks:
 cargo test -p remote-codex-runtime service::generation --lib
 cargo test -p remote-codex-runtime gpt_61_sol --lib
 cargo test -p remote-codex-runtime --test generation_speed
+cargo test -p remote-codex-runtime acp::claude_usage --lib
+```
+
+A real Claude check uses an independent database/workspace/session and the
+advertised Haiku model. It verifies positive speed during the first tool wait,
+then checks the final persisted usage. It never restarts the host Supervisor:
+
+```sh
+cargo test -p remote-codex-runtime --test claude_usage_live -- --ignored --nocapture
 ```
 
 The real-token browser acceptance is opt-in. Copy credentials/config into a new

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+remote-codex-protocol.workspace = true
 remote-codex-relay.workspace = true
 remote-codex-runtime.workspace = true
 remote-codex-supervisor.workspace = true
