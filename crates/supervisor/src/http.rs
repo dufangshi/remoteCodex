@@ -84,6 +84,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
         .route("/api/version", get(version))
+        .route("/api/device/metrics", get(device_metrics))
         .route(
             "/api/management/harnesses",
             get(crate::management::harnesses),
@@ -485,6 +486,22 @@ async fn version() -> Json<VersionDto> {
         name: APP_NAME.into(),
         version: APP_VERSION.into(),
     })
+}
+
+async fn device_metrics(State(state): State<AppState>) -> Response {
+    match state.device_monitor.snapshot().await {
+        Ok(metrics) => (
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Json(metrics),
+        )
+            .into_response(),
+        Err(error) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "metrics_unavailable",
+            error.to_string(),
+        )
+        .into_response(),
+    }
 }
 
 async fn runtime_config(State(state): State<AppState>) -> Json<RuntimeConfigDto> {

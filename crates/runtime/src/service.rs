@@ -311,6 +311,7 @@ pub struct Supervisor {
     generation: generation::GenerationCache,
     claude_history: claude_history::HistoryCache,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
+    pub device_monitor: crate::device_metrics::DeviceMonitor,
 }
 
 impl Supervisor {
@@ -365,6 +366,7 @@ impl Supervisor {
             generation: Default::default(),
             claude_history: Default::default(),
             subscription_usage: Default::default(),
+            device_monitor: Default::default(),
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
             tracing::warn!(%error, "failed to reconcile stale turns at startup");

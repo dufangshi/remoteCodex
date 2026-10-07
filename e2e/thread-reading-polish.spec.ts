@@ -36,7 +36,7 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
-test('overlapping live steps stay stable on expansion and an idle reply explains its pending completion', async ({ page, request }) => {
+test('overlapping live steps stay stable on expansion and idle output keeps running dots and a progress age', async ({ page, request }) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
   const startedAt = new Date(Date.now() - 60_000).toISOString();
@@ -68,9 +68,11 @@ test('overlapping live steps stay stable on expansion and an idle reply explains
   const summary = page.locator('.thread-graph-worked-summary');
   const steps = summary.locator('.thread-execution-step-count');
   await expect(steps).toHaveText('1 steps');
-  await expect(page.locator('.thread-waiting-for-finish')).toHaveText('Waiting for turn to finish');
+  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [5-9]\ds ago/);
+  await expect(page.locator('.thread-graph-turn-footer .animate-pulse')).toHaveCount(3);
   await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
   emit('thread.item.completed', { turnId: turn.id, item: commands[0] });
+  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [01]s ago/);
   await expect(steps).toHaveText('1 steps');
   await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
   await expect(page.getByText('read inbox', { exact: true })).toBeVisible();
@@ -85,7 +87,9 @@ test('overlapping live steps stay stable on expansion and an idle reply explains
   await expect(steps).toHaveText('2 steps');
   await page.reload();
   await expect(steps).toHaveText('2 steps');
-  await expect(page.locator('.thread-waiting-for-finish')).toBeVisible();
+  await expect(page.locator('.thread-progress-age')).toBeVisible();
+  emit('thread.turn.token.updated', { turnId: turn.id, tokenUsage: { total: { inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedInputTokens: 0 } } });
+  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [01]s ago/);
   completed = true;
   emit('thread.turn.completed', { turnId: turn.id, status: 'completed' });
   emit('thread.updated');

@@ -1,3 +1,4 @@
+import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
@@ -428,6 +429,7 @@ export function ThreadDetailPage() {
   const [backendManagementSchema, setBackendManagementSchema] =
     useState<AgentBackendManagementSchemaDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
+  const [backendProgress, setBackendProgress] = useState<{ threadId: string; turnId: string; receivedAt: string } | null>(null);
   const [livePlan, setLivePlan] = useState<{
     turnId: string;
     explanation: string | null;
@@ -1585,6 +1587,12 @@ export function ThreadDetailPage() {
     const handleSocketEvent = (event: ThreadEventEnvelope) => {
       if (event.threadId !== id) {
         return;
+      }
+      // Record receipt, not rendering, polling or socket keepalive time.
+      if (event.type.startsWith('thread.item.') || event.type.startsWith('thread.turn.')
+        || ['thread.output.delta', 'thread.plan.updated', 'thread.context.updated', 'thread.subagents.updated', 'thread.request.created'].includes(event.type)) {
+        const turnId = 'turnId' in event.payload && typeof event.payload.turnId === 'string' ? event.payload.turnId : detailRef.current?.thread.activeTurnId;
+        if (turnId) setBackendProgress({ threadId: id!, turnId, receivedAt: new Date().toISOString() });
       }
 
       if (
@@ -3312,6 +3320,7 @@ export function ThreadDetailPage() {
     () => ({
       livePlan,
       liveItems,
+      backendProgress: backendProgress?.threadId === id ? backendProgress : null,
       backgroundAgentCount: detail?.activeSubagents?.filter((agent) => agent.isBackground && agent.status === 'running').length ?? 0,
       respondingRequestId,
       onRespondToRequest: handleRespondToRequest,
@@ -3343,6 +3352,8 @@ export function ThreadDetailPage() {
       handleRespondToRequest,
       liveItems,
       livePlan,
+      backendProgress,
+      id,
       loadingEarlier,
       openThread,
       optimisticSteers,
@@ -3634,6 +3645,7 @@ export function ThreadDetailPage() {
 
   return (
     <ThreadDetailSurface
+      deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
       workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
       threads={threads}
       detail={detail}

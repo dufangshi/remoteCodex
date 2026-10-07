@@ -1,0 +1,108 @@
+.thread-ui-shell .matter-workbench .device-monitor-button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: 1px;
+  width: 52px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 7px;
+  color: var(--theme-fg-muted);
+  font-size: 8px;
+  line-height: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.device-monitor-button span {
+  display: flex;
+  justify-content: space-between;
+  gap: 3px;
+}
+.device-monitor-button b {
+  font-weight: 600;
+  color: var(--theme-accent-strong);
+}
+.device-monitor-button[data-stale] b {
+  color: var(--theme-fg-muted);
+}
+.device-monitor-button:hover {
+  background: var(--theme-hover);
+}
+.matter-sidebar-footer .device-monitor-button {
+  margin: 0 0 10px;
+}
+.device-monitor-details {
+  min-width: 0;
+  color: var(--theme-fg);
+  font-size: 12px;
+}
+.device-monitor-details section {
+  margin-top: 16px;
+  border-top: 1px solid var(--theme-border);
+  padding-top: 12px;
+}
+.device-monitor-heading,
+.device-monitor-reading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+}
+.device-monitor-heading h3,
+.device-monitor-details h3 {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.device-monitor-heading strong {
+  color: var(--theme-accent-strong);
+  font-size: 18px;
+}
+.device-monitor-caption {
+  font-size: 11px;
+  color: var(--theme-fg-muted);
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.device-monitor-notice {
+  border: 1px solid var(--theme-border);
+  padding: 8px;
+  border-radius: 6px;
+}
+.device-monitor-cores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.device-monitor-core {
+  min-width: 0;
+}
+.device-monitor-core span {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+}
+.device-monitor-core b {
+  font-weight: 500;
+}
+.device-monitor-core progress {
+  width: 100%;
+  height: 6px;
+  display: block;
+  margin-top: 4px;
+  accent-color: var(--theme-accent-solid);
+}
+@media (max-width: 359px) {
+  .thread-ui-shell .matter-workbench .matter-topbar :where(button, a) {
+    width: 29px;
+  }
+  .thread-ui-shell .matter-workbench .matter-topbar .device-monitor-button {
+    width: 48px;
+  }
+  .thread-ui-shell .matter-workbench .matter-topbar .matter-search-trigger {
+    width: 29px;
+  }
+}

@@ -3,7 +3,9 @@ import {
   ThreadWorkspaceLayout as SharedThreadWorkspaceLayout,
 } from '@remote-codex/thread-ui';
 import type { ComponentProps } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { DeviceMonitor } from './DeviceMonitor';
+import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 
 import { useAppShellNav } from './AppShellNavContext';
 import { appSettingsSections } from './AppShellSettingsDialog';
@@ -33,6 +35,8 @@ export function ThreadWorkspaceLayout({
   ...props
 }: ThreadWorkspaceLayoutProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const deviceId = relayDeviceIdFromPath(location.pathname) ?? 'local';
   const shellNav = useAppShellNav();
   const closeAppNavigation = onCloseAppNavigation ?? shellNav?.closeNav;
   const effectiveTheme = props.effectiveTheme ?? shellNav?.effectiveTheme;
@@ -42,6 +46,7 @@ export function ThreadWorkspaceLayout({
   return (
     <SharedThreadWorkspaceLayout
       {...props}
+      deviceMonitor={<DeviceMonitor key={deviceId} />}
       workspaceReturnHref={props.workspaceReturnHref ?? currentWorkspacesHref()}
       settingsSections={props.settingsSections ?? appSettingsSections()}
       {...(effectiveTheme ? { effectiveTheme } : {})}

@@ -73,7 +73,7 @@ pub(crate) fn access_allows(access: &EffectiveAccess, method: &Method, path: &st
         // Collection pages cannot use a thread/workspace-scoped handshake before
         // they have loaded the collection. This publishes only the device's signed
         // recipient key; each subsequent request still goes through this ACL.
-        && matches!(pathname, "/api/threads" | "/api/workspaces" | "/api/transport/key")
+        && matches!(pathname, "/api/threads" | "/api/workspaces" | "/api/transport/key" | "/api/device/metrics")
 }
 
 pub(crate) fn shared_runtime_metadata_allowed(method: &str, pathname: &str) -> bool {
@@ -257,6 +257,24 @@ mod tests {
         assert!(!access_allows(&access, &Method::GET, "/api/transport/key"));
         let mut device_access = access.clone();
         device_access.scope = "device".into();
+        assert!(access_allows(
+            &device_access,
+            &Method::GET,
+            "/api/device/metrics"
+        ));
+        assert!(!access_allows(
+            &device_access,
+            &Method::POST,
+            "/api/device/metrics"
+        ));
+        assert!(!access_allows(&access, &Method::GET, "/api/device/metrics"));
+        let mut workspace_access = access.clone();
+        workspace_access.scope = "workspace".into();
+        assert!(!access_allows(
+            &workspace_access,
+            &Method::GET,
+            "/api/device/metrics"
+        ));
         assert!(access_allows(
             &device_access,
             &Method::GET,

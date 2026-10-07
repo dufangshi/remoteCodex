@@ -96,6 +96,33 @@ async fn spawn_supervisor_state(
 }
 
 #[tokio::test]
+async fn device_metrics_api_returns_warmed_cached_native_samples() {
+    let (_dir, port, _) = spawn_supervisor(vec![Provider::Codex]).await;
+    let response = reqwest::get(format!("http://127.0.0.1:{port}/api/device/metrics"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let first: remote_codex_protocol::DeviceMetricsDto = response.json().await.unwrap();
+    assert!(first.sample_window_ms >= 900);
+    assert_eq!(first.cpu.logical_core_count, first.cpu.cores.len());
+    assert!(first.cpu.logical_core_count > 0);
+    assert!(first.memory.total_bytes > 0);
+    assert_eq!(
+        first.memory.used_bytes + first.memory.available_bytes,
+        first.memory.total_bytes
+    );
+    let second: remote_codex_protocol::DeviceMetricsDto =
+        reqwest::get(format!("http://127.0.0.1:{port}/api/device/metrics"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+    assert_eq!(first.sampled_at, second.sampled_at);
+}
+
+#[tokio::test]
 async fn cli_delete_authenticates_the_parent_and_refuses_arbitrary_targets_and_spoofing() {
     let (dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
     let ws = state

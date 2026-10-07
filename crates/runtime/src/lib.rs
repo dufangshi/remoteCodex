@@ -3,6 +3,7 @@ pub mod actor;
 mod child_process;
 pub mod config;
 pub mod db;
+pub mod device_metrics;
 pub mod fake;
 pub mod files;
 pub mod history;
