@@ -11,6 +11,23 @@ Threads are peers. Each can create others, message existing threads, read state/
 
 ## The orchestration loop
 
+For an existing peer, choose by what must change **in its current turn**, before
+calling something a task:
+
+- Stop, replace, reprioritize or correct its active work: use `steer` (or `direct`
+  when its state is uncertain) with the concrete wasted work/harm in
+  `--interrupt-reason`. Do not queue “use the existing implementation instead,”
+  “switch the primary strategy,” or “stop launching work under the old grant.”
+- Give it distinct work that can wait until its current turn ends: use `queue`.
+  Queue waits for the **entire turn**, not the next tool result, checkpoint or
+  compute batch. A long-running turn can defer that instruction for hours.
+- Provide ready inputs, results, adoption notices or report-only updates: use
+  `inbox`. “Already received,” “task complete” and “no action needed” are not tasks.
+
+When another peer needs a running worker's output now, split the request: steer
+the minimal unblock/correction, and queue any independent later work. A waiting
+consumer should collect ready inputs through inbox in its existing turn.
+
 Most delegation is this, and every step is one command:
 
 ```bash
@@ -219,8 +236,9 @@ controls when to collect results; sending mail does not entitle you to start its
 
 | Intent | Delivery |
 | --- | --- |
+| Change the active task before more obsolete/invalid work is dispatched | `steer` or `direct`, kind `task` or `question`, with `--interrupt-reason` |
 | A usable result or a question awaiting a decision | `inbox`, kind `result` or `question` |
-| A concrete assignment that should execute after current work | `queue`, kind `task` |
+| A distinct assignment that should execute after the entire current turn ends | `queue`, kind `task` |
 | Correction/unblock request that cannot wait for a checkpoint | `direct` or `steer`, kind `task` or `question`, with `--interrupt-reason` |
 | Routine progress | Shared progress file; send a batched inbox `status` only if a dependent needs it |
 
@@ -228,13 +246,21 @@ For peer sends the server rejects queued reports and direct/steer without the pr
 kind and a nonempty reason. Explain the actual harm or wasted work if handling waits;
 "urgent", "please read now" and "peer is idle" are not useful reasons. Examples of
 valid urgency: a running calculation uses invalid inputs, a worker exceeds an agreed
-resource allocation, or an imminent publication must stop. A new task belongs in
-queue, and a routine milestone belongs in inbox. Do not relabel a report as a task or
+resource allocation, or an imminent publication must stop. Classify active-task
+corrections before new assignments; kind `task` does not imply queue. A routine
+milestone belongs in inbox. Do not relabel a report as a task or
 invent urgency to evade this rule. Explicit user instructions take precedence over
 workflow preferences, but do not bypass the API's delivery requirements.
 
 Steering is not guaranteed to interrupt a blocking tool. Check the receipt; a held
 correction requires inspection, not a flood of retries.
+
+Before launching resource-consuming work, read the current authoritative grant;
+an old queued resource notice must not restore a superseded allowance. If a scope
+change also replaces an earlier queued assignment, inspect that continuation and
+explicitly cancel/supersede it through the available queue controls. Steering a
+replacement does not remove the original queued task. Do not send duplicate work
+through both queue and inbox/direct just to improve delivery odds.
 
 ## Deliver usable batches to actual dependents
 
@@ -386,6 +412,12 @@ remote-codex thread send PEER_ID --delivery direct --kind task --subject 'Stop: 
 ```
 
 For an eligible urgent request, direct resolves idle to a new turn and running to steering in the acceptance transaction. Only idle and running states qualify; inspect other states before acting. Unsupported steering is rejected, with no silent queue fallback. Receipts include `requestedDelivery`, resolved `delivery`, kind and any interrupt reason. `queued` is acceptance, not execution. An idle route stays queued if other work starts first; an active route stays pinned to its selected turn. A race/backend failure returns `held` plus an error and pending ID, never an automatic continuation. Inspect status/history before retrying uncertain acknowledgement. `steered` proves backend acknowledgement, not that the agent followed it.
+
+Preserve and inspect the full JSON receipt. Counting a field with `grep -c`, or
+checking only the exit code, hides whether the send was queued, steered or held.
+For a correction to an active turn, verify the actual receipt says `steered`;
+`requestedDelivery=direct` with `delivery=queued` means the receiver was idle at
+acceptance, not that queue was chosen for an active correction.
 
 ## Read and acknowledge your inbox
 

@@ -3,7 +3,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
-test('agent tabs stay grouped after polling and navigate through an unclipped menu', async ({ page, request }) => {
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' });
+});
+
+test('agent tabs stay grouped after polling and navigate through an unclipped menu', async ({ page, request }, testInfo) => {
   const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
   const directory = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright', `groups-${randomUUID()}`);
   await fs.mkdir(directory, { recursive: true });
@@ -20,7 +24,15 @@ test('agent tabs stay grouped after polling and navigate through an unclipped me
   };
   const root = await create('Research root');
   const child = await create('Search agent', root.id);
-  await create('Scoring agent', root.id);
+  const grandchild = await create('Scoring agent', child.id);
+  let descendantRunning = true;
+  await page.route('**/api/threads?includeAgentThreads=true', async route => {
+    const response = await route.fetch();
+    const threads = await response.json();
+    await route.fulfill({ response, json: threads.map((thread: { id: string }) =>
+      thread.id === grandchild.id ? { ...thread, status: descendantRunning ? 'running' : 'idle' } : thread),
+    });
+  });
   let snapshots = 0;
   page.on('request', request => { if (request.url().includes('/api/threads?includeAgentThreads=true')) snapshots += 1; });
   await page.goto(`/threads/${root.id}`);
@@ -30,6 +42,24 @@ test('agent tabs stay grouped after polling and navigate through an unclipped me
   await expect(tabs.locator('a.matter-group-tab')).toHaveCount(1);
   await expect.poll(() => snapshots).toBeGreaterThanOrEqual(2);
   await expect(toggle).toBeVisible();
+  if (testInfo.project.name === 'mobile-chromium') {
+    await page.getByRole('button', { name: 'Toggle shortcuts sidebar' }).click();
+  }
+  const rootLink = page.getByTestId('recent-chats').locator(`a[href="/threads/${root.id}"]`);
+  const dot = rootLink.getByRole('img');
+  await expect(dot).toBeVisible();
+  await expect(dot).toHaveAttribute('data-status', 'agents-running');
+  await expect(dot).toHaveAttribute('aria-label', /1 agent thread running/);
+  await expect(tabs.locator('.matter-group-tab [role="img"]')).toHaveAttribute('data-status', 'agents-running');
+  // The navigation indicator must not turn an idle parent into a running session.
+  const parentDetail = await (await request.get(`${base}/api/threads/${root.id}?view=summary`)).json();
+  expect(parentDetail.thread.status).toBe('idle');
+  descendantRunning = false;
+  await expect(dot).toHaveAttribute('data-status', 'idle');
+  await expect(tabs.locator('.matter-group-tab [role="img"]')).toHaveAttribute('data-status', 'idle');
+  if (testInfo.project.name === 'mobile-chromium') {
+    await page.getByRole('button', { name: 'Close sidebar', exact: true }).click();
+  }
   await toggle.click();
   const menu = page.getByRole('region', { name: 'Research root agent threads' });
   await expect(menu).toBeVisible();
