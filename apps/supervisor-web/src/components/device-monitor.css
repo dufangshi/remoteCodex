@@ -29,8 +29,9 @@
 .device-monitor-button:hover {
   background: var(--theme-hover);
 }
-.matter-sidebar-footer .device-monitor-button {
-  margin: 0 0 10px;
+.thread-ui-shell .matter-workbench .matter-rail .device-monitor-button {
+  width: 41px;
+  height: 40px;
 }
 .device-monitor-details {
   min-width: 0;

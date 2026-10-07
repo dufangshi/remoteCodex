@@ -89,9 +89,18 @@ test('device monitor shows cores, memory and real watts, and marks failed sample
           .locator('.matter-topbar')
           .getByRole('button', { name: 'Device monitor' })
       : page
-          .locator('.matter-sidebar')
+          .locator('.matter-rail-bottom')
           .getByRole('button', { name: 'Device monitor' }),
   ).toBeVisible();
+  if (!mobile) {
+    await page.getByRole('button', { name: 'Toggle shortcuts sidebar' }).click();
+    await expect(monitor).toBeVisible();
+    const settings = page.locator('.matter-rail-bottom').getByRole('button', { name: 'Open settings' });
+    await expect(settings).toBeVisible();
+    const monitorBox = await monitor.boundingBox();
+    const settingsBox = await settings.boundingBox();
+    expect(monitorBox!.y + monitorBox!.height).toBeLessThanOrEqual(settingsBox!.y);
+  }
   await monitor.click();
   const dialog = page.getByRole('dialog', { name: 'Device monitor' });
   await expect(dialog).toContainText('WSL environment');

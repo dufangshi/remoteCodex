@@ -812,6 +812,7 @@ export function AppShellSettingsDialog({
         className={`min-h-0 flex-1 overflow-y-auto ${embedded ? '!overflow-visible !flex-none p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
       >
         <div className="divide-y divide-[var(--theme-border)]">
+          {section === 'preferences' && <ComposerShortcutSettings />}
           {section === 'preferences' ? (
             <fieldset className="py-5">
               <legend className="text-sm font-semibold text-[var(--theme-fg)]">
@@ -851,7 +852,6 @@ export function AppShellSettingsDialog({
             </fieldset>
           ) : null}
 
-          {section === 'preferences' && <ComposerShortcutSettings />}
           {section === 'preferences' && (
             <section className="py-5">
               <label htmlFor="settings-font-size" className="block text-sm font-semibold">Text size</label>

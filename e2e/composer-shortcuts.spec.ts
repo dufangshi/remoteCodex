@@ -62,6 +62,13 @@ test('account shortcuts sync across devices and browsers and steer without an ex
       .getByRole('button', { name: 'Open settings', exact: true })
       .click();
     await page.getByRole('tab', { name: 'Preferences', exact: true }).click();
+    const panel = page.getByRole('tabpanel');
+    await expect(panel.getByRole('group', { name: 'Message shortcuts', exact: true })).toBeVisible();
+    await expect(panel.getByRole('radio', { name: /^Ctrl\+Enter to send/ })).toBeEnabled();
+    await expect(panel.getByRole('radio', { name: /^Enter to send/ })).toBeEnabled();
+    const shortcuts = await panel.getByRole('group', { name: 'Message shortcuts', exact: true }).boundingBox();
+    const appearance = await panel.getByRole('group', { name: 'Appearance', exact: true }).boundingBox();
+    expect(shortcuts!.y + shortcuts!.height).toBeLessThanOrEqual(appearance!.y);
   };
   try {
     start('relay', {

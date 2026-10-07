@@ -32,7 +32,8 @@ domains and handles one counter wrap; long gaps re-prime rather than guess wraps
 The app does not install drivers, change sensor permissions or ask for a password.
 macOS can use an already-authorized noninteractive `sudo -n` for powermetrics.
 
-The Web button appears in the mobile topbar and desktop sidebar. Opening it shows
+The Web button appears in the mobile topbar and desktop icon rail above Settings,
+remaining visible when the chat sidebar is collapsed. Opening it shows
 per-core bars, used/total RAM, swap and available GPU/power readings. A failed or
 stale sample replaces button percentages with dashes; the details retain the last
 sample with its age. Hidden browser tabs pause polling. Older Supervisors display
