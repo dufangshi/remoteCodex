@@ -36,6 +36,63 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
+test('overlapping live steps stay stable on expansion and an idle reply explains its pending completion', async ({ page, request }) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const prompt = { id: 'prompt', kind: 'userMessage', text: 'Check progress' };
+  const reply = { id: 'reply', kind: 'agentMessage', text: 'Progress report received', updatedAt: startedAt };
+  const commands = [
+    { id: 'command-one', kind: 'commandExecution', text: 'read inbox', status: 'completed', updatedAt: startedAt },
+    { id: 'command-two', kind: 'commandExecution', text: 'read report', status: 'completed', updatedAt: startedAt },
+  ];
+  let count = 1;
+  let completed = false;
+  let socket: WebSocketRoute | undefined;
+  const turn = { id: 'coalesced-turn', status: 'inProgress', startedAt, items: [prompt, reply] };
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, current => {
+    socket = current;
+    current.send(JSON.stringify({ type: 'supervisor.connected' }));
+    current.onMessage(() => current.send(JSON.stringify({ type: 'supervisor.pong' })));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: {
+    ...detail, totalTurnCount: 1, activeSubagents: [],
+    thread: { ...detail.thread, status: completed ? 'idle' : 'running', activeTurnId: completed ? null : turn.id },
+    turns: [{ ...turn, status: completed ? 'completed' : 'inProgress', hasDeferredItems: true, deferredItemCount: count }],
+  } }));
+  await page.route(`**/api/threads/${id}/turns/${turn.id}/detail`, route => route.fulfill({ json: {
+    ...turn, items: [prompt, ...commands.slice(0, count), reply], hasDeferredItems: false, deferredItemCount: 0,
+  } }));
+  const emit = (type: string, payload = {}) => socket!.send(JSON.stringify({ type, threadId: id, timestamp: startedAt, payload }));
+  await page.goto(`/threads/${id}`);
+  const summary = page.locator('.thread-graph-worked-summary');
+  const steps = summary.locator('.thread-execution-step-count');
+  await expect(steps).toHaveText('1 steps');
+  await expect(page.locator('.thread-waiting-for-finish')).toHaveText('Waiting for turn to finish');
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
+  emit('thread.item.completed', { turnId: turn.id, item: commands[0] });
+  await expect(steps).toHaveText('1 steps');
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(page.getByText('read inbox', { exact: true })).toBeVisible();
+  await expect(steps).toHaveText('1 steps');
+  await summary.getByRole('button', { name: /Collapse turn 1$/ }).click();
+  count = 2;
+  emit('thread.item.completed', { turnId: turn.id, item: commands[1] });
+  emit('thread.updated');
+  await expect(steps).toHaveText('2 steps');
+  await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
+  await expect(page.getByText('read report', { exact: true })).toBeVisible();
+  await expect(steps).toHaveText('2 steps');
+  await page.reload();
+  await expect(steps).toHaveText('2 steps');
+  await expect(page.locator('.thread-waiting-for-finish')).toBeVisible();
+  completed = true;
+  emit('thread.turn.completed', { turnId: turn.id, status: 'completed' });
+  emit('thread.updated');
+  await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+});
+
 test('background agents remain visible after the main reply, survive reload, and clear on completion', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();

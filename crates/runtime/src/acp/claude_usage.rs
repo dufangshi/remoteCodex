@@ -132,6 +132,17 @@ impl ClaudeUsageReader {
         self.background.active()
     }
 
+    pub fn expect_prompt(&mut self, prompt: &str) {
+        self.completion.expect_prompt(prompt);
+    }
+
+    pub fn completed_queued_command(&self, delivered_text: Option<&str>) -> Option<&str> {
+        if !self.complete_tail || !self.background.active().is_empty() {
+            return None;
+        }
+        self.completion.completed_queued_command(delivered_text)
+    }
+
     fn record(&mut self, entry: &Value) -> Option<Value> {
         let at = entry["timestamp"].as_str()?;
         if entry["sessionId"] != self.session

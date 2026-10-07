@@ -97,6 +97,7 @@ struct LiveSession {
     /// Prompt bootstrap is scoped to the loaded process and product identity.
     context_thread_id: Option<String>,
     active_subagents: HashMap<String, ThreadSubagentDto>,
+    claude_lifecycle: super::claude_lifecycle::ClaudeLifecycle,
     upstream_revision: Option<Vec<u8>>,
 }
 
@@ -364,14 +365,14 @@ impl AcpRuntime {
                 process
                     .request(
                         "session/load",
-                        json!({ "sessionId": existing, "cwd": cwd, "mcpServers": [] }),
+                        json!({ "sessionId": existing, "cwd": cwd, "mcpServers": [], "_meta": adapter.session_load_meta() }),
                     )
                     .await?
             } else if negotiated.resume {
                 process
                     .request(
                         "session/resume",
-                        json!({ "sessionId": existing, "cwd": cwd, "mcpServers": [] }),
+                        json!({ "sessionId": existing, "cwd": cwd, "mcpServers": [], "_meta": adapter.session_load_meta() }),
                     )
                     .await?
             } else {
@@ -459,6 +460,7 @@ impl AcpRuntime {
             model,
             reasoning_effort,
             active: None,
+            claude_lifecycle: Default::default(),
             operation: Arc::new(Mutex::new(())),
             config_options: config_options.clone(),
             harness_state,
@@ -1710,7 +1712,7 @@ impl AgentRuntime for AcpRuntime {
             });
         }
         let mut updates = self.inner.updates.subscribe();
-        {
+        let claude_sequence = {
             let mut sessions = self.inner.sessions.lock().await;
             let live = sessions
                 .get_mut(&input.provider_session_id)
@@ -1724,12 +1726,19 @@ impl AgentRuntime for AcpRuntime {
                 bus: bus.clone(),
             });
             live.active_subagents.clear();
-        }
+            live.claude_lifecycle.begin_turn()
+        };
         let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
         let mut usage_reader =
             (adapter_id == "codex").then(|| super::usage::CodexUsageReader::new(&session_id));
         let mut claude_usage_reader = (adapter_id == "claude")
             .then(|| super::claude_usage::ClaudeUsageReader::new(&session_id));
+        if let Some(reader) = claude_usage_reader
+            .as_mut()
+            .filter(|_| input.images.is_empty())
+        {
+            reader.expect_prompt(&prompt);
+        }
         let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
         let prompt_rpc = process.request(
             "session/prompt",
@@ -1753,6 +1762,8 @@ impl AgentRuntime for AcpRuntime {
         let mut cancel_deadline = tokio::time::Instant::now();
         let mut discard_session = false;
         let mut pending_claude_error = None;
+        let mut coalesced_ready_since = None;
+        let mut draining_coalesced = false;
         let mut outcome = loop {
             tokio::select! {
                 biased;
@@ -1786,7 +1797,7 @@ impl AgentRuntime for AcpRuntime {
                             if let Some(usage) = response.get("usage").filter(|v| v.is_object() && !matches!(adapter_id.as_str(), "codex" | "copilot")) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage.clone(), input.hidden);
                             }
-                            if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") {
+                            if response.get("stopReason").and_then(Value::as_str) == Some("cancelled") && !draining_coalesced {
                                 cancel.cancel();
                                 cancel_sent = true;
                             }
@@ -1800,6 +1811,11 @@ impl AgentRuntime for AcpRuntime {
                             if cancel_sent || cancel.is_cancelled() {
                                 discard_session = process.exited().await.unwrap_or(true);
                                 break TurnOutcome::Interrupted;
+                            }
+                            if draining_coalesced && serde_json::from_str::<Value>(&err.to_string()).ok()
+                                .is_some_and(|error| error["code"] == -32800) {
+                                prompt_done = true;
+                                continue;
                             }
                             if adapter_id == "claude"
                                 && super::claude_completion::incomplete_tool_ids(&err.to_string()).is_some()
@@ -1836,6 +1852,34 @@ impl AgentRuntime for AcpRuntime {
                             emit_mapped(&bus, &input.thread_id, &input.turn_id,
                                 MappedUpdate { active_subagents: Some(subagents), ..Default::default() }, input.hidden);
                         }
+                        if !prompt_done && !cancel_sent && !draining_coalesced {
+                            let ready = match reader.completed_queued_command(mapper.final_agent_text()) {
+                                Some(id) if mapper.active_subagents().is_empty() => self.inner.sessions.lock().await
+                                    .get(&input.provider_session_id).is_some_and(|live|
+                                        live.process.id == process.id && live.claude_lifecycle.completed_coalesced_command(id, claude_sequence)),
+                                _ => false,
+                            };
+                            if ready {
+                                let since = coalesced_ready_since.get_or_insert_with(tokio::time::Instant::now);
+                                if since.elapsed() >= Duration::from_secs(3) {
+                                    // This command already ran in an autonomous SDK cycle.
+                                    // Drain the stranded ACP request and await its response;
+                                    // never resubmit work or cancel a live background task.
+                                    // Serialize the last check/write against steering so
+                                    // new user input cannot be swept into housekeeping.
+                                    let mut sessions = self.inner.sessions.lock().await;
+                                    if !cancel.is_cancelled() && sessions.get_mut(&input.provider_session_id).is_some_and(|live|
+                                        live.process.id == process.id && reader.completed_queued_command(mapper.final_agent_text())
+                                            .is_some_and(|id| live.claude_lifecycle.begin_drain(id, claude_sequence))) {
+                                        tracing::warn!(session_id = %session_id, "Draining Claude ACP prompt completed in an autonomous cycle");
+                                        if let Err(error) = process.notify("session/cancel", json!({"sessionId":session_id})).await {
+                                            break TurnOutcome::Failed(crate::actor::ExecutionUncertain(error.to_string()).into());
+                                        }
+                                        draining_coalesced = true;
+                                    }
+                                }
+                            } else { coalesced_ready_since = None; }
+                        }
                     }
                 }
                 recv = updates.recv() => {
@@ -1847,6 +1891,8 @@ impl AgentRuntime for AcpRuntime {
                                     continue;
                                 }
                             }
+                            coalesced_ready_since = None;
+                            if update["_remoteMethod"] == "_claude/sdkMessage" { continue; }
                             if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
                             }
@@ -2273,6 +2319,7 @@ impl AgentRuntime for AcpRuntime {
                 model: model.clone(),
                 reasoning_effort: effort.clone(),
                 active: None,
+                claude_lifecycle: Default::default(),
                 operation: Arc::new(Mutex::new(())),
                 config_options,
                 harness_state,
@@ -2293,9 +2340,9 @@ impl AgentRuntime for AcpRuntime {
 
     async fn send_input(&self, session_id: &str, turn_id: &str, prompt: &str) -> Result<()> {
         let (process, provider_session_id) = {
-            let sessions = self.inner.sessions.lock().await;
+            let mut sessions = self.inner.sessions.lock().await;
             let live = sessions
-                .get(session_id)
+                .get_mut(session_id)
                 .ok_or_else(|| anyhow!("ACP session is not running"))?;
             if !live.negotiated.steer {
                 bail!("this harness does not support steering");
@@ -2306,6 +2353,9 @@ impl AgentRuntime for AcpRuntime {
                 .is_some_and(|active| active.turn_id == turn_id)
             {
                 bail!("conflict: The active turn finished before this prompt could be steered.");
+            }
+            if live.adapter_id == "claude" && !live.claude_lifecycle.steering_started() {
+                bail!("conflict: The active turn is finishing; send this prompt as a new turn.");
             }
             (live.process.clone(), live.session_id.clone())
         };
@@ -2558,6 +2608,14 @@ fn spawn_mux(
                 Some(mut update) = updates.recv() => {
                     if !adapter.accepts_notification(update["_remoteMethod"].as_str().unwrap_or("session/update")) { continue; }
                     update["_remoteProcessId"] = json!(process.id);
+                    if update["_remoteMethod"] == "_claude/sdkMessage" {
+                        if let Some(sid) = update["sessionId"].as_str() {
+                            if let Some(live) = inner.sessions.lock().await.values_mut()
+                                .find(|live| live.process.id == process.id && live.session_id == sid) {
+                                live.claude_lifecycle.record(&update["message"]);
+                            }
+                        }
+                    }
                     if update["update"]["sessionUpdate"] == "available_commands_update" {
                         if let Some(sid) = update["sessionId"].as_str() {
                             let mut commands = inner.commands.lock().await;

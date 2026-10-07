@@ -90,6 +90,9 @@ pub trait HarnessAdapter: Send + Sync {
     fn session_new_meta(&self, _reasoning_effort: Option<&str>) -> Value {
         json!({})
     }
+    fn session_load_meta(&self) -> Value {
+        json!({})
+    }
     fn project_session(&self, _response: &Value) -> Option<HarnessProjection> {
         None
     }
@@ -187,6 +190,18 @@ pub struct ClaudeAdapter;
 impl HarnessAdapter for ClaudeAdapter {
     fn id(&self) -> &'static str {
         "claude"
+    }
+    fn session_new_meta(&self, _reasoning_effort: Option<&str>) -> Value {
+        // Request lifecycle bookends only; never duplicate streamed assistant text.
+        json!({"claudeCode":{"emitRawSDKMessages":[
+            {"type":"command_lifecycle"}, {"type":"result"}, {"type":"system"}
+        ]}})
+    }
+    fn accepts_notification(&self, method: &str) -> bool {
+        matches!(method, "session/update" | "_claude/sdkMessage")
+    }
+    fn session_load_meta(&self) -> Value {
+        self.session_new_meta(None)
     }
     fn patch_capabilities(
         &self,
