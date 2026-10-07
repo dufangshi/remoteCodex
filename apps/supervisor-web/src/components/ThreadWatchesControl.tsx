@@ -25,9 +25,11 @@ interface Watch {
     | 'active'
     | 'unconfirmed'
     | 'sessionEnded'
+    | 'notScheduled'
     | 'deleted'
     | 'expired'
     | 'completed';
+  statusCheckedAt?: string | null;
   // Older Supervisors return the schedule without usage statistics.
   triggerCount?: number | null;
   ambiguousTriggerCount?: number;
@@ -44,6 +46,7 @@ const statusLabel: Record<Watch['status'], string> = {
   active: 'Active in current session',
   unconfirmed: 'Status unconfirmed',
   sessionEnded: 'Session ended',
+  notScheduled: 'No longer scheduled',
   deleted: 'Cancelled',
   expired: 'Expired',
   completed: 'Completed',
@@ -70,6 +73,11 @@ function WatchCard({ watch: w }: { watch: Watch }) {
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
             {statusLabel[w.status]}
           </p>
+          {w.status === 'unconfirmed' && (
+            <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+              This recorded watch may have ended. Its live schedule has not been confirmed.
+            </p>
+          )}
         </div>
         <div className="shrink-0 text-sm" aria-label="Watch total cost">
           {w.priceEstimate || w.tokenUsage ? (
@@ -110,6 +118,12 @@ function WatchCard({ watch: w }: { watch: Watch }) {
                 {dateLabel(w.lastTriggeredAt)}
               </time>
             </dd>
+          </>
+        )}
+        {w.statusCheckedAt && (
+          <>
+            <dt className="text-[var(--theme-fg-muted)]">Status checked</dt>
+            <dd><time dateTime={w.statusCheckedAt}>{dateLabel(w.statusCheckedAt)}</time></dd>
           </>
         )}
       </dl>

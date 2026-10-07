@@ -319,6 +319,14 @@ impl TurnMapper {
         items
     }
 
+    pub(super) fn completed_tool_ids(&self) -> Vec<String> {
+        self.tools
+            .iter()
+            .filter(|tool| tool.status.as_deref() == Some("completed"))
+            .map(|tool| tool.id.clone())
+            .collect()
+    }
+
     pub(super) fn final_agent_text(&self) -> Option<&str> {
         self.agent_segments
             .last()

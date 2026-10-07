@@ -75,6 +75,26 @@ fn timestamp(value: Option<&str>) -> Option<i64> {
         .map(|at| at.timestamp_millis())
 }
 
+fn tool_completed(item: &ThreadHistoryItemDto) -> bool {
+    // Older runtimes overwrote tool status with the enclosing turn's status.
+    // The mapper-generated header retains the actual tool outcome. Read only
+    // the header before Input, never quoted statuses in a prompt/result.
+    let header = item
+        .detail_text
+        .as_deref()
+        .unwrap_or("")
+        .split("Input:\n")
+        .next()
+        .unwrap_or("");
+    match header
+        .lines()
+        .find_map(|line| line.strip_prefix("Status: "))
+    {
+        Some(status) => status == "completed",
+        None => item.status.as_deref() == Some("completed"),
+    }
+}
+
 struct WatchEntry {
     value: Value,
     start: Option<i64>,
@@ -90,6 +110,7 @@ struct WatchEntry {
 fn watch_entries(
     records: Vec<(String, Option<String>)>,
     current: Option<&str>,
+    current_started: Option<&str>,
     turns: &[ThreadTurnDto],
     prompts: &HashMap<String, String>,
     thread_id: &str,
@@ -98,18 +119,48 @@ fn watch_entries(
     let mut entries = Vec::<WatchEntry>::new();
     for (raw, instance) in records {
         let item: ThreadHistoryItemDto = serde_json::from_str(&raw)?;
-        if item.status.as_deref() != Some("completed") {
+        if !tool_completed(&item) {
             continue;
         }
         let Some((input, result)) = item.detail_text.as_deref().and_then(input_and_result) else {
             continue;
         };
         let created = timestamp(item.created_at.as_deref());
+        if item.text == "CronList" {
+            if result.trim() == "No scheduled jobs." {
+                for entry in entries.iter_mut().filter(|entry| {
+                    matches!(
+                        entry.value["status"].as_str(),
+                        Some("active" | "unconfirmed")
+                    )
+                }) {
+                    entry.value["status"] = json!("notScheduled");
+                    entry.value["statusCheckedAt"] = json!(item.created_at);
+                    entry.end = match (created, entry.end) {
+                        (Some(at), Some(expiry)) => Some(at.min(expiry)),
+                        (Some(at), None) => Some(at),
+                        (None, end) => end,
+                    };
+                }
+            }
+            continue;
+        }
         if item.text == "CronDelete" {
+            let Some(id) = input["id"].as_str() else {
+                continue;
+            };
+            let result = result.trim();
+            if result != format!("Cancelled job {id}.")
+                && result != format!("Deleted job {id}.")
+                && !matches!(result, "Deleted job" | "Deleted job.")
+            {
+                continue;
+            }
             for entry in entries.iter_mut().filter(|entry| {
                 entry.value["id"] == input["id"] && entry.value["status"] != "deleted"
             }) {
                 entry.value["status"] = json!("deleted");
+                entry.value["statusCheckedAt"] = json!(item.created_at);
                 // Missing cancellation timing cannot safely establish a lifetime.
                 entry.end = match (created.or(entry.start), entry.end) {
                     (Some(cancelled), Some(expiry)) => Some(cancelled.min(expiry)),
@@ -149,16 +200,25 @@ fn watch_entries(
             });
         let status = if expiry.is_some_and(|at| at.timestamp_millis() <= now) {
             "expired"
+        } else if input["durable"] != true
+            && created
+                .zip(timestamp(current_started))
+                .is_some_and(|(created, started)| created < started)
+        {
+            "sessionEnded"
         } else {
             match (instance.as_deref(), current) {
                 (Some(a), Some(b)) if a == b => "active",
-                (Some(_), _) => "sessionEnded",
+                (Some(_), _) if input["durable"] != true => "sessionEnded",
                 _ => "unconfirmed",
             }
         };
         entries.push(WatchEntry {
             value: json!({"id":job,"cron":cron,"schedule":schedule_label(cron,recurring),"prompt":prompt,"recurring":recurring,"createdAt":item.created_at,"expiresAt":expiry.map(|at|at.to_rfc3339()),"status":status,"lastTriggeredAt":null}),
-            start: created, end: expiry.map(|at|at.timestamp_millis()),
+            start: created, end: match (status, created.zip(timestamp(current_started)), expiry.map(|at|at.timestamp_millis())) {
+                ("sessionEnded", Some((created, started)), expiry) if created < started => Some(expiry.map_or(started, |expiry| expiry.min(started))),
+                (_, _, expiry) => expiry,
+            },
             triggers: 0, ambiguous: 0, usage_count: 0, priced_count: 0,
             tokens: crate::usage::Tokens::default(),
             price: json!({"currency":"USD","inputUsd":0.0,"cachedInputUsd":0.0,"cacheWriteInputUsd":0.0,"outputUsd":0.0,"totalUsd":0.0}),
@@ -279,10 +339,17 @@ impl Supervisor {
         } else {
             None
         };
+        let current_started = if let Some(session) = thread.provider_session_id.as_deref() {
+            self.runtime(thread.provider)?
+                .session_instance_started_at(session)
+                .await
+        } else {
+            None
+        };
         let records = self.db.with(|conn| {
             let mut stmt = conn.prepare("SELECT h.item_json,k.value FROM thread_history_items h
                 LEFT JOIN kv k ON k.key='turn-process:'||h.turn_id
-                WHERE h.thread_id=?1 AND json_extract(h.item_json,'$.text') IN ('CronCreate','CronDelete')
+                WHERE h.thread_id=?1 AND json_extract(h.item_json,'$.text') IN ('CronCreate','CronDelete','CronList')
                 ORDER BY h.created_at,h.rowid")?;
             let rows = stmt.query_map([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -300,6 +367,7 @@ impl Supervisor {
         let mut watches = watch_entries(
             records,
             current.as_deref(),
+            current_started.as_deref(),
             &turns,
             &prompts,
             id,
@@ -345,6 +413,74 @@ mod tests {
             "detailText":format!("Input:\n{}\n\nResult:\nDeleted job",json!({"id":id}))}).to_string(), None)
     }
 
+    #[test]
+    fn successful_cancel_in_interrupted_turn_and_empty_list_reconcile_legacy_watches() {
+        let at = "2030-01-01T00:02:00Z";
+        let deleted = json!({"id":"cancel","createdAt":at,"kind":"toolCall","text":"CronDelete","status":"interrupted",
+            "detailText":"Tool: CronDelete\n\nStatus: completed\n\nInput:\n{\"id\":\"old\"}\n\nResult:\nCancelled job old."}).to_string();
+        let list = json!({"id":"list","createdAt":at,"kind":"toolCall","text":"CronList","status":"completed",
+            "detailText":"Input:\n{}\n\nResult:\nNo scheduled jobs."}).to_string();
+        let watches = summarize(
+            vec![
+                create("old", Some("2030-01-01T00:00:00Z"), true),
+                (deleted, None),
+                create("missing", Some("2030-01-01T00:00:01Z"), true),
+                (list, None),
+            ],
+            vec![turn("t:scheduled:after", "2030-01-01T00:03:00Z", true)],
+        );
+        assert_eq!(watches[0]["status"], "deleted");
+        assert_eq!(watches[1]["status"], "notScheduled");
+        assert_eq!(watches[1]["statusCheckedAt"], at);
+        assert_eq!(watches[0]["triggerCount"], 0);
+        assert_eq!(watches[1]["triggerCount"], 0);
+        // A pending or failed cancellation, or a completed tool returning an
+        // error, must never prove that the schedule disappeared.
+        for (status, result) in [
+            ("pending", "Cancelled job old."),
+            ("failed", "Cancelled job old."),
+            ("completed", "Job not found"),
+        ] {
+            let bad = json!({"id":"bad-cancel","kind":"toolCall","text":"CronDelete","status":"interrupted","createdAt":at,
+                "detailText":format!("Status: {status}\n\nInput:\n{{\"id\":\"old\"}}\n\nResult:\n{result}")});
+            let values = summarize(
+                vec![
+                    create("old", Some("2030-01-01T00:00:00Z"), true),
+                    (bad.to_string(), None),
+                ],
+                vec![],
+            );
+            assert_eq!(values[0]["status"], "unconfirmed");
+        }
+    }
+
+    #[test]
+    fn process_start_proves_old_session_only_watch_ended_without_guessing_current_or_durable_jobs()
+    {
+        let mut durable: Value =
+            serde_json::from_str(&create("durable", Some("2030-01-01T00:00:00Z"), true).0).unwrap();
+        durable["detailText"] = json!("Input:\n{\"cron\":\"* * * * *\",\"prompt\":\"Read inbox\",\"recurring\":true,\"durable\":true}\n\nResult:\nScheduled recurring job durable (* * * * *).");
+        let values = watch_entries(
+            vec![
+                create("old", Some("2030-01-01T00:00:00Z"), true),
+                create("unknown", None, true),
+                create("new", Some("2030-01-01T01:01:00Z"), true),
+                (durable.to_string(), None),
+            ],
+            Some("current"),
+            Some("2030-01-01T01:00:00Z"),
+            &[],
+            &HashMap::new(),
+            "t",
+            timestamp(Some("2030-01-02T00:00:00Z")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values[0]["status"], "sessionEnded");
+        for value in &values[1..] {
+            assert_eq!(value["status"], "unconfirmed");
+        }
+    }
+
     fn turn(id: &str, at: &str, priced: bool) -> ThreadTurnDto {
         serde_json::from_value(json!({"id":id,"startedAt":at,"status":"completed","error":null,"items":[],
             "tokenUsage":{"total":{"inputTokens":100,"outputTokens":20,"cachedInputTokens":40,"cacheWriteInputTokens":10,"reasoningOutputTokens":5,"totalTokens":120}},
@@ -359,6 +495,7 @@ mod tests {
             .collect();
         watch_entries(
             records,
+            None,
             None,
             &turns,
             &prompts,

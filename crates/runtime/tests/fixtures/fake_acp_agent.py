@@ -172,6 +172,13 @@ def handle(msg):
                 "sessionId": sid, "update": {"sessionUpdate": "agent_message_chunk",
                 "content": {"type": "text", "text": "waiting"}}}})
             return
+        if text == "cancel-after-completed-tool":
+            for update in [
+                {"sessionUpdate":"tool_call","toolCallId":"finished","title":"CronDelete","kind":"other","status":"completed","rawInput":{"id":"job"},"rawOutput":"Cancelled job job."},
+                {"sessionUpdate":"tool_call","toolCallId":"unfinished","title":"Bash","kind":"execute","status":"in_progress"}]:
+                send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,"update":update}})
+            send({"jsonrpc":"2.0","id":req_id,"result":{"stopReason":"cancelled"}})
+            return
         if "rpc-error" in text:
             send(
                 {

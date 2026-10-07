@@ -98,6 +98,38 @@ async fn prompt_rpc_error_is_failed_and_clears_active_state() {
 }
 
 #[tokio::test]
+async fn completed_tools_keep_their_results_when_the_enclosing_prompt_is_cancelled() {
+    let dir = tempdir().unwrap();
+    let (runtime, session) = start_runtime(dir.path(), &which_python()).await;
+    let items = runtime
+        .start_turn(
+            turn_input(&session, "cancel-after-completed-tool", "cancelled-turn"),
+            EventBus::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.id == "finished")
+            .unwrap()
+            .status
+            .as_deref(),
+        Some("completed")
+    );
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.id == "unfinished")
+            .unwrap()
+            .status
+            .as_deref(),
+        Some("interrupted")
+    );
+}
+
+#[tokio::test]
 async fn process_exit_leaves_completion_unconfirmed() {
     let python = which_python();
     let dir = tempdir().unwrap();

@@ -73,7 +73,7 @@ with sqlite3.connect(sys.argv[1]) as conn:
   for watch in v['watches']:
     item=dict(id=watch['id'],createdAt=watch['createdAt'],kind='toolCall',text='CronCreate',status='completed',detailText='Input:\\n'+json.dumps(dict(cron=watch['cron'],prompt=watch['prompt'],recurring=True))+'\\n\\nResult:\\nScheduled recurring job '+watch['id']+' (* * * * *). Auto-expires after 7 days.')
     conn.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(v['id']+watch['id'],v['id'],'owner',watch['id'],json.dumps(item),watch['createdAt'],watch['createdAt']))
-  cancelled=dict(id='delete',createdAt=v['cancelledAt'],kind='toolCall',text='CronDelete',status='completed',detailText='Input:\\n{"id":"job-past"}\\n\\nResult:\\nDeleted job')
+  cancelled=dict(id='delete',createdAt=v['cancelledAt'],kind='toolCall',text='CronDelete',status='interrupted',detailText='Status: completed\\n\\nInput:\\n{"id":"job-past"}\\n\\nResult:\\nDeleted job')
   conn.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(v['id']+'delete',v['id'],'owner','delete',json.dumps(cancelled),v['cancelledAt'],v['cancelledAt']))
   for n, at in enumerate(v['turnTimes']):
     tid=v['id']+(':scheduled:'+str(n) if n<2 else ':manual')
@@ -206,4 +206,46 @@ with sqlite3.connect(sys.argv[1]) as conn:
     dialog.locator('dd').filter({ hasText: /^Unavailable$/ }),
   ).toBeVisible();
   await expect(dialog.getByText(prompt, { exact: true })).toHaveCount(0);
+});
+
+test('watch polling moves legacy cancellations and empty scheduler snapshots into past watches', async ({ page, request }) => {
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, `watch-state-${randomUUID()}`);
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath } })).json();
+  const created = await (await request.post(`${base}/api/threads/start`, { data: {
+    workspaceId: workspace.id, provider: 'claude', model: 'default', approvalMode: 'yolo',
+  } })).json();
+  const id = created.id ?? created.thread.id;
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const insert = (items: unknown[]) => execFileSync('python3', ['-c', `
+import json,sqlite3,sys
+v=json.load(sys.stdin)
+with sqlite3.connect(sys.argv[1]) as c:
+ for item in v['items']:
+  c.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(v['id']+item['id'],v['id'],'owner',item['id'],json.dumps(item),item['createdAt'],item['createdAt']))
+`, process.env.E2E_DATABASE_URL!], { input: JSON.stringify({ id, items }) });
+  const tool = (key: string, name: string, input: unknown, result: string, status = 'completed') => ({
+    id: key, kind: 'toolCall', text: name, status, createdAt: at,
+    detailText: `Tool: ${name}\n\nStatus: completed\n\nInput:\n${JSON.stringify(input)}\n\nResult:\n${result}`,
+  });
+  insert([
+    tool('cancelled', 'CronCreate', { cron: '* * * * *', prompt: 'Old watch', recurring: true }, 'Scheduled recurring job cancelled (* * * * *).'),
+    tool('cancel', 'CronDelete', { id: 'cancelled' }, 'Cancelled job cancelled.', 'interrupted'),
+    tool('unknown', 'CronCreate', { cron: '* * * * *', prompt: 'Unconfirmed watch', recurring: true }, 'Scheduled recurring job unknown (* * * * *).'),
+  ]);
+  await page.clock.install();
+  await page.goto(`/threads/${id}`);
+  await page.getByRole('button', { name: 'Watches (1)', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Watches', exact: true });
+  await expect(dialog.getByText('Status unconfirmed', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('This recorded watch may have ended. Its live schedule has not been confirmed.', { exact: true })).toBeVisible();
+  await dialog.getByText('Past watches (1)', { exact: true }).click();
+  await expect(dialog.getByText('Cancelled', { exact: true })).toBeVisible();
+  insert([tool('list', 'CronList', {}, 'No scheduled jobs.')]);
+  await page.clock.fastForward(31_000);
+  await expect(dialog.getByText('Past watches (2)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('No longer scheduled', { exact: true })).toBeVisible();
+  await expect(page.locator('.matter-watches-toggle')).toHaveAttribute('aria-label', 'Watches (0)');
+  await expect(dialog.getByText('Status checked', { exact: true })).toHaveCount(2);
 });

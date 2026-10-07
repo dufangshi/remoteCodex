@@ -30,4 +30,4 @@ Targeted Claude native-reader and SDK lifecycle units, the existing abandoned-to
 
 Shared UI regressions cover overlapping deferred/live step snapshots, repeated expansion and polling, waiting/completed/background states. Two desktop Chromium flows cover expansion, reload, completion and background-agent visibility, including a 320px viewport.
 
-Treer Apple container verification is still pending: the Mac mini is reachable, but this workspace has no authenticated SSH identity for its `mac` account. Runtime publication must wait for that required recovery check; Web deployment is independent.
+The legacy Treer-only validation requirement was removed at the user's request. The isolated protocol and browser regressions above are the relevant validation for this change; runtime publication no longer depends on that machine. Web deployment is independent.

@@ -2017,9 +2017,13 @@ impl AgentRuntime for AcpRuntime {
                 Some(error.to_string()),
             ),
         };
+        let completed_tools = mapper.completed_tool_ids();
         let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
         for item in &mut items {
-            if item.status.as_deref() != Some("failed") && !abandoned_tools.contains(&item.id) {
+            if item.status.as_deref() != Some("failed")
+                && !abandoned_tools.contains(&item.id)
+                && !completed_tools.contains(&item.id)
+            {
                 item.status = Some(status.into());
             }
         }
@@ -2588,6 +2592,22 @@ impl AgentRuntime for AcpRuntime {
             .1;
         if live.process.connection_open().await {
             Some(live.process.id.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn session_instance_started_at(&self, session_id: &str) -> Option<String> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .iter()
+            .find(|(key, live)| {
+                session_ids_match(key, session_id)
+                    || session_ids_match(&live.session_id, session_id)
+            })?
+            .1;
+        if live.process.connection_open().await {
+            Some(live.process.started_at.clone())
         } else {
             None
         }

@@ -62,6 +62,7 @@ impl Drop for PendingGuard {
 pub struct AcpProcess {
     pub(crate) cli_env: Vec<(String, String)>,
     pub(crate) id: String,
+    pub(crate) started_at: String,
     stdin: Mutex<ChildStdin>,
     child: Arc<Mutex<Child>>,
     state: Arc<Mutex<RpcState>>,
@@ -180,6 +181,7 @@ impl AcpProcess {
             Self {
                 cli_env,
                 id: uuid::Uuid::new_v4().to_string(),
+                started_at: remote_codex_protocol::now_rfc3339(),
                 stdin: Mutex::new(stdin),
                 child,
                 state,
