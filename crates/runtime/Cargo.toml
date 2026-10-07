@@ -32,7 +32,7 @@ walkdir.workspace = true
 which.workspace = true
 zip.workspace = true
 tempfile = "3"
-sysinfo = { version = "=0.36.1", default-features = false, features = ["system"] }
+sysinfo = { version = "=0.36.1", default-features = false, features = ["system", "component"] }
 csv = "1"
 plist = "=1.7.0"
 

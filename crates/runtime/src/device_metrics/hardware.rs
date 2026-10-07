@@ -1,7 +1,6 @@
 use super::percent;
 use remote_codex_protocol::*;
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -10,6 +9,7 @@ use std::{
 pub(super) struct HardwareSnapshot {
     pub sampled_at: String,
     pub cpu_power: PowerReadingDto,
+    pub cpu_temperature: TemperatureReadingDto,
     pub gpus: Vec<GpuMetricsDto>,
     pub notes: Vec<String>,
 }
@@ -17,10 +17,10 @@ pub(super) struct HardwareSnapshot {
 #[derive(Default)]
 pub(super) struct HardwareCollector {
     cache: Option<(Instant, HardwareSnapshot)>,
-    energy: HashMap<PathBuf, (Instant, u64)>,
+    linux: super::linux::LinuxSensors,
 }
 
-fn unavailable(reason: &str) -> PowerReadingDto {
+pub(super) fn unavailable(reason: &str) -> PowerReadingDto {
     PowerReadingDto {
         watts: None,
         source: None,
@@ -28,7 +28,7 @@ fn unavailable(reason: &str) -> PowerReadingDto {
     }
 }
 
-fn power(watts: Option<f64>, source: &str) -> PowerReadingDto {
+pub(super) fn power(watts: Option<f64>, source: &str) -> PowerReadingDto {
     PowerReadingDto {
         watts,
         source: Some(source.into()),
@@ -41,7 +41,56 @@ fn number(s: &str) -> Option<f64> {
     (n.is_finite() && n >= 0.0).then_some(n)
 }
 
-async fn command(program: &str, args: &[&str]) -> Option<String> {
+pub(super) fn celsius(value: f64) -> Option<f64> {
+    (value.is_finite() && (-20.0..=150.0).contains(&value)).then_some(value)
+}
+
+fn temperature_unavailable(reason: &str) -> TemperatureReadingDto {
+    TemperatureReadingDto {
+        reason: Some(reason.into()),
+        ..Default::default()
+    }
+}
+
+fn native_temperature() -> TemperatureReadingDto {
+    let components = sysinfo::Components::new_with_refreshed_list();
+    let sensors: Vec<_> = components
+        .iter()
+        .filter_map(|c| {
+            let label = c.label();
+            // Do not mistake an SSD, battery, or generic SoC sensor for CPU die heat.
+            if !label.to_lowercase().contains("cpu")
+                && !label.starts_with("pACC")
+                && !label.starts_with("eACC")
+            {
+                return None;
+            }
+            Some(TemperatureSensorDto {
+                label: label.into(),
+                celsius: celsius(c.temperature()? as f64)?,
+            })
+        })
+        .collect();
+    let value = sensors.iter().map(|s| s.celsius).reduce(f64::max);
+    TemperatureReadingDto {
+        celsius: value,
+        source: value.map(|_| "macOS native SMC / IOHID · hottest CPU sensor".into()),
+        reason: value
+            .is_none()
+            .then(|| "No CPU temperature exposed by the native SMC / IOHID sensors".into()),
+        sensors,
+    }
+}
+
+pub(super) fn labeled_temperature(text: &str, label: &str) -> Option<f64> {
+    text.lines().find_map(|line| {
+        let mut parts = line.trim().strip_prefix(label)?.split_whitespace();
+        let value = parts.next()?.parse().ok().and_then(celsius)?;
+        matches!(parts.next()?, "C" | "°C").then_some(value)
+    })
+}
+
+pub(super) async fn command(program: &str, args: &[&str]) -> Option<String> {
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
         .kill_on_drop(true)
@@ -126,78 +175,11 @@ pub(super) fn energy_watts(
     Some(delta as f64 / 1_000_000.0 / seconds)
 }
 
-fn read_u64(path: impl AsRef<Path>) -> Option<u64> {
+pub(super) fn read_u64(path: impl AsRef<Path>) -> Option<u64> {
     std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 impl HardwareCollector {
-    fn linux_power(&mut self) -> PowerReadingDto {
-        let now = Instant::now();
-        let mut watts = 0.0;
-        let mut found = false;
-        let mut complete = true;
-        let mut seen = std::collections::HashSet::new();
-        // Only CPU package domains: summing package + core/DRAM domains double counts.
-        for entry in walkdir::WalkDir::new("/sys/class/powercap")
-            .follow_links(true)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
-            if entry.file_name() != "energy_uj" {
-                continue;
-            }
-            let Some(path) = entry.path().parent() else {
-                continue;
-            };
-            if !std::fs::read_to_string(path.join("name"))
-                .unwrap_or_default()
-                .trim()
-                .starts_with("package-")
-            {
-                continue;
-            }
-            let Ok(key) = path.canonicalize() else {
-                continue;
-            };
-            if !seen.insert(key.clone()) {
-                continue;
-            }
-            let Some(current) = read_u64(path.join("energy_uj")) else {
-                complete = false;
-                continue;
-            };
-            found = true;
-            let old = self.energy.insert(key, (now, current));
-            if let Some((at, previous)) = old {
-                if now.duration_since(at) > Duration::from_secs(30) {
-                    // After a long pause, multiple counter wraps cannot be recovered.
-                    complete = false;
-                    continue;
-                }
-                if let Some(value) = energy_watts(
-                    previous,
-                    current,
-                    read_u64(path.join("max_energy_range_uj")),
-                    now.duration_since(at).as_secs_f64(),
-                ) {
-                    watts += value;
-                } else {
-                    complete = false;
-                }
-            } else {
-                complete = false;
-            }
-        }
-        if found && complete {
-            power(Some(watts), "Linux RAPL · CPU package")
-        } else if found {
-            unavailable("CPU package power reading is incomplete or warming up")
-        } else {
-            unavailable("CPU package energy sensors are unavailable or require permission")
-        }
-    }
-
     pub async fn sample(&mut self) -> HardwareSnapshot {
         if let Some((at, sample)) = &self.cache {
             if at.elapsed() < Duration::from_secs(10) {
@@ -225,18 +207,39 @@ impl HardwareCollector {
                 match std::env::consts::OS {
                     "macos" => mac_sensors().await,
                     "windows" => windows_sensors().await,
-                    _ => (unavailable("CPU power sensors are unavailable"), vec![]),
+                    _ => (
+                        unavailable("CPU power sensors are unavailable"),
+                        TemperatureReadingDto::default(),
+                        vec![],
+                    ),
                 }
             })
             .await
-            .unwrap_or_else(|_| (unavailable("Hardware sensor probe timed out"), vec![]))
+            .unwrap_or_else(|_| {
+                (
+                    unavailable("Hardware sensor probe timed out"),
+                    temperature_unavailable("Hardware sensor probe timed out"),
+                    vec![],
+                )
+            })
         };
-        let (mut gpus, (mut cpu_power, native_gpus)) = tokio::join!(nvidia, native);
+        let (mut gpus, (mut cpu_power, mut cpu_temperature, native_gpus)) =
+            tokio::join!(nvidia, native);
         if gpus.is_empty() {
             gpus = native_gpus;
         }
         if cfg!(target_os = "linux") {
-            cpu_power = self.linux_power();
+            cpu_temperature = super::linux::temperature(
+                Path::new("/sys/class/hwmon"),
+                Path::new("/sys/class/thermal"),
+            );
+            cpu_power = self
+                .linux
+                .power(
+                    Path::new("/sys/class/powercap"),
+                    Path::new("/sys/class/hwmon"),
+                )
+                .await;
             gpus.extend(linux_gpus());
         }
         let notes = if gpus.is_empty() {
@@ -247,6 +250,7 @@ impl HardwareCollector {
         let sample = HardwareSnapshot {
             sampled_at: now_rfc3339(),
             cpu_power,
+            cpu_temperature,
             gpus,
             notes,
         };
@@ -314,13 +318,11 @@ fn linux_gpus() -> Vec<GpuMetricsDto> {
 
 pub(super) fn labeled_power(text: &str, label: &str) -> Option<f64> {
     text.lines().find_map(|line| {
-        let mut parts = line.trim().strip_prefix(label)?.split_whitespace();
-        let value = number(parts.next()?)?;
-        match parts.next()? {
-            "mW" => Some(value / 1000.0),
-            "W" => Some(value),
-            _ => None,
+        let reading = line.trim().strip_prefix(label)?.trim();
+        if let Some(value) = reading.strip_suffix("mW") {
+            return number(value).map(|n| n / 1000.0);
         }
+        number(reading.strip_suffix('W')?)
     })
 }
 
@@ -373,28 +375,35 @@ pub(super) fn parse_ioreg(bytes: &[u8]) -> Vec<GpuMetricsDto> {
     gpus
 }
 
-async fn mac_sensors() -> (PowerReadingDto, Vec<GpuMetricsDto>) {
-    let args = ["--samplers", "cpu_power,gpu_power", "-i", "1000", "-n", "1"];
+async fn mac_sensors() -> (PowerReadingDto, TemperatureReadingDto, Vec<GpuMetricsDto>) {
     let powermetrics = async {
-        if let Some(text) = command("/usr/bin/powermetrics", &args).await {
-            return Some(text);
-        }
-        // Read-only, noninteractive fallback if the administrator already allows
-        // it. Never request a password or change sudo/sensor permissions.
-        command(
-            "/usr/bin/sudo",
-            &[
+        let preferred = if cfg!(target_arch = "aarch64") {
+            "cpu_power,gpu_power"
+        } else {
+            "cpu_power,smc"
+        };
+        for samplers in [preferred, "cpu_power"] {
+            let args = ["--samplers", samplers, "-i", "1000", "-n", "1"];
+            if let Some(text) = command("/usr/bin/powermetrics", &args).await {
+                return Some(text);
+            }
+            // Only use administrator access that is already authorized. A missing
+            // sampler must not hide CPU watts that the cpu_power sampler supports.
+            let args = [
                 "-n",
                 "/usr/bin/powermetrics",
                 "--samplers",
-                "cpu_power,gpu_power",
+                samplers,
                 "-i",
                 "1000",
                 "-n",
                 "1",
-            ],
-        )
-        .await
+            ];
+            if let Some(text) = command("/usr/bin/sudo", &args).await {
+                return Some(text);
+            }
+        }
+        None
     };
     let registry = async {
         for class in ["IOAccelerator", "IOGPU"] {
@@ -409,12 +418,24 @@ async fn mac_sensors() -> (PowerReadingDto, Vec<GpuMetricsDto>) {
         }
         vec![]
     };
-    let (text, mut gpus) = tokio::join!(powermetrics, registry);
+    let temperature = tokio::task::spawn_blocking(native_temperature);
+    let (text, mut gpus, temperature) = tokio::join!(powermetrics, registry, temperature);
+    let mut temperature =
+        temperature.unwrap_or_else(|_| temperature_unavailable("Native temperature probe failed"));
     let Some(text) = text else {
-        return (unavailable("CPU power needs powermetrics permission"), gpus);
+        return (
+            unavailable("powermetrics is unavailable or needs administrator access for CPU power"),
+            temperature,
+            gpus,
+        );
     };
     let cpu = labeled_power(&text, "CPU Power:");
-    let package = labeled_power(&text, "Package Power:");
+    let package = labeled_power(&text, "Package Power:").or_else(|| {
+        labeled_power(
+            &text,
+            "Intel energy model derived package power (CPUs+GT+SA):",
+        )
+    });
     let cpu_power = power(
         cpu.or(package),
         if cpu.is_some() {
@@ -440,21 +461,34 @@ async fn mac_sensors() -> (PowerReadingDto, Vec<GpuMetricsDto>) {
             gpus[0].power = power(Some(watts), "macOS powermetrics · GPU");
         }
     }
-    (cpu_power, gpus)
+    if temperature.celsius.is_none() {
+        if let Some(value) = labeled_temperature(&text, "CPU die temperature:") {
+            temperature = TemperatureReadingDto {
+                celsius: Some(value),
+                source: Some("macOS powermetrics · CPU die".into()),
+                reason: None,
+                sensors: vec![],
+            };
+        }
+    }
+    (cpu_power, temperature, gpus)
 }
 
 const WINDOWS_SENSORS: &str = r#"
 $ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();
 $cpu=$null; try { $sensors=@(Get-CimInstance -Namespace root/LibreHardwareMonitor -ClassName Sensor | Where-Object { $_.SensorType -eq 'Power' -and $_.Name -eq 'CPU Package' }); if ($sensors.Count -gt 0) { $cpu=($sensors | Measure-Object Value -Sum).Sum } } catch {}
+$temp=$null; try { $ts=@(Get-CimInstance -Namespace root/LibreHardwareMonitor -ClassName Sensor | Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match '^CPU (Package|Tdie)$' }); if ($ts.Count -gt 0) { $temp=($ts | Measure-Object Value -Maximum).Maximum } } catch {}
 $gpu=@(); try {
  $engines=Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine;
  $sums=$engines | Group-Object { $_.Name -replace '^pid_\d+_','' -replace '_engtype_.*$','' } | ForEach-Object { @{ id=($_.Name -replace '_eng_.*$',''); load=($_.Group | Measure-Object UtilizationPercentage -Sum).Sum } };
  $gpu=@($sums | Group-Object id | ForEach-Object { @{ id=$_.Name; name=('GPU '+$_.Name); usagePercent=[Math]::Min(100,($_.Group | Measure-Object load -Maximum).Maximum) } });
 } catch {}
-@{cpuPowerWatts=$cpu;gpus=$gpu} | ConvertTo-Json -Depth 5 -Compress
+@{cpuPowerWatts=$cpu;cpuTemperatureCelsius=$temp;gpus=$gpu} | ConvertTo-Json -Depth 5 -Compress
 "#;
 
-pub(super) fn parse_windows(text: &str) -> (PowerReadingDto, Vec<GpuMetricsDto>) {
+pub(super) fn parse_windows(
+    text: &str,
+) -> (PowerReadingDto, TemperatureReadingDto, Vec<GpuMetricsDto>) {
     let value: serde_json::Value =
         serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default();
     let watts = value["cpuPowerWatts"]
@@ -481,10 +515,19 @@ pub(super) fn parse_windows(text: &str) -> (PowerReadingDto, Vec<GpuMetricsDto>)
             })
         })
         .collect();
-    (cpu, gpus)
+    let degrees = value["cpuTemperatureCelsius"].as_f64().and_then(celsius);
+    let temperature = TemperatureReadingDto {
+        celsius: degrees,
+        source: degrees.map(|_| "LibreHardwareMonitor · CPU package".into()),
+        reason: degrees
+            .is_none()
+            .then(|| "CPU temperature needs a hardware sensor provider".into()),
+        sensors: vec![],
+    };
+    (cpu, temperature, gpus)
 }
 
-async fn windows_sensors() -> (PowerReadingDto, Vec<GpuMetricsDto>) {
+async fn windows_sensors() -> (PowerReadingDto, TemperatureReadingDto, Vec<GpuMetricsDto>) {
     command(
         "powershell.exe",
         &[
@@ -497,7 +540,13 @@ async fn windows_sensors() -> (PowerReadingDto, Vec<GpuMetricsDto>) {
     )
     .await
     .map(|s| parse_windows(&s))
-    .unwrap_or_else(|| (unavailable("Hardware sensor query unavailable"), vec![]))
+    .unwrap_or_else(|| {
+        (
+            unavailable("Hardware sensor query unavailable"),
+            temperature_unavailable("Hardware sensor query unavailable"),
+            vec![],
+        )
+    })
 }
 
 pub(super) fn container_limits() -> Option<DeviceLimitsDto> {

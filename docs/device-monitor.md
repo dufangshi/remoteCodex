@@ -18,9 +18,9 @@ RAM. Containers expose OS-visible CPU/RAM plus available cgroup limits separatel
 
 | System  | CPU and RAM                             | Optional GPU/power sources                                                                                                             |
 | ------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Linux   | Native system counters, per logical CPU | NVIDIA driver; DRM utilization/VRAM and hwmon GPU watts; RAPL CPU package energy deltas                                                |
-| Windows | Native system counters, per logical CPU | NVIDIA driver; WDDM engine counters (busiest engine per adapter); CPU package watts from an existing LibreHardwareMonitor WMI provider |
-| macOS   | Native system counters, per logical CPU | IORegistry GPU utilization; `powermetrics` CPU/GPU watts if accessible                                                                 |
+| Linux   | Native system counters, per logical CPU | NVIDIA driver; DRM utilization/VRAM and hwmon GPU watts; RAPL CPU package energy deltas; coretemp/k10temp temperatures                                                |
+| Windows | Native system counters, per logical CPU | NVIDIA driver; WDDM engine counters (busiest engine per adapter); CPU package watts/temperature from an existing LibreHardwareMonitor WMI provider |
+| macOS   | Native system counters, per logical CPU | IORegistry GPU utilization; native SMC/IOHID CPU temperatures; `powermetrics` CPU/GPU watts if accessible                                                                 |
 | WSL     | Linux VM counters, per logical CPU      | WSL NVIDIA driver where supported; host power is usually unavailable                                                                   |
 
 Power is measured watts, never thermal design power or an estimate from CPU
@@ -31,6 +31,66 @@ with a reason. Zero remains a valid measured value. RAPL collects only package
 domains and handles one counter wrap; long gaps re-prime rather than guess wraps.
 The app does not install drivers, change sensor permissions or ask for a password.
 macOS can use an already-authorized noninteractive `sudo -n` for powermetrics.
+Linux can similarly read the specific energy counters through already-authorized
+`sudo -n /usr/bin/cat -- ...`; failed privileged probes back off for one minute.
+MSR and MMIO representations of the same `package-N` are alternatives, never
+added together. CPU hwmon power (`zenpower` / `fam15h_power`) is a fallback. The
+first/reopened readable RAPL sample warms for one second and returns watts.
+
+CPU temperature uses CPU-only hwmon drivers or CPU thermal zones on Linux;
+package/Tdie values take precedence over core values. SSD, Wi-Fi and generic ACPI
+thermal zones are excluded. macOS uses sysinfo’s native Intel SMC / Apple Silicon
+IOHID reader, with Intel powermetrics SMC temperatures as a fallback. Windows
+uses CPU Package/Tdie temperatures from LibreHardwareMonitor when installed.
+`cpuTemperature` includes Celsius, source/reason and individually labeled sensors;
+the UI collapses these details and shows unavailable reasons without requiring hover.
+
+## Linux sensor access
+
+RAPL `energy_uj` is commonly root-readable only. An interface being present does
+not imply the Supervisor account can read it. Neither switching from sysfs to
+MSR/perf nor installing `sensors` bypasses that permission. Do not grant blanket
+root access to the Supervisor, expose all MSRs, or use TDP/limits as measured power.
+
+An administrator can grant the Supervisor’s existing private group read access
+to just the CPU package counter. For the audited Ubuntu host (user/group
+`ubuntu`, package `intel-rapl:0`), the commands are:
+
+```bash
+sudo chgrp ubuntu /sys/class/powercap/intel-rapl:0/energy_uj
+sudo chmod g+r /sys/class/powercap/intel-rapl:0/energy_uj
+```
+
+For other hosts, first verify the service user/group and each zone’s `name`;
+authorize each physical package. These sysfs permissions reset on boot. For a
+persistent setup, an administrator can install a narrow udev rule (substitute
+the intended group) and trigger existing powercap devices:
+
+```udev
+ACTION=="add", SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", ATTR{name}=="package-*", RUN+="/usr/bin/chgrp ubuntu /sys%p/energy_uj", RUN+="/usr/bin/chmod g+r /sys%p/energy_uj"
+```
+
+Save under `/etc/udev/rules.d/99-remote-codex-rapl.rules`, then run
+`sudo udevadm control --reload-rules` and
+`sudo udevadm trigger --subsystem-match=powercap --action=add`. The collector
+retries ordinary reads on the next hardware sample, without a Supervisor restart.
+
+## macOS sensor access and limits
+
+`powermetrics` is an Apple-provided interface but normally requires administrator
+access. The collector chooses Apple Silicon CPU/GPU samplers or Intel CPU/SMC
+samplers, with a CPU-only fallback if optional samplers are absent. An existing,
+restricted sudo policy for the exact read-only command can permit the fallback;
+Remote Codex never prompts for a password or edits that policy. Native
+temperature availability varies by chip/macOS version, even with administrator
+access; absent sensors remain null. IOReport Energy Model can provide unprivileged
+Apple Silicon energy data on some versions, but is a private ABI; this collector
+does not claim support or infer watts from unrelated channels.
+
+References: [kernel powercap/RAPL](https://www.kernel.org/doc/html/latest/power/powercap/powercap.html),
+[kernel coretemp](https://www.kernel.org/doc/html/latest/hwmon/coretemp.html),
+[sysinfo native Apple sensor implementation](https://github.com/GuillaumeGomez/sysinfo/tree/v0.36.1/src/unix/apple/macos/component),
+[Netdata macOS sensor sources and privilege requirements](https://learn.netdata.cloud/docs/collecting-metrics/collectors/operating-systems/macos).
 
 The Web button appears in the mobile topbar and desktop icon rail above Settings,
 remaining visible when the chat sidebar is collapsed. Opening it shows
@@ -53,3 +113,16 @@ event for that turn. Socket pings, polling, expanding history and rerendering do
 not reset it. Initial/reloaded views fall back to recorded activity timestamps.
 Silence does not itself mark a turn stuck or finished; known background agents
 continue to have their own explicit status.
+
+
+## 2026-10-07 local investigation
+
+The Ubuntu host exposes `coretemp` package and physical-core readings without
+extra permissions (CPU package was 95–97°C during investigation). Both MSR and
+MMIO RAPL providers expose `package-0`; all energy counters are mode 0400 root.
+The Supervisor account is ubuntu, and noninteractive sudo is unavailable.
+The updated collector returns real CPU temperature and an explicit RAPL access
+reason. Real watts on this host remain unverified until an administrator grants
+the counter access above; fixture tests verify watts, wrap handling, provider
+deduplication/switching and fallback selection. No real Mac/Windows hardware was
+used for this change’s sensor validation.

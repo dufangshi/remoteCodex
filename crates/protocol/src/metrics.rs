@@ -8,6 +8,23 @@ pub struct PowerReadingDto {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperatureReadingDto {
+    pub celsius: Option<f64>,
+    pub source: Option<String>,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub sensors: Vec<TemperatureSensorDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperatureSensorDto {
+    pub label: String,
+    pub celsius: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CpuCoreMetricsDto {
@@ -64,6 +81,8 @@ pub struct DeviceMetricsDto {
     pub memory: MemoryMetricsDto,
     pub swap: MemoryMetricsDto,
     pub cpu_power: PowerReadingDto,
+    #[serde(default)]
+    pub cpu_temperature: TemperatureReadingDto,
     pub gpus: Vec<GpuMetricsDto>,
     pub hardware_sampled_at: String,
     pub hardware_notes: Vec<String>,

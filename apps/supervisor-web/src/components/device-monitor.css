@@ -67,6 +67,18 @@
   overflow-wrap: anywhere;
   line-height: 1.6;
 }
+.device-monitor-reading > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.device-monitor-reading > span:last-child {
+  flex-shrink: 0;
+}
+.device-monitor-sensors summary {
+  cursor: pointer;
+  color: var(--theme-fg-muted);
+  margin-top: 10px;
+}
 .device-monitor-notice {
   border: 1px solid var(--theme-border);
   padding: 8px;

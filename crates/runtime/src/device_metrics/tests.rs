@@ -19,6 +19,13 @@ fn device_metrics_validate_percent_memory_and_power_units() {
         Some(31.2)
     );
     assert_eq!(
+        hardware::labeled_power(
+            "Intel energy model derived package power (CPUs+GT+SA): 12.24W",
+            "Intel energy model derived package power (CPUs+GT+SA):"
+        ),
+        Some(12.24)
+    );
+    assert_eq!(
         hardware::labeled_power("CPU Power: N/A", "CPU Power:"),
         None
     );
@@ -42,10 +49,11 @@ fn device_metrics_parse_gpu_provider_fixtures_without_inventing_missing_values()
     assert_eq!(gpus[0].power.watts, Some(120.5));
     assert_eq!(gpus[1].usage_percent, None);
     assert_eq!(gpus[1].power.watts, None);
-    let (cpu, windows) = hardware::parse_windows(
+    let (cpu, temperature, windows) = hardware::parse_windows(
         r#"{"cpuPowerWatts":null,"gpus":[{"id":"luid-1","name":"GPU 0","usagePercent":45}]}"#,
     );
     assert_eq!(cpu.watts, None);
+    assert_eq!(temperature.celsius, None);
     assert_eq!(windows[0].usage_percent, Some(45.0));
     let mac = hardware::parse_ioreg(br#"<?xml version="1.0"?><plist version="1.0"><array><dict><key>IORegistryEntryName</key><string>AGX</string><key>PerformanceStatistics</key><dict><key>Device Utilization %</key><integer>67</integer></dict></dict></array></plist>"#);
     assert_eq!(mac[0].usage_percent, Some(67.0));
@@ -93,16 +101,38 @@ async fn device_metrics_live_sampling_is_warmed_shared_and_serializes_camel_case
         assert_eq!(a.memory.total_bytes, total);
     }
     println!(
-        "Native sample: {} cores, CPU {:?}%, RAM {}/{} bytes, environment={}, CPU power={:?}",
+        "Native sample: {} cores, CPU {:?}%, RAM {}/{} bytes, environment={}, CPU power={:?}, CPU temperature={:?}, sensor reason={:?}",
         a.cpu.logical_core_count,
         a.cpu.usage_percent,
         a.memory.used_bytes,
         a.memory.total_bytes,
         a.environment,
-        a.cpu_power.watts
+        a.cpu_power.watts,
+        a.cpu_temperature.celsius,
+        a.cpu_power.reason
     );
     let value = serde_json::to_value(a).unwrap();
     assert!(value["cpu"]["logicalCoreCount"].is_number());
     assert!(value.get("sampleWindowMs").is_some());
     assert!(value.get("sample_window_ms").is_none());
+    assert!(value.get("cpuTemperature").is_some());
+}
+
+#[test]
+fn device_metrics_temperature_provider_units_and_invalid_values() {
+    assert_eq!(
+        hardware::labeled_temperature("CPU die temperature: 73.25 C", "CPU die temperature:"),
+        Some(73.25)
+    );
+    assert_eq!(
+        hardware::labeled_temperature("CPU die temperature: 163 F", "CPU die temperature:"),
+        None
+    );
+    for n in [f64::NAN, f64::INFINITY, -273.15, 999.0] {
+        assert_eq!(hardware::celsius(n), None);
+    }
+    let (power, temperature, _) =
+        hardware::parse_windows(r#"{"cpuPowerWatts":65.5,"cpuTemperatureCelsius":82.5,"gpus":[]}"#);
+    assert_eq!(power.watts, Some(65.5));
+    assert_eq!(temperature.celsius, Some(82.5));
 }

@@ -58,6 +58,13 @@ test('device monitor shows cores, memory and real watts, and marks failed sample
               usagePercent: null,
             },
             cpuPower: { watts: 24.5, source: 'CPU package', reason: null },
+            cpuTemperature: {
+              celsius: 97.5, source: 'Linux hwmon', reason: null,
+              sensors: [
+                { label: 'Package id 0', celsius: 97.5 },
+                { label: 'Core 0', celsius: 94 },
+              ],
+            },
             gpus: [
               {
                 id: 'gpu-1',
@@ -65,7 +72,7 @@ test('device monitor shows cores, memory and real watts, and marks failed sample
                 usagePercent: 12,
                 usedMemoryBytes: 2 ** 30,
                 totalMemoryBytes: 8 * 2 ** 30,
-                power: { watts: null, source: null, reason: 'Unsupported' },
+                power: { watts: null, source: null, reason: 'GPU power sensor is not exposed by this driver' },
                 source: 'test',
               },
             ],
@@ -110,6 +117,12 @@ test('device monitor shows cores, memory and real watts, and marks failed sample
   ).toHaveAttribute('value', '0');
   await expect(dialog).toContainText('8.0 GiB / 16.0 GiB');
   await expect(dialog).toContainText('24.5 W');
+  await expect(dialog).toContainText('97.5 °C');
+  await expect(dialog).toContainText('GPU power sensor is not exposed by this driver');
+  await expect(dialog.getByText('Core 0', { exact: true })).not.toBeVisible();
+  await dialog.getByText('CPU temperature sensors (2)').click();
+  await expect(dialog.getByText('Core 0', { exact: true })).toBeVisible();
+  await expect(dialog).toContainText('94.0 °C');
   await expect(dialog).toContainText('Unavailable');
   fail = true;
   await expect(dialog.getByRole('status')).toContainText(

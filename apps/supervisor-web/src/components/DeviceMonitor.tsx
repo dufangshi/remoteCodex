@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { DeviceMetricsDto, PowerReadingDto } from '@remote-codex/shared';
+import type { DeviceMetricsDto, PowerReadingDto, TemperatureReadingDto } from '@remote-codex/shared';
 import { ApiError, request } from '../lib/api';
 import { FormDialog } from './FormDialog';
 import './device-monitor.css';
@@ -15,6 +15,7 @@ function Power({
   reading: PowerReadingDto;
 }) {
   return (
+    <>
     <div className="device-monitor-reading">
       <span title={reading.source ?? undefined}>{label}</span>
       <span title={reading.reason ?? reading.source ?? undefined}>
@@ -23,6 +24,45 @@ function Power({
           : `${reading.watts.toFixed(1)} W`}
       </span>
     </div>
+      {reading.watts == null && reading.reason && (
+        <p className="device-monitor-caption">
+          {reading.reason}{' '}
+          {reading.reason.includes('RAPL') && (
+            <a href="https://github.com/dufangshi/remoteCodex/blob/main/docs/device-monitor.md#linux-sensor-access" target="_blank" rel="noreferrer">
+              Sensor access setup
+            </a>
+          )}
+        </p>
+      )}
+    </>
+  );
+}
+
+function Temperature({ reading }: { reading: TemperatureReadingDto | undefined }) {
+  return (
+    <>
+      <div className="device-monitor-reading">
+        <span>CPU temperature</span>
+        <span title={reading?.source ?? undefined}>
+          {reading?.celsius == null ? 'Unavailable' : `${reading.celsius.toFixed(1)} °C`}
+        </span>
+      </div>
+      {reading?.celsius == null && (
+        <p className="device-monitor-caption">
+          {reading?.reason ?? 'Update this device’s Supervisor to collect temperature sensors'}
+        </p>
+      )}
+      {Boolean(reading?.sensors.length) && (
+        <details className="device-monitor-sensors">
+          <summary>CPU temperature sensors ({reading!.sensors.length})</summary>
+          {reading!.sensors.map((sensor, index) => (
+            <div className="device-monitor-reading" key={`${sensor.label}-${index}`}>
+              <span>{sensor.label}</span><span>{sensor.celsius.toFixed(1)} °C</span>
+            </div>
+          ))}
+        </details>
+      )}
+    </>
   );
 }
 
@@ -173,7 +213,8 @@ export function DeviceMonitor() {
                       </div>
                     ))}
                   </div>
-                  <Power label="CPU package power" reading={data.cpuPower} />
+                  <Power label="CPU power" reading={data.cpuPower} />
+                  <Temperature reading={data.cpuTemperature} />
                 </section>
                 <section aria-label="Memory utilization">
                   <div className="device-monitor-heading">

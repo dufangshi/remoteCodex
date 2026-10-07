@@ -3,6 +3,12 @@ export interface PowerReadingDto {
   source: string | null;
   reason: string | null;
 }
+export interface TemperatureReadingDto {
+  celsius: number | null;
+  source: string | null;
+  reason: string | null;
+  sensors: Array<{ label: string; celsius: number }>;
+}
 export interface MemoryMetricsDto {
   totalBytes: number;
   usedBytes: number;
@@ -32,6 +38,7 @@ export interface DeviceMetricsDto {
   memory: MemoryMetricsDto;
   swap: MemoryMetricsDto;
   cpuPower: PowerReadingDto;
+  cpuTemperature?: TemperatureReadingDto;
   gpus: GpuMetricsDto[];
   hardwareSampledAt: string;
   hardwareNotes: string[];

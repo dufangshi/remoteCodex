@@ -1,6 +1,7 @@
 //! Device-local telemetry. Native CPU/RAM samples are shared across all readers;
 //! optional sensor probes never turn unsupported/permission-denied values into zero.
 mod hardware;
+mod linux;
 #[cfg(test)]
 mod tests;
 
@@ -106,6 +107,7 @@ impl BasicCollector {
                 system.total_swap().saturating_sub(system.used_swap()),
             ),
             cpu_power: PowerReadingDto::default(),
+            cpu_temperature: TemperatureReadingDto::default(),
             gpus: vec![],
             hardware_sampled_at: String::new(),
             hardware_notes: vec![],
@@ -149,6 +151,7 @@ impl DeviceMonitor {
         let (basic, hardware) = tokio::join!(basic_task, hardware_task);
         let mut basic = basic??;
         basic.cpu_power = hardware.cpu_power;
+        basic.cpu_temperature = hardware.cpu_temperature;
         basic.gpus = hardware.gpus;
         basic.hardware_sampled_at = hardware.sampled_at;
         basic.hardware_notes = hardware.notes;

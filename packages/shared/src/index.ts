@@ -1983,4 +1983,4 @@ export function mergeThreadHistoryItem(
       ? { sequence: incoming.sequence ?? current.sequence } : {}),
   };
 }
-export type { DeviceMetricsDto, MemoryMetricsDto, GpuMetricsDto, PowerReadingDto } from './deviceMetrics';
+export type { DeviceMetricsDto, MemoryMetricsDto, GpuMetricsDto, PowerReadingDto, TemperatureReadingDto } from './deviceMetrics';
