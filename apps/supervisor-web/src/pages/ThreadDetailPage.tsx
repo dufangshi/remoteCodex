@@ -668,7 +668,7 @@ export function ThreadDetailPage() {
   const presentationWorkspace = useRef<{ device: string | null; id: string | null }>({ device: relayRouteDeviceId, id: currentWorkspaceId });
   if (presentationWorkspace.current.device !== relayRouteDeviceId || currentWorkspaceId) presentationWorkspace.current = { device: relayRouteDeviceId, id: currentWorkspaceId };
   const presentationScope = presentationAccount && presentationWorkspace.current.id ? `remote-codex.presentation.v1:${JSON.stringify([window.location.origin, presentationAccount, relayRouteDeviceId ?? 'local', presentationWorkspace.current.id])}` : null;
-  const workbenchPresentation = useWorkbenchPresentation(presentationScope);
+  const workbenchPresentation = useWorkbenchPresentation(presentationScope, routeKey);
   const referenceId = workbenchPresentation.value.referenceId === id ? null : workbenchPresentation.value.referenceId;
   const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${relayRouteDeviceId ?? 'local'}:${referenceId ?? ''}`);
   const referenceController = useWorkbenchReference(relayRouteDeviceId ?? 'local', referenceId);

@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 test.use({ actionTimeout: 15_000 });
 
 test('shared device Explorer honors full, read-only and no filesystem access', async ({ browser }) => {
+  await mkdir(resolve('.local'), { recursive: true });
   const root = await mkdtemp(resolve('.local/shared-device-explorer-'));
   const processes: ChildProcess[] = [];
   const logs: string[] = [];
@@ -47,6 +48,8 @@ test('shared device Explorer honors full, read-only and no filesystem access', a
     return (await api('/relay/auth/login', undefined, { username, password })).token as string;
   }
   const context = await browser.newContext();
+  let releaseIdentity!: () => void;
+  const identityReady = new Promise<void>(resolve => { releaseIdentity = resolve; });
   try {
     start('relay', { PORT: String(rp), REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'),
       REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_PUBLIC_BASE_URL: base,
@@ -72,13 +75,23 @@ test('shared device Explorer honors full, read-only and no filesystem access', a
     expect(access).toMatchObject({ scope: 'device', workspaceId: null, workspaceAccess: 'write' });
     await context.addCookies([{ name: 'remote_codex_relay_session', value: guest, url: base }]);
     const page = await context.newPage();
+    let identityRequests = 0;
+    // The app authenticates first; delay the workbench's second identity lookup
+    // so opening Explorer happens before its persistent profile can be restored.
+    await page.route('**/relay/auth/session', async route => {
+      if (++identityRequests > 1) await identityReady;
+      await route.continue();
+    });
     const openThread = async () => {
       await page.goto(`${base}/devices/${deviceId}/threads/${threadId}`);
       return page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('button', { name: 'Toggle Explorer' });
     };
     const toggle = await openThread();
     await expect(toggle).toBeEnabled();
+    await expect.poll(() => identityRequests).toBeGreaterThan(1);
     await toggle.click();
+    releaseIdentity();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     const explorer = page.getByRole('complementary', { name: 'Explorer', exact: true });
     await expect(explorer).toBeVisible();
     const row = page.getByRole('treeitem', { name: 'shared-note.txt', exact: true });
@@ -98,7 +111,10 @@ test('shared device Explorer honors full, read-only and no filesystem access', a
     await page.reload();
     const readonlyToggle = page.getByRole('navigation', { name: 'Workspace tools' }).getByRole('button', { name: 'Toggle Explorer' });
     await expect(readonlyToggle).toBeEnabled();
-    if (!(await explorer.isVisible())) await readonlyToggle.click();
+    // The workbench restores the open Explorer profile after authentication.
+    // A conditional click during restoration could close the panel it just opened.
+    await expect(explorer).toBeVisible();
+    await expect(readonlyToggle).toHaveAttribute('aria-expanded', 'true');
     const readonlyRow = page.getByRole('treeitem', { name: 'renamed-note.txt', exact: true });
     await expect(readonlyRow).toBeVisible();
     await readonlyRow.click();
@@ -118,6 +134,7 @@ test('shared device Explorer honors full, read-only and no filesystem access', a
     console.error(logs.join(''));
     throw error;
   } finally {
+    releaseIdentity();
     await context.close().catch(() => {});
     for (const proc of processes.reverse()) {
       if (proc.exitCode !== null) continue;
