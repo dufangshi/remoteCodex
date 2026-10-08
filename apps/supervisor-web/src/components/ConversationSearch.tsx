@@ -1,11 +1,16 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import {
   ApiError, fetchThreadConversationPage, fetchThreadTurnDetail, searchThreadMessages,
-  type ConversationSearchMatch, type ConversationSearchResult,
+  type ConversationSearchMatch, type GlobalConversationSearchMatch, searchConversations,
 } from '../lib/api';
 import type { ThreadTurnDto } from '@remote-codex/shared';
+import { ConversationSearchExcerpt, ConversationSearchScopePicker, type ConversationSearchScope } from '@remote-codex/thread-ui';
+import { useSearchMessages } from './searchMessages';
+
+type SearchMatch = ConversationSearchMatch | GlobalConversationSearchMatch;
+type SearchResult = { matches: SearchMatch[]; hasMore: boolean; nextOffset?: number | null };
+const isGlobal = (match: SearchMatch): match is GlobalConversationSearchMatch => 'threadId' in match;
 
 function matchMessages(turns: ThreadTurnDto[], query: string): ConversationSearchMatch[] {
   return turns.flatMap(turn => turn.items
@@ -14,17 +19,21 @@ function matchMessages(turns: ThreadTurnDto[], query: string): ConversationSearc
     .map(item => ({ turnId: turn.id, itemId: item.id,
       role: item.kind === 'userMessage' ? 'You' : 'Assistant', text: item.text })));
 }
-const matchKey = (match: ConversationSearchMatch) => `${match.turnId}:${match.itemId}`;
+const matchKey = (match: SearchMatch) => `${isGlobal(match) ? match.threadId : ''}:${match.turnId}:${match.itemId}`;
 
-export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onSelect }: {
+export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGlobal, turns, open, onOpen, onClose, onSelect, onNavigate }: {
   threadId: string;
+  workspaceId: string;
+  deviceLabel: string;
+  allowGlobal: boolean;
+  onNavigate: (match: GlobalConversationSearchMatch) => void;
   turns: ThreadTurnDto[];
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSelect: (turns: ThreadTurnDto[], turnId: string, itemId: string) => void;
 }) {
-  useI18n();
+  const labels = useSearchMessages();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -33,14 +42,19 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
   const closeCallback = useRef(onClose);
   closeCallback.current = onClose;
   const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<ConversationSearchScope>('thread');
+  const [offset, setOffset] = useState(0);
+  // Fail closed if a live permission refresh removes global access.
+  const effectiveScope = allowGlobal ? scope : 'thread';
   const normalized = query.trim().toLowerCase();
-  const [remote, setRemote] = useState<{ query: string; result: ConversationSearchResult } | null>(null);
+  const searchKey = `${effectiveScope}:${offset}:${normalized}`;
+  const [remote, setRemote] = useState<{ query: string; result: SearchResult } | null>(null);
   const [loading, setLoading] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [error, setError] = useState('');
   const [active, setActive] = useState(0);
   const legacy = useRef(false);
-  const cache = useRef(new Map<string, { result: ConversationSearchResult; at: number }>());
+  const cache = useRef(new Map<string, { result: SearchResult; at: number }>());
   const selection = useRef<AbortController | null>(null);
   useEffect(() => () => selection.current?.abort(), []);
   useEffect(() => {
@@ -61,9 +75,9 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
     setActive(0);
     setError('');
     if (!open || !normalized) { setLoading(false); return; }
-    const cached = cache.current.get(normalized);
+    const cached = cache.current.get(searchKey);
     if (cached && Date.now() - cached.at < 30_000) {
-      setRemote({ query: normalized, result: cached.result });
+      setRemote({ query: searchKey, result: cached.result });
       setLoading(false);
       return;
     }
@@ -71,8 +85,11 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
     setLoading(true);
     const timer = window.setTimeout(async () => {
       try {
-        let result: ConversationSearchResult | undefined;
-        if (!legacy.current) {
+        let result: SearchResult | undefined;
+        if (effectiveScope !== 'thread') {
+          result = await searchConversations(normalized, effectiveScope === 'workspace' ? workspaceId : undefined, offset, controller.signal);
+        }
+        if (effectiveScope === 'thread' && !legacy.current) {
           try { result = await searchThreadMessages(threadId, normalized, controller.signal); }
           catch (e) {
             if (controller.signal.aborted) return;
@@ -92,7 +109,7 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
             if (!fresh.length) break;
             fresh.forEach(turn => seen.add(turn.id));
             matches.push(...matchMessages([...fresh].reverse(), normalized));
-            setRemote({ query: normalized, result: { matches: matches.slice(0, 50), hasMore: matches.length > 50 } });
+            setRemote({ query: searchKey, result: { matches: matches.slice(0, 50), hasMore: matches.length > 50 } });
             before = fresh[0]?.id;
             if (matches.length > 50 || seen.size >= (page.totalTurnCount ?? seen.size)) break;
           } while (before);
@@ -101,25 +118,32 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
         if (controller.signal.aborted) return;
         // Bound retained searches; cache is scoped to this mounted thread only.
         if (cache.current.size >= 10) cache.current.delete(cache.current.keys().next().value!);
-        cache.current.set(normalized, { result, at: Date.now() });
-        setRemote({ query: normalized, result });
+        cache.current.set(searchKey, { result, at: Date.now() });
+        setRemote({ query: searchKey, result });
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : translate("chat.conversationSearch_searchFailed"));
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : labels.failed);
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [open, normalized, threadId]);
+  }, [open, normalized, threadId, workspaceId, effectiveScope, offset, searchKey]);
 
   const matches = useMemo(() => {
     if (!normalized) return [];
-    const merged = new Map<string, ConversationSearchMatch>();
-    if (remote?.query === normalized) remote.result.matches.forEach(match => merged.set(matchKey(match), match));
+    const merged = new Map<string, SearchMatch>();
+    if (remote?.query === searchKey) remote.result.matches.forEach(match => merged.set(matchKey(match), match));
     // The current live conversation is immediately searchable, even offline.
-    matchMessages([...turns].reverse(), normalized).forEach(match => merged.set(matchKey(match), match));
+    if (effectiveScope === 'thread') matchMessages([...turns].reverse(), normalized).forEach(match => merged.set(matchKey(match), match));
     return [...merged.values()].slice(0, 50);
-  }, [normalized, remote, turns]);
+  }, [normalized, remote, turns, searchKey, effectiveScope]);
+  useEffect(() => {
+    if (open && matches[active]) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, active, matches, listId]);
   const close = () => { restoreFocus.current = true; onClose(); };
-  const select = async (match: ConversationSearchMatch) => {
+  const select = async (match: SearchMatch) => {
+    if (isGlobal(match) && (match.threadId !== threadId || !match.turnId || !match.itemId)) {
+      onNavigate(match); close(); return;
+    }
+    if (!match.turnId || !match.itemId) return;
     if (selecting) return;
     selection.current?.abort();
     const controller = new AbortController();
@@ -132,20 +156,22 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
       onSelect([turn], match.turnId, match.itemId);
       close();
     } catch (e) {
-      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : translate("chat.conversationSearch_couldNotOpenThisMessage"));
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : labels.openFailed);
     } finally { if (!controller.signal.aborted) setSelecting(false); }
   };
 
   return <div ref={root} className={`workbench-search ${open ? 'is-open' : ''}`}>
-    {!open ? <button ref={trigger} className="matter-search-trigger" aria-label={translate("chat.conversationSearch_searchConversation")} onClick={onOpen}>
-      <Search /><span>{translate("chat.conversationSearch_searchConversation")}</span>
+    {!open ? <button ref={trigger} className="matter-search-trigger" aria-label={labels.trigger} onClick={onOpen}>
+      <Search /><span>{labels.trigger}</span>
     </button> : <>
       <div className="workbench-search-field">
+        <ConversationSearchScopePicker value={effectiveScope} allowGlobal={allowGlobal} labels={labels}
+          onChange={value => { selection.current?.abort(); setSelecting(false); setScope(value); setOffset(0); input.current?.focus(); }} />
         <Search size={16} aria-hidden="true" />
-        <input ref={input} role="combobox" aria-label={translate("chat.conversationSearch_searchMessages")} placeholder={translate("chat.conversationSearch_searchConversation_b2cb99")}
+        <input ref={input} role="combobox" aria-label={labels.input} placeholder={effectiveScope === 'thread' ? labels.placeholder : labels.globalPlaceholder}
           aria-autocomplete="list" aria-expanded={!!normalized} aria-controls={normalized ? listId : undefined}
           aria-activedescendant={normalized && matches[active] ? `${listId}-${active}` : undefined}
-          value={query} maxLength={200} onChange={event => setQuery(event.target.value)}
+          value={query} maxLength={200} onChange={event => { setQuery(event.target.value); setOffset(0); }}
           onKeyDown={event => {
             if (event.key === 'Escape') { event.stopPropagation(); close(); }
             if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && matches.length) {
@@ -155,30 +181,32 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
               event.preventDefault(); void select(matches[active]);
             }
           }} />
-        <button type="button" aria-label={translate("chat.conversationSearch_closeSearch")} onClick={close}><X size={16} /></button>
+        <button type="button" aria-label={labels.close} onClick={close}><X size={16} /></button>
       </div>
-      {(normalized || error) && <div className="workbench-search-dropdown" aria-label={translate("chat.conversationSearch_conversationSearchResults")}>
-        <p role="status">{selecting ? translate("chat.conversationSearch_openingMessage") : loading
-          ? translate("chat.conversationSearch_searchingOlderMessages", { value1: matches.length ? translate("chat.matches", { value1: matches.length }) : '' })
-          : translate("chat.conversationSearch_matchingMessages", { value1: matches.length, value2: remote?.query === normalized && remote.result.hasMore ? '+' : '' })}</p>
+      {(normalized || error) && <div className="workbench-search-dropdown" aria-label={labels.results}>
+        <p role="status">{selecting ? labels.opening : loading ? labels.searching
+          : labels.count(matches.length, remote?.query === searchKey && remote.result.hasMore)}</p>
+        {effectiveScope !== 'thread' && <p>{labels.localScope} · {deviceLabel}</p>}
         {error && <p role="alert">{error}</p>}
-        <div id={listId} className="workbench-search-results" role="listbox" aria-label={translate("chat.conversationSearch_matchingMessages_f5412f")}>
+        <div id={listId} className="workbench-search-results" role="listbox" aria-label={labels.matches}>
           {matches.map((match, index) => {
-            const found = match.text.toLowerCase().indexOf(normalized);
-            const start = Math.max(0, found - 80);
-            const finish = found + normalized.length;
             return <button key={matchKey(match)} id={`${listId}-${index}`} type="button" role="option"
               aria-selected={index === active} disabled={selecting}
               onMouseEnter={() => setActive(index)} onMouseDown={event => event.preventDefault()}
               onClick={() => void select(match)}>
-              <strong>{match.role === 'You' || match.role === 'user' ? translate('chat.searchUserRole') : match.role === 'Assistant' || match.role === 'assistant' ? translate('chat.searchAssistantRole') : match.role}</strong><p>{start > 0 ? '…' : ''}{match.text.slice(start, found)}
-                <mark>{match.text.slice(found, finish)}</mark>{match.text.slice(finish, finish + 180)}
-                {match.text.length > finish + 180 ? '…' : ''}</p>
+              <strong>{isGlobal(match) ? `${match.threadTitle} · ${match.workspaceLabel} · ${deviceLabel} · ` : ''}
+                {match.role === 'You' ? labels.you : match.role === 'Title' ? labels.title : labels.assistant}</strong>
+              <ConversationSearchExcerpt text={match.text} query={normalized} />
             </button>;
           })}
         </div>
-        {!loading && !error && !matches.length && <p>{translate("chat.conversationSearch_noMatchingMessages")}</p>}
-        {remote?.query === normalized && remote.result.hasMore && <p>{translate("chat.conversationSearch_showingTheFirst50MatchesRefineYour")}</p>}
+        {!loading && !error && !matches.length && <p>{labels.empty}</p>}
+        {effectiveScope === 'thread' && remote?.query === searchKey && remote.result.hasMore && <p>{labels.refine}</p>}
+        {effectiveScope !== 'thread' && <div className="workbench-search-pagination">
+          {offset > 0 && <button type="button" disabled={loading} onClick={() => setOffset(Math.max(0, offset - 50))}>{labels.previous}</button>}
+          {remote?.query === searchKey && remote.result.hasMore && offset < 10_000 && <button type="button" disabled={loading}
+            onClick={() => setOffset(remote.result.nextOffset ?? offset + 50)}>{labels.more}</button>}
+        </div>}
       </div>}
     </>}
   </div>;

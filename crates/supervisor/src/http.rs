@@ -195,6 +195,8 @@ pub fn router(state: AppState) -> Router {
             get(get_thread).patch(rename_thread).delete(delete_thread),
         )
         .route("/api/threads/{id}/search", get(thread_search))
+        .route("/api/search", get(device_search))
+        .route("/api/workspaces/{id}/search", get(workspace_search))
         .route(
             "/api/threads/{id}/turns/{turnId}/detail",
             get(thread_turn_detail),
@@ -1092,6 +1094,53 @@ async fn get_thread(
 struct ThreadSearchQuery {
     q: String,
     limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct ConversationSearchQuery {
+    q: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+async fn device_search(
+    Query(query): Query<ConversationSearchQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    conversation_search(state, query, None).await
+}
+
+async fn workspace_search(
+    Path(id): Path<String>,
+    Query(query): Query<ConversationSearchQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    conversation_search(state, query, Some(id)).await
+}
+
+async fn conversation_search(
+    state: AppState,
+    query: ConversationSearchQuery,
+    workspace_id: Option<String>,
+) -> Result<Json<Value>, ApiErr> {
+    let value = tokio::task::spawn_blocking(move || {
+        state.search_conversations(
+            &query.q,
+            workspace_id.as_deref(),
+            query.limit.unwrap_or(50),
+            query.offset.unwrap_or(0),
+        )
+    })
+    .await
+    .map_err(|e| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            &e.to_string(),
+        )
+    })?
+    .map_err(map_err)?;
+    Ok(Json(value))
 }
 
 async fn thread_search(

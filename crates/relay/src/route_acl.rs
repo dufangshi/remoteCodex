@@ -42,6 +42,30 @@ pub(crate) fn access_allows(access: &EffectiveAccess, method: &Method, path: &st
             && access.thread_access == "control"
             && method == "POST";
     }
+    // Workspace search may initiate encryption before any thread request. A
+    // device conversation reader already has /api/transport/key permission;
+    // this alias publishes the same signed descriptor, never workspace files.
+    if method == "GET"
+        && access.scope == "device"
+        && matches!(access.thread_access.as_str(), "read" | "control")
+        && workspace_id
+            .as_ref()
+            .is_some_and(|id| pathname == format!("/api/workspaces/{id}/transport/key"))
+    {
+        return true;
+    }
+    // A workspace filesystem grant (including one attached to a thread share)
+    // does not grant access to conversations in that workspace. Global search
+    // follows the existing device-wide thread collection permission only.
+    if pathname == "/api/search"
+        || workspace_id
+            .as_ref()
+            .is_some_and(|id| pathname == format!("/api/workspaces/{id}/search"))
+    {
+        return method == "GET"
+            && access.scope == "device"
+            && matches!(access.thread_access.as_str(), "read" | "control");
+    }
     if let Some(thread_id) = thread_id {
         if access.scope != "device" && access.thread_id.as_deref() != Some(thread_id.as_str()) {
             return false;
@@ -205,6 +229,97 @@ pub(crate) fn shared_workspace_path_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_search_is_denied_for_multi_user_hosted_isolation() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        for (path, workspace_id) in [
+            ("/api/search?q=private", None),
+            (
+                "/api/workspaces/own-workspace/search?q=private",
+                Some("own-workspace"),
+            ),
+        ] {
+            assert!(!hosted_resource_allowed(
+                &conn,
+                HostedResourceRequest {
+                    sandbox_id: "shared-vm",
+                    user_id: "tenant",
+                    thread_id: None,
+                    workspace_id,
+                    method: &Method::GET,
+                    path,
+                    body: &[],
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn global_search_requires_device_conversation_access() {
+        let mut access = owner_access();
+        for path in [
+            "/api/search?q=secret",
+            "/api/workspaces/workspace-1/search?q=secret",
+        ] {
+            assert!(access_allows(&access, &Method::GET, path));
+        }
+        access.kind = "shared";
+        access.thread_id = Some("thread-1".into());
+        access.workspace_id = Some("workspace-1".into());
+        access.workspace_scope = Some("all".into());
+        access.workspace_access = "write".into();
+        access.thread_access = "read".into();
+        for scope in ["thread", "workspace"] {
+            access.scope = scope.into();
+            for path in [
+                "/api/search?q=secret&threadId=thread-1",
+                "/api/workspaces/workspace-1/search?q=secret",
+                "/api/workspaces/workspace-2/search?q=secret",
+            ] {
+                assert!(
+                    !access_allows(&access, &Method::GET, path),
+                    "{scope}: {path}"
+                );
+            }
+        }
+        access.scope = "device".into();
+        access.workspace_access = "none".into();
+        assert!(access_allows(
+            &access,
+            &Method::GET,
+            "/api/workspaces/workspace-1/transport/key?challenge=fresh"
+        ));
+        assert!(!access_allows(
+            &access,
+            &Method::POST,
+            "/api/workspaces/workspace-1/transport/key"
+        ));
+        assert!(!access_allows(
+            &access,
+            &Method::GET,
+            "/api/workspaces/workspace-1/files/raw"
+        ));
+        assert!(access_allows(&access, &Method::GET, "/api/search"));
+        assert!(access_allows(
+            &access,
+            &Method::GET,
+            "/api/workspaces/workspace-1/search"
+        ));
+        assert!(!access_allows(&access, &Method::POST, "/api/search"));
+        assert!(!access_allows(
+            &access,
+            &Method::GET,
+            "/api/workspaces/workspace-1/files/search"
+        ));
+        access.thread_access = "none".into();
+        assert!(!access_allows(&access, &Method::GET, "/api/search"));
+        assert!(!access_allows(
+            &access,
+            &Method::GET,
+            "/api/workspaces/workspace-1/search"
+        ));
+    }
 
     #[test]
     fn conversation_search_is_scoped_read_access() {

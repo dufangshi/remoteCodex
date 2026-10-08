@@ -1156,6 +1156,54 @@ async fn conversation_search_reads_bounded_messages_without_hydrating_history() 
         assert!(item["text"].as_str().unwrap().contains("ÄÖ 中文 100% _"));
         assert!(item["text"].as_str().unwrap().chars().count() < 400);
     }
+    let global = json(
+        &client,
+        client.get(format!("{base}/api/search")).query(&[
+            ("q", "äö 中文 100% _"),
+            ("limit", "2"),
+            ("offset", "0"),
+        ]),
+    )
+    .await;
+    assert_eq!(global["matches"].as_array().unwrap().len(), 2);
+    assert_eq!(global["hasMore"], true);
+    assert_eq!(global["nextOffset"], 2);
+    assert!(global["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|m| m["workspaceId"] == workspace["id"]));
+    let titles = json(
+        &client,
+        client.get(format!(
+            "{base}/api/workspaces/{}/search?q=Other",
+            workspace["id"].as_str().unwrap()
+        )),
+    )
+    .await;
+    assert_eq!(titles["matches"][0]["threadId"], ids[1]);
+    assert_eq!(titles["matches"][0]["kind"], "title");
+    assert!(titles["matches"][0]["turnId"].is_null());
+    for suffix in ["q=hello&limit=0", "q=hello&offset=10001", "q="] {
+        assert_eq!(
+            client
+                .get(format!("{base}/api/search?{suffix}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    assert_eq!(
+        client
+            .get(format!("{base}/api/workspaces/not-found/search?q=hello"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
     let tools = json(
         &client,
         client.get(format!(

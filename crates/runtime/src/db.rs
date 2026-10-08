@@ -136,6 +136,14 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 11,
+        name: "device_conversation_search",
+        apply: |conn| {
+            conn.execute_batch(include_str!("search_index.sql"))?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[
@@ -219,6 +227,7 @@ impl Database {
         let mut conn =
             Connection::open(path).with_context(|| format!("open sqlite {}", path.display()))?;
 
+        register_search_functions(&conn)?;
         validate_database_before_migration(&conn)
             .with_context(|| format!("validate sqlite {}", path.display()))?;
         create_pre_rust_backup(path, &conn)
@@ -1285,5 +1294,28 @@ fn migrate_legacy_policies(conn: &Connection) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// Deterministic functions are shared by migration backfill and transactional
+// triggers. Rust folding handles Unicode beyond SQLite's ASCII-only lower().
+fn register_search_functions(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("search_fold", 1, flags, |ctx| {
+        Ok(ctx.get::<String>(0)?.to_lowercase())
+    })?;
+    conn.create_scalar_function("search_body", 3, flags, |ctx| {
+        let text = ctx.get::<Option<String>>(0)?.unwrap_or_default();
+        let kind = ctx.get::<String>(1)?;
+        let source = ctx.get::<Option<String>>(2)?;
+        Ok(
+            if source.as_deref() == Some("local_codex_import") && kind == "userMessage" {
+                crate::local_sessions::sanitize_codex_user_text(&text)
+            } else {
+                Some(text)
+            },
+        )
+    })?;
     Ok(())
 }

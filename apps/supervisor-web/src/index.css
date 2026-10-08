@@ -18,6 +18,9 @@
 .workbench-search-field:focus-within { border-color: var(--theme-accent-solid); }
 .workbench-search-field input { flex: 1; min-width: 0; width: 100%; outline: none; border: 0; background: transparent; color: var(--theme-fg); font-size: 14px; }
 .thread-ui-shell .matter-workbench .workbench-search-field button { width: 30px; height: 30px; flex-shrink: 0; }
+.workbench-search-scope { flex-shrink: 0; max-width: 38%; min-width: 0; height: 28px; border: 0; border-right: 1px solid var(--theme-border); background: var(--theme-surface); color: var(--theme-fg); font-size: 12px; padding-right: 6px; }
+.thread-ui-shell .matter-workbench .workbench-search-pagination { display: flex; justify-content: space-between; gap: 8px; }
+.thread-ui-shell .matter-workbench .workbench-search-pagination button { width: auto; height: auto; padding: 6px 10px; font-size: 12px; }
 .workbench-search-dropdown { position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 100; max-height: min(560px, 70dvh); overflow-y: auto; padding: 8px; border: 1px solid var(--theme-border); border-radius: 10px; background: var(--theme-panel); color: var(--theme-fg); box-shadow: 0 12px 40px rgb(0 0 0 / 20%); }
 .workbench-search-dropdown > p { margin: 5px 6px 8px; font-size: 12px; color: var(--theme-fg-muted); }
 .thread-ui-shell .matter-workbench .workbench-search-results > button { display: block; width: 100%; height: auto; text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--theme-border); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; border-radius: 6px; }

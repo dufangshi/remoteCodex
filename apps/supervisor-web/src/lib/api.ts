@@ -1343,6 +1343,32 @@ export interface ConversationSearchResult {
   matches: ConversationSearchMatch[];
   hasMore: boolean;
 }
+export interface GlobalConversationSearchMatch {
+  threadId: string;
+  threadTitle: string;
+  workspaceId: string;
+  workspaceLabel: string;
+  workspacePath: string;
+  turnId: string | null;
+  itemId: string | null;
+  kind: 'title' | 'message';
+  role: string;
+  text: string;
+  createdAt: string;
+}
+export interface GlobalConversationSearchResult {
+  matches: GlobalConversationSearchMatch[];
+  hasMore: boolean;
+  nextOffset: number | null;
+  scope: 'device';
+}
+export function searchConversations(query: string, workspaceId: string | undefined, offset: number, signal?: AbortSignal) {
+  const path = workspaceId ? `/api/workspaces/${encodeURIComponent(workspaceId)}/search` : '/api/search';
+  return request<GlobalConversationSearchResult>(
+    `${path}?${new URLSearchParams({ q: query, limit: '50', offset: String(offset) })}`,
+    { ...(signal ? { signal } : {}), cache: 'no-store' },
+  );
+}
 export function searchThreadMessages(id: string, query: string, signal?: AbortSignal) {
   return request<ConversationSearchResult>(
     `/api/threads/${encodeURIComponent(id)}/search?${new URLSearchParams({ q: query, limit: '50' })}`,

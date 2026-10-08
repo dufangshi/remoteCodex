@@ -2,6 +2,7 @@ import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
+import { useSearchMessages } from '../components/searchMessages';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
 import { useScopedState } from './useScopedState';
 import { useSubscriptionUsage } from './useSubscriptionUsage';
@@ -460,8 +461,27 @@ export function ThreadDetailPage() {
   const [autoConnectingRoute, setAutoConnectingRoute] = useState<string | null>(null);
   const busy = mutationBusy || autoConnectingRoute === routeKey;
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const searchLabels = useSearchMessages();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ turnId: string; itemId: string; key: number }>();
+  // Global search opens a message through a shareable, device-scoped deep link.
+  // Load only the destination turn, including turns outside the summary page.
+  useEffect(() => {
+    if (!id || detail?.thread.id !== id) return;
+    const params = new URLSearchParams(location.search);
+    const turnId = params.get('searchTurn'), itemId = params.get('searchItem');
+    if (!turnId || !itemId) return;
+    let cancelled = false;
+    void fetchThreadTurnDetail(id, turnId).then(turn => {
+      if (cancelled) return;
+      setDetail(current => current?.thread.id === id ? {
+        ...current,
+        turns: prependTurns(current.turns.map(existing => existing.id === turnId ? turn : existing), [turn]),
+      } : current);
+      setSearchTarget({ turnId, itemId, key: Date.now() });
+    }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : searchLabels.openFailed); });
+    return () => { cancelled = true; };
+  }, [id, detail?.thread.id, location.search]);
   const [actionMode, setActionMode] = useState<'share' | 'link' | 'html'>('share');
   const [workspaceFocusPathRequest, setWorkspaceFocusPathRequest] =
     useState<WorkspaceFocusPathRequest | null>(null);
@@ -3655,7 +3675,14 @@ export function ThreadDetailPage() {
     {relayThreadIsOwner && relayRouteDeviceId && <PortMappingsControl key={relayRouteDeviceId} deviceId={relayRouteDeviceId} open={portsOpen} onOpenChange={setPortsOpen} />}
     <ThreadDetailSurface
       deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
-      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} turns={detail.turns} open={searchOpen}
+      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
+        deviceLabel={relayRouteDeviceId ?? searchLabels.localDevice}
+        allowGlobal={relayThreadIsOwner || (relayAccess?.scope === 'device' && (relayAccess.threadAccess === 'read' || relayAccess.threadAccess === 'control'))}
+        onNavigate={match => {
+          const params = new URLSearchParams();
+          if (match.turnId && match.itemId) { params.set('searchTurn', match.turnId); params.set('searchItem', match.itemId); }
+          navigate(`${currentThreadHref(match.threadId)}${params.size ? `?${params}` : ''}`);
+        }} turns={detail.turns} open={searchOpen}
         onOpen={() => setSearchOpen(true)} onClose={() => setSearchOpen(false)}
         onSelect={(turns, turnId, itemId) => {
           setDetail(current => current ? { ...current, turns: prependTurns(current.turns.map(turn => {

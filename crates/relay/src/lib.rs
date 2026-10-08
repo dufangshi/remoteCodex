@@ -3187,6 +3187,16 @@ struct HostedResourceRequest<'a> {
 }
 
 fn hosted_resource_allowed(conn: &Connection, request: HostedResourceRequest<'_>) -> bool {
+    // Hosted VMs can contain multiple users' journals. Until the encrypted
+    // request carries a device-enforced thread allowlist, never expose that
+    // shared VM's global index, even through a user-owned workspace route.
+    let pathname = request.path.split('?').next().unwrap_or(request.path);
+    if pathname == "/api/search"
+        || (request.workspace_id.is_some() && pathname.ends_with("/search"))
+    {
+        return false;
+    }
+
     if request
         .path
         .split('?')
