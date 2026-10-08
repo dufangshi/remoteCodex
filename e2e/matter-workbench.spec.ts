@@ -116,11 +116,12 @@ test('search reveals an older collapsed message, Explorer resizes and connection
     return route.fulfill({ json: { ...detail, thread: { ...detail.thread, ...(running ? { status: 'running', activeTurnId: 'search-turn-5' } : {}) }, totalTurnCount: turns.length, turns: turns.slice(-limit).map(turn => ({ ...turn, ...(running && turn.id === 'search-turn-5' ? { status: 'inProgress', completedAt: null } : {}), hasDeferredItems: true, deferredItemCount: 2, items: [turn.items[0], turn.items[3]] })) } });
   });
   await page.route(`**/api/threads/${id}/turns/*/detail`, route => route.fulfill({ json: turns.find(turn => route.request().url().includes(`/${turn.id}/`)) }));
+  await page.route(`**/api/threads/${id}/search?**`, route => route.fulfill({ json: { matches: [{ turnId: turns[0].id, itemId: 'progress-0', role: 'Assistant', text: turns[0].items[1].text }], hasMore: false } }));
   await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode', 'light'));
   await page.goto(`/threads/${id}`);
   await expect(page.locator('[data-turn-id="search-turn-0"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Search conversation', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Search messages' }).fill('hidden cobalt');
+  await page.getByRole('combobox', { name: 'Search messages' }).fill('hidden cobalt');
   const result = page.locator('.workbench-search-results > button').filter({ hasText: 'hidden cobalt' });
   await expect(result).toHaveCount(1);
   await result.click();
@@ -319,14 +320,14 @@ test('Matter workbench floats the composer, persists shortcuts, searches history
   await page
     .getByRole('button', { name: 'Search conversation', exact: true })
     .click();
-  await page.getByRole('textbox', { name: 'Search messages' }).fill('clarity');
+  await page.getByRole('combobox', { name: 'Search messages' }).fill('clarity');
   await expect(page.getByText('1 matching messages')).toBeVisible();
   await expect(page.locator('.workbench-search-results mark')).toHaveText(
     'clarity',
   );
   await page.keyboard.press('Escape');
   await expect(
-    page.getByRole('dialog', { name: 'Search conversation' }),
+    page.getByRole('combobox', { name: 'Search messages' }),
   ).not.toBeVisible();
   await page
     .getByRole('button', { name: 'Notifications', exact: true })

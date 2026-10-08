@@ -194,6 +194,7 @@ pub fn router(state: AppState) -> Router {
             "/api/threads/{id}",
             get(get_thread).patch(rename_thread).delete(delete_thread),
         )
+        .route("/api/threads/{id}/search", get(thread_search))
         .route(
             "/api/threads/{id}/turns/{turnId}/detail",
             get(thread_turn_detail),
@@ -1084,6 +1085,42 @@ async fn get_thread(
     )
     .unwrap();
     remote_codex_runtime::history::defer_tool_details(&mut value);
+    Ok(Json(value))
+}
+
+#[derive(Deserialize)]
+struct ThreadSearchQuery {
+    q: String,
+    limit: Option<usize>,
+}
+
+async fn thread_search(
+    Path(id): Path<String>,
+    Query(query): Query<ThreadSearchQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    if query.q.trim().is_empty()
+        || query.q.chars().count() > 200
+        || query.limit.is_some_and(|limit| !(1..=100).contains(&limit))
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "Search needs 1 to 200 characters and a limit between 1 and 100",
+        ));
+    }
+    let value = tokio::task::spawn_blocking(move || {
+        state.search_thread_messages(&id, &query.q, query.limit.unwrap_or(50))
+    })
+    .await
+    .map_err(|e| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            &e.to_string(),
+        )
+    })?
+    .map_err(map_err)?;
     Ok(Json(value))
 }
 

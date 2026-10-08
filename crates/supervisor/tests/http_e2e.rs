@@ -1108,3 +1108,115 @@ async fn coordination_operations_work_over_the_cli_api() {
     .await;
     assert!(closed["closedAt"].is_string(), "{closed}");
 }
+
+#[tokio::test]
+async fn conversation_search_reads_bounded_messages_without_hydrating_history() {
+    let (_dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let workspace = json(
+        &client,
+        client
+            .post(format!("{base}/api/workspaces"))
+            .json(&json!({"absPath":root,"label":"Search"})),
+    )
+    .await;
+    let mut ids = vec![];
+    for title in ["Search here", "Other thread"] {
+        let thread = json(&client, client.post(format!("{base}/api/threads/start"))
+            .json(&json!({"workspaceId":workspace["id"],"title":title,"provider":"codex","model":"ios-e2e-stream","approvalMode":"yolo"}))).await;
+        ids.push(thread["id"].as_str().unwrap().to_owned());
+    }
+    state.db.with(|conn| {
+        for (owner, id) in ids.iter().enumerate() {
+            for n in 0..12 {
+                let turn = format!("search-{owner}-{n}");
+                conn.execute("INSERT INTO thread_turns(id,thread_id,status,ordinal) VALUES(?1,?2,'completed',?3)",(&turn,id,n))?;
+                for (kind, text) in [("agentMessage",format!("{} ÄÖ 中文 100% _ {}", "before ".repeat(200), "after ".repeat(200))), ("commandExecution", "only tool secret ÄÖ 中文 100% _".into())] {
+                    let item = format!("{turn}-{kind}");
+                    conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?1,?2,?3,?1,?4,'2030-01-01T00:00:00Z','2030-01-01T00:00:00Z')",(&item,id,&turn,json!({"id":item,"kind":kind,"text":text}).to_string()))?;
+                }
+            }
+        }
+        Ok(())
+    }).unwrap();
+    let search = json(
+        &client,
+        client
+            .get(format!("{base}/api/threads/{}/search", ids[0]))
+            .query(&[("q", "äö 中文 100% _"), ("limit", "2")]),
+    )
+    .await;
+    let matches = search["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2);
+    assert_eq!(search["hasMore"], true);
+    assert_eq!(matches[0]["turnId"], "search-0-11");
+    for item in matches {
+        assert_eq!(item["role"], "Assistant");
+        assert!(item["text"].as_str().unwrap().contains("ÄÖ 中文 100% _"));
+        assert!(item["text"].as_str().unwrap().chars().count() < 400);
+    }
+    let tools = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads/{}/search?q=only%20tool%20secret",
+            ids[0]
+        )),
+    )
+    .await;
+    assert_eq!(tools["matches"], json!([]));
+    assert_eq!(state.get_thread(&ids[0]).unwrap().status, "idle");
+    // Imported Codex context and duplicate messages must match the visible
+    // normalized conversation, including the item id used for navigation.
+    state.db.with(|conn| {
+        conn.execute("UPDATE threads SET source='local_codex_import' WHERE id=?1", [&ids[0]])?;
+        for (item, text) in [
+            ("context", "# AGENTS.md instructions\nhidden injection"),
+            ("request-first", "# AGENTS.md instructions\nhidden injection\n## My request:\nvisible search"),
+            ("request-duplicate", "visible search"),
+        ] {
+            conn.execute("INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?1,?2,'search-0-11',?1,?3,'2030-01-01T00:00:01Z','2030-01-01T00:00:01Z')", (item, &ids[0], json!({"id":item,"kind":"userMessage","text":text}).to_string()))?;
+        }
+        Ok(())
+    }).unwrap();
+    let imported = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads/{}/search?q=visible%20search",
+            ids[0]
+        )),
+    )
+    .await;
+    assert_eq!(imported["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(imported["matches"][0]["itemId"], "request-first");
+    let hidden = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads/{}/search?q=hidden%20injection",
+            ids[0]
+        )),
+    )
+    .await;
+    assert_eq!(hidden["matches"], json!([]));
+    for (q, limit) in [("", "2"), ("hello", "0"), ("hello", "101")] {
+        assert_eq!(
+            client
+                .get(format!("{base}/api/threads/{}/search", ids[0]))
+                .query(&[("q", q), ("limit", limit)])
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    assert_eq!(
+        client
+            .get(format!("{base}/api/threads/not-found/search?q=hello"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+}

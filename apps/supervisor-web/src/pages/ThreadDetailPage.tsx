@@ -3652,7 +3652,15 @@ export function ThreadDetailPage() {
     {relayThreadIsOwner && relayRouteDeviceId && <PortMappingsControl key={relayRouteDeviceId} deviceId={relayRouteDeviceId} open={portsOpen} onOpenChange={setPortsOpen} />}
     <ThreadDetailSurface
       deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
-      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
+      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} turns={detail.turns} open={searchOpen}
+        onOpen={() => setSearchOpen(true)} onClose={() => setSearchOpen(false)}
+        onSelect={(turns, turnId, itemId) => {
+          setDetail(current => current ? { ...current, turns: prependTurns(current.turns.map(turn => {
+            const full = turns.find(t => t.id === turn.id);
+            return full && turn.status !== 'inProgress' ? full : turn;
+          }), turns) } : current);
+          setSearchTarget({ turnId, itemId, key: Date.now() });
+        }} /> : undefined, }}
       threads={threads}
       detail={detail}
       status={status}
@@ -3695,13 +3703,7 @@ export function ThreadDetailPage() {
           Unable to resolve this thread.
         </div>
       }
-      dialogs={<>{dialogs}{searchOpen && id && <ConversationSearch key={id} threadId={id} onClose={() => setSearchOpen(false)} onSelect={(turns, turnId, itemId) => {
-        setDetail(current => current ? { ...current, turns: prependTurns(current.turns.map(turn => {
-          const full = turns.find(t => t.id === turn.id);
-          return full && turn.status !== 'inProgress' ? full : turn;
-        }), turns) } : current);
-        setSearchTarget({ turnId, itemId, key: Date.now() });
-      }} />}{harnessSettingsOpen && detail && <HarnessSettingsDialog
+      dialogs={<>{dialogs}{harnessSettingsOpen && detail && <HarnessSettingsDialog
         key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}
         onChange={handleUpdateThreadSettings} onClose={() => setHarnessSettingsOpen(false)}
       />}</>}

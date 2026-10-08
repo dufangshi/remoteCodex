@@ -1331,6 +1331,31 @@ export function fetchThreadDetail(
   );
 }
 
+export interface ConversationSearchMatch {
+  turnId: string;
+  itemId: string;
+  role: string;
+  text: string;
+  createdAt?: string;
+}
+export interface ConversationSearchResult {
+  matches: ConversationSearchMatch[];
+  hasMore: boolean;
+}
+export function searchThreadMessages(id: string, query: string, signal?: AbortSignal) {
+  return request<ConversationSearchResult>(
+    `/api/threads/${encodeURIComponent(id)}/search?${new URLSearchParams({ q: query, limit: '50' })}`,
+    { signal: signal ?? null },
+  );
+}
+// Older Supervisors have no search endpoint. A full conversation page avoids
+// the old summary + one detail request per turn; fetch only after a query.
+export function fetchThreadConversationPage(id: string, beforeTurnId?: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ view: 'full', limit: '100' });
+  if (beforeTurnId) params.set('beforeTurnId', beforeTurnId);
+  return request<ThreadDetailDto>(`/api/threads/${encodeURIComponent(id)}?${params}`, { signal: signal ?? null });
+}
+
 export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
   return request<ThreadHistoryItemDetailDto>(
     `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,

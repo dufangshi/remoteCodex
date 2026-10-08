@@ -2,6 +2,7 @@ mod child_delete;
 mod claude_history;
 mod generation;
 mod reliability;
+mod search;
 mod update;
 mod watches;
 

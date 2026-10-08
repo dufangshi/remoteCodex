@@ -123,6 +123,7 @@ pub(crate) fn shared_thread_path_allowed(
                 | "/models"
                 | "/group"
                 | "/watches"
+                | "/search"
         ) {
             return true;
         }
@@ -204,6 +205,28 @@ pub(crate) fn shared_workspace_path_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_search_is_scoped_read_access() {
+        assert!(shared_thread_path_allowed(
+            "GET",
+            "/api/threads/thread-1/search",
+            "thread-1",
+            false
+        ));
+        assert!(!shared_thread_path_allowed(
+            "GET",
+            "/api/threads/thread-2/search",
+            "thread-1",
+            false
+        ));
+        assert!(!shared_thread_path_allowed(
+            "POST",
+            "/api/threads/thread-1/search",
+            "thread-1",
+            true
+        ));
+    }
 
     #[test]
     fn history_detail_paths_preserve_wire_encoding_and_shared_read_access() {
