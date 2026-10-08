@@ -48,6 +48,10 @@ pub enum AutomationTrigger {
     At {
         at: String,
     },
+    /// Every subsequent complete turn of this source; historical replay is rejected.
+    ThreadEnded {
+        source_thread_id: String,
+    },
     TurnEnded {
         source_thread_id: String,
         turn_id: String,

@@ -112,7 +112,9 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
       ? t('automation.intervalSummary', { value1: v.everySeconds })
       : v.kind === 'at'
         ? date(v.at)
-        : `${t(`automation.${v.kind}`)} · ${v.kind === 'turnEnded' ? v.turnId : v.kind === 'taskEnded' ? `#${v.taskNumber}` : (v.commandKey ?? v.commandId)}`;
+        : v.kind === 'threadEnded'
+          ? `${t('automation.threadEnded')} · ${v.sourceThreadId}`
+          : `${t(`automation.${v.kind}`)} · ${v.kind === 'turnEnded' ? v.turnId : v.kind === 'taskEnded' ? `#${v.taskNumber}` : (v.commandKey ?? v.commandId)}`;
   return (
     <>
       <button
@@ -392,15 +394,21 @@ function AutomationForm({
         ? { kind: trigger, everySeconds: seconds }
         : trigger === 'at'
           ? { kind: trigger, at: new Date(at).toISOString() }
-          : trigger === 'turnEnded'
-            ? { kind: trigger, sourceThreadId: source, turnId: sourceId }
-            : trigger === 'taskEnded'
-              ? {
-                  kind: trigger,
-                  rootThreadId: source,
-                  taskNumber: Number(sourceId),
-                }
-              : { kind: trigger, sourceThreadId: source, commandKey: sourceId };
+          : trigger === 'threadEnded'
+            ? { kind: trigger, sourceThreadId: source }
+            : trigger === 'turnEnded'
+              ? { kind: trigger, sourceThreadId: source, turnId: sourceId }
+              : trigger === 'taskEnded'
+                ? {
+                    kind: trigger,
+                    rootThreadId: source,
+                    taskNumber: Number(sourceId),
+                  }
+                : {
+                    kind: trigger,
+                    sourceThreadId: source,
+                    commandKey: sourceId,
+                  };
     const command = shell
       ? { shell: argv, argv: [], cwd, timeoutSeconds: timeout }
       : { argv: JSON.parse(argv), cwd, timeoutSeconds: timeout };
@@ -425,7 +433,7 @@ function AutomationForm({
           : trigger === 'commandEnded'
             ? { kind: 'exitCodeEquals', value: 0 }
             : { kind: 'statusIn', values: ['completed'] },
-      replayExisting: replay,
+      replayExisting: trigger === 'threadEnded' ? false : replay,
     };
   };
   const submit = async (save: boolean) => {
@@ -501,12 +509,17 @@ function AutomationForm({
                 onChange={(e) => {
                   setTrigger(e.target.value as AutomationTrigger['kind']);
                   setSourceId('');
+                  if (e.target.value === 'threadEnded') {
+                    setSource('');
+                    setReplay(false);
+                  }
                 }}
               >
                 {(
                   [
                     'interval',
                     'at',
+                    'threadEnded',
                     'turnEnded',
                     'taskEnded',
                     'commandEnded',
@@ -571,19 +584,20 @@ function AutomationForm({
                   onChange={(e) => setSource(e.target.value)}
                 />,
               )}
-              {label(
-                trigger === 'turnEnded'
-                  ? 'automation.turn'
-                  : trigger === 'taskEnded'
-                    ? 'automation.task'
-                    : 'automation.commandKey',
-                <input
-                  required
-                  className={field}
-                  value={sourceId}
-                  onChange={(e) => setSourceId(e.target.value)}
-                />,
-              )}
+              {trigger !== 'threadEnded' &&
+                label(
+                  trigger === 'turnEnded'
+                    ? 'automation.turn'
+                    : trigger === 'taskEnded'
+                      ? 'automation.task'
+                      : 'automation.commandKey',
+                  <input
+                    required
+                    className={field}
+                    value={sourceId}
+                    onChange={(e) => setSourceId(e.target.value)}
+                  />,
+                )}
               {label(
                 'automation.condition',
                 <select
@@ -595,14 +609,20 @@ function AutomationForm({
                   <option value="any">{t('automation.anyTerminal')}</option>
                 </select>,
               )}
-              <label className="flex gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={replay}
-                  onChange={(e) => setReplay(e.target.checked)}
-                />
-                {t('automation.replay')}
-              </label>
+              {trigger === 'threadEnded' ? (
+                <p className="text-xs text-[var(--theme-fg-muted)]">
+                  {t('automation.threadEndedNote')}
+                </p>
+              ) : (
+                <label className="flex gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={replay}
+                    onChange={(e) => setReplay(e.target.checked)}
+                  />
+                  {t('automation.replay')}
+                </label>
+              )}
             </>
           )}
           {action === 'runScript' ? (

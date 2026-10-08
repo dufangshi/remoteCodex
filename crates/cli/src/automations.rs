@@ -7,7 +7,7 @@ use std::{io::Read, path::PathBuf};
 pub struct DefinitionArgs {
     #[arg(long, default_value = "self")]
     pub thread: String,
-    /// Full typed trigger/condition/action definition as JSON.
+    /// Full typed definition as JSON; threadEnded needs only sourceThreadId (no turn ID).
     #[arg(long, conflicts_with = "file")]
     pub json: Option<String>,
     /// JSON file, or - to read stdin. Conditions support all/any/not.

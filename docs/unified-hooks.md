@@ -7,8 +7,9 @@ watches stay a separate read-only projection: they are never imported or duplica
 Recorded active/unconfirmed native watches block registering a Supervisor prompt
 against that same session until a successful cancellation is recorded.
 
-An automation belongs to its target thread. Its source can be a precise turn,
-lineage task or controlled command on another local thread. Only a registered
+An automation belongs to its target thread. Its source can be every subsequent
+complete turn of another local thread, a precise turn, lineage task or controlled
+command. Only a registered
 `prompt` action wakes a thread; results/reminders and command execution reports
 always enter passive inbox, both when idle and during a turn. Reading an inbox
 never starts execution. Existing queue/inbox/task/wake rules remain in force.
@@ -34,6 +35,15 @@ remote-codex hooks create --thread self --json '{
   "trigger":{"kind":"at","at":"2030-01-01T12:00:00Z"},
   "action":{"kind":"notifyInbox","subject":"Reminder","text":"Review the report.","messageKind":"status"}
 }'
+
+# Listen to another local thread, without knowing its current or future turn IDs.
+# Set SOURCE_THREAD_ID to its Remote Codex thread UUID first.
+remote-codex hooks create --thread self --request-id source-thread-results --json "{
+  \"name\":\"Other thread results\",
+  \"trigger\":{\"kind\":\"threadEnded\",\"sourceThreadId\":\"$SOURCE_THREAD_ID\"},
+  \"condition\":{\"kind\":\"statusIn\",\"values\":[\"completed\",\"failed\",\"interrupted\"]},
+  \"action\":{\"kind\":\"notifyInbox\",\"subject\":\"Source thread ended\",\"text\":\"A complete source turn ended.\",\"includeClosingMessage\":true}
+}"
 
 # Full JSON files and typed predicate combinations use the same server validator.
 # Fill SOURCE_THREAD_ID and TURN_ID from a real thread/turn before running this block.
@@ -64,6 +74,17 @@ Immutable turn/task/command-ID subscriptions reject already ended sources with
 `sourceAlreadyEnded`. Set `replayExisting: true` to explicitly run once immediately
 instead. Register against the actual immutable turn ID, not "the next turn".
 `commandKey` subscriptions match each new controlled wrapper execution of that key.
+
+`threadEnded {sourceThreadId}` subscribes continuously to the source's complete
+turns ending **after registration**, including a turn already running at registration.
+Each turn produces at most one occurrence, for `completed`, `failed` or `interrupted`;
+typed `statusIn` can filter these statuses. Tools/batches, idle state and closing or
+deleting a thread do not produce completion occurrences. Registration never replays
+history; `replayExisting: true` is rejected with `replayUnsupported` for this trigger.
+At the next scheduler check, source closure/deletion pauses this subscription with
+`sourceUnavailable`, removing its unexecuted actions. A closed source must reopen
+before explicit resume; paused events are discarded, and reopening alone never
+resumes the subscription.
 
 ```sh
 # Register a script after this thread's controlled `focused-build` wrapper succeeds.
@@ -114,7 +135,7 @@ implemented but was not part of Linux validation).
 
 ## Definition and reliability
 
-Triggers: `interval {everySeconds, anchorAt?}`, `at {at}`, `turnEnded
+Triggers: `interval {everySeconds, anchorAt?}`, `at {at}`, `threadEnded {sourceThreadId}`, `turnEnded
 {sourceThreadId, turnId}`, `taskEnded {rootThreadId, taskNumber}`, `commandEnded
 {sourceThreadId, commandId?, commandKey?}`. UTC interval anchors do not drift with
 execution duration or DST. Dates require RFC3339 with an offset. There is no cron,
@@ -190,6 +211,29 @@ Preview body: the definition directly. Command body: `{ "argv": ["..."],
 "clientRequestId": "build-1" }`. CLI operations use existing `/api/cli` and call
 these same runtime services. Read-only shares can inspect definitions/history;
 control is required to create/control hooks or access command execution/output.
+
+For example, POST to `/api/threads/TARGET_A/automations` to monitor source B:
+
+```json
+{
+  "clientRequestId": "listen-b-v1",
+  "definition": {
+    "name": "Source B completed turns",
+    "trigger": { "kind": "threadEnded", "sourceThreadId": "SOURCE_B" },
+    "condition": { "kind": "statusIn", "values": ["completed"] },
+    "action": {
+      "kind": "notifyInbox",
+      "subject": "Source B result",
+      "text": "A complete source turn ended.",
+      "includeClosingMessage": true
+    }
+  }
+}
+```
+
+Replace TARGET_A/SOURCE_B with actual local Remote Codex thread IDs. The target
+is selected by the URL; no turnId is required. The same trigger supports explicit
+prompt or runScript actions through the existing action and busy-turn rules.
 
 Web changes require the independent shared UI commit and a future relay UI deploy
 with that full thread_ui_sha. A device Supervisor restart alone does not publish UI.

@@ -1,5 +1,6 @@
 use super::*;
 use crate::fake::FakeRuntime;
+use remote_codex_protocol::ThreadEventEnvelope;
 
 fn supervisor(dir: &Path) -> Arc<Supervisor> {
     let config = RuntimeConfig {
@@ -58,6 +59,21 @@ async fn setup() -> (tempfile::TempDir, Arc<Supervisor>, String) {
 }
 fn def(trigger: Value, action: Value) -> Definition {
     serde_json::from_value(json!({"name":"fixture","trigger":trigger,"action":action})).unwrap()
+}
+async fn child(s: &Supervisor, parent: &str) -> String {
+    s.create_thread(CreateThreadInput {
+        workspace_id: s.get_thread(parent).unwrap().workspace_id,
+        title: None,
+        provider: Some(Provider::Codex),
+        agent_id: None,
+        model: "ios-e2e-stream".into(),
+        reasoning_effort: None,
+        approval_mode: "yolo".into(),
+        parent_thread_id: Some(parent.into()),
+    })
+    .await
+    .unwrap()
+    .id
 }
 fn hourly(action: Value) -> Definition {
     def(
@@ -212,6 +228,162 @@ async fn automation_repeated_resume_preserves_unconsumed_events_and_interval_sch
     assert_eq!(runs(&s, &t, event_id)[0]["state"], "completed");
     assert_eq!(mail(&s, &t), mail_before + 1);
     assert_eq!(pending(&s, &t), 0);
+}
+
+#[tokio::test]
+async fn automation_thread_ended_cross_thread_repeats_only_for_new_complete_source_turns() {
+    let (_dir, s, a) = setup().await;
+    let b = child(&s, &a).await;
+    let c = child(&s, &a).await;
+    turn(&s, &b, "historical-b", "inProgress");
+    finish(&s, &b, "historical-b", "completed");
+    let d = def(json!({"kind":"threadEnded","sourceThreadId":b}), notice());
+    let mut replay = d.clone();
+    replay.replay_existing = true;
+    assert!(s
+        .automation_preview(&a, replay)
+        .unwrap_err()
+        .to_string()
+        .contains("replayUnsupported"));
+    let hook = s.automation_create(&a, d.clone(), None).unwrap();
+    let id = hook["id"].as_str().unwrap();
+    let mut successful = d;
+    successful.condition = Condition::StatusIn {
+        values: vec!["completed".into()],
+    };
+    let filtered = s.automation_create(&a, successful, None).unwrap();
+    let filtered_id = filtered["id"].as_str().unwrap();
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert!(runs(&s, &a, id).is_empty()); // No historical or idle-state replay.
+    turn(&s, &c, "unrelated-c", "inProgress");
+    finish(&s, &c, "unrelated-c", "completed");
+    turn(&s, &b, "first-b", "inProgress");
+    s.bus.emit(ThreadEventEnvelope {
+        event_type: "thread.item.completed".into(), thread_id: b.clone(),
+        timestamp: "2030-01-01T03:30:00Z".into(),
+        payload: json!({"turnId":"first-b","item":{"id":"tool","kind":"toolCall","status":"completed"}}),
+    });
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(mail(&s, &a), 0);
+    finish(&s, &b, "first-b", "completed");
+    finish(&s, &b, "first-b", "completed");
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(runs(&s, &a, id).len(), 1);
+    assert_eq!(mail(&s, &a), 2); // One per matching hook, never per repeated event.
+    turn(&s, &b, "second-b", "inProgress");
+    finish(&s, &b, "second-b", "failed");
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(runs(&s, &a, id).len(), 2);
+    assert_eq!(runs(&s, &a, filtered_id)[0]["state"], "conditionSkipped");
+    assert_eq!(mail(&s, &a), 3);
+    // Multiple complete turns in one event-journal batch must all be consumed.
+    turn(&s, &b, "third-b", "inProgress");
+    finish(&s, &b, "third-b", "interrupted");
+    turn(&s, &b, "fourth-b", "inProgress");
+    finish(&s, &b, "fourth-b", "completed");
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(runs(&s, &a, id).len(), 4);
+    assert_eq!(runs(&s, &a, filtered_id).len(), 4);
+    assert_eq!(mail(&s, &a), 6);
+    assert_eq!(mail(&s, &b), 0);
+    assert_eq!(pending(&s, &a), 0);
+}
+
+#[tokio::test]
+async fn automation_thread_ended_prompt_waits_for_whole_target_turn() {
+    let (_dir, s, a) = setup().await;
+    let b = child(&s, &a).await;
+    turn(&s, &a, "busy-a", "inProgress");
+    let hook = s
+        .automation_create(
+            &a,
+            def(json!({"kind":"threadEnded","sourceThreadId":b}), prompt()),
+            None,
+        )
+        .unwrap();
+    let id = hook["id"].as_str().unwrap();
+    turn(&s, &b, "source-b", "inProgress");
+    finish(&s, &b, "source-b", "completed");
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    s.drain_steers(&a).await.unwrap();
+    assert_eq!(pending(&s, &a), 1);
+    s.bus.emit(ThreadEventEnvelope {
+        event_type: "thread.item.completed".into(),
+        thread_id: a.clone(),
+        timestamp: "2030-01-01T03:30:00Z".into(),
+        payload: json!({"turnId":"busy-a"}),
+    });
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    s.drain_steers(&a).await.unwrap();
+    assert_eq!(pending(&s, &a), 1);
+    assert!(runs(&s, &a, id)[0]["turnId"].is_null());
+    finish(&s, &a, "busy-a", "completed");
+    s.drain_steers(&a).await.unwrap();
+    assert_eq!(pending(&s, &a), 0);
+    assert!(runs(&s, &a, id)[0]["turnId"].is_string());
+}
+
+#[tokio::test]
+async fn automation_thread_ended_source_close_or_delete_pauses_without_a_completion() {
+    let (_dir, s, a) = setup().await;
+    let closed = child(&s, &a).await;
+    let deleted = child(&s, &a).await;
+    let close_hook = s
+        .automation_create(
+            &a,
+            def(
+                json!({"kind":"threadEnded","sourceThreadId":closed}),
+                notice(),
+            ),
+            None,
+        )
+        .unwrap();
+    let delete_hook = s
+        .automation_create(
+            &a,
+            def(
+                json!({"kind":"threadEnded","sourceThreadId":deleted}),
+                prompt(),
+            ),
+            None,
+        )
+        .unwrap();
+    turn(&s, &a, "busy-a", "inProgress");
+    turn(&s, &deleted, "completed-before-delete", "inProgress");
+    finish(&s, &deleted, "completed-before-delete", "completed");
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(pending(&s, &a), 1);
+    s.close_agent_thread(Some(&a), &closed, false).unwrap();
+    s.delete_thread(&deleted).unwrap();
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    for h in [&close_hook, &delete_hook] {
+        let id = h["id"].as_str().unwrap();
+        let current = s.automation_show(&a, id).unwrap();
+        assert_eq!(current["state"], "paused");
+        assert_eq!(current["error"], "sourceUnavailable");
+        assert!(s.automation_control(&a, id, "resume").is_err());
+    }
+    assert!(runs(&s, &a, close_hook["id"].as_str().unwrap()).is_empty());
+    assert_eq!(runs(&s, &a, delete_hook["id"].as_str().unwrap()).len(), 1);
+    assert_eq!(
+        runs(&s, &a, delete_hook["id"].as_str().unwrap())[0]["state"],
+        "cancelled"
+    );
+    assert_eq!(pending(&s, &a), 0);
+    assert_eq!(mail(&s, &a), 0);
+    assert!(s
+        .automation_create(
+            &a,
+            def(
+                json!({"kind":"threadEnded","sourceThreadId":closed}),
+                notice()
+            ),
+            None
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("sourceUnavailable"));
 }
 
 #[tokio::test]

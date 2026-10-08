@@ -2,6 +2,7 @@
 export type AutomationTrigger =
   | { kind: 'interval'; everySeconds: number; anchorAt?: string | null }
   | { kind: 'at'; at: string }
+  | { kind: 'threadEnded'; sourceThreadId: string }
   | { kind: 'turnEnded'; sourceThreadId: string; turnId: string }
   | { kind: 'taskEnded'; rootThreadId: string; taskNumber: number }
   | {

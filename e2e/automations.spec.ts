@@ -247,3 +247,123 @@ test('automation creation retries the same accepted request after a lost respons
   await expect(dialog.locator('article')).toHaveCount(2);
   expect(identities[2]).not.toBe(identities[0]);
 });
+
+test('threadEnded creates an other-thread subscription without a turn ID and shows its configuration', async ({
+  page,
+  request,
+}, testInfo) => {
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const absPath = path.resolve(
+    process.env.E2E_WORKSPACE_ROOT!,
+    `thread-ended-${randomUUID()}`,
+  );
+  await mkdir(absPath, { recursive: true });
+  const wsResponse = await request.post(`${base}/api/workspaces`, {
+    data: { absPath },
+  });
+  expect(wsResponse.ok()).toBeTruthy();
+  const ws = await wsResponse.json();
+  const ids: string[] = [];
+  for (const title of ['Target A', 'Source B']) {
+    const response = await request.post(`${base}/api/threads/start`, {
+      data: {
+        workspaceId: ws.id,
+        title,
+        provider: 'codex',
+        model: 'ios-e2e-stream',
+        approvalMode: 'yolo',
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+    const created = await response.json();
+    ids.push(created.id ?? created.thread.id);
+  }
+  const [a, b] = ids;
+  await page.addInitScript(() =>
+    localStorage.setItem('remote-codex.locale', 'en'),
+  );
+  await page.goto(`/threads/${a}`);
+  await page.getByRole('button', { name: 'Automations', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Automations', exact: true });
+  await dialog
+    .getByRole('button', { name: 'Create automation', exact: true })
+    .click();
+  await dialog.getByLabel('Name', { exact: true }).fill('Listen to Source B');
+  await dialog
+    .getByRole('combobox', { name: 'Trigger', exact: true })
+    .selectOption('threadEnded');
+  await expect(dialog.getByLabel('Turn ID', { exact: true })).toHaveCount(0);
+  await expect(
+    dialog.getByRole('checkbox', {
+      name: 'Notify / run once if source already ended',
+    }),
+  ).toHaveCount(0);
+  await expect(dialog).toContainText('History is not replayed.');
+  await dialog.getByLabel('Source thread ID', { exact: true }).fill(b);
+  await dialog
+    .getByRole('combobox', { name: 'Condition', exact: true })
+    .selectOption('any');
+  await dialog
+    .getByRole('combobox', { name: 'Action', exact: true })
+    .selectOption('notifyInbox');
+  await dialog.getByLabel('Subject', { exact: true }).fill('Source B result');
+  await dialog
+    .getByLabel('Text', { exact: true })
+    .fill('A complete source turn ended.');
+  await dialog
+    .getByRole('button', { name: 'Register automation', exact: true })
+    .click();
+  const item = dialog
+    .locator('article')
+    .filter({ hasText: 'Listen to Source B' });
+  await expect(item).toContainText(`Other thread ended · ${b}`);
+  const registered = await (
+    await request.get(`${base}/api/threads/${a}/automations`)
+  ).json();
+  expect(registered.automations).toHaveLength(1);
+  const hook = registered.automations[0];
+  expect(hook.definition.trigger).toEqual({
+    kind: 'threadEnded',
+    sourceThreadId: b,
+  });
+  expect(hook.definition.replayExisting).toBe(false);
+  await item.locator('summary').filter({ hasText: 'Definition' }).click();
+  await expect(item.locator('pre')).toContainText('"kind": "threadEnded"');
+  await expect(item.locator('pre')).toContainText(b);
+
+  // The real fake-runtime source turn completes through HTTP, never a synthetic idle event.
+  const prompt = await request.post(`${base}/api/threads/${b}/prompt`, {
+    data: {
+      prompt: 'Report one deterministic result.',
+      clientRequestId: randomUUID(),
+    },
+  });
+  expect(prompt.ok()).toBeTruthy();
+  await expect
+    .poll(
+      async () =>
+        (
+          await (
+            await request.get(
+              `${base}/api/threads/${a}/automations/${hook.id}/runs`,
+            )
+          ).json()
+        ).runs[0]?.state,
+    )
+    .toBe('completed');
+  const target = await (await request.get(`${base}/api/threads/${a}`)).json();
+  expect(target.thread.status).toBe('idle');
+  expect(target.turns).toHaveLength(0);
+  expect(target.pendingSteers).toHaveLength(0);
+  await page.screenshot({ path: testInfo.outputPath('thread-ended-en.png') });
+
+  await page.addInitScript(() =>
+    localStorage.setItem('remote-codex.locale', 'zh-CN'),
+  );
+  await page.reload();
+  await page.getByRole('button', { name: '自动化', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '自动化', exact: true }),
+  ).toContainText(`其它线程结束 · ${b}`);
+  await page.screenshot({ path: testInfo.outputPath('thread-ended-zh.png') });
+});

@@ -156,6 +156,12 @@ fn validate_condition(c: &Condition, depth: usize) -> Result<()> {
 }
 fn matches_event(t: &Trigger, e: &Value) -> bool {
     match t {
+        Trigger::ThreadEnded { source_thread_id } => {
+            e["kind"] == "turnEnded"
+                && e["sourceThreadId"] == *source_thread_id
+                && e["turnId"].as_str().is_some_and(|id| !id.is_empty())
+                && e["status"].as_str().is_some_and(terminal)
+        }
         Trigger::TurnEnded {
             source_thread_id,
             turn_id,
@@ -329,6 +335,16 @@ impl Supervisor {
             }
         }
         match &definition.trigger {
+            Trigger::ThreadEnded { source_thread_id } => {
+                ensure!(
+                    !definition.replay_existing,
+                    "replayUnsupported: threadEnded only observes turns ending after registration"
+                );
+                ensure!(
+                    self.get_thread(source_thread_id)?.closed_at.is_none(),
+                    "sourceUnavailable: thread is closed"
+                );
+            }
             Trigger::TurnEnded {
                 source_thread_id,
                 turn_id,
@@ -595,7 +611,8 @@ fn prepare_runs(c: &Connection, now: &str) -> Result<()> {
             continue;
         }
         let source = match &d.trigger {
-            Trigger::TurnEnded {
+            Trigger::ThreadEnded { source_thread_id }
+            | Trigger::TurnEnded {
                 source_thread_id, ..
             }
             | Trigger::CommandEnded {
@@ -606,8 +623,8 @@ fn prepare_runs(c: &Connection, now: &str) -> Result<()> {
         };
         if let Some(source) = source {
             let exists: bool = c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
-                [source],
+                "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1 AND (?2=0 OR closed_at IS NULL))",
+                params![source, matches!(d.trigger, Trigger::ThreadEnded { .. })],
                 |r| r.get(0),
             )?;
             if !exists {
@@ -695,12 +712,14 @@ fn prepare_runs(c: &Connection, now: &str) -> Result<()> {
                 if matches_event(&d.trigger, &e) {
                     create_run(c, &id, &d, &key, &at, now, &e, 0)?;
                     // Exact turn/task/command subscriptions are immutable and single occurrence.
+                    // Thread-wide and named command subscriptions consume every new event.
                     if !matches!(
                         d.trigger,
-                        Trigger::CommandEnded {
-                            command_id: None,
-                            ..
-                        }
+                        Trigger::ThreadEnded { .. }
+                            | Trigger::CommandEnded {
+                                command_id: None,
+                                ..
+                            }
                     ) {
                         c.execute(
                             "UPDATE automations SET event_cursor=?2 WHERE id=?1",
