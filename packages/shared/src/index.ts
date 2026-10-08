@@ -1237,6 +1237,7 @@ export interface ThreadActionQuestionDto {
   header: string;
   question: string;
   multiSelect?: boolean;
+  required?: boolean;
   isOther: boolean;
   isSecret: boolean;
   options: ThreadActionQuestionOptionDto[] | null;
