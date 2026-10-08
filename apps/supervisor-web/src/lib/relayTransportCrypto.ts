@@ -141,8 +141,11 @@ export function deviceRoute(url: URL) {
     ? { deviceId: decodeURIComponent(match[1]!), path: match[2]! + url.search }
     : null;
 }
-export function scopeFromPage(url: string) {
-  return new URL(url).pathname.match(/\/devices\/[^/]+\/threads\/([^/]+)/)?.[1];
+export function scopeFromPage(url: string, targetDeviceId?: string) {
+  const match = new URL(url).pathname.match(/\/devices\/([^/]+)\/threads\/([^/]+)/);
+  // A page's primary thread grants no scope on a different device.
+  if (targetDeviceId && match && decodeURIComponent(match[1]!) !== targetDeviceId) return undefined;
+  return match?.[2];
 }
 async function keyFor(
   deviceId: string,

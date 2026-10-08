@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { useWorkbenchReference } from './useWorkbenchReference';
 import * as api from '../lib/api';
 vi.mock('../lib/api', () => ({
-  relayModeActive: vi.fn(() => true), fetchRelayAccess: vi.fn(),
+  relayModeActive: vi.fn(() => true), fetchRelayAccess: vi.fn(), connectSupervisorEvents: vi.fn(),
   fetchThreadCapabilitySnapshot: vi.fn(async () => ({ effectiveCapabilities: null })),
   fetchThreadModels: vi.fn(async () => []), fetchThreadDetail: vi.fn(),
   sendThreadPrompt: vi.fn(), resumeThread: vi.fn(), interruptThread: vi.fn(),
@@ -49,7 +49,7 @@ it('binds each mutation and an in-flight upload to the selected ID and ignores a
   const attachment = { file: new File(['b'], 'b.txt'), clientId: 'b-file', originalName: 'b.txt', kind: 'file' as const, placeholder: '[FILE b.txt]' };
   let sent!: Promise<boolean>;
   act(() => { sent = old.send({ prompt: 'B upload', attachments: [attachment] }); });
-  await waitFor(() => expect(api.sendThreadPrompt).toHaveBeenCalledWith('b', expect.objectContaining({ attachments: [attachment] })));
+  await waitFor(() => expect(api.sendThreadPrompt).toHaveBeenCalledWith('b', expect.objectContaining({ attachments: [attachment] }), 'device'));
   rerender({ id: 'c' });
   await waitFor(() => expect(result.current.detail?.thread.id).toBe('c'));
   await act(async () => { finish(); await sent; });
@@ -63,10 +63,10 @@ it('binds each mutation and an in-flight upload to the selected ID and ignores a
     await result.current.respond('request-c', { answers: {} });
   });
   expect(api.sendThreadPrompt).toHaveBeenCalledTimes(1);
-  expect(api.interruptThread).toHaveBeenCalledWith('c');
-  expect(api.cancelPendingSteer).toHaveBeenCalledWith('c', 'queue-c');
-  expect(api.steerPendingPrompt).toHaveBeenCalledWith('c', 'queue-c');
-  expect(api.respondToThreadRequest).toHaveBeenCalledWith('c', 'request-c', { answers: {} });
+  expect(api.interruptThread).toHaveBeenCalledWith('c', {}, 'device');
+  expect(api.cancelPendingSteer).toHaveBeenCalledWith('c', 'queue-c', 'device');
+  expect(api.steerPendingPrompt).toHaveBeenCalledWith('c', 'queue-c', 'device');
+  expect(api.respondToThreadRequest).toHaveBeenCalledWith('c', 'request-c', { answers: {} }, 'device');
 });
 it('keeps a successful prompt accepted if its follow-up summary fetch fails', async () => {
   vi.mocked(api.relayModeActive).mockReturnValue(false);
@@ -77,4 +77,24 @@ it('keeps a successful prompt accepted if its follow-up summary fetch fails', as
   await act(async () => { expect(await result.current.send({ prompt: 'persisted once' })).toBe(true); });
   expect(api.sendThreadPrompt).toHaveBeenCalledTimes(1);
   expect(result.current.error).toBe('Summary temporarily offline');
+});
+it('keeps a cross-device conversation, its event subscription and mutations scoped independently', async () => {
+  vi.mocked(api.relayModeActive).mockReturnValue(true);
+  vi.mocked(api.fetchRelayAccess).mockResolvedValue({ kind:'owner' } as never);
+  const close = vi.fn();
+  vi.mocked(api.connectSupervisorEvents).mockReturnValue({close} as never);
+  const {result,rerender,unmount} = renderHook(({device}) => useWorkbenchReference(device,'same-id','host'),{initialProps:{device:'peer-a'}});
+  await waitFor(() => expect(result.current.canControl && result.current.detail?.thread.id === 'same-id').toBe(true));
+  expect(api.fetchThreadDetail).toHaveBeenCalledWith('same-id',{limit:3},'peer-a');
+  expect(api.fetchThreadModels).toHaveBeenCalledWith('same-id','peer-a');
+  expect(api.connectSupervisorEvents).toHaveBeenCalledWith(expect.any(Function),{deviceId:'peer-a',threadId:'same-id'});
+  const old = result.current;
+  rerender({device:'peer-b'});
+  await waitFor(() => expect(api.fetchThreadDetail).toHaveBeenCalledWith('same-id',{limit:3},'peer-b'));
+  await waitFor(() => expect(result.current.canControl).toBe(true));
+  await act(async () => { expect(await old.send({prompt:'departed'})).toBe(false); await result.current.send({prompt:'peer B only'}); });
+  expect(api.sendThreadPrompt).toHaveBeenCalledWith('same-id',expect.objectContaining({prompt:'peer B only'}),'peer-b');
+  expect(api.sendThreadPrompt).toHaveBeenCalledTimes(1);
+  expect(close).toHaveBeenCalledTimes(1);
+  unmount(); expect(close).toHaveBeenCalledTimes(2);
 });

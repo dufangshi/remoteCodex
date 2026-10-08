@@ -213,6 +213,7 @@ test('composer image preview portal retains expansion and settings keeps model, 
     name: 'Harness settings',
     exact: true,
   });
+  await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
   await expect(
     settings.getByRole('combobox', { name: 'Harness model', exact: true }),
   ).toHaveValue('default');
@@ -228,6 +229,7 @@ test('composer image preview portal retains expansion and settings keeps model, 
   });
   await expect(permissions).toHaveValue('danger-full-access');
   await permissions.selectOption('workspace-write');
+  await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
   await expect
     .poll(
       async () =>

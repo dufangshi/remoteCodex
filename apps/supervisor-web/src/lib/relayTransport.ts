@@ -2,6 +2,7 @@ import { getLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import workerUrl from './relayServiceWorker.ts?worker&url';
 import {
   exchange,
+  deviceRoute,
   trustPinnedDevice,
   scopeFromPage,
   setTransportReporter,
@@ -110,11 +111,11 @@ export async function ensureRelayWorker() {
     throw e;
   }
 }
-export async function encryptedBrowserFetch(url: string, init: RequestInit) {
+export async function encryptedBrowserFetch(url: string, init: RequestInit, threadScope?: string) {
   return (
     await exchange(
       new Request(new URL(url, window.location.href), init),
-      scopeFromPage(window.location.href),
+      threadScope ?? scopeFromPage(window.location.href, deviceRoute(new URL(url, window.location.href))?.deviceId),
       async () => { await ensureRelayWorker(); },
     )
   ).response;

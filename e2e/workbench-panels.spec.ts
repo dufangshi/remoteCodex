@@ -2,12 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type Page, type APIRequestContext } from '@playwright/test';
 
 test.use({ actionTimeout: 15_000 });
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 const screenshotRoot = process.env.WORKBENCH_SCREENSHOT_DIR;
+async function selectSplit(page: Page, id: string) {
+  await page.getByTestId('workbench-split-trigger').click();
+  await page.getByTestId('workbench-thread-picker').locator(`[data-thread-id="${id}"]`).click();
+}
+
 
 // Only the isolated fake Supervisor database is edited. All UI data is then read
 // through the normal API. Native-agent metadata is an explicitly labelled fixture.
@@ -158,16 +163,15 @@ test('dual conversations send concurrently to real thread IDs with independent d
   await expect(page.getByText('发送目标 · 主会话', { exact: true })).toHaveCount(0);
   await left.fill('左侧独立草稿');
   // One exposed selection opens the second conversation, without a nested tools menu.
-  const split = page.getByRole('combobox', { name: '对照此设备的会话' });
-  await expect(split).toBeVisible();
-  await split.selectOption(b.id);
+  await expect(page.getByTestId('workbench-split-trigger')).toBeVisible();
+  await selectSplit(page, b.id);
   await expect(right).toBeVisible();
   await expect(reference).toContainText('独立评审结论');
   await right.fill('右侧独立草稿');
   await expect(page.getByTestId('chat-composer')).toHaveCount(2);
-  await split.selectOption(c.id);
+  await selectSplit(page, c.id);
   await expect(reference.getByRole('textbox', { name: '提示词', exact: true })).toHaveText('');
-  await split.selectOption(b.id);
+  await selectSplit(page, b.id);
   await expect(right).toHaveText('右侧独立草稿');
   await showLeft();
   await expect(left).toHaveText('左侧独立草稿');
@@ -233,16 +237,16 @@ test('dual conversations send concurrently to real thread IDs with independent d
   await page.getByTestId('make-primary').click();
   await expect(page).toHaveURL(new RegExp(`/threads/${a.id}$`));
   await showRight();
-  await page.getByRole('button', { name: '关闭参考视图', exact: true }).click();
+  await reference.getByRole('button', { name: '关闭分屏', exact: true }).click();
   await expect(reference).not.toBeVisible();
-  await split.selectOption(b.id);
+  await selectSplit(page, b.id);
   await expect(right).toHaveText('切换后仍属于右侧');
-  await page.getByTestId('reference-picker').click();
+  await page.getByTestId('workbench-split-trigger').click();
   await page.getByRole('button', { name: '协作进度', exact: true }).click();
   await expect(page.getByTestId('managed-summary')).toHaveCount(2);
   await expect(page.getByTestId('native-summary')).toHaveCount(2);
   if (!mobile) await snap('desktop-collaboration.png');
-  await split.selectOption(b.id);
+  await selectSplit(page, b.id);
   await page.evaluate(() => {
     for (const key of Object.keys(localStorage))
       if (key.includes('presentation.v1:') && key.endsWith('.arrangement')) localStorage.setItem(key, '{broken');
@@ -306,14 +310,10 @@ test('opening and closing references preserves a running primary and ignores lat
   ).toBeTruthy();
   await expect(primary.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
   const baselineSocketCount = socketCount;
-  await page
-    .getByRole('combobox', { name: 'Compare a session on this device' })
-    .selectOption(b.id);
+  await selectSplit(page, b.id);
   await requested;
   await expect(primary.getByRole('textbox', { name: 'Prompt', exact: true })).toBeVisible();
-  await page
-    .getByRole('combobox', { name: 'Compare a session on this device' })
-    .selectOption(c.id);
+  await selectSplit(page, c.id);
   await expect(reference).toContainText(c.title);
   releaseB();
   await expect(reference).toContainText('参考区长历史');
@@ -334,8 +334,8 @@ test('opening and closing references preserves a running primary and ignores lat
     primaryOffset,
   );
   expect(socketCount).toBe(baselineSocketCount);
-  await page
-    .getByRole('button', { name: 'Close reference view', exact: true })
+  await reference
+    .getByRole('button', { name: 'Close split', exact: true })
     .click();
   await expect(reference).not.toBeVisible();
   expect(
@@ -359,7 +359,7 @@ test('secondary queue, steer, stop and failed sends stay bound to their conversa
   await page.setViewportSize({ width: 1440, height: 1000 });
   const { a, b } = await fixture(request);
   await page.goto(`/threads/${a.id}`);
-  await page.getByRole('combobox', { name: 'Compare a session on this device' }).selectOption(b.id);
+  await selectSplit(page, b.id);
   const primary = page.getByTestId('primary-pane');
   const secondary = page.getByTestId('reference-pane');
   const left = primary.getByRole('textbox', { name: 'Prompt', exact: true });
@@ -404,7 +404,7 @@ test('swapping primary while a send is in flight isolates the old error and busy
   await page.setViewportSize({ width: 1440, height: 1000 });
   const { a, b } = await fixture(request);
   await page.goto(`/threads/${a.id}`);
-  await page.getByRole('combobox', { name: 'Compare a session on this device' }).selectOption(b.id);
+  await selectSplit(page, b.id);
   const primary = page.getByTestId('primary-pane');
   const input = primary.getByRole('textbox', { name: 'Prompt', exact: true });
   const submit = primary.getByRole('button', { name: 'Send Prompt', exact: true });

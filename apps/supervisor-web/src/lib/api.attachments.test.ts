@@ -10,7 +10,7 @@ it('downloads shared images through encrypted transport without relying on a ser
   vi.stubGlobal('fetch', plain);
   vi.mocked(encryptedBrowserFetch).mockResolvedValue(new Response('image', { headers: { 'content-type': 'image/png' } }));
   const blob = await downloadThreadImage('thread', './photo.png');
-  expect(encryptedBrowserFetch).toHaveBeenCalledWith('/relay/devices/mac/api/threads/thread/assets/image?path=.%2Fphoto.png', expect.objectContaining({ credentials: 'same-origin' }));
+  expect(encryptedBrowserFetch).toHaveBeenCalledWith('/relay/devices/mac/api/threads/thread/assets/image?path=.%2Fphoto.png', expect.objectContaining({ credentials: 'same-origin' }), undefined);
   expect(blob.size).toBe(5);
   expect(plain).not.toHaveBeenCalled();
 });

@@ -16,7 +16,7 @@ export interface HarnessSettingsFieldsProps {
   onChange: (input: {
     model?: string;
     reasoningEffort?: ThreadDto['reasoningEffort'];
-    sandboxMode?: ThreadDto['sandboxMode'];
+    sandboxMode?: Exclude<ThreadDto['sandboxMode'], undefined>;
   }) => Promise<void>;
   loadCapabilities?: () => Promise<AgentCapabilitySnapshotDto>;
 }
@@ -154,7 +154,7 @@ export function HarnessSettingsFields({
           disabled={disabled}
           onChange={(event) =>
             void onChange({
-              sandboxMode: event.target.value as ThreadDto['sandboxMode'],
+              sandboxMode: event.target.value as Exclude<ThreadDto['sandboxMode'], undefined>,
             })
           }
         >

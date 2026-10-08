@@ -247,7 +247,12 @@ export function setSelectedRelayThreadId(threadId: string | null) {
   window.localStorage.removeItem(RELAY_THREAD_STORAGE_KEY);
 }
 
-function apiPath(path: string) {
+function apiPath(path: string, deviceId?: string | null) {
+  // Explicit targets are captured by each pane; never mutate global navigation.
+  if (deviceId !== undefined) {
+    return deviceId && deviceId !== 'local' && path.startsWith('/api/')
+      ? `/relay/devices/${encodeURIComponent(deviceId)}${path}` : path;
+  }
   if (!relayModeEnabled()) {
     return path;
   }
@@ -265,8 +270,8 @@ export function buildApiUrl(path: string) {
   return apiPath(path);
 }
 
-function buildBrowserMediaUrl(path: string) {
-  const resolvedPath = apiPath(path);
+function buildBrowserMediaUrl(path: string, deviceId?: string | null) {
+  const resolvedPath = apiPath(path, deviceId);
   if (typeof window === 'undefined') {
     return resolvedPath;
   }
@@ -280,6 +285,20 @@ function buildBrowserMediaUrl(path: string) {
     url.searchParams.set('token', authToken);
   }
   return `${url.pathname}${url.search}${url.hash}`;
+}
+
+// These wrappers keep every operation (including retries/downloads) on the pane's device.
+function deviceRequest<T>(deviceId: string | null | undefined, input: RequestInfo, init?: RequestInit, threadScope?: string) {
+  return request<T>(input, init, { deviceId, threadScope });
+}
+function deviceDownload(deviceId: string | null | undefined, input: RequestInfo | URL, init?: RequestInit) {
+  return downloadFile(input, init, deviceId);
+}
+function buildDeviceApiUrl(deviceId: string | null | undefined, path: string) {
+  return apiPath(path, deviceId);
+}
+function buildDeviceMediaUrl(deviceId: string | null | undefined, path: string) {
+  return buildBrowserMediaUrl(path, deviceId);
 }
 
 export interface FileDownloadResult {
@@ -411,15 +430,15 @@ async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
   }
 }
 
-function fetchApi(path: string, init: RequestInit) {
-  const url = apiPath(path);
-  return /^\/relay\/devices\/[^/]+\/api\//.test(url) ? encryptedBrowserFetch(url, init) : fetch(url, init);
+function fetchApi(path: string, init: RequestInit, deviceId?: string | null, threadScope?: string) {
+  const url = apiPath(path, deviceId);
+  return /^\/relay\/devices\/[^/]+\/api\//.test(url) ? encryptedBrowserFetch(url, init, threadScope) : fetch(url, init);
 }
 
 export async function request<T>(
   input: RequestInfo,
   init?: RequestInit,
-  options: { auth?: RequestAuthMode } = {},
+  options: { auth?: RequestAuthMode; deviceId?: string | null | undefined; threadScope?: string | undefined } = {},
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   if (
@@ -437,9 +456,12 @@ export async function request<T>(
     },
     options.auth,
   );
+  const targetPath = apiPath(String(input), options.deviceId);
   let wakeAttempt = 0;
   while (true) {
-    const response = await fetchApi(String(input), requestInit);
+    // targetPath was resolved once; even a local /api path must stay local if
+    // navigation changes while the hosted-device wake retry is pending.
+    const response = await fetchApi(targetPath, requestInit, null, options.threadScope);
     if (response.ok) {
       if (wakeAttempt > 0) {
         emitHostedVmWake({ state: 'connected', attempt: wakeAttempt });
@@ -490,8 +512,9 @@ function parseContentDispositionFilename(value: string | null) {
 async function downloadFile(
   input: RequestInfo | URL,
   init?: RequestInit,
+  deviceId?: string | null,
 ): Promise<FileDownloadResult> {
-  const response = await fetchApi(String(input), withAuthInit(init));
+  const response = await fetchApi(String(input), withAuthInit(init), deviceId);
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -1100,12 +1123,16 @@ export function fetchAgentBackendAgents(provider: AgentBackendIdDto) {
   );
 }
 
-export function fetchThreadCapabilitySnapshot(threadId: string) {
-  return request<AgentCapabilitySnapshotDto>(`/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
+export function fetchThreadCapabilitySnapshot(threadId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<AgentCapabilitySnapshotDto>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
 }
 
-export function fetchThreadModels(threadId: string) {
-  return request<ModelOptionDto[]>(`/api/threads/${encodeURIComponent(threadId)}/models`, {cache:'no-store'});
+export function fetchThreadModels(threadId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ModelOptionDto[]>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/models`, {cache:'no-store'});
 }
 export function fetchThreadGroup(threadId: string) {
   return request<ThreadDto[]>(`/api/threads/${encodeURIComponent(threadId)}/group`, {cache:'no-store'});
@@ -1195,32 +1222,41 @@ export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
 }
 
-export function fetchLinkedFile(threadId: string, path: string) {
-  return request<ThreadWorkspaceTreeNodeDto>(`/api/threads/${encodeURIComponent(threadId)}/linked-files/stat?${new URLSearchParams({path})}`, {cache: 'no-store'});
+export function fetchLinkedFile(threadId: string, path: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadWorkspaceTreeNodeDto>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/linked-files/stat?${new URLSearchParams({path})}`, {cache: 'no-store'});
 }
-export function fetchLinkedFilePreview(threadId: string, input: {path: string; offset?: number; limit?: number}) {
+export function fetchLinkedFilePreview(threadId: string, input: {path: string; offset?: number; limit?: number},
+  deviceId?: string | null,
+) {
   const params = new URLSearchParams({path: input.path, offset: String(input.offset ?? 0), limit: String(input.limit ?? 24000)});
-  return request<ThreadWorkspaceFilePreviewDto>(`/api/threads/${encodeURIComponent(threadId)}/linked-files/preview?${params}`, {cache: 'no-store'});
+  return deviceRequest<ThreadWorkspaceFilePreviewDto>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/linked-files/preview?${params}`, {cache: 'no-store'});
 }
-export async function downloadLinkedFile(threadId: string, path: string) {
-  const result = await downloadFile(`/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
+export async function downloadLinkedFile(threadId: string, path: string,
+  deviceId?: string | null,
+) {
+  const result = await deviceDownload(deviceId, `/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
   return { ...result, filename: path.replace(/\\/g, '/').split('/').pop() || 'download' };
 }
 
-export function buildLinkedFileUrl(threadId: string, path: string) {
-  return buildBrowserMediaUrl(`/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
+export function buildLinkedFileUrl(threadId: string, path: string,
+  deviceId?: string | null,
+) {
+  return buildDeviceMediaUrl(deviceId, `/api/threads/${encodeURIComponent(threadId)}/linked-files/raw?${new URLSearchParams({path})}`);
 }
 
 export function fetchWorkspaceFileTree(
   workspaceId: string,
   input: { path?: string | null } = {},
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams();
   if (input.path) {
     params.set('path', input.path);
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
-  return request<ThreadWorkspaceTreeNodeDto>(
+  return deviceRequest<ThreadWorkspaceTreeNodeDto>(deviceId,
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree${suffix}`,
     {
       cache: 'no-store',
@@ -1231,6 +1267,7 @@ export function fetchWorkspaceFileTree(
 export function fetchWorkspaceFilePreview(
   workspaceId: string,
   input: { path: string; offset?: number; limit?: number },
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams({ path: input.path });
   if (input.offset !== undefined) {
@@ -1240,7 +1277,7 @@ export function fetchWorkspaceFilePreview(
     params.set('limit', String(input.limit));
   }
 
-  return request<ThreadWorkspaceFilePreviewDto>(
+  return deviceRequest<ThreadWorkspaceFilePreviewDto>(deviceId,
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/preview?${params.toString()}`,
     {
       cache: 'no-store',
@@ -1251,9 +1288,10 @@ export function fetchWorkspaceFilePreview(
 export function buildWorkspaceRawFileUrl(
   workspaceId: string,
   input: { path: string },
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams({ path: input.path });
-  return buildApiUrl(
+  return buildDeviceApiUrl(deviceId,
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`,
   );
 }
@@ -1261,9 +1299,10 @@ export function buildWorkspaceRawFileUrl(
 export function buildThreadImageAssetUrl(
   threadId: string,
   input: { path: string },
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams({ path: input.path });
-  return buildBrowserMediaUrl(
+  return buildDeviceMediaUrl(deviceId,
     `/api/threads/${encodeURIComponent(threadId)}/assets/image?${params.toString()}`,
   );
 }
@@ -1276,9 +1315,10 @@ export async function downloadThreadImage(threadId: string, path: string) {
 export function downloadWorkspaceFile(
   workspaceId: string,
   input: { path: string },
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams({ path: input.path });
-  return downloadFile(
+  return deviceDownload(deviceId,
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`,
     {
       cache: 'no-store',
@@ -1289,10 +1329,11 @@ export function downloadWorkspaceFile(
 export function uploadWorkspaceFile(
   workspaceId: string,
   input: { file: File },
+  deviceId?: string | null,
 ) {
   const formData = new FormData();
   formData.append('file', input.file, input.file.name);
-  return request<ThreadWorkspaceUploadResultDto>(
+  return deviceRequest<ThreadWorkspaceUploadResultDto>(deviceId,
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files/upload`,
     {
       method: 'POST',
@@ -1318,21 +1359,28 @@ export function fetchThreads(includeAgentThreads = false) {
   return request<ThreadDto[]>(`/api/threads${includeAgentThreads ? '?includeAgentThreads=true' : ''}`);
 }
 
-export function renameWorkspaceNode(workspaceId: string, input: {fromPath: string; toPath: string}) {
-  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/move`, {method:'PATCH',body:JSON.stringify(input)});
+export function renameWorkspaceNode(workspaceId: string, input: {fromPath: string; toPath: string},
+  deviceId?: string | null,
+) {
+  return deviceRequest(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files/move`, {method:'PATCH',body:JSON.stringify(input)});
 }
-export function createWorkspaceFile(workspaceId: string, path: string) {
-  return request<{ path: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
+export function createWorkspaceFile(workspaceId: string, path: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<{ path: string }>(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
     method: 'POST', body: JSON.stringify({ path }),
   });
 }
-export function deleteWorkspaceNode(workspaceId: string, path: string) {
-  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({path})}`, {method:'DELETE'});
+export function deleteWorkspaceNode(workspaceId: string, path: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({path})}`, {method:'DELETE'});
 }
 
 export function fetchThreadDetail(
   id: string,
   options: { limit?: number; beforeTurnId?: string } = {},
+  deviceId?: string | null,
 ) {
   const params = new URLSearchParams();
   params.set('view', 'summary');
@@ -1341,7 +1389,7 @@ export function fetchThreadDetail(
     params.set('beforeTurnId', options.beforeTurnId);
   }
 
-  return request<ThreadDetailDto>(
+  return deviceRequest<ThreadDetailDto>(deviceId,
     `/api/threads/${id}?${params.toString()}`,
   );
 }
@@ -1397,14 +1445,18 @@ export function fetchThreadConversationPage(id: string, beforeTurnId?: string, s
   return request<ThreadDetailDto>(`/api/threads/${encodeURIComponent(id)}?${params}`, { signal: signal ?? null });
 }
 
-export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
-  return request<ThreadHistoryItemDetailDto>(
+export function fetchThreadHistoryItemDetail(id: string, itemId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadHistoryItemDetailDto>(deviceId,
     `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,
   );
 }
 
-export function fetchThreadTurnDetail(id: string, turnId: string) {
-  return request<ThreadTurnDto>(
+export function fetchThreadTurnDetail(id: string, turnId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadTurnDto>(deviceId,
     `/api/threads/${id}/turns/${encodeURIComponent(turnId)}/detail`,
   );
 }
@@ -1444,8 +1496,10 @@ export function fetchThreadExportTurns(id: string) {
   );
 }
 
-export function fetchThreadShellState(id: string) {
-  return request<ThreadShellStateDto>(`/api/threads/${id}/shell`);
+export function fetchThreadShellState(id: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadShellStateDto>(deviceId, `/api/threads/${id}/shell`);
 }
 
 export function createThread(input: CreateThreadInput) {
@@ -1481,28 +1535,37 @@ export function fetchImportThreadCandidates(
 export function createThreadShell(
   id: string,
   input: { cols?: number; rows?: number; label?: string } = {},
+  deviceId?: string | null,
 ) {
-  return request<ThreadShellStateDto>(`/api/threads/${id}/shell`, {
+  return deviceRequest<ThreadShellStateDto>(deviceId, `/api/threads/${id}/shell`, {
     method: 'POST',
     ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
   });
 }
 
-export function terminateShell(id: string) {
-  return request<ShellSessionDto>(`/api/shells/${id}/terminate`, {
+export function terminateShell(id: string,
+  deviceId?: string | null,
+  threadScope?: string,
+) {
+  return deviceRequest<ShellSessionDto>(deviceId, `/api/shells/${id}/terminate`, {
     method: 'POST',
-  });
+  }, threadScope);
 }
 
-export function updateShell(id: string, input: UpdateShellInput) {
-  return request<ShellSessionDto>(`/api/shells/${id}`, {
+export function updateShell(id: string, input: UpdateShellInput,
+  deviceId?: string | null,
+  threadScope?: string,
+) {
+  return deviceRequest<ShellSessionDto>(deviceId, `/api/shells/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
-  });
+  }, threadScope);
 }
 
-export function resumeThread(id: string, input: ResumeThreadInput = {}) {
-  return request<ThreadDetailDto>(`/api/threads/${id}/resume`, {
+export function resumeThread(id: string, input: ResumeThreadInput = {},
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadDetailDto>(deviceId, `/api/threads/${id}/resume`, {
     method: 'POST',
     ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
   });
@@ -1517,11 +1580,12 @@ export function disconnectThread(id: string) {
 export function sendThreadPrompt(
   id: string,
   input: SendThreadPromptRequestInput,
+  deviceId?: string | null,
 ) {
   const attachments = input.attachments ?? [];
 
   if (attachments.length === 0) {
-    return request<ThreadDto>(`/api/threads/${id}/prompt`, {
+    return deviceRequest<ThreadDto>(deviceId, `/api/threads/${id}/prompt`, {
       method: 'POST',
       body: JSON.stringify(input),
     });
@@ -1562,14 +1626,16 @@ export function sendThreadPrompt(
     );
   }
 
-  return request<ThreadDto>(`/api/threads/${id}/prompt`, {
+  return deviceRequest<ThreadDto>(deviceId, `/api/threads/${id}/prompt`, {
     method: 'POST',
     body: formData,
   });
 }
 
-export function interruptThread(id: string, input: InterruptTurnInput = {}) {
-  return request<ThreadDto>(`/api/threads/${id}/interrupt`, {
+export function interruptThread(id: string, input: InterruptTurnInput = {},
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadDto>(deviceId, `/api/threads/${id}/interrupt`, {
     method: 'POST',
     body: JSON.stringify(input),
   });
@@ -1588,8 +1654,10 @@ export function deleteThread(id: string) {
   });
 }
 
-export function cancelPendingSteer(id: string, pendingSteerId: string) {
-  return request<ThreadDetailDto>(
+export function cancelPendingSteer(id: string, pendingSteerId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<ThreadDetailDto>(deviceId,
     `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}`,
     {
       method: 'DELETE',
@@ -1597,19 +1665,23 @@ export function cancelPendingSteer(id: string, pendingSteerId: string) {
   );
 }
 
-export async function fetchThreadDelivery(id: string) {
+export async function fetchThreadDelivery(id: string,
+  deviceId?: string | null,
+) {
   try {
-    return await request<ThreadDetailDto & {acceptedSteerIds?: string[]}>(`/api/threads/${id}?view=delivery`);
+    return await deviceRequest<ThreadDetailDto & {acceptedSteerIds?: string[]}>(deviceId, `/api/threads/${id}?view=delivery`);
   } catch (error) {
     // Compatible with devices that have not installed the lightweight endpoint yet.
-    if (error instanceof ApiError && error.statusCode === 400) return fetchThreadDetail(id, {limit:1});
+    if (error instanceof ApiError && error.statusCode === 400) return fetchThreadDetail(id, {limit:1}, deviceId);
     throw error;
   }
 }
 
-export async function steerPendingPrompt(id: string, pendingSteerId: string) {
+export async function steerPendingPrompt(id: string, pendingSteerId: string,
+  deviceId?: string | null,
+) {
   try {
-    return await request<ThreadDetailDto>(
+    return await deviceRequest<ThreadDetailDto>(deviceId,
       `/api/threads/${id}/pending-steers/${encodeURIComponent(pendingSteerId)}/steer`, {method:'POST'},
     );
   } catch (error) {
@@ -1619,7 +1691,7 @@ export async function steerPendingPrompt(id: string, pendingSteerId: string) {
     for (let attempt=0; attempt<4; attempt++) {
       if (attempt) await new Promise(resolve=>setTimeout(resolve, attempt*500));
       try {
-        const delivery = await fetchThreadDelivery(id);
+        const delivery = await fetchThreadDelivery(id, deviceId);
         if ((delivery as ThreadDetailDto & {acceptedSteerIds?:string[]}).acceptedSteerIds?.includes(pendingSteerId)
           || delivery.pendingSteers.some(item=>item.id===pendingSteerId && item.delivery==='steer')
           || delivery.turns.some(turn=>turn.items.some(item=>item.id===`steer:${pendingSteerId}`))) return delivery;
@@ -1633,8 +1705,9 @@ export async function steerSubmittedPrompt(
   id: string,
   clientRequestId: string,
   targetTurnId: string,
+  deviceId?: string | null,
 ) {
-  const delivery = await fetchThreadDelivery(id);
+  const delivery = await fetchThreadDelivery(id, deviceId);
   // If the original turn finished, the saved continuation starts normally.
   // Skip if it has already progressed to a new turn, and only use our receipt.
   if (delivery.thread.status !== 'running' || delivery.thread.activeTurnId !== targetTurnId) {
@@ -1643,14 +1716,15 @@ export async function steerSubmittedPrompt(
   const pending = delivery.pendingSteers.find(item => item.clientRequestId === clientRequestId);
   if (!pending) throw new Error(translate("workbench.theSavedMessageIsNotAvailableTo"));
   if (pending.delivery === 'steer') return delivery;
-  return steerPendingPrompt(id, pending.id);
+  return steerPendingPrompt(id, pending.id, deviceId);
 }
 
 export function updateThreadSettings(
   id: string,
   input: UpdateThreadSettingsInput,
+  deviceId?: string | null,
 ) {
-  return request<ThreadDto>(`/api/threads/${id}/settings`, {
+  return deviceRequest<ThreadDto>(deviceId, `/api/threads/${id}/settings`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
@@ -1747,8 +1821,9 @@ export function respondToThreadRequest(
   id: string,
   requestId: string,
   input: RespondThreadActionRequestInput,
+  deviceId?: string | null,
 ) {
-  return request<ThreadDetailDto>(
+  return deviceRequest<ThreadDetailDto>(deviceId,
     `/api/threads/${id}/requests/${encodeURIComponent(requestId)}/respond`,
     {
       method: 'POST',
@@ -1798,9 +1873,10 @@ export function updateWorkspaceFavorite(
 
 export function connectSupervisorEvents(
   onEvent: (event: ThreadEventEnvelope) => void,
+  target?: { deviceId: string | null; threadId: string | null },
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol)) : new WebSocket(buildSocketUrl(protocol));
+  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol, target)) : new WebSocket(buildSocketUrl(protocol, target));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -1823,9 +1899,10 @@ export function connectShellSocket(
     onConnected?: (event: SupervisorConnectedEnvelope) => void;
     onShellEvent?: (event: ShellEventEnvelope) => void;
   } = {},
+  target?: { deviceId: string | null; threadId: string | null },
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol)) : new WebSocket(buildSocketUrl(protocol));
+  const socket = relayModeEnabled() ? encryptedRelaySocket(buildSocketUrl(protocol, target)) : new WebSocket(buildSocketUrl(protocol, target));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -1852,17 +1929,17 @@ export function connectShellSocket(
   };
 }
 
-function buildSocketUrl(protocol: 'ws:' | 'wss:') {
+function buildSocketUrl(protocol: 'ws:' | 'wss:', target?: { deviceId: string | null; threadId: string | null }) {
   const url = new URL(`${protocol}//${window.location.host}/ws`);
   if (relayModeEnabled()) {
-    const deviceId = readSelectedRelayDeviceId();
+    const deviceId = target ? target.deviceId : readSelectedRelayDeviceId();
     url.pathname = deviceId
       ? `/relay/devices/${encodeURIComponent(deviceId)}/ws`
       : '/relay/ws';
   }
   const token = readStoredAuthToken();
   const relayToken = readStoredRelayToken();
-  const relayThreadId = readSelectedRelayThreadId();
+  const relayThreadId = target ? target.threadId : readSelectedRelayThreadId();
   if (relayModeEnabled() && relayToken) {
     url.searchParams.set('relaySession', relayToken);
   }
@@ -1897,20 +1974,26 @@ function isShellEventEnvelope(
   );
 }
 
-export function workspaceResourceScope() {
-  return JSON.stringify([window.location.origin, readSelectedRelayDeviceId(), workspaceActorScope]);
+export function workspaceResourceScope(deviceId?: string | null) {
+  return JSON.stringify([window.location.origin, deviceId === undefined ? readSelectedRelayDeviceId() : deviceId, workspaceActorScope]);
 }
-export function fetchWorkspaceDocument(workspaceId: string, path: string, signal?: AbortSignal) {
-  return request<WorkspaceDocumentSnapshot>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/document?${new URLSearchParams({path})}`, { cache: 'no-store', ...(signal ? {signal} : {}) });
+export function fetchWorkspaceDocument(workspaceId: string, path: string, signal?: AbortSignal,
+  deviceId?: string | null,
+) {
+  return deviceRequest<WorkspaceDocumentSnapshot>(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files/document?${new URLSearchParams({path})}`, { cache: 'no-store', ...(signal ? {signal} : {}) });
 }
-export async function saveWorkspaceDocument(workspaceId: string, input: WorkspaceDocumentSaveInput): Promise<WorkspaceSaveReceipt> {
-  try { return await request<WorkspaceSaveReceipt>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/save`, {method:'POST', body: JSON.stringify(input)}); }
+export async function saveWorkspaceDocument(workspaceId: string, input: WorkspaceDocumentSaveInput,
+  deviceId?: string | null,
+): Promise<WorkspaceSaveReceipt> {
+  try { return await deviceRequest<WorkspaceSaveReceipt>(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files/save`, {method:'POST', body: JSON.stringify(input)}); }
   catch (error) {
     if (error instanceof ApiError && error.payload.details && ['conflict','failedBeforeWrite'].includes(String(error.payload.details.status))) return error.payload.details as unknown as WorkspaceSaveReceipt;
     if (error instanceof ApiError && [400,401,403,404,409,410,413,415,422,501,507].includes(error.statusCode)) return {status:'failedBeforeWrite',operationId:input.operationId,draftRevision:input.draftRevision,path:input.path,code:error.statusCode===401||error.statusCode===403?'forbidden':error.payload.code,message:error.payload.message};
     throw error;
   }
 }
-export function fetchWorkspaceSaveOperation(workspaceId: string, operationId: string) {
-  return request<WorkspaceSaveReceipt>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/operations/${encodeURIComponent(operationId)}`, { cache:'no-store' });
+export function fetchWorkspaceSaveOperation(workspaceId: string, operationId: string,
+  deviceId?: string | null,
+) {
+  return deviceRequest<WorkspaceSaveReceipt>(deviceId, `/api/workspaces/${encodeURIComponent(workspaceId)}/files/operations/${encodeURIComponent(operationId)}`, { cache:'no-store' });
 }

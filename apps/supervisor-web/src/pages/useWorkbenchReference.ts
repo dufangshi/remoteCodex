@@ -4,7 +4,7 @@ import type {
   ThreadDetailDto, ThreadEventEnvelope, UpdateThreadSettingsInput,
 } from '@remote-codex/shared';
 import {
-  cancelPendingSteer, fetchRelayAccess, fetchThreadCapabilitySnapshot,
+  connectSupervisorEvents, cancelPendingSteer, fetchRelayAccess, fetchThreadCapabilitySnapshot,
   fetchThreadDetail, fetchThreadModels, interruptThread, relayModeActive,
   respondToThreadRequest, resumeThread, sendThreadPrompt, steerPendingPrompt,
   steerSubmittedPrompt, updateThreadSettings, type SendThreadPromptRequestInput,
@@ -13,9 +13,9 @@ import { translate as t } from '@remote-codex/thread-ui/i18n';
 import { createClientRequestId, prependTurns } from './threadDetailModel';
 import { useScopedState } from './useScopedState';
 
-/** A second conversation controller: shares the host socket, never auto-resumes,
+/** A second conversation controller: subscribes to its own device, never auto-resumes,
  * acknowledges reads, mounts device management, or changes the host route. */
-export function useWorkbenchReference(device: string, threadId: string | null) {
+export function useWorkbenchReference(device: string, threadId: string | null, hostDevice = device) {
   const source = `${device}:${threadId ?? ''}`;
   const [detail, setDetail] = useScopedState<ThreadDetailDto | null>(source, null);
   const [error, setError] = useScopedState<string | null>(source, null);
@@ -53,7 +53,7 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
     let alive = true;
     void Promise.allSettled([
       relay ? fetchRelayAccess({ deviceId: device, threadId }) : Promise.resolve(null),
-      fetchThreadCapabilitySnapshot(threadId), fetchThreadModels(threadId),
+      fetchThreadCapabilitySnapshot(threadId, device), fetchThreadModels(threadId, device),
     ]).then(([acl, caps, model]) => {
       if (!alive || !isCurrent()) return;
       if (acl.status === 'fulfilled') { setAccess(acl.value); setAccessReady(true); }
@@ -73,7 +73,7 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
       pending = true;
       const version = owner.version;
       try {
-        const next = await fetchThreadDetail(threadId!, { limit: 3 });
+        const next = await fetchThreadDetail(threadId!, { limit: 3 }, device);
         if (alive && isCurrent() && version === owner.version) mergeDetail(next);
       } catch (caught) {
         if (alive && isCurrent()) setError(caught instanceof Error ? caught.message : String(caught));
@@ -90,10 +90,17 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
       alive = false; clearInterval(interval); clearTimeout(timer);
       refreshRef.current = () => {};
     };
-  }, [threadId, owner, revision, mergeDetail, setError]);
+  }, [threadId, owner, revision, mergeDetail, setError, device]);
   const onEvent = useCallback((event: ThreadEventEnvelope) => {
-    if (event.threadId === threadId) refreshRef.current();
-  }, [threadId]);
+    if (device === hostDevice && event.threadId === threadId) refreshRef.current();
+  }, [threadId, device, hostDevice]);
+  useEffect(() => {
+    if (!threadId || device === hostDevice) return;
+    const socket = connectSupervisorEvents(event => {
+      if (event.threadId === threadId) refreshRef.current();
+    }, { deviceId: device === 'local' ? null : device, threadId });
+    return () => socket.close();
+  }, [device, hostDevice, threadId]);
 
   async function mutate(action: () => Promise<unknown>) {
     if (!threadId || !isCurrent() || !canControl || owner.mutation) return false;
@@ -102,7 +109,7 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
     try {
       await action();
       if (isCurrent()) {
-        try { mergeDetail(await fetchThreadDetail(threadId, { limit: 3 })); }
+        try { mergeDetail(await fetchThreadDetail(threadId, { limit: 3 }, device)); }
         catch (caught) { if (isCurrent()) setError(caught instanceof Error ? caught.message : String(caught)); }
       }
       return true;
@@ -127,15 +134,15 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
     return mutate(async () => {
       if (!current) throw new Error(t('workbench.threadDetailIsStillLoading'));
       if (!current.thread.isLoaded && current.thread.status !== 'recovering')
-        await resumeThread(target, current.thread.model ? { model: current.thread.model } : {});
+        await resumeThread(target, current.thread.model ? { model: current.thread.model } : {}, device);
       await sendThreadPrompt(target, {
         prompt: input.prompt, ...(input.attachments?.length ? { attachments: input.attachments } : {}), clientRequestId,
         ...(current.thread.model ? { model: current.thread.model } : {}),
         ...(current.thread.reasoningEffort ? { reasoningEffort: current.thread.reasoningEffort } : {}),
         collaborationMode: current.thread.collaborationMode,
-      });
+      }, device);
       if (input.delivery === 'steer' && current.thread.activeTurnId) {
-        try { await steerSubmittedPrompt(target, clientRequestId, current.thread.activeTurnId); }
+        try { await steerSubmittedPrompt(target, clientRequestId, current.thread.activeTurnId, device); }
         catch (caught) {
           // Persisted acceptance must clear this draft even if delivery needs retry.
           if (isCurrent()) setError(t('workbench.messageSavedButSteerCouldNotBe', { value1: caught instanceof Error ? caught.message : String(caught) }));
@@ -148,7 +155,7 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
     if (!threadId || !current?.turns.length || owner.earlier) return;
     owner.earlier = true; setLoadingEarlier(true);
     try {
-      const next = await fetchThreadDetail(threadId, { limit: 3, beforeTurnId: current.turns[0]!.id });
+      const next = await fetchThreadDetail(threadId, { limit: 3, beforeTurnId: current.turns[0]!.id }, device);
       if (isCurrent()) setDetail(value => value ? { ...value, turns: prependTurns(value.turns, next.turns) } : value);
     } catch (caught) {
       if (isCurrent()) setError(caught instanceof Error ? caught.message : String(caught));
@@ -156,17 +163,17 @@ export function useWorkbenchReference(device: string, threadId: string | null) {
       owner.earlier = false;
       if (isCurrent()) setLoadingEarlier(false);
     }
-  }, [threadId, owner, setDetail, setError, setLoadingEarlier]);
+  }, [threadId, owner, setDetail, setError, setLoadingEarlier, device]);
   return {
-    detail, error, busy, canControl, disabledReason, capabilities, models,
+    deviceId: device, detail, error, busy, canControl, access, accessReady, disabledReason, capabilities, models,
     onEvent, loadEarlier, loadingEarlier, respondingRequestId, send,
-    interrupt: () => mutate(() => interruptThread(threadId!)),
-    cancelQueued: (queueId: string) => mutate(() => cancelPendingSteer(threadId!, queueId)),
-    steerQueued: (queueId: string) => mutate(() => steerPendingPrompt(threadId!, queueId)),
-    updateSettings: (input: UpdateThreadSettingsInput) => mutate(() => updateThreadSettings(threadId!, input)),
+    interrupt: () => mutate(() => interruptThread(threadId!, {}, device)),
+    cancelQueued: (queueId: string) => mutate(() => cancelPendingSteer(threadId!, queueId, device)),
+    steerQueued: (queueId: string) => mutate(() => steerPendingPrompt(threadId!, queueId, device)),
+    updateSettings: (input: UpdateThreadSettingsInput) => mutate(() => updateThreadSettings(threadId!, input, device)),
     respond: async (requestId: string, input: { answers: Record<string, { answers: string[] }> }) => {
       setRespondingRequestId(requestId);
-      try { await mutate(() => respondToThreadRequest(threadId!, requestId, input)); }
+      try { await mutate(() => respondToThreadRequest(threadId!, requestId, input, device)); }
       finally { setRespondingRequestId(null); }
     },
     retry: () => { setError(null); setRevision(r => r + 1); },

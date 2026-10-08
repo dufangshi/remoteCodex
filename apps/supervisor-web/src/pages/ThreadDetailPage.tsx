@@ -1,10 +1,12 @@
 import { useThreadDrafts } from './useThreadDrafts';
 import { useWorkbenchReference } from './useWorkbenchReference';
+import { WorkbenchThreadPicker } from '../components/WorkbenchThreadPicker';
+import { WorkbenchTerminal } from '../components/WorkbenchTerminal';
 import { WorkbenchReferencePane } from '../components/WorkbenchReferencePane';
 import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
-import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
+import { HarnessSettingsDialog, HarnessSettingsFields } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useSearchMessages } from '../components/searchMessages';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
@@ -46,6 +48,7 @@ import {
   ThreadDetailSurface,
   useWorkbenchPresentation,
   ThreadShellPanel,
+  ThreadGraphWorkspacePanel,
   ThreadTimeline,
   type ThreadShellControlState,
   type ThreadShellPanelHandle,
@@ -137,6 +140,7 @@ import {
   currentNewThreadHref,
   currentRelayDeviceIdFromPath,
   currentThreadHref,
+  threadHref,
   currentThreadsHref,
   currentWorkspacesHref,
   relayDeviceIdFromPath,
@@ -529,7 +533,9 @@ export function ThreadDetailPage() {
     (workspaceId?: string | null) => currentNewThreadHref(workspaceId),
     [],
   );
-  const [harnessSettingsOpen, setHarnessSettingsOpen] = useState(false);
+  const [harnessSettingsTarget, setHarnessSettingsTarget] = useState<{
+    pane: 'primary' | 'reference'; deviceId: string; threadId: string; composerFocusOwner?: string;
+  } | null>(null);
   const renderNewThreadDialogContent = useCallback(
     ({
       close,
@@ -669,22 +675,29 @@ export function ThreadDetailPage() {
   if (presentationWorkspace.current.device !== relayRouteDeviceId || currentWorkspaceId) presentationWorkspace.current = { device: relayRouteDeviceId, id: currentWorkspaceId };
   const presentationScope = presentationAccount && presentationWorkspace.current.id ? `remote-codex.presentation.v1:${JSON.stringify([window.location.origin, presentationAccount, relayRouteDeviceId ?? 'local', presentationWorkspace.current.id])}` : null;
   const workbenchPresentation = useWorkbenchPresentation(presentationScope, routeKey);
-  const referenceId = workbenchPresentation.value.referenceId === id ? null : workbenchPresentation.value.referenceId;
-  const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${relayRouteDeviceId ?? 'local'}:${referenceId ?? ''}`);
-  const referenceController = useWorkbenchReference(relayRouteDeviceId ?? 'local', referenceId);
+  const referenceDevice = workbenchPresentation.value.referenceDeviceId ?? relayRouteDeviceId ?? 'local';
+  const referenceId = workbenchPresentation.value.referenceId === id && referenceDevice === (relayRouteDeviceId ?? 'local') ? null : workbenchPresentation.value.referenceId;
+  const [focusedPane, setFocusedPane] = useScopedState<'primary' | 'reference'>(`${routeKey}:${referenceDevice}:${referenceId ?? ''}`, 'primary');
+  const [terminalOpen, setTerminalOpen] = useScopedState(routeKey, false);
+  const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${referenceDevice}:${referenceId ?? ''}`);
+  const referenceController = useWorkbenchReference(referenceDevice, referenceId, relayRouteDeviceId ?? 'local');
   const referenceEventRef = useRef(referenceController.onEvent);
   referenceEventRef.current = referenceController.onEvent;
   const onCompareThread = useCallback((threadId: string) => {
     if (threadId === activeThreadIdRef.current) return;
-    workbenchPresentation.update({ referenceId: threadId, mode: 'thread' });
-  }, [workbenchPresentation.update]);
+    if (!confirmWorkspaceDocumentLeave()) return;
+    workbenchPresentation.update({ referenceId: threadId, referenceDeviceId: null, mode: 'thread' });
+    setFocusedPane('primary');
+  }, [workbenchPresentation.update, setFocusedPane]);
   const makeReferencePrimary = () => {
     if (!referenceId) return;
     // The file guard can cancel navigation. Keep reference membership unchanged
     // until that decision succeeds, or cancellation would hide the chosen peer.
     if (!confirmWorkspaceDocumentLeave()) return;
-    workbenchPresentation.update({ referenceId: id, mode: 'thread' });
-    navigate(currentThreadHref(referenceId));
+    workbenchPresentation.update({ referenceId: id, referenceDeviceId: relayRouteDeviceId, mode: 'thread' });
+    navigate(threadHref(referenceId, referenceDevice === 'local' ? null : referenceDevice), {
+      state: { workbenchSwap: { targetDevice: referenceDevice, targetThread: referenceId, referenceId: id, referenceDeviceId: relayRouteDeviceId } },
+    });
   };
   const effectiveWorkspaceAccess: 'none' | 'read' | 'write' =
     !relayDeviceRouteActive
@@ -698,6 +711,54 @@ export function ThreadDetailPage() {
               (relayAccess.workspaceId && relayAccess.workspaceId === currentWorkspaceId))
           ? relayAccess.workspaceAccess
           : 'none';
+  const appliedSwap = useRef<unknown>(null);
+  useEffect(() => {
+    const state = location.state as {workbenchSwap?: {targetDevice:string; targetThread:string; referenceId:string; referenceDeviceId:string|null}} | null;
+    const swap = state?.workbenchSwap;
+    if (!swap || appliedSwap.current === swap || swap.targetDevice !== (relayRouteDeviceId ?? 'local') || swap.targetThread !== id) return;
+    appliedSwap.current = swap;
+    // Carry the old primary across workspace/device scopes through route state;
+    // the presentation hook retains this action while identity is loading.
+    workbenchPresentation.update({referenceId:swap.referenceId, referenceDeviceId:swap.referenceDeviceId, mode:'thread'});
+    navigate(`${location.pathname}${location.search}${location.hash}`, {replace:true, state:null});
+  }, [location.state, location.pathname, location.search, location.hash, relayRouteDeviceId, id, navigate, workbenchPresentation.update]);
+  const toolsUseReference = focusedPane === 'reference' && Boolean(referenceId) && workbenchPresentation.value.mode !== 'focus';
+  const toolsDetail = toolsUseReference ? referenceController.detail : detail;
+  const toolsDevice = toolsUseReference ? referenceDevice : (relayRouteDeviceId ?? 'local');
+  const toolsAccess = toolsUseReference ? referenceController.access : relayAccess;
+  const toolsRelay = toolsDevice !== 'local' && relayModeActive();
+  const toolsWorkspaceAccess = !toolsRelay || toolsAccess?.kind === 'owner' ? 'write'
+    : toolsAccess?.kind === 'shared' && ((toolsAccess.scope === 'device' && toolsAccess.workspaceScope !== 'selected') || toolsAccess.workspaceId === toolsDetail?.workspace.id)
+      ? toolsAccess.workspaceAccess : 'none';
+  const toolsCanControl = toolsUseReference ? referenceController.canControl : relayThreadCanControl;
+  const focusPane = useCallback((pane: 'primary' | 'reference') => {
+    if (pane === focusedPane) return true;
+    if (pane === 'reference' && !referenceId) return false;
+    const target = pane === 'reference' ? referenceController.detail : detail;
+    const device = pane === 'reference' ? referenceDevice : (relayRouteDeviceId ?? 'local');
+    if ((device !== toolsDevice || target?.workspace.id !== toolsDetail?.workspace.id) && !confirmWorkspaceDocumentLeave()) return false;
+    setFocusedPane(pane);
+    setWorkspaceFocusPathRequest(null);
+    return true;
+  }, [focusedPane, referenceId, referenceController.detail, detail, referenceDevice, relayRouteDeviceId, toolsDevice, toolsDetail?.workspace.id, setFocusedPane]);
+  const changePresentation = useCallback((patch: Partial<typeof workbenchPresentation.value>) => {
+    if (patch.mode === 'focus' || patch.mode === 'collaboration') {
+      if (toolsUseReference && (toolsDevice !== (relayRouteDeviceId ?? 'local') || toolsDetail?.workspace.id !== detail?.workspace.id) && !confirmWorkspaceDocumentLeave()) return false;
+      setFocusedPane('primary');
+    }
+    if (patch.mode === 'files') setTerminalOpen(false);
+    workbenchPresentation.update(patch);
+    return true;
+  }, [workbenchPresentation.update, toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, setFocusedPane, setTerminalOpen]);
+  const selectSplitThread = useCallback((selection: {deviceId: string | null; workspaceId: string; threadId: string; title: string}) => {
+    if (toolsUseReference && (toolsDevice !== (relayRouteDeviceId ?? 'local') || toolsDetail?.workspace.id !== detail?.workspace.id) && !confirmWorkspaceDocumentLeave()) return;
+    workbenchPresentation.update({ referenceId: selection.threadId, referenceDeviceId: selection.deviceId, mode: 'thread' });
+    setFocusedPane('primary');
+  }, [toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, workbenchPresentation.update, setFocusedPane]);
+  const closeTerminal = useCallback(() => setTerminalOpen(false), [setTerminalOpen]);
+  const loadToolsCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(toolsDetail!.thread.id, toolsDevice), [toolsDetail?.thread.id, toolsDevice]);
+  const loadDialogCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(harnessSettingsTarget!.threadId, harnessSettingsTarget!.deviceId), [harnessSettingsTarget?.threadId, harnessSettingsTarget?.deviceId]);
+  const openReferenceThread = useCallback((threadId: string) => navigate(threadHref(threadId, referenceDevice === 'local' ? null : referenceDevice)), [navigate, referenceDevice]);
   const loadThreadShares = useCallback(async () => {
     const currentDetail = detailRef.current;
     const deviceId = currentRelayDeviceIdFromPath();
@@ -3111,13 +3172,7 @@ export function ThreadDetailPage() {
   }
 
   function handleToggleView() {
-    if (activeView === 'shell') {
-      setActiveView('chat');
-      return;
-    }
-    setActiveView('shell');
-    setPendingShellConnectionToggle(true);
-    if (detail && !detail.thread.isLoaded && !busy) void handleThreadConnectionToggle();
+    setTerminalOpen(open => !open);
   }
 
   async function handleShellCopy() {
@@ -3284,7 +3339,18 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
-  const settingsContent = null;
+  const settingsContent = toolsDetail ? <div data-testid="workbench-session-settings" data-device={toolsDevice} data-thread={toolsDetail.thread.id}>
+    <p className="mb-3 text-sm text-[var(--theme-fg-muted)]">{toolsDetail.workspace.label} · {toolsDetail.thread.title}</p>
+    <HarnessSettingsFields key={`${toolsDevice}:${toolsDetail.thread.id}`} thread={toolsDetail.thread}
+      models={toolsUseReference ? referenceController.models : modelOptions}
+      busy={toolsUseReference ? referenceController.busy : settingsBusy} readOnly={!toolsCanControl}
+      onChange={async input => { if (toolsUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
+      loadCapabilities={loadToolsCapabilities} />
+  </div> : null;
+  const dialogUseReference = harnessSettingsTarget?.pane === 'reference';
+  const dialogDetail = dialogUseReference ? referenceController.detail : detail;
+  const dialogDevice = dialogUseReference ? referenceDevice : (relayRouteDeviceId ?? 'local');
+  const settingsDialogVisible = Boolean(harnessSettingsTarget && dialogDetail?.thread.id === harnessSettingsTarget.threadId && dialogDevice === harnessSettingsTarget.deviceId);
 
   const optimisticMaterializedTurn =
     optimisticTurn && detail
@@ -3448,7 +3514,7 @@ export function ThreadDetailPage() {
         subscriptionUsage,
         capabilities: backendCapabilities,
         toolboxItems: backendManagementSchema?.toolboxItems ?? [],
-        onOpenHarness: () => setHarnessSettingsOpen(true),
+        onOpenHarness: (composerFocusOwner?: string) => setHarnessSettingsTarget({ pane: 'primary', deviceId: relayRouteDeviceId ?? 'local', threadId: id, ...(composerFocusOwner ? {composerFocusOwner} : {}) }),
         hookCommandTemplates:
           backendManagementSchema?.hookCommandTemplates ?? [],
         mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
@@ -3538,7 +3604,7 @@ export function ThreadDetailPage() {
         followTail: false,
         capabilities: backendCapabilities,
         toolboxItems: backendManagementSchema?.toolboxItems ?? [],
-        onOpenHarness: () => setHarnessSettingsOpen(true),
+        onOpenHarness: (composerFocusOwner?: string) => setHarnessSettingsTarget({ pane: 'primary', deviceId: relayRouteDeviceId ?? 'local', threadId: id, ...(composerFocusOwner ? {composerFocusOwner} : {}) }),
         hookCommandTemplates:
           backendManagementSchema?.hookCommandTemplates ?? [],
         mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
@@ -3563,18 +3629,21 @@ export function ThreadDetailPage() {
         : '',
     [detail?.thread.id, getThreadImageAssetUrl],
   );
+  const primaryWorkspaceAdapter = useThreadWorkspaceAdapter({ setError, workspaceId: detail?.workspace.id ?? null, deviceId: relayRouteDeviceId ?? 'local', access: effectiveWorkspaceAccess, allowLinkedFiles: relayThreadIsOwner });
   const workspaceAdapter = useThreadWorkspaceAdapter({
     setError,
-    workspaceId: detail?.workspace.id ?? null,
-    access: effectiveWorkspaceAccess,
-    allowLinkedFiles: relayThreadIsOwner,
+    workspaceId: toolsDetail?.workspace.id ?? null,
+    deviceId: toolsDevice,
+    access: toolsWorkspaceAccess,
+    allowLinkedFiles: !toolsRelay || toolsAccess?.kind === 'owner',
   });
   const handleOpenWorkspaceFile = useCallback(
     (input: { path: string; line?: number }) => {
       const currentDetail = detailRef.current;
-      if (!currentDetail) {
-        return;
-      }
+      if (!currentDetail) return;
+      if (toolsUseReference && !confirmWorkspaceDocumentLeave()) return;
+      setFocusedPane('primary');
+      setTerminalOpen(false);
 
       const relativePath = relativeWorkspaceLinkPath(
         input.path,
@@ -3587,8 +3656,16 @@ export function ThreadDetailPage() {
         requestId: (current?.requestId ?? 0) + 1,
       }));
     },
-    [],
+    [toolsUseReference, setFocusedPane, setTerminalOpen],
   );
+  const openReferenceFile = useCallback((input: {path: string; line?: number}) => {
+    if (!referenceController.detail) return;
+    if (!toolsUseReference && !confirmWorkspaceDocumentLeave()) return;
+    setFocusedPane('reference');
+    setTerminalOpen(false);
+    const path = relativeWorkspaceLinkPath(input.path, referenceController.detail.workspace.absPath) ?? input.path;
+    setWorkspaceFocusPathRequest(current => ({ path, ...(input.line !== undefined ? {line:input.line} : {}), requestId: (current?.requestId ?? 0)+1 }));
+  }, [referenceController.detail, toolsUseReference, setFocusedPane, setTerminalOpen]);
   const surfaceAdapter = useMemo(
     () => ({
       openThread,
@@ -3611,7 +3688,7 @@ export function ThreadDetailPage() {
       loadTurnDetail: handleLoadTurnDetail,
       getImageAssetUrl: getCurrentThreadImageAssetUrl,
       openWorkspaceFile: handleOpenWorkspaceFile,
-      workspace: workspaceAdapter,
+      workspace: primaryWorkspaceAdapter,
       shell: localShellAdapter,
     }),
     [
@@ -3633,7 +3710,7 @@ export function ThreadDetailPage() {
       openThread,
       relayThreadCanControl,
       relayThreadIsOwner,
-      workspaceAdapter,
+      primaryWorkspaceAdapter,
     ],
   );
   const workspaceReturnHref = currentWorkspacesHref();
@@ -3718,11 +3795,11 @@ export function ThreadDetailPage() {
         primaryTitle: detail?.thread.title ?? translate('workbench.loadingThreadDetail'),
         primaryHarness: detail?.thread.agentId ?? detail?.thread.provider ?? '',
         primaryStatus: detail ? threadStatusLabel(detail.thread.status) : '',
-        presentation: workbenchPresentation.value.referenceId === id ? { ...workbenchPresentation.value, mode: workbenchPresentation.value.mode === 'thread' ? 'focus' : workbenchPresentation.value.mode } : workbenchPresentation.value,
-        onPresentationChange: workbenchPresentation.update,
+        presentation: workbenchPresentation.value.referenceId === id && referenceDevice === (relayRouteDeviceId ?? 'local') ? { ...workbenchPresentation.value, mode: workbenchPresentation.value.mode === 'thread' ? 'focus' : workbenchPresentation.value.mode } : workbenchPresentation.value,
+        onPresentationChange: changePresentation,
         candidates: threads.filter(thread => thread.id !== id).map(thread => ({ id: thread.id, title: thread.title })),
         referenceTitle: referenceController.detail?.thread.title ?? threads.find(thread => thread.id === referenceId)?.title ?? translate('workbench.loadingThreadDetail'),
-        referenceContent: referenceId ? <WorkbenchReferencePane key={`${relayRouteDeviceId}:${referenceId}`} controller={referenceController} onOpenThread={openThread} draft={referenceDraft} onDraftChange={setReferenceDraft} sendShortcut={shellNav?.sendShortcut ?? 'ctrlEnter'} /> : null,
+        referenceContent: referenceId ? <WorkbenchReferencePane key={`${referenceDevice}:${referenceId}`} controller={referenceController} onOpenThread={openReferenceThread} onOpenWorkspaceFile={openReferenceFile} onOpenHarness={composerFocusOwner => setHarnessSettingsTarget({pane:'reference',deviceId:referenceDevice,threadId:referenceId,...(composerFocusOwner ? {composerFocusOwner} : {})})} draft={referenceDraft} onDraftChange={setReferenceDraft} sendShortcut={shellNav?.sendShortcut ?? 'ctrlEnter'} /> : null,
         collaborationContent: <WorkbenchCollaboration detail={detail} threads={threads} onCompare={onCompareThread} onOpen={openThread} sourceKey={routeKey} visible={workbenchPresentation.value.mode === 'collaboration'} liveItems={liveItems} onNativeResult={target => {
           const source = routeKey;
           void fetchThreadTurnDetail(id, target.turnId).then(turn => {
@@ -3735,8 +3812,15 @@ export function ThreadDetailPage() {
           }).catch(caught => { if (activeRouteRef.current === source) setError(actionErrorMessage(caught, translate('workbench.statusUnavailable'))); });
         }} />,
         onMakePrimary: makeReferencePrimary,
+        focusedPane: toolsUseReference ? 'reference' : 'primary',
+        onFocusPane: focusPane,
+        toolsOpen: terminalOpen,
+        toolsTargetLabel: `${toolsDevice === (relayRouteDeviceId ?? 'local') ? (presentationDeviceName ?? translate('workbench.localDeviceName')) : toolsDevice.slice(0,8)} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
+        toolTitle: `${translate('workbench.terminal')} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
+        toolContent: terminalOpen ? <WorkbenchTerminal key={`${toolsDevice}:${toolsDetail?.thread.id ?? ''}`} deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} /> : null,
+        onCloseTools: closeTerminal,
         storageFailed: workbenchPresentation.storageFailed,
-      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
+      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /><WorkbenchThreadPicker deviceId={relayRouteDeviceId} workspaceId={detail.workspace.id} threadId={detail.thread.id} threads={threads} navigationThreads={workbenchNavigation.threads} reference={referenceId ? {deviceId: referenceDevice === 'local' ? null : referenceDevice, threadId:referenceId} : null} splitActive={Boolean(referenceId && ['thread','files'].includes(workbenchPresentation.value.mode))} onSelect={selectSplitThread} onRestore={() => changePresentation({mode:'thread'})} onClose={() => changePresentation({mode:'focus'})} onCollaboration={() => changePresentation({mode:'collaboration'})} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView: terminalOpen ? 'shell' : 'chat', terminalEnabled: terminalPluginEnabled, onViewChange: view => setTerminalOpen(view === 'shell'), onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
         deviceLabel={relayRouteDeviceId ?? searchLabels.localDevice}
         allowGlobal={relayThreadIsOwner || (relayAccess?.scope === 'device' && (relayAccess.threadAccess === 'read' || relayAccess.threadAccess === 'control'))}
         onNavigate={match => {
@@ -3768,6 +3852,7 @@ export function ThreadDetailPage() {
       threadActionsButton={threadActionsButton}
       surfaceActions={surfaceActions}
       workspaceFeatures={SUPERVISOR_WORKSPACE_FEATURES}
+      workspaceContent={<div className="flex min-h-0 flex-1 flex-col" data-testid="workbench-tool-target" data-device={toolsDevice} data-workspace={toolsDetail?.workspace.id ?? ''} data-thread={toolsDetail?.thread.id ?? ''}>{toolsDetail ? <ThreadGraphWorkspacePanel detail={toolsDetail} status={toolsUseReference ? null : status} plugins={plugins} workspaceAdapter={workspaceAdapter} activeView="chat" features={SUPERVISOR_WORKSPACE_FEATURES} focusPathRequest={workspaceFocusPathRequest} /> : <p className="workbench-reference-status">{translate('workbench.loadingThreadDetail')}</p>}</div>}
       workspaceFocusPathRequest={workspaceFocusPathRequest}
       activeView={activeView}
       liveOutput={liveOutput}
@@ -3776,6 +3861,7 @@ export function ThreadDetailPage() {
       useFloatingMobileComposer={false}
       floatingMobileComposerBottomOffset={floatingMobileComposerBottomOffset}
       composerHostRef={composerHostRef}
+      shellContent={<></>}
       shellPanelRef={shellPanelRef}
       shellPanelComponent={ThreadShellPanel}
       shellEffectiveTheme={shellNav?.effectiveTheme ?? 'dark'}
@@ -3792,9 +3878,15 @@ export function ThreadDetailPage() {
         <div className="host-muted flex flex-1 items-center justify-center px-6 py-12 text-center">
           {translate("workbench.unableToResolveThisThread")}</div>
       }
-      dialogs={<>{dialogs}{harnessSettingsOpen && detail && <HarnessSettingsDialog
-        key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}
-        onChange={handleUpdateThreadSettings} onClose={() => setHarnessSettingsOpen(false)}
+      dialogs={<>{dialogs}{settingsDialogVisible && dialogDetail && <HarnessSettingsDialog
+        key={`${dialogDevice}:${dialogDetail.thread.id}`} thread={dialogDetail.thread}
+        models={dialogUseReference ? referenceController.models : modelOptions}
+        busy={dialogUseReference ? referenceController.busy : settingsBusy}
+        readOnly={dialogUseReference ? !referenceController.canControl : !relayThreadCanControl}
+        {...(harnessSettingsTarget?.composerFocusOwner ? {composerFocusOwner:harnessSettingsTarget.composerFocusOwner} : {})}
+        loadCapabilities={loadDialogCapabilities}
+        onChange={async input => { if (dialogUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
+        onClose={() => setHarnessSettingsTarget(null)}
       />}</>}
       {...(chatComposerProps ? { composerProps: chatComposerProps } : {})}
       {...(shellComposerProps ? { shellComposerProps } : {})}

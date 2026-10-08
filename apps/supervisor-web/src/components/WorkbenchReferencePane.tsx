@@ -12,13 +12,15 @@ import { resolveThreadContextUsage } from '../pages/threadDetailModel';
 export function WorkbenchReferencePane({
   controller,
   onOpenThread,
-  draft, onDraftChange, sendShortcut,
+  draft, onDraftChange, sendShortcut, onOpenWorkspaceFile, onOpenHarness,
 }: {
   controller: ReturnType<typeof useWorkbenchReference>;
   onOpenThread: (id: string) => void;
   draft: { prompt: string; attachments: NonNullable<ThreadComposerProps['draftAttachments']> };
   onDraftChange: ThreadComposerProps['onDraftChange'];
   sendShortcut: ThreadComposerProps['sendShortcut'];
+  onOpenHarness?: (composerFocusOwner?: string) => void;
+  onOpenWorkspaceFile?: (input: {path: string; line?: number}) => void;
 }) {
   useI18n();
   const { detail, error, loadEarlier, loadingEarlier, retry } = controller;
@@ -31,14 +33,16 @@ export function WorkbenchReferencePane({
       }: {
         threadId: string;
         path: string;
-      }) => buildThreadImageAssetUrl(threadId, { path }),
+      }) => buildThreadImageAssetUrl(threadId, { path }, controller.deviceId),
       onLoadHistoryItemDetail: (itemId: string) =>
-        fetchThreadHistoryItemDetail(threadId!, itemId),
+        fetchThreadHistoryItemDetail(threadId!, itemId, controller.deviceId),
       onLoadTurnDetail: (turnId: string) =>
-        fetchThreadTurnDetail(threadId!, turnId),
+        fetchThreadTurnDetail(threadId!, turnId, controller.deviceId),
       onOpenLinkedThread: onOpenThread,
+      ...(onOpenWorkspaceFile ? {onOpenWorkspaceFile} : {}),
+      workspaceRootPath: detail?.workspace.absPath,
     }),
-    [threadId, onOpenThread],
+    [threadId, onOpenThread, controller.deviceId, onOpenWorkspaceFile, detail?.workspace.absPath],
   );
   return (
     <>
@@ -104,6 +108,7 @@ export function WorkbenchReferencePane({
             canInterrupt={Boolean(controller.canControl && detail.thread.activeTurnId)}
             pendingPrompts={(detail.pendingSteers ?? []).filter(item => item.delivery !== 'steer').map(item => ({ id: item.id, prompt: item.prompt }))}
             {...(controller.canControl ? {
+              ...(onOpenHarness ? {onOpenHarness} : {}),
               onInterrupt: async () => { await controller.interrupt(); },
               onUpdateSettings: async input => { await controller.updateSettings(input); },
               onCancelPendingPrompt: async queueId => { await controller.cancelQueued(queueId); },

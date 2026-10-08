@@ -51,7 +51,7 @@ worker.addEventListener('fetch', (event) => {
         return (
           await exchange(
             request,
-            client ? scopeFromPage(client.url) : undefined,
+            client ? scopeFromPage(client.url, deviceRoute(url)?.deviceId) : undefined,
           )
         ).response;
       } catch (error) {

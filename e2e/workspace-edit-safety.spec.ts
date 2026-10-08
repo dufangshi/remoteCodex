@@ -217,17 +217,15 @@ test('dirty file survives tab switch, undo, navigation cancel and guarded save-a
   );
   // Combined workbench: cancelling a primary swap preserves the reference and
   // the hidden file draft; membership must not change before the leave guard.
-  await page.getByTestId('reference-picker').click();
-  const compare = page.getByRole('combobox', { name: '对照此设备的会话', exact: true });
-  await compare.selectOption(otherId);
+  await page.getByTestId('workbench-split-trigger').click();
+  await page.getByTestId('workbench-thread-picker').locator(`[data-thread-id="${otherId}"]`).click();
   await expect(page.getByTestId('reference-pane')).toContainText('测试回归 · 参考会话');
   page.once('dialog', (dialog) => dialog.dismiss());
   await page.getByTestId('make-primary').click();
   await expect(page).toHaveURL(new RegExp(`/threads/${id}$`));
   await expect(page.getByTestId('reference-pane')).toBeVisible();
   await expect(page.getByTestId('reference-pane')).toContainText('测试回归 · 参考会话');
-  await page.getByTestId('reference-picker').click();
-  await page.getByRole('button', { name: '工作区文件', exact: true }).click();
+  await page.getByTestId('reference-pane').getByRole('button', {name:'工作区文件',exact:true}).click();
   await expect(page.getByTestId('workspace-monaco-editor')).toContainText('手机端也可');
   // Actual SPA navigation through the workbench link must be cancellable.
   page.once('dialog', (dialog) => dialog.dismiss());
@@ -237,9 +235,7 @@ test('dirty file survives tab switch, undo, navigation cancel and guarded save-a
     .click();
   await expect(page).toHaveURL(new RegExp(`/threads/${id}$`));
   // Hiding the panel may unmount its view; retained drafts still guard reload.
-  await page
-    .getByRole('button', { name: '关闭参考视图', exact: true })
-    .click();
+  await page.getByTestId('workbench-close-files').click();
   let unloadPrompt = false;
   page.once('dialog', async (dialog) => {
     unloadPrompt = dialog.type() === 'beforeunload';
