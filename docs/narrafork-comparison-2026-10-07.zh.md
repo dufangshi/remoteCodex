@@ -77,6 +77,8 @@ NarraFork 将消息正文与会话中的消息引用分开保存。full 分叉�
 
 典型场景：用户打开文件后，agent 修改了同一文件；用户随后保存旧缓冲区。目前我们缺少同等的协议级版本前提保护。补充 expectedHash、冲突结果和 diff UI，比重做编辑器更有价值。
 
+2026-10-08 专项审查补充：NarraFork 当前 FileTreePanel 只对 local 设备设置目录根，editor-documents 路由也明确拒绝远端编辑传输。因此上述优势主要指其本地文档生命周期和冲突处理，不能扩大为“远程文件浏览/编辑全面领先”；我方已有经 relay 操作设备文件的完整链路。[对方文件树入口][N-file-tree]、[远端编辑限制][N-editor-remote]。详细改进设计见[文件浏览与编辑方案](proposals/narrafork-file-browser-editor-plan.zh.md)。
+
 ### 3.3 终端：它让人与 agent 使用同一个 PTY
 
 NarraFork 除普通 Bash 工具外，还提供 Terminal 工具，在限定 workspace/narrator 范围内创建、读取、写入和等待同一 PTY；增量输出有 cursor。用户与 agent 能观察同一个 shell 状态。[Terminal 工具][N-terminal]。
@@ -341,3 +343,5 @@ Dockview 支持多个会话/编辑器面板、不同排列方式；服务端将�
 [N-team-spec]: https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/docs/DYNAMIC_SPEC_TEAM_TASKS.md#L1
 [N-switch]: https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/lib/agent/tools/switch-device.ts#L6
 [R-apns]: https://github.com/dufangshi/remoteCodex/blob/94edcfadc8a6dda5ebc23271ee582709d32af171/crates/relay/src/apns.rs#L1
+[N-file-tree]: https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/frontend/components/narrator/file-tree/FileTreePanel.tsx#L37
+[N-editor-remote]: https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/routes/editor-documents.ts#L68
