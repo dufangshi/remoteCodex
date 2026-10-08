@@ -1,0 +1,46 @@
+{
+  "capturedAt": "2026-10-08T17:51:45.441904+00:00",
+  "source": "e2e/composer-compact.spec.ts",
+  "environment": "isolated Rust Supervisor with fake harness; actual workbench pages; fixture conversation prose",
+  "apiPort": 18216,
+  "webPort": 15216,
+  "database": ".temp/compact-composer/e2e.sqlite",
+  "screenshots": [
+    {
+      "file": "desktop-collapsed.png",
+      "sha256": "223162bfa71b7799486cfb75045b6a8334bea6182cc9971b8ff7e60d1bf85e31",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 191209,
+      "state": "collapsed",
+      "project": "desktop-chromium"
+    },
+    {
+      "file": "desktop-expanded.png",
+      "sha256": "c7793d6c542de9ae78093ef18ebf325b901e9fca8f35dea97b36e44aaab4bed4",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 242478,
+      "state": "expanded",
+      "project": "desktop-chromium"
+    },
+    {
+      "file": "mobile-collapsed.png",
+      "sha256": "f5ac3f9d09b4a3580e70c5a40447a91f5fa3e6995cc8363b7be874afa196798c",
+      "width": 390,
+      "height": 844,
+      "bytes": 73460,
+      "state": "collapsed",
+      "project": "mobile-chromium"
+    },
+    {
+      "file": "mobile-expanded.png",
+      "sha256": "ec883a79f73e84270b9262c510a20d82531d5e4946b08853f53e4330a0d94b57",
+      "width": 390,
+      "height": 844,
+      "bytes": 111742,
+      "state": "expanded",
+      "project": "mobile-chromium"
+    }
+  ]
+}
