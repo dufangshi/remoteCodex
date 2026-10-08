@@ -139,7 +139,9 @@ test('multiline composer stays expanded across plus/slash menus and keyboard foc
   await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
   await activate(page.locator('.matter-workbench').first(), isMobile);
   await expect(composer).toHaveAttribute('data-composer-layout', 'collapsed');
-  await expect(editor).toHaveText('First line\nSecond line\nThird line', { useInnerText: true });
+  await expect(editor).toHaveText('First line\nSecond line\nThird line', {
+    useInnerText: true,
+  });
 
   await editor.fill('short');
   await expect(composer).toHaveAttribute('data-composer-layout', 'collapsed');
@@ -149,11 +151,7 @@ test('multiline composer stays expanded across plus/slash menus and keyboard foc
   expect(
     await label.evaluate((node) => node.scrollWidth <= node.clientWidth),
   ).toBe(true);
-  await expect(
-    composer.locator(
-      '.composer-model-control button, .composer-sandbox-control, [aria-label^="Model and effort:"]',
-    ),
-  ).toHaveCount(0);
+  await expect(composer.locator('.composer-sandbox-control')).toHaveCount(0);
   await screenshot(
     page,
     `${isMobile ? 'mobile' : 'desktop'}-composer-compact.png`,
@@ -165,6 +163,57 @@ test('multiline composer stays expanded across plus/slash menus and keyboard foc
   ).toBe(true);
 });
 
+test('collapsed composer model, plus and slash controls are clickable and preserve expanded drafts', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const { composer, editor, id } = await openComposer(page, request);
+  const model = composer.getByTestId('composer-model-label');
+  await expect(composer).toHaveAttribute('data-composer-layout', 'collapsed');
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveCSS('cursor', 'pointer');
+  await activate(model, isMobile);
+  const effort = composer.getByRole('menuitemradio', {
+    name: 'high',
+    exact: true,
+  });
+  await expect(effort).toBeVisible();
+  await activate(effort, isMobile);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${api}/api/threads/${id}`)).json()).thread
+          .reasoningEffort,
+    )
+    .toBe('high');
+  await activate(
+    composer.getByRole('button', { name: 'Add attachment', exact: true }),
+    isMobile,
+  );
+  await expect(
+    composer.getByRole('button', { name: 'Photo', exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await activate(
+    composer.getByRole('button', { name: 'Open slash toolbox', exact: true }),
+    isMobile,
+  );
+  await expect(composer.getByRole('button', { name: /\/model/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await editor.fill('First line\nSecond line\nThird line');
+  await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
+  await activate(model, isMobile);
+  await expect(
+    composer.getByRole('menuitemradio', { name: modelName, exact: true }),
+  ).toBeVisible();
+  await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
+  await screenshot(
+    page,
+    `${isMobile ? 'mobile' : 'desktop'}-composer-model-menu.png`,
+  );
+});
+
 test('composer image preview portal retains expansion and settings keeps model, reasoning and permissions', async ({
   page,
   request,
@@ -172,16 +221,14 @@ test('composer image preview portal retains expansion and settings keeps model, 
 }) => {
   const { composer, editor, id } = await openComposer(page, request);
   await editor.fill('First line\nSecond line');
-  await page
-    .locator('input[type="file"][accept="image/*"]')
-    .setInputFiles({
-      name: 'preview.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6qX8AAAAASUVORK5CYII=',
-        'base64',
-      ),
-    });
+  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+    name: 'preview.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6qX8AAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
   await editor.focus();
   await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
   await activate(
