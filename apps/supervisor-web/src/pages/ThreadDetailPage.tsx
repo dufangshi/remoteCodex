@@ -658,8 +658,10 @@ export function ThreadDetailPage() {
       : relayAccess?.kind === 'owner'
         ? 'write'
         : relayAccess?.kind === 'shared' &&
-            relayAccess.workspaceId &&
-            relayAccess.workspaceId === currentWorkspaceId
+            // Whole-device grants cover every workspace and have no workspaceId.
+            // Resource-scoped grants must still match this workspace explicitly.
+            ((relayAccess.scope === 'device' && relayAccess.workspaceScope !== 'selected') ||
+              (relayAccess.workspaceId && relayAccess.workspaceId === currentWorkspaceId))
           ? relayAccess.workspaceAccess
           : 'none';
   const loadThreadShares = useCallback(async () => {
