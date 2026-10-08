@@ -1,4 +1,5 @@
 pub(crate) mod automation;
+mod automation_statistics;
 mod child_delete;
 mod claude_history;
 mod generation;

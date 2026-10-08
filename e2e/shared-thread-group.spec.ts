@@ -224,9 +224,9 @@ test('shared Claude families keep provider models, effort controls and consisten
     const page = await context.newPage();
     await page.goto(`${base}/devices/${d}/threads/${parent}`);
     await page
-      .getByRole('button', { name: 'Watches (1)', exact: true })
+      .getByRole('button', { name: 'Automation', exact: true })
       .click();
-    const watches = page.getByRole('dialog', { name: 'Watches', exact: true });
+    const watches = page.getByRole('dialog', { name: 'Automation', exact: true });
     await expect(watches).toContainText('Every 30 minutes');
     await watches.getByRole('button', { name: 'Show details', exact: true }).click();
     await expect(watches).toContainText('Check all agent threads for results.');

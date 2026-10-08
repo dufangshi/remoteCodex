@@ -405,7 +405,7 @@ impl Supervisor {
         let existing=self.db.with(|c|{if let Some(key)=request {if let Some((id,saved))=c.query_row("SELECT id,request_definition FROM automations WHERE thread_id=?1 AND request_id=?2",params![thread,key],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()? {
             ensure!(saved==fingerprint,"conflict: clientRequestId reused with different definition");return Ok(Some(auto_value(c,&id,thread)?));}}Ok(None)})?;
         if let Some(v) = existing {
-            return Ok(v);
+            return self.automation_show(thread, v["id"].as_str().unwrap_or_default());
         }
         self.automation_preview(thread, d.clone())?;
         if let Trigger::Interval {
@@ -431,18 +431,44 @@ impl Supervisor {
             tx.execute("INSERT INTO automations(id,thread_id,definition_json,state,next_run_at,event_cursor,created_at,updated_at,request_id,request_definition) VALUES(?1,?2,?3,?4,?5,?6,?7,?7,?8,?9)",params![id,thread,raw.to_string(),if d.enabled {"enabled"}else{"paused"},next,cursor,now,request,fingerprint])?;
             if d.enabled {if let Some(e)=source {create_run(&tx,&id,&d,"existing",&now,&now,&e,0)?;}}
             tx.commit()?;auto_value(c,&id,thread)
-        })
+        })?;
+        self.automation_show(thread, &id)
     }
     pub fn automation_list(&self, thread: &str) -> Result<Value> {
         self.get_thread(thread)?;
-        self.db.with(|c|{let mut q=c.prepare("SELECT id FROM automations WHERE thread_id=?1 ORDER BY created_at DESC")?;let ids=q.query_map([thread],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;Ok(json!({"automations":ids.iter().map(|id|auto_value(c,id,thread)).collect::<Result<Vec<_>>>()?}))})
+        let mut items = self.db.with(|c| {
+            let mut q = c.prepare(
+                "SELECT id FROM automations WHERE thread_id=?1 ORDER BY created_at DESC",
+            )?;
+            let ids = q
+                .query_map([thread], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            ids.iter()
+                .map(|id| auto_value(c, id, thread))
+                .collect::<Result<Vec<_>>>()
+        })?;
+        if !items.is_empty() {
+            let statistics = self.automation_statistics(thread)?;
+            for item in &mut items {
+                item["statistics"] = statistics
+                    .get(item["id"].as_str().unwrap_or_default())
+                    .cloned()
+                    .unwrap_or_default();
+            }
+        }
+        Ok(json!({"automations": items}))
     }
     pub fn automation_show(&self, thread: &str, id: &str) -> Result<Value> {
-        self.db.with(|c| auto_value(c, id, thread))
+        let mut item = self.db.with(|c| auto_value(c, id, thread))?;
+        item["statistics"] = self
+            .automation_statistics(thread)?
+            .remove(id)
+            .unwrap_or_default();
+        Ok(item)
     }
     pub fn automation_runs(&self, thread: &str, id: &str, limit: u64) -> Result<Value> {
-        self.automation_show(thread, id)?;
         self.db.with(|c| {
+            auto_value(c, id, thread)?;
             let mut q = c.prepare(&format!(
                 "{RUN_SELECT} WHERE automation_id=?1 ORDER BY observed_at DESC,rowid DESC LIMIT ?2"
             ))?;
@@ -472,7 +498,8 @@ impl Supervisor {
             if op!="resume" {cancelled_pending(&tx,id,&now)?;}
             let cursor:i64=tx.query_row("SELECT coalesce(max(sequence),0) FROM automation_events",[],|r|r.get(0))?;
             tx.execute("UPDATE automations SET state=?2,next_run_at=?3,updated_at=?4,event_cursor=?5,error=NULL WHERE id=?1",params![id,state,next,now,cursor])?;tx.commit()?;auto_value(c,id,thread)
-        })
+        })?;
+        self.automation_show(thread, id)
     }
     pub(crate) fn pause_thread_prompt_automations(&self, thread: &str, reason: &str) -> Result<()> {
         self.db.with(|c|{let tx=c.unchecked_transaction()?;let ids={let mut q=tx.prepare("SELECT id FROM automations WHERE thread_id=?1 AND state='enabled' AND json_extract(definition_json,'$.action.kind')='prompt'")?;let v=q.query_map([thread],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;v};let now=now_rfc3339();for id in ids {cancelled_pending(&tx,&id,&now)?;tx.execute("UPDATE automations SET state='paused',next_run_at=NULL,error=?2,updated_at=?3 WHERE id=?1",params![id,reason,now])?;}tx.commit()?;Ok(())})

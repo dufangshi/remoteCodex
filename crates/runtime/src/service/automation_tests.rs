@@ -804,3 +804,91 @@ async fn automation_target_deleted_before_spawn_records_failure_without_executio
     assert_eq!(s.command_show(&t, &id).unwrap()["state"], "failed");
     assert!(!dir.path().join("should-not-exist").exists());
 }
+
+#[tokio::test]
+async fn lifetime_statistics_include_all_runs_deduplicate_turns_and_price_each_model() {
+    let (_dir, s, t) = setup().await;
+    let a = s.automation_create(&t, hourly(prompt()), None).unwrap();
+    let id = a["id"].as_str().unwrap();
+    let raw = a["definition"].to_string();
+    let usage = json!({"total":{"inputTokens":10,"outputTokens":5},"last":{"inputTokens":10,"outputTokens":5}}).to_string();
+    s.db.with(|c| {
+        for n in 0..105 {
+            let turn = format!("attributed-{n}");
+            let model = if n == 103 { "unpriced-model" } else if n % 2 == 0 { "gpt-6.1-sol" } else { "gpt-6-astra" };
+            let state = if n == 104 { "running" } else { "completed" };
+            c.execute("INSERT INTO thread_turns(id,thread_id,status,model,token_usage_json,started_at,ordinal) VALUES(?1,?2,?3,?4,?5,'2030-01-01T01:00:00Z',?6)", params![turn,t,state,model,if n == 102 {None}else{Some(&usage)},n])?;
+            c.execute("INSERT INTO automation_runs(id,automation_id,occurrence_key,state,scheduled_at,observed_at,definition_json,event_json,turn_id,started_at) VALUES(?1,?2,?1,?3,'2030-01-01T01:00:00Z','2030-01-01T01:00:00Z',?4,'{}',?5,'2030-01-01T01:00:00Z')",params![format!("run-{n}"),id,state,raw,turn])?;
+        }
+        // Duplicate binding and coalesced ticks must never multiply model charges.
+        c.execute("INSERT INTO automation_runs(id,automation_id,occurrence_key,state,scheduled_at,observed_at,definition_json,event_json,turn_id,missed_count,started_at) VALUES('duplicate',?1,'duplicate','completed','2030-01-01T01:00:00Z','2030-01-01T01:00:00Z',?2,'{}','attributed-0',4,'2030-01-01T01:00:00Z')",params![id,raw])?;
+        // Same-thread ordinary usage must not leak into automation totals.
+        c.execute("INSERT INTO thread_turns(id,thread_id,status,model,token_usage_json,started_at,ordinal) VALUES('ordinary',?1,'completed','gpt-6.1-sol',?2,'2030-01-01T01:00:00Z',200)",params![t,usage])?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(runs(&s, &t, id).len(), 100);
+    let shown = s.automation_show(&t, id).unwrap();
+    let stats = &shown["statistics"];
+    assert_eq!(stats["triggerCount"], 110);
+    assert_eq!(stats["runCount"], 106);
+    assert_eq!(stats["executedActionCount"], 106);
+    assert_eq!(stats["runningActionCount"], 1);
+    assert_eq!(stats["promptTurnCount"], 105);
+    assert_eq!(stats["usageTurnCount"], 104);
+    assert_eq!(stats["pricedTurnCount"], 103);
+    assert_eq!(stats["tokenUsage"]["totalTokens"], 104 * 15);
+    let expected: f64 = s
+        .load_turns_meta(&t)
+        .unwrap()
+        .iter()
+        .filter(|turn| turn.id != "ordinary")
+        .filter_map(|turn| turn.price_estimate.as_ref()?.get("totalUsd")?.as_f64())
+        .sum();
+    assert!((stats["priceEstimate"]["totalUsd"].as_f64().unwrap() - expected).abs() < 1e-12);
+    assert_eq!(
+        s.automation_list(&t).unwrap()["automations"][0]["statistics"],
+        *stats
+    );
+}
+
+#[tokio::test]
+async fn lifetime_statistics_exclude_ambiguous_and_missing_turns_and_unmeasured_actions() {
+    let (_dir, s, t) = setup().await;
+    let a = s.automation_create(&t, hourly(prompt()), None).unwrap();
+    let b = s.automation_create(&t, hourly(prompt()), None).unwrap();
+    let inbox = s.automation_create(&t, hourly(notice()), None).unwrap();
+    let script = s
+        .automation_create(
+            &t,
+            hourly(json!({"kind":"runScript","argv":["true"],"cwd":"."})),
+            None,
+        )
+        .unwrap();
+    s.db.with(|c| {
+        c.execute("INSERT INTO thread_turns(id,thread_id,status,model,token_usage_json,started_at,ordinal) VALUES('shared-turn',?1,'completed','gpt-6.1-sol',?2,'2030-01-01T01:00:00Z',1)",params![t,json!({"total":{"inputTokens":100,"outputTokens":10}}).to_string()])?;
+        for (n, a) in [&a,&b,&inbox,&script].iter().enumerate() {
+            let id = a["id"].as_str().unwrap();
+            c.execute("INSERT INTO automation_runs(id,automation_id,occurrence_key,state,scheduled_at,observed_at,definition_json,event_json,turn_id,started_at) VALUES(?1,?2,?1,'completed','2030-01-01T01:00:00Z','2030-01-01T01:00:00Z',?3,'{}','shared-turn','2030-01-01T01:00:00Z')",params![format!("shared-{n}"),id,a["definition"].to_string()])?;
+        }
+        let id = a["id"].as_str().unwrap();
+        for (key, turn, state) in [("missing",Some("deleted-turn"),"completed"),("unbound",None,"uncertain"),("skipped",None,"conditionSkipped"),("queued",None,"queued")] {
+            c.execute("INSERT INTO automation_runs(id,automation_id,occurrence_key,state,scheduled_at,observed_at,definition_json,event_json,turn_id,missed_count) VALUES(?1,?2,?1,?3,'2030-01-01T01:00:00Z','2030-01-01T01:00:00Z',?4,'{}',?5,2)",params![key,id,state,a["definition"].to_string(),turn])?;
+        }
+        Ok(())
+    }).unwrap();
+    let stats = s.automation_show(&t, a["id"].as_str().unwrap()).unwrap()["statistics"].clone();
+    assert_eq!(stats["triggerCount"], 13);
+    assert_eq!(stats["promptTurnCount"], 2);
+    assert_eq!(stats["ambiguousTurnCount"], 1);
+    assert_eq!(stats["missingTurnCount"], 1);
+    assert_eq!(stats["unattributedRunCount"], 1);
+    assert!(stats["tokenUsage"].is_null());
+    assert!(stats["priceEstimate"].is_null());
+    for a in [inbox, script] {
+        let stats = s.automation_show(&t, a["id"].as_str().unwrap()).unwrap()["statistics"].clone();
+        assert_eq!(stats["promptTurnCount"], 0);
+        assert_eq!(stats["ambiguousTurnCount"], 0);
+        assert_eq!(stats["tokenUsage"]["totalTokens"], 0);
+        assert_eq!(stats["priceEstimate"]["totalUsd"], 0.0);
+    }
+}

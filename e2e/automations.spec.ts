@@ -3,74 +3,58 @@ import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-test('device automations define, pause, resume, cancel and expose script history in English and Chinese', async ({
+test('automation panel is read-only while agent API retains registration, control and script history', async ({
   page,
   request,
-}, testInfo) => {
+}) => {
   const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
   const absPath = path.resolve(
     process.env.E2E_WORKSPACE_ROOT!,
     `hooks-${randomUUID()}`,
   );
   await mkdir(absPath, { recursive: true });
-  const wsResponse = await request.post(`${base}/api/workspaces`, {
+  const workspaceResponse = await request.post(`${base}/api/workspaces`, {
     data: { absPath },
   });
-  expect(wsResponse.ok()).toBeTruthy();
-  const ws = await wsResponse.json();
+  expect(workspaceResponse.ok()).toBeTruthy();
+  const workspace = await workspaceResponse.json();
   const threadResponse = await request.post(`${base}/api/threads/start`, {
     data: {
-      workspaceId: ws.id,
+      workspaceId: workspace.id,
       provider: 'codex',
       model: 'ios-e2e-stream',
       approvalMode: 'yolo',
     },
   });
   expect(threadResponse.ok()).toBeTruthy();
-  const created = await threadResponse.json();
-  const id = created.id ?? created.thread.id;
-  await page.addInitScript(() =>
-    localStorage.setItem('remote-codex.locale', 'en'),
-  );
-  await page.goto(`/threads/${id}`);
-  await page.getByRole('button', { name: 'Automations', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Automations', exact: true });
-  await expect(dialog).toBeVisible();
-  await dialog
-    .getByRole('button', { name: 'Create automation', exact: true })
-    .click();
-  await dialog.getByLabel('Name', { exact: true }).fill('Hourly inbox check');
-  await dialog
-    .getByRole('combobox', { name: 'Action', exact: true })
-    .selectOption('notifyInbox');
-  await dialog.getByLabel('Subject', { exact: true }).fill('Hourly result');
-  await dialog
-    .getByLabel('Text', { exact: true })
-    .fill('This reminder stays passive.');
-  await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
-  await expect(dialog.locator('pre')).toContainText('nextRuns');
-  await dialog
-    .getByRole('button', { name: 'Register automation', exact: true })
-    .click();
-  const hourly = dialog
-    .locator('article')
-    .filter({ hasText: 'Hourly inbox check' });
-  await expect(hourly.getByText('Enabled', { exact: true })).toBeVisible();
-  await expect(hourly).toContainText('Every 3600 seconds');
-  await expect(hourly).toContainText('Next scheduled:');
-  await hourly.getByRole('button', { name: 'Pause', exact: true }).click();
-  await expect(hourly.getByText('Paused', { exact: true })).toBeVisible();
-  await hourly.getByRole('button', { name: 'Resume', exact: true }).click();
-  await expect(hourly.getByText('Enabled', { exact: true })).toBeVisible();
-  await hourly
-    .getByRole('button', { name: 'Execution history', exact: true })
-    .click();
-  await expect(
-    hourly.getByText('No executions yet.', { exact: true }),
-  ).toBeVisible();
-
-  // A real script runs in an isolated fixture, with genuine failure / output persisted.
-  const script = await request.post(`${base}/api/threads/${id}/automations`, {
+  const thread = await threadResponse.json();
+  const id = thread.id ?? thread.thread.id;
+  const endpoint = `${base}/api/threads/${id}/automations`;
+  const definition = {
+    name: 'Hourly inbox check',
+    trigger: { kind: 'interval', everySeconds: 3600 },
+    action: {
+      kind: 'notifyInbox',
+      subject: 'Result',
+      text: 'This stays passive.',
+    },
+  };
+  // CLI/API remains the agent's management surface; idempotent acceptance survives retries.
+  const registration = { definition, clientRequestId: randomUUID() };
+  const first = await request.post(endpoint, { data: registration });
+  expect(first.ok()).toBeTruthy();
+  const hourly = await first.json();
+  expect(
+    (await (await request.post(endpoint, { data: registration })).json()).id,
+  ).toBe(hourly.id);
+  expect(
+    (await (await request.post(`${endpoint}/${hourly.id}/pause`)).json()).state,
+  ).toBe('paused');
+  expect(
+    (await (await request.post(`${endpoint}/${hourly.id}/resume`)).json())
+      .state,
+  ).toBe('enabled');
+  const scriptResponse = await request.post(endpoint, {
     data: {
       definition: {
         name: 'Script exit history',
@@ -85,24 +69,52 @@ test('device automations define, pause, resume, cancel and expose script history
       clientRequestId: randomUUID(),
     },
   });
-  expect(script.ok()).toBeTruthy();
-  const automation = await script.json();
+  expect(scriptResponse.ok()).toBeTruthy();
+  const script = await scriptResponse.json();
   await expect
     .poll(
       async () =>
-        (
-          await (
-            await request.get(
-              `${base}/api/threads/${id}/automations/${automation.id}/runs`,
-            )
-          ).json()
-        ).runs[0]?.state,
+        (await (await request.get(`${endpoint}/${script.id}/runs`)).json())
+          .runs[0]?.state,
     )
     .toBe('failed');
-  await dialog.getByRole('button', { name: 'Refresh', exact: true }).click();
+  const shown = await (await request.get(`${endpoint}/${script.id}`)).json();
+  expect(shown.statistics.triggerCount).toBe(1);
+  expect(shown.statistics.tokenUsage.totalTokens).toBe(0);
+  expect(shown.statistics.priceEstimate.totalUsd).toBe(0);
+  const browserWrites: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/automations') && r.method() !== 'GET')
+      browserWrites.push(r.url());
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem('remote-codex.locale', 'en'),
+  );
+  await page.goto(`/threads/${id}`);
+  await page.getByRole('button', { name: 'Automation', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Automation', exact: true });
+  await expect(
+    dialog.getByText('Hourly inbox check', { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('textbox')).toHaveCount(0);
+  await expect(dialog.getByRole('combobox')).toHaveCount(0);
+  await expect(
+    dialog.getByRole('button', {
+      name: /create|preview|register|pause|resume|cancel|edit/i,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole('region', { name: 'Lifetime totals' }),
+  ).toContainText('Triggers: 1');
+  await dialog
+    .getByText('History and inactive automations (1)', { exact: true })
+    .click();
   const failed = dialog
     .locator('article')
     .filter({ hasText: 'Script exit history' });
+  await expect(failed).toContainText(
+    'Models invoked independently by a script are not measured here.',
+  );
   await failed
     .getByRole('button', { name: 'Execution history', exact: true })
     .click();
@@ -112,258 +124,33 @@ test('device automations define, pause, resume, cancel and expose script history
     .getByRole('button', { name: 'Command output', exact: true })
     .click();
   await expect(failed.locator('pre').last()).toContainText('fixture-output');
-  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
-  expect(detail.thread.status).toBe('idle');
-  expect(detail.pendingSteers).toHaveLength(0);
-  await page.screenshot({
-    path: testInfo.outputPath('automations-en.png'),
-  });
-
-  await hourly
-    .getByRole('button', { name: 'Cancel automation', exact: true })
-    .click();
-  await expect(hourly.getByText('Cancelled', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(
-    hourly.getByRole('button', { name: 'Resume', exact: true }),
-  ).toHaveCount(0);
+    page.getByRole('button', { name: 'Automation', exact: true }),
+  ).toBeFocused();
+  expect(
+    (await (await request.post(`${endpoint}/${hourly.id}/cancel`)).json())
+      .state,
+  ).toBe('cancelled');
   await page.addInitScript(() =>
     localStorage.setItem('remote-codex.locale', 'zh-CN'),
   );
   await page.reload();
   await page.getByRole('button', { name: '自动化', exact: true }).click();
   const zh = page.getByRole('dialog', { name: '自动化', exact: true });
+  await expect(zh).toContainText('只读查看计划、触发与消耗');
+  await zh.getByText('历史与非活跃自动化 (2)', { exact: true }).click();
   await expect(
-    zh.getByRole('button', { name: '创建自动化', exact: true }),
+    zh.getByText('Hourly inbox check', { exact: true }),
   ).toBeVisible();
-  const zhFailed = zh
-    .locator('article')
-    .filter({ hasText: 'Script exit history' });
-  await zhFailed.getByRole('button', { name: '执行历史', exact: true }).click();
-  await expect(zhFailed.getByText('失败', { exact: true })).toBeVisible();
-  await expect(zh).toContainText('设备调度跨 Supervisor 重启保留');
+  await expect(
+    zh.getByRole('button', { name: /创建|预览|注册|暂停|恢复|取消|编辑/ }),
+  ).toHaveCount(0);
+  expect(browserWrites).toEqual([]);
   expect(
     await zh.evaluate((el) => el.scrollWidth - el.clientWidth),
   ).toBeLessThanOrEqual(1);
-  await page.screenshot({
-    path: testInfo.outputPath('automations-zh.png'),
-  });
-});
-
-test('automation creation retries the same accepted request after a lost response', async ({
-  page,
-  request,
-}) => {
-  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
-  const absPath = path.resolve(
-    process.env.E2E_WORKSPACE_ROOT!,
-    `hooks-retry-${randomUUID()}`,
-  );
-  await mkdir(absPath, { recursive: true });
-  const wsResponse = await request.post(`${base}/api/workspaces`, {
-    data: { absPath },
-  });
-  expect(wsResponse.ok()).toBeTruthy();
-  const ws = await wsResponse.json();
-  const threadResponse = await request.post(`${base}/api/threads/start`, {
-    data: {
-      workspaceId: ws.id,
-      provider: 'codex',
-      model: 'ios-e2e-stream',
-      approvalMode: 'yolo',
-    },
-  });
-  expect(threadResponse.ok()).toBeTruthy();
-  const created = await threadResponse.json();
-  const id = created.id ?? created.thread.id;
-  const endpoint = `/api/threads/${id}/automations`;
-  const identities: string[] = [];
-  let acceptedId: string | undefined;
-  await page.route(`**${endpoint}`, async (route) => {
-    if (route.request().method() !== 'POST') return route.continue();
-    identities.push(route.request().postDataJSON().clientRequestId);
-    if (identities.length === 1) {
-      // Actually commit the first POST, then drop only its browser response.
-      const response = await route.fetch();
-      expect(response.ok()).toBeTruthy();
-      acceptedId = (await response.json()).id;
-      await route.abort('failed');
-    } else {
-      await route.continue();
-    }
-  });
-  await page.addInitScript(() =>
-    localStorage.setItem('remote-codex.locale', 'en'),
-  );
-  await page.goto(`/threads/${id}`);
-  await page.getByRole('button', { name: 'Automations', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Automations', exact: true });
-  await dialog
-    .getByRole('button', { name: 'Create automation', exact: true })
-    .click();
-  await dialog
-    .getByLabel('Name', { exact: true })
-    .fill('Accepted despite lost response');
-  await dialog
-    .getByRole('combobox', { name: 'Action', exact: true })
-    .selectOption('notifyInbox');
-  await dialog
-    .getByLabel('Subject', { exact: true })
-    .fill('Passive retry fixture');
-  await dialog
-    .getByLabel('Text', { exact: true })
-    .fill('One registration only');
-  const submit = dialog.getByRole('button', {
-    name: 'Register automation',
-    exact: true,
-  });
-  await submit.click();
-  await expect(dialog.getByRole('alert')).toBeVisible();
-  const first = await (await request.get(`${base}${endpoint}`)).json();
-  expect(first.automations).toHaveLength(1);
-  expect(first.automations[0].id).toBe(acceptedId);
-  await submit.click();
-  await expect(
-    dialog
-      .locator('article')
-      .filter({ hasText: 'Accepted despite lost response' }),
-  ).toBeVisible();
-  expect(identities).toHaveLength(2);
-  expect(identities[1]).toBe(identities[0]);
-  const retried = await (await request.get(`${base}${endpoint}`)).json();
-  expect(retried.automations).toHaveLength(1);
-  expect(retried.automations[0].id).toBe(acceptedId);
-
-  // A successful acceptance clears the identity for a new registration.
-  await dialog
-    .getByRole('button', { name: 'Create automation', exact: true })
-    .click();
-  await dialog.getByLabel('Name', { exact: true }).fill('A new definition');
-  await dialog
-    .getByRole('combobox', { name: 'Action', exact: true })
-    .selectOption('notifyInbox');
-  await dialog.getByLabel('Subject', { exact: true }).fill('Second fixture');
-  await dialog.getByLabel('Text', { exact: true }).fill('New registration');
-  await submit.click();
-  await expect(dialog.locator('article')).toHaveCount(2);
-  expect(identities[2]).not.toBe(identities[0]);
-});
-
-test('threadEnded creates an other-thread subscription without a turn ID and shows its configuration', async ({
-  page,
-  request,
-}, testInfo) => {
-  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
-  const absPath = path.resolve(
-    process.env.E2E_WORKSPACE_ROOT!,
-    `thread-ended-${randomUUID()}`,
-  );
-  await mkdir(absPath, { recursive: true });
-  const wsResponse = await request.post(`${base}/api/workspaces`, {
-    data: { absPath },
-  });
-  expect(wsResponse.ok()).toBeTruthy();
-  const ws = await wsResponse.json();
-  const ids: string[] = [];
-  for (const title of ['Target A', 'Source B']) {
-    const response = await request.post(`${base}/api/threads/start`, {
-      data: {
-        workspaceId: ws.id,
-        title,
-        provider: 'codex',
-        model: 'ios-e2e-stream',
-        approvalMode: 'yolo',
-      },
-    });
-    expect(response.ok()).toBeTruthy();
-    const created = await response.json();
-    ids.push(created.id ?? created.thread.id);
-  }
-  const [a, b] = ids;
-  await page.addInitScript(() =>
-    localStorage.setItem('remote-codex.locale', 'en'),
-  );
-  await page.goto(`/threads/${a}`);
-  await page.getByRole('button', { name: 'Automations', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Automations', exact: true });
-  await dialog
-    .getByRole('button', { name: 'Create automation', exact: true })
-    .click();
-  await dialog.getByLabel('Name', { exact: true }).fill('Listen to Source B');
-  await dialog
-    .getByRole('combobox', { name: 'Trigger', exact: true })
-    .selectOption('threadEnded');
-  await expect(dialog.getByLabel('Turn ID', { exact: true })).toHaveCount(0);
-  await expect(
-    dialog.getByRole('checkbox', {
-      name: 'Notify / run once if source already ended',
-    }),
-  ).toHaveCount(0);
-  await expect(dialog).toContainText('History is not replayed.');
-  await dialog.getByLabel('Source thread ID', { exact: true }).fill(b);
-  await dialog
-    .getByRole('combobox', { name: 'Condition', exact: true })
-    .selectOption('any');
-  await dialog
-    .getByRole('combobox', { name: 'Action', exact: true })
-    .selectOption('notifyInbox');
-  await dialog.getByLabel('Subject', { exact: true }).fill('Source B result');
-  await dialog
-    .getByLabel('Text', { exact: true })
-    .fill('A complete source turn ended.');
-  await dialog
-    .getByRole('button', { name: 'Register automation', exact: true })
-    .click();
-  const item = dialog
-    .locator('article')
-    .filter({ hasText: 'Listen to Source B' });
-  await expect(item).toContainText(`Other thread ended · ${b}`);
-  const registered = await (
-    await request.get(`${base}/api/threads/${a}/automations`)
-  ).json();
-  expect(registered.automations).toHaveLength(1);
-  const hook = registered.automations[0];
-  expect(hook.definition.trigger).toEqual({
-    kind: 'threadEnded',
-    sourceThreadId: b,
-  });
-  expect(hook.definition.replayExisting).toBe(false);
-  await item.locator('summary').filter({ hasText: 'Definition' }).click();
-  await expect(item.locator('pre')).toContainText('"kind": "threadEnded"');
-  await expect(item.locator('pre')).toContainText(b);
-
-  // The real fake-runtime source turn completes through HTTP, never a synthetic idle event.
-  const prompt = await request.post(`${base}/api/threads/${b}/prompt`, {
-    data: {
-      prompt: 'Report one deterministic result.',
-      clientRequestId: randomUUID(),
-    },
-  });
-  expect(prompt.ok()).toBeTruthy();
-  await expect
-    .poll(
-      async () =>
-        (
-          await (
-            await request.get(
-              `${base}/api/threads/${a}/automations/${hook.id}/runs`,
-            )
-          ).json()
-        ).runs[0]?.state,
-    )
-    .toBe('completed');
-  const target = await (await request.get(`${base}/api/threads/${a}`)).json();
-  expect(target.thread.status).toBe('idle');
-  expect(target.turns).toHaveLength(0);
-  expect(target.pendingSteers).toHaveLength(0);
-  await page.screenshot({ path: testInfo.outputPath('thread-ended-en.png') });
-
-  await page.addInitScript(() =>
-    localStorage.setItem('remote-codex.locale', 'zh-CN'),
-  );
-  await page.reload();
-  await page.getByRole('button', { name: '自动化', exact: true }).click();
-  await expect(
-    page.getByRole('dialog', { name: '自动化', exact: true }),
-  ).toContainText(`其它线程结束 · ${b}`);
-  await page.screenshot({ path: testInfo.outputPath('thread-ended-zh.png') });
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  expect(detail.thread.status).toBe('idle');
+  expect(detail.pendingSteers).toHaveLength(0);
 });

@@ -52,6 +52,8 @@ export interface AutomationDto {
   nextRunAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Absent on older Supervisors. */
+  statistics?: AutomationStatisticsDto;
   pendingCount: number;
   missedCount: number;
   error: string | null;
@@ -72,4 +74,29 @@ export interface AutomationRunDto {
   deliveryReceipt: Record<string, unknown> | null;
   error: string | null;
   attemptCount: number;
+}
+
+/** Lifetime observed occurrences, not just the latest execution-history page. */
+export interface AutomationStatisticsDto {
+  /** Includes merged ticks and condition/loop/lateness-skipped occurrences. */
+  triggerCount: number;
+  runCount: number;
+  executedActionCount: number;
+  runningActionCount: number;
+  /** Distinct bound prompt turns; tokens/prices exclude ambiguous ownership. */
+  promptTurnCount: number;
+  ambiguousTurnCount: number;
+  missingTurnCount: number;
+  unattributedRunCount: number;
+  usageTurnCount: number;
+  pricedTurnCount: number;
+  tokenUsage: import('./index').ThreadTurnTokenBreakdownDto | null;
+  priceEstimate: Pick<
+    import('./index').ThreadTurnPriceEstimateDto,
+    | 'totalUsd'
+    | 'inputUsd'
+    | 'cachedInputUsd'
+    | 'cacheWriteInputUsd'
+    | 'outputUsd'
+  > | null;
 }

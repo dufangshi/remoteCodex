@@ -70,6 +70,9 @@ test('watch summaries show creation, recorded triggers and summed turn cost with
 import json, sqlite3, sys
 v=json.load(sys.stdin)
 with sqlite3.connect(sys.argv[1]) as conn:
+  # These fixtures contain only tool calls; register the trigger functions.
+  conn.create_function('search_body', 3, lambda text, kind, source: text or '', deterministic=True)
+  conn.create_function('search_fold', 1, lambda text: (text or '').lower(), deterministic=True)
   for watch in v['watches']:
     item=dict(id=watch['id'],createdAt=watch['createdAt'],kind='toolCall',text='CronCreate',status='completed',detailText='Input:\\n'+json.dumps(dict(cron=watch['cron'],prompt=watch['prompt'],recurring=True))+'\\n\\nResult:\\nScheduled recurring job '+watch['id']+' (* * * * *). Auto-expires after 7 days.')
     conn.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(v['id']+watch['id'],v['id'],'owner',watch['id'],json.dumps(item),watch['createdAt'],watch['createdAt']))
@@ -112,10 +115,10 @@ with sqlite3.connect(sys.argv[1]) as conn:
   expect(active.priceEstimate.totalUsd).toBeCloseTo(sum, 10);
   const usd = `$${sum.toFixed(2)}`;
   await page.goto(`/threads/${id}`);
-  const toggle = page.getByRole('button', { name: 'Watches (1)', exact: true });
+  const toggle = page.getByRole('button', { name: 'Automation', exact: true });
   await expect(toggle).toBeVisible();
   await toggle.click();
-  const dialog = page.getByRole('dialog', { name: 'Watches', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Automation', exact: true });
   const card = dialog.locator('article').first();
   await expect(dialog).toBeVisible();
   await expect(card.getByText('Created', { exact: true })).toBeVisible();
@@ -175,7 +178,9 @@ with sqlite3.connect(sys.argv[1]) as conn:
   await dialog
     .getByRole('button', { name: 'Hide details', exact: true })
     .click();
-  await dialog.getByText('Past watches (1)', { exact: true }).click();
+  await dialog
+    .getByText('History and inactive automations (1)', { exact: true })
+    .click();
   await expect(dialog.getByText('Cancelled', { exact: true })).toBeVisible();
   await expect(
     dialog.getByText('Old watch details', { exact: true }),
@@ -208,44 +213,114 @@ with sqlite3.connect(sys.argv[1]) as conn:
   await expect(dialog.getByText(prompt, { exact: true })).toHaveCount(0);
 });
 
-test('watch polling moves legacy cancellations and empty scheduler snapshots into past watches', async ({ page, request }) => {
+test('watch polling moves legacy cancellations and empty scheduler snapshots into past watches', async ({
+  page,
+  request,
+}) => {
   const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
-  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, `watch-state-${randomUUID()}`);
+  const absPath = path.resolve(
+    process.env.E2E_WORKSPACE_ROOT!,
+    `watch-state-${randomUUID()}`,
+  );
   await mkdir(absPath, { recursive: true });
-  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath } })).json();
-  const created = await (await request.post(`${base}/api/threads/start`, { data: {
-    workspaceId: workspace.id, provider: 'claude', model: 'default', approvalMode: 'yolo',
-  } })).json();
+  const workspace = await (
+    await request.post(`${base}/api/workspaces`, { data: { absPath } })
+  ).json();
+  const created = await (
+    await request.post(`${base}/api/threads/start`, {
+      data: {
+        workspaceId: workspace.id,
+        provider: 'claude',
+        model: 'default',
+        approvalMode: 'yolo',
+      },
+    })
+  ).json();
   const id = created.id ?? created.thread.id;
   const at = new Date(Date.now() - 60_000).toISOString();
-  const insert = (items: unknown[]) => execFileSync('python3', ['-c', `
+  const insert = (items: unknown[]) =>
+    execFileSync(
+      'python3',
+      [
+        '-c',
+        `
 import json,sqlite3,sys
 v=json.load(sys.stdin)
 with sqlite3.connect(sys.argv[1]) as c:
+ c.create_function('search_body', 3, lambda text, kind, source: text or '', deterministic=True)
+ c.create_function('search_fold', 1, lambda text: (text or '').lower(), deterministic=True)
  for item in v['items']:
   c.execute('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(v['id']+item['id'],v['id'],'owner',item['id'],json.dumps(item),item['createdAt'],item['createdAt']))
-`, process.env.E2E_DATABASE_URL!], { input: JSON.stringify({ id, items }) });
-  const tool = (key: string, name: string, input: unknown, result: string, status = 'completed') => ({
-    id: key, kind: 'toolCall', text: name, status, createdAt: at,
+`,
+        process.env.E2E_DATABASE_URL!,
+      ],
+      { input: JSON.stringify({ id, items }) },
+    );
+  const tool = (
+    key: string,
+    name: string,
+    input: unknown,
+    result: string,
+    status = 'completed',
+  ) => ({
+    id: key,
+    kind: 'toolCall',
+    text: name,
+    status,
+    createdAt: at,
     detailText: `Tool: ${name}\n\nStatus: completed\n\nInput:\n${JSON.stringify(input)}\n\nResult:\n${result}`,
   });
   insert([
-    tool('cancelled', 'CronCreate', { cron: '* * * * *', prompt: 'Old watch', recurring: true }, 'Scheduled recurring job cancelled (* * * * *).'),
-    tool('cancel', 'CronDelete', { id: 'cancelled' }, 'Cancelled job cancelled.', 'interrupted'),
-    tool('unknown', 'CronCreate', { cron: '* * * * *', prompt: 'Unconfirmed watch', recurring: true }, 'Scheduled recurring job unknown (* * * * *).'),
+    tool(
+      'cancelled',
+      'CronCreate',
+      { cron: '* * * * *', prompt: 'Old watch', recurring: true },
+      'Scheduled recurring job cancelled (* * * * *).',
+    ),
+    tool(
+      'cancel',
+      'CronDelete',
+      { id: 'cancelled' },
+      'Cancelled job cancelled.',
+      'interrupted',
+    ),
+    tool(
+      'unknown',
+      'CronCreate',
+      { cron: '* * * * *', prompt: 'Unconfirmed watch', recurring: true },
+      'Scheduled recurring job unknown (* * * * *).',
+    ),
   ]);
   await page.clock.install();
   await page.goto(`/threads/${id}`);
-  await page.getByRole('button', { name: 'Watches (1)', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Watches', exact: true });
-  await expect(dialog.getByText('Status unconfirmed', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('This recorded watch may have ended. Its live schedule has not been confirmed.', { exact: true })).toBeVisible();
-  await dialog.getByText('Past watches (1)', { exact: true }).click();
+  await page.getByRole('button', { name: 'Automation', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Automation', exact: true });
+  await expect(
+    dialog.getByText('Status unconfirmed', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(
+      'This recorded watch may have ended. Its live schedule has not been confirmed.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await dialog
+    .getByText('History and inactive automations (1)', { exact: true })
+    .click();
   await expect(dialog.getByText('Cancelled', { exact: true })).toBeVisible();
   insert([tool('list', 'CronList', {}, 'No scheduled jobs.')]);
   await page.clock.fastForward(31_000);
-  await expect(dialog.getByText('Past watches (2)', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('No longer scheduled', { exact: true })).toBeVisible();
-  await expect(page.locator('.matter-watches-toggle')).toHaveAttribute('aria-label', 'Watches (0)');
-  await expect(dialog.getByText('Status checked', { exact: true })).toHaveCount(2);
+  await expect(
+    dialog.getByText('History and inactive automations (2)', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText('No longer scheduled', { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.matter-watches-toggle')).toHaveAttribute(
+    'aria-label',
+    'Automation',
+  );
+  await expect(dialog.getByText('Status checked', { exact: true })).toHaveCount(
+    2,
+  );
 });
