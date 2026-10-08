@@ -122,8 +122,9 @@ DST wall-clock scheduler, cross-device schedule or arbitrary PTY command observe
 
 Typed conditions: `all/any {conditions}`, `not {condition}`, `statusIn {values}`,
 `exitCodeEquals {value}`, `workspaceId {value}`, `commandId {value}`. Conditions
-never run shell/JavaScript. Exit-code equality also requires confirmed completed
-status; unknown exits/timeouts cannot count as exit 0. Condition nesting is capped
+never run shell/JavaScript. Exit-code equality requires a known exit code and a
+`completed` or `failed` status, so a normal nonzero exit can match its exact code;
+unknown exits/timeouts never match. Condition nesting is capped
 at eight levels. Script argv/output are available only with existing control access.
 
 Default `missedRunPolicy` is `coalesceLatest`, `maxLatenessSeconds` is 86400.
@@ -157,7 +158,10 @@ No PTY/transcript text is interpreted as an executable event.
 
 Pause/cancel atomically remove only this automation's unexecuted queue entries.
 Running work is allowed to finish. Cancel is permanent; resume starts from future
-ticks and discards paused events. User Stop pauses that thread's prompt automations,
+ticks and discards paused events. Resume on an already enabled definition is a
+no-op: retries preserve its event cursor, nextRunAt and anchor. The UI preserves
+the create request ID across lost-response retries of the same definition and
+target thread, clearing it after success. User Stop pauses that thread's prompt automations,
 so they do not secretly wake it again. Closed/missing targets and deleted sources
 pause schedules with a visible reason. Recovering threads defer actions and never
 silently reconnect or reopen. Native historical imports do not generate script events.

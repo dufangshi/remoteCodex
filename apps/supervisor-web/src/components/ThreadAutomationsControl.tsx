@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Workflow } from 'lucide-react';
 import {
   Dialog,
@@ -49,6 +49,7 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
   const [history, setHistory] = useState<string | null>(null);
   const [runs, setRuns] = useState<AutomationRunDto[]>([]);
   const [output, setOutput] = useState('');
+  const createRequest = useRef<{ signature: string; id: string } | null>(null);
   const base = `/api/threads/${encodeURIComponent(thread.id)}/automations`;
   const date = (v: string | null) =>
     v ? new Date(v).toLocaleString(locale) : t('automation.none');
@@ -155,13 +156,28 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
               }
               onSave={(d) =>
                 act(async () => {
+                  // Keep the acceptance identity when a response is lost. Include
+                  // the target so a form cannot reuse it for a different thread.
+                  const signature = JSON.stringify({
+                    threadId: thread.id,
+                    definition: d,
+                  });
+                  if (createRequest.current?.signature !== signature) {
+                    createRequest.current = {
+                      signature,
+                      id: crypto.randomUUID(),
+                    };
+                  }
+                  const pending = createRequest.current;
                   await request(base, {
                     method: 'POST',
                     body: JSON.stringify({
                       definition: d,
-                      clientRequestId: crypto.randomUUID(),
+                      clientRequestId: pending.id,
                     }),
                   });
+                  if (createRequest.current === pending)
+                    createRequest.current = null;
                   setCreating(false);
                 })
               }

@@ -126,7 +126,8 @@ fn condition_ok(c: &Condition, e: &Value) -> bool {
             .as_str()
             .is_some_and(|s| values.iter().any(|v| v == s)),
         Condition::ExitCodeEquals { value } => {
-            e["status"] == "completed" && e["exitCode"].as_i64() == Some(i64::from(*value))
+            matches!(e["status"].as_str(), Some("completed" | "failed"))
+                && e["exitCode"].as_i64() == Some(i64::from(*value))
         }
         Condition::WorkspaceId { value } => e["workspaceId"] == *value,
         Condition::CommandId { value } => e["commandId"] == *value,
@@ -442,13 +443,15 @@ impl Supervisor {
             "cancelled automation cannot resume"
         );
         let d = definition(&a["definition"].to_string())?;
-        if op == "resume" {
+        if op == "resume" && a["state"] != "enabled" {
             self.automation_preview(thread, d.clone())?;
         }
         let now = now_rfc3339();
         self.db.with(|c|{let tx=c.unchecked_transaction()?;
             let current:String=tx.query_row("SELECT state FROM automations WHERE id=?1 AND thread_id=?2",params![id,thread],|r|r.get(0))?;
             ensure!(current!="cancelled" || op=="cancel","cancelled automation cannot resume");
+            // A retried resume must preserve unconsumed events and the timer anchor.
+            if op=="resume" && current=="enabled" {tx.commit()?;return auto_value(c,id,thread);}
             let (state,next)=match op {"pause"=>("paused",None),"cancel"=>("cancelled",None),"resume"=>("enabled",next_time(&d.trigger,date(&now)?,true)?),_=>bail!("unknown automation operation")};
             if op!="resume" {cancelled_pending(&tx,id,&now)?;}
             let cursor:i64=tx.query_row("SELECT coalesce(max(sequence),0) FROM automation_events",[],|r|r.get(0))?;

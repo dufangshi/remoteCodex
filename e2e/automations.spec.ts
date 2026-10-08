@@ -6,7 +6,7 @@ import path from 'node:path';
 test('device automations define, pause, resume, cancel and expose script history in English and Chinese', async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
   const absPath = path.resolve(
     process.env.E2E_WORKSPACE_ROOT!,
@@ -116,7 +116,7 @@ test('device automations define, pause, resume, cancel and expose script history
   expect(detail.thread.status).toBe('idle');
   expect(detail.pendingSteers).toHaveLength(0);
   await page.screenshot({
-    path: '/home/ubuntu/dev/remoteCodex/.temp/research/unified-hooks/automations-en.png',
+    path: testInfo.outputPath('automations-en.png'),
   });
 
   await hourly
@@ -145,6 +145,105 @@ test('device automations define, pause, resume, cancel and expose script history
     await zh.evaluate((el) => el.scrollWidth - el.clientWidth),
   ).toBeLessThanOrEqual(1);
   await page.screenshot({
-    path: '/home/ubuntu/dev/remoteCodex/.temp/research/unified-hooks/automations-zh.png',
+    path: testInfo.outputPath('automations-zh.png'),
   });
+});
+
+test('automation creation retries the same accepted request after a lost response', async ({
+  page,
+  request,
+}) => {
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const absPath = path.resolve(
+    process.env.E2E_WORKSPACE_ROOT!,
+    `hooks-retry-${randomUUID()}`,
+  );
+  await mkdir(absPath, { recursive: true });
+  const wsResponse = await request.post(`${base}/api/workspaces`, {
+    data: { absPath },
+  });
+  expect(wsResponse.ok()).toBeTruthy();
+  const ws = await wsResponse.json();
+  const threadResponse = await request.post(`${base}/api/threads/start`, {
+    data: {
+      workspaceId: ws.id,
+      provider: 'codex',
+      model: 'ios-e2e-stream',
+      approvalMode: 'yolo',
+    },
+  });
+  expect(threadResponse.ok()).toBeTruthy();
+  const created = await threadResponse.json();
+  const id = created.id ?? created.thread.id;
+  const endpoint = `/api/threads/${id}/automations`;
+  const identities: string[] = [];
+  let acceptedId: string | undefined;
+  await page.route(`**${endpoint}`, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    identities.push(route.request().postDataJSON().clientRequestId);
+    if (identities.length === 1) {
+      // Actually commit the first POST, then drop only its browser response.
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      acceptedId = (await response.json()).id;
+      await route.abort('failed');
+    } else {
+      await route.continue();
+    }
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem('remote-codex.locale', 'en'),
+  );
+  await page.goto(`/threads/${id}`);
+  await page.getByRole('button', { name: 'Automations', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Automations', exact: true });
+  await dialog
+    .getByRole('button', { name: 'Create automation', exact: true })
+    .click();
+  await dialog
+    .getByLabel('Name', { exact: true })
+    .fill('Accepted despite lost response');
+  await dialog
+    .getByRole('combobox', { name: 'Action', exact: true })
+    .selectOption('notifyInbox');
+  await dialog
+    .getByLabel('Subject', { exact: true })
+    .fill('Passive retry fixture');
+  await dialog
+    .getByLabel('Text', { exact: true })
+    .fill('One registration only');
+  const submit = dialog.getByRole('button', {
+    name: 'Register automation',
+    exact: true,
+  });
+  await submit.click();
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  const first = await (await request.get(`${base}${endpoint}`)).json();
+  expect(first.automations).toHaveLength(1);
+  expect(first.automations[0].id).toBe(acceptedId);
+  await submit.click();
+  await expect(
+    dialog
+      .locator('article')
+      .filter({ hasText: 'Accepted despite lost response' }),
+  ).toBeVisible();
+  expect(identities).toHaveLength(2);
+  expect(identities[1]).toBe(identities[0]);
+  const retried = await (await request.get(`${base}${endpoint}`)).json();
+  expect(retried.automations).toHaveLength(1);
+  expect(retried.automations[0].id).toBe(acceptedId);
+
+  // A successful acceptance clears the identity for a new registration.
+  await dialog
+    .getByRole('button', { name: 'Create automation', exact: true })
+    .click();
+  await dialog.getByLabel('Name', { exact: true }).fill('A new definition');
+  await dialog
+    .getByRole('combobox', { name: 'Action', exact: true })
+    .selectOption('notifyInbox');
+  await dialog.getByLabel('Subject', { exact: true }).fill('Second fixture');
+  await dialog.getByLabel('Text', { exact: true }).fill('New registration');
+  await submit.click();
+  await expect(dialog.locator('article')).toHaveCount(2);
+  expect(identities[2]).not.toBe(identities[0]);
 });

@@ -177,6 +177,44 @@ async fn automation_restart_merges_downtime_and_lost_ack_does_not_repeat_accepta
 }
 
 #[tokio::test]
+async fn automation_repeated_resume_preserves_unconsumed_events_and_interval_schedule() {
+    let (_dir, s, t) = setup().await;
+    turn(&s, &t, "resume-source", "inProgress");
+    let event = s
+        .automation_create(
+            &t,
+            def(
+                json!({"kind":"turnEnded","sourceThreadId":t,"turnId":"resume-source"}),
+                notice(),
+            ),
+            None,
+        )
+        .unwrap();
+    let event_id = event["id"].as_str().unwrap();
+    let timer = s.automation_create(&t, hourly(notice()), None).unwrap();
+    let timer_id = timer["id"].as_str().unwrap();
+    // Advance nextRun beyond its original anchor so resetting it is observable.
+    s.automation_tick("2030-01-01T02:30:00Z").await.unwrap();
+    let timer_before = s.automation_show(&t, timer_id).unwrap();
+    finish(&s, &t, "resume-source", "completed");
+    let mail_before = mail(&s, &t);
+    for _ in 0..2 {
+        assert_eq!(s.automation_control(&t, event_id, "resume").unwrap(), event);
+        assert_eq!(
+            s.automation_control(&t, timer_id, "resume").unwrap(),
+            timer_before
+        );
+    }
+    s.automation_control(&t, timer_id, "pause").unwrap();
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
+    assert_eq!(runs(&s, &t, event_id).len(), 1);
+    assert_eq!(runs(&s, &t, event_id)[0]["state"], "completed");
+    assert_eq!(mail(&s, &t), mail_before + 1);
+    assert_eq!(pending(&s, &t), 0);
+}
+
+#[tokio::test]
 async fn automation_exact_turn_conditions_and_repeated_terminal_events_are_passive() {
     let (_dir, s, t) = setup().await;
     turn(&s, &t, "source", "inProgress");
@@ -400,6 +438,44 @@ async fn automation_time_and_command_events_execute_real_scripts_once_and_exclud
         std::fs::read_to_string(dir.path().join("executions")).unwrap(),
         "run\nrun\n"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn automation_real_wrapper_nonzero_exit_matches_once_and_not_timeout_or_unknown() {
+    let (_dir, s, t) = setup().await;
+    let mut d = def(
+        json!({"kind":"commandEnded","sourceThreadId":t,"commandKey":"expected-seven"}),
+        notice(),
+    );
+    d.condition = Condition::ExitCodeEquals { value: 7 };
+    for event in [
+        json!({"status":"timedOut","exitCode":7}),
+        json!({"status":"uncertain","exitCode":7}),
+        json!({"status":"failed"}),
+        json!({"status":"completed"}),
+    ] {
+        assert!(!condition_ok(&d.condition, &event));
+    }
+    let a = s.automation_create(&t, d, None).unwrap();
+    let id = a["id"].as_str().unwrap();
+    let input: CommandRunInput = serde_json::from_value(json!({
+        "shell":"printf expected-failure; exit 7","cwd":".",
+        "commandKey":"expected-seven","clientRequestId":"exit-seven-once"
+    }))
+    .unwrap();
+    let result = s.command_run(&t, input.clone()).await.unwrap();
+    assert_eq!(result["state"], "failed");
+    assert_eq!(result["exitCode"], 7);
+    assert_eq!(result["stdout"], "expected-failure");
+    assert_eq!(s.command_run(&t, input).await.unwrap()["id"], result["id"]);
+    assert_eq!(mail(&s, &t), 1); // Wrapper's own completion notice.
+    s.automation_tick(&now_rfc3339()).await.unwrap();
+    s.automation_tick(&now_rfc3339()).await.unwrap();
+    assert_eq!(runs(&s, &t, id).len(), 1);
+    assert_eq!(runs(&s, &t, id)[0]["state"], "completed");
+    assert_eq!(mail(&s, &t), 2); // Exactly one additional hook notice.
+    assert_eq!(pending(&s, &t), 0);
 }
 
 #[cfg(unix)]
