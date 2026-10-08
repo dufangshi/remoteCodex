@@ -19,6 +19,7 @@ import {
   workspaceResourceScope,
   renameWorkspaceNode,
   deleteWorkspaceNode,
+  createWorkspaceFile,
 } from '../lib/api';
 
 interface UseThreadWorkspaceAdapterInput {
@@ -79,6 +80,18 @@ export function useThreadWorkspaceAdapter({
         isLinked(input.path) && allowLinkedFiles ? buildLinkedFileUrl(input.threadId, input.path) : buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       ...(access === 'write'
         ? {
+            createFile: async (input) => {
+              try { return await createWorkspaceFile(workspaceId, input.path); }
+              catch (error) {
+                if (error instanceof ApiError) {
+                  const code = error.payload.code;
+                  if (code === 'fileAlreadyExists') throw new Error(translate('files.fileAlreadyExists'));
+                  if (code === 'permissionDenied') throw new Error(translate('files.createPermissionDenied'));
+                  if ([404,405,501].includes(error.statusCode)) throw new Error(translate('files.createUnavailable'));
+                }
+                throw error;
+              }
+            },
             uploadFile: (input) =>
               uploadWorkspaceFile(workspaceId, { file: input.file }),
             renameNode: async (input) => { await renameWorkspaceNode(workspaceId, input); },

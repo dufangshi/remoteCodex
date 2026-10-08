@@ -239,6 +239,24 @@ mod tests {
     #[test]
     fn safe_file_routes_require_exact_workspace_and_write_for_operations() {
         let base = "/api/workspaces/ws";
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "other",
+            true
+        ));
         for suffix in ["/files/capabilities", "/files/document"] {
             assert!(shared_workspace_path_allowed(
                 "GET",

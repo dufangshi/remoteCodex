@@ -13,6 +13,8 @@ export type {
 } from './agent-providers';
 
 export type ApiErrorCode =
+  | 'fileAlreadyExists'
+  | 'permissionDenied'
   | 'reauthentication_required'
   | 'rate_limited'
   | 'bad_request'

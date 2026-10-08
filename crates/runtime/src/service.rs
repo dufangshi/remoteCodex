@@ -989,6 +989,12 @@ impl Supervisor {
         files::write_file(Path::new(&ws.abs_path), rel, content)
     }
 
+    pub fn workspace_create_file(&self, id: &str, rel: &str) -> Result<()> {
+        let _gate = crate::file_documents::mutation_guard();
+        let workspace = self.get_workspace(id)?;
+        files::create_empty_file(Path::new(&workspace.abs_path), rel)
+    }
+
     pub fn workspace_write_bytes(
         &self,
         id: &str,

@@ -23,3 +23,5 @@
 - 桌面串联：中文 composition Enter 不发送；快捷键提交旧稿，在途继续编辑并加附件，旧稿接收后新稿与附件仍保留，并可真实提交到当前会话。
 
 浏览器采用 Chromium 桌面及手机仿真；IME 回归验证浏览器 composition 事件边界，未代替真实手机系统键盘或所有操作系统输入法的人工验收。长正文收起时只显示首行视口，完整内容在重新聚焦后恢复；收起不会改写正文。未发布、推送或部署本次预览。
+
+桌面输入区细节裁剪：[收起](assets/narrafork-preview/composer/desktop-collapsed-detail.png)、[展开](assets/narrafork-preview/composer/desktop-expanded-detail.png)。来自上述实页截图，裁剪坐标与哈希在 manifest 的 detailCrops 中。

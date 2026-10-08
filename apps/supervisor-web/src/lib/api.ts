@@ -1321,6 +1321,11 @@ export function fetchThreads(includeAgentThreads = false) {
 export function renameWorkspaceNode(workspaceId: string, input: {fromPath: string; toPath: string}) {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/move`, {method:'PATCH',body:JSON.stringify(input)});
 }
+export function createWorkspaceFile(workspaceId: string, path: string) {
+  return request<{ path: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
+    method: 'POST', body: JSON.stringify({ path }),
+  });
+}
 export function deleteWorkspaceNode(workspaceId: string, path: string) {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({path})}`, {method:'DELETE'});
 }

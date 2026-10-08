@@ -201,7 +201,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/workspaces/{id}/files/raw", get(workspace_raw))
         .route(
             "/api/workspaces/{id}/files",
-            axum::routing::put(workspace_write).delete(workspace_delete_file),
+            axum::routing::put(workspace_write)
+                .post(workspace_create_file)
+                .delete(workspace_delete_file),
         )
         .route("/api/threads", get(list_threads))
         .route("/api/threads/start", post(start_thread))
@@ -934,6 +936,44 @@ async fn workspace_raw(
 struct WriteFileBody {
     path: String,
     content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateFileBody {
+    path: String,
+}
+
+async fn workspace_create_file(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<CreateFileBody>,
+) -> Result<impl IntoResponse, ApiErr> {
+    let path = body.path;
+    let returned_path = path.clone();
+    tokio::task::spawn_blocking(move || state.workspace_create_file(&id, &path))
+        .await
+        .map_err(|e| map_err(e.into()))?
+        .map_err(
+            |e| match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
+                Some(std::io::ErrorKind::AlreadyExists) => err(
+                    StatusCode::CONFLICT,
+                    "fileAlreadyExists",
+                    "A file or folder already exists at this path.",
+                ),
+                Some(std::io::ErrorKind::PermissionDenied) => err(
+                    StatusCode::FORBIDDEN,
+                    "permissionDenied",
+                    "This directory is not writable.",
+                ),
+                _ => map_err(e),
+            },
+        )?;
+    Ok((
+        StatusCode::CREATED,
+        [("cache-control", "private, no-store")],
+        Json(json!({"path": returned_path})),
+    ))
 }
 
 async fn workspace_write(

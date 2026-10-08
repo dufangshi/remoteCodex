@@ -42,5 +42,29 @@
       "state": "expanded",
       "project": "mobile-chromium"
     }
+  ],
+  "detailCrops": [
+    {
+      "file": "desktop-collapsed-detail.png",
+      "source": "desktop-collapsed.png",
+      "box": [
+        300,
+        895,
+        1440,
+        1000
+      ],
+      "sha256": "28274a938d1044ae2ad5eb1d78e9da78d7c0aa7afe7ee49557cda41dc2c6a070"
+    },
+    {
+      "file": "desktop-expanded-detail.png",
+      "source": "desktop-expanded.png",
+      "box": [
+        300,
+        750,
+        1440,
+        1000
+      ],
+      "sha256": "bbdcc7ddac4b53ece18a5a8e24c2843a53c927db802b8656ee75ad8e9a611ada"
+    }
   ]
 }

@@ -20,9 +20,17 @@ vi.mock('../lib/api', () => ({
   uploadWorkspaceFile: vi.fn(),
   renameWorkspaceNode: vi.fn(),
   deleteWorkspaceNode: vi.fn(),
+  createWorkspaceFile: vi.fn(),
 }));
 import { useThreadWorkspaceAdapter } from './useThreadWorkspaceAdapter';
+import * as api from '../lib/api';
 describe('workspace adapter source identity', () => {
+  it('creates only in the workspace bound to the writable adapter', async () => {
+    vi.mocked(api.createWorkspaceFile).mockResolvedValue({ path: 'docs/new.md' });
+    const { result } = renderHook(() => useThreadWorkspaceAdapter({ setError: vi.fn(), workspaceId: 'bound-workspace' }));
+    await result.current?.createFile?.({ threadId: 'thread', workspaceId: 'untrusted-workspace', path: 'docs/new.md' });
+    expect(api.createWorkspaceFile).toHaveBeenCalledWith('bound-workspace', 'docs/new.md');
+  });
   it('changes source when the device changes even if workspace IDs are identical', () => {
     const setError = vi.fn();
     const { result, rerender } = renderHook(() =>
@@ -47,6 +55,7 @@ describe('workspace adapter source identity', () => {
     expect(result.current?.saveDocument).toBeUndefined();
     expect(result.current?.getSaveOperation).toBeUndefined();
     expect(result.current?.writeFile).toBeUndefined();
+    expect(result.current?.createFile).toBeUndefined();
     expect(result.current?.textRangeRead).toBe(false);
   });
 });

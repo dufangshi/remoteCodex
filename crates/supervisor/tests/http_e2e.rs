@@ -18,6 +18,74 @@ async fn spawn_supervisor(
     spawn_supervisor_seeded(providers, |_| {}).await
 }
 
+#[tokio::test]
+async fn explorer_create_file_never_overwrites_and_can_be_opened_as_document() {
+    let (_dir, port, root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let proj = root.join("new-files");
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    let ws = json(
+        &client,
+        client
+            .post(format!("{base}/api/workspaces"))
+            .json(&json!({"absPath":proj,"label":"new-files"})),
+    )
+    .await;
+    let id = ws["id"].as_str().unwrap();
+    let endpoint = format!("{base}/api/workspaces/{id}/files");
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/new.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    assert_eq!(std::fs::read(proj.join("docs/new.md")).unwrap(), b"");
+    std::fs::write(proj.join("docs/new.md"), "keep").unwrap();
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/new.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["code"],
+        "fileAlreadyExists"
+    );
+    assert_eq!(
+        std::fs::read_to_string(proj.join("docs/new.md")).unwrap(),
+        "keep"
+    );
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"../outside.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    assert!(!root.join("outside.md").exists());
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/second.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let doc = json(
+        &client,
+        client.get(format!(
+            "{base}/api/workspaces/{id}/files/document?path=docs/second.md"
+        )),
+    )
+    .await;
+    assert_eq!(doc["content"], "");
+    assert_eq!(doc["encoding"], "utf-8");
+    #[cfg(target_os = "linux")]
+    assert_eq!(doc["readOnlyReason"], Value::Null);
+}
+
 async fn spawn_supervisor_seeded(
     providers: Vec<Provider>,
     seed: impl Fn(&FakeRuntime),

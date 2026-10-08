@@ -132,6 +132,63 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+test('new file opens for editing and never overwrites an existing path', async ({ page, request }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  const { absPath } = await setup(page, request, mobile);
+  await mkdir(path.join(absPath, 'docs'));
+  const revealTree = async () => {
+    const show = page.getByRole('button', { name: '显示文件浏览器', exact: true });
+    if (await show.isVisible()) await show.click();
+  };
+  await revealTree();
+  await page.getByRole('button', { name: '刷新工作区', exact: true }).click();
+  const directory = page.getByRole('treeitem', { name: 'docs', exact: true });
+  await expect(directory).toBeVisible();
+  // The existing hover actions overlay the right half of a narrow tree row.
+  // Click the visible folder icon/name area, without bypassing hit testing.
+  await directory.getByRole('button', { name: 'docs', exact: true }).click({ position: { x: 8, y: 14 } });
+  await expect(directory).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: '新建文件', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '新建文件', exact: true });
+  const filename = dialog.getByRole('textbox', { name: '文件路径', exact: true });
+  await expect(filename).toHaveValue('docs/');
+  await filename.fill('docs/cancelled.md');
+  await filename.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '新建文件', exact: true })).toBeVisible();
+  await expect(readFile(path.join(absPath, 'docs/cancelled.md'))).rejects.toThrow();
+  await page.getByRole('button', { name: '新建文件', exact: true }).click();
+  await filename.fill('docs/新笔记.md');
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const input = page.getByRole('textbox', { name: mobile ? '工作区文件编辑器' : '工作区编辑器：docs/新笔记.md', exact: true });
+  // Monaco's native edit-context textbox has zero width before the first
+  // character in an empty document; assert the visible editor separately.
+  await expect(input).toBeAttached();
+  await expect(mobile ? input : page.getByTestId('workspace-monaco-editor')).toBeVisible();
+  const content = '# 新建文件\n\n可直接开始编辑。';
+  await input.focus();
+  await page.keyboard.insertText(content);
+  await page.getByRole('button', { name: '保存文件', exact: true }).click();
+  await expect.poll(() => readFile(path.join(absPath, 'docs/新笔记.md'), 'utf8')).toBe(content);
+  await screenshot(page, mobile ? 'mobile-new-file.png' : 'desktop-new-file.png');
+  await revealTree();
+  await page.getByRole('button', { name: '新建文件', exact: true }).click();
+  await filename.fill('docs/新笔记.md');
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('同名文件或文件夹已存在');
+  expect(await readFile(path.join(absPath, 'docs/新笔记.md'), 'utf8')).toBe(content);
+  await filename.fill('../outside.md');
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('有效的相对文件路径');
+  await filename.fill('docs/第二份.md');
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const nextEditor = page.getByRole('textbox', { name: mobile ? '工作区文件编辑器' : '工作区编辑器：docs/第二份.md', exact: true });
+  await expect(nextEditor).toBeAttached();
+  await expect(mobile ? nextEditor : page.getByTestId('workspace-monaco-editor')).toBeVisible();
+});
+
 test('dirty file survives tab switch, undo, navigation cancel and guarded save-and-close', async ({
   page,
   request,
