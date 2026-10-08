@@ -1,12 +1,43 @@
 import { test, expect } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import path from 'node:path';
+import { drawioPreviewDocument } from '../remote-codex-thread-ui/packages/thread-ui/src/components/graph-workspace/GraphDrawioPreview';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 test.use({ actionTimeout: 15_000 });
 const model = (label: string) => `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" value="${label}" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="180" height="80" as="geometry"/></mxCell></root></mxGraphModel>`;
+
+test('draw.io renders under the public relay CSP without inline scripts or eval', async ({ page }) => {
+  // srcdoc inherits the public site's HTTP CSP. A meta policy cannot relax it.
+  // Serve a minimal parent instead of Vite's development-only inline preamble.
+  const csp = "default-src 'self'; script-src 'self' 'sha256-J/u35pSjfPx+3XnEQrievRBlloQ59CziqpHF08KUmhU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+  // Use a public HTTPS origin: fulfilling a localhost navigation gives Chromium
+  // a synthetic public address space and incorrectly triggers loopback access checks.
+  await page.route('https://drawio-csp.example/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/') return route.fulfill({
+      contentType: 'text/html', headers: { 'content-security-policy': csp }, body: '<!doctype html><html><body></body></html>',
+    });
+    if (!['/vendor/drawio/bootstrap.v1.js', '/vendor/drawio/viewer-static.v32.3.0.min.js'].includes(pathname)) return route.abort();
+    await route.fulfill({ contentType: 'text/javascript', body: await readFile(path.resolve('apps/supervisor-web/public' + pathname)) });
+  });
+  await page.goto('https://drawio-csp.example/');
+  const xml = `<mxfile><diagram name="Architecture">${model('数据库 / Architecture')}</diagram></mxfile>`;
+  const srcdoc = drawioPreviewDocument(xml, new URL(page.url()).origin);
+  await page.evaluate((srcdoc) => {
+    const frame = document.createElement('iframe');
+    frame.title = 'CSP diagram';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.style.cssText = 'width:90vw;height:80vh';
+    frame.srcdoc = srcdoc;
+    document.body.append(frame);
+  }, srcdoc);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.locator('svg')).toBeVisible();
+  await expect(frame.getByText('数据库 / Architecture', { exact: true })).toBeVisible();
+});
 
 test('Explorer renders complete draw.io files, compressed pages and source on desktop and mobile', async ({ page, request }, testInfo) => {
   const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, `drawio-${randomUUID()}`);
