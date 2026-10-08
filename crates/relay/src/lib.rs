@@ -8,6 +8,7 @@ mod notifications;
 mod oauth;
 mod peer;
 mod preferences;
+mod preview;
 mod public_links;
 mod route_acl;
 mod security;
@@ -92,6 +93,7 @@ struct AppState {
     hosted: Arc<hosted::HostedService>,
     hosted_bootstraps: Mutex<HashSet<String>>,
     admission: security::Admission,
+    preview: preview::Hub,
 }
 
 pub async fn serve() -> Result<()> {
@@ -225,6 +227,7 @@ pub async fn serve() -> Result<()> {
         hosted,
         hosted_bootstraps: Mutex::new(HashSet::new()),
         admission: security::Admission::default(),
+        preview: preview::Hub::from_env()?,
     });
     state.hosted.start_background().await;
     notifications::start(&state)?;
@@ -233,6 +236,7 @@ pub async fn serve() -> Result<()> {
         .merge(notifications::routes())
         .merge(workbench::routes())
         .merge(preferences::routes())
+        .merge(preview::routes())
         .route("/healthz", get(healthz))
         .route("/relay/auth/register", post(register))
         .route("/relay/auth/login", post(login))
@@ -357,6 +361,10 @@ pub async fn serve() -> Result<()> {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             security::browser_security,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            preview::middleware,
         ))
         .with_state(state);
     let host = std::env::var("REMOTE_CODEX_RELAY_HOST")
@@ -4032,6 +4040,7 @@ async fn handle_supervisor_with_timeout(
                                     }
                                 }
                                 Some("relay.heartbeat") => {
+                                    preview::update(&state, &device_id, connection_id, &msg["portMappings"]);
                                     if msg["threadLineage"].is_array() {
                                         if let Err(error)=thread_groups::replace(&*state.store.conn.lock().await,&device_id,&msg["threadLineage"]) { tracing::warn!(%error,"invalid device lineage"); }
                                     }
@@ -4100,6 +4109,7 @@ async fn handle_supervisor_with_timeout(
 }
 
 async fn remove_supervisor_connection(state: &AppState, device_id: &str, connection_id: Uuid) {
+    preview::disconnected(state, device_id, connection_id);
     let mut sockets = state.sockets.write().await;
     if sockets
         .get(device_id)
@@ -4653,6 +4663,7 @@ mod tests {
                 hosted,
                 hosted_bootstraps: Mutex::new(HashSet::new()),
                 admission: security::Admission::default(),
+                preview: preview::Hub::default(),
             }),
             data_dir,
         )

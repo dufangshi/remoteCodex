@@ -108,6 +108,10 @@ It should normally also be given:
 - `HOST`
 - `PORT`
 
+Private device HTTP previews are optional. Set
+`REMOTE_CODEX_PORT_PREVIEW_BASE_URL` only after configuring wildcard DNS, TLS
+and ingress routing; see [device web previews](relay-port-preview-proposal.md).
+
 Google and GitHub OAuth are enabled only when both credentials for that
 provider are configured. `REMOTE_CODEX_PUBLIC_BASE_URL` must be the public
 HTTPS relay origin so the generated callback exactly matches the provider

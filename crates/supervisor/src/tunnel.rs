@@ -152,7 +152,7 @@ async fn run_connected_tunnel_with_deadline(
     let mut activity = state.bus.subscribe();
 
     outgoing
-        .send(json!({ "type": "relay.heartbeat", "timestamp": now_rfc3339(), "threadLineage":thread_lineage(&state) }))
+        .send(json!({ "type": "relay.heartbeat", "timestamp": now_rfc3339(), "threadLineage":thread_lineage(&state), "portMappings":crate::ports::snapshot(&state) }))
         .map_err(|_| anyhow!("relay tunnel writer closed"))?;
     // Consume the interval's immediate first tick because the initial heartbeat
     // was queued explicitly above.
@@ -225,7 +225,7 @@ async fn run_connected_tunnel_with_deadline(
                 if outgoing.send(json!({
                     "type": "relay.heartbeat",
                     "timestamp": now_rfc3339(),
-                    "threadLineage":thread_lineage(&state)
+                    "threadLineage":thread_lineage(&state), "portMappings":crate::ports::snapshot(&state)
                 })).is_err() {
                     return Err(anyhow!("relay tunnel writer closed"));
                 }
@@ -277,6 +277,7 @@ fn handle_relay_message(
     message: Value,
 ) {
     match message.get("type").and_then(Value::as_str) {
+        Some("preview.open") => crate::ports::open(state, &message),
         Some("relay.request") => {
             let Some(request_id) = message
                 .get("requestId")
@@ -333,11 +334,19 @@ fn handle_relay_message(
             let outgoing = outgoing.clone();
             tokio::spawn(async move {
                 let _permit = permit;
+                let mappings_changed = payload["path"]
+                    .as_str()
+                    .is_some_and(|p| p.starts_with("/api/port-mappings"));
                 let payload = bounded_forward(
                     forward_local(&state, payload, peer),
                     Duration::from_secs(60),
                 )
                 .await;
+                if mappings_changed {
+                    // Announce the committed permission before returning the API
+                    // result, so the owner's immediate Open request can resolve it.
+                    let _ = outgoing.send(json!({"type":"relay.heartbeat","portMappings":crate::ports::snapshot(&state)}));
+                }
                 let _ = outgoing.send(json!({
                     "type": "relay.response",
                     "timestamp": now_rfc3339(),

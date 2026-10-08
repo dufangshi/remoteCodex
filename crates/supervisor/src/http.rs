@@ -86,6 +86,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/version", get(version))
         .route("/api/device/metrics", get(device_metrics))
         .route(
+            "/api/port-mappings",
+            get(crate::ports::list).post(crate::ports::create),
+        )
+        .route("/api/port-mappings/{id}", delete(crate::ports::remove))
+        .route(
             "/api/management/harnesses",
             get(crate::management::harnesses),
         )

@@ -9,9 +9,10 @@ import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { ThreadWatchesControl } from '../components/ThreadWatchesControl';
 import { ThreadSubagentsControl } from '../components/ThreadSubagentsControl';
+import { PortMappingsControl } from '../components/PortMappingsControl';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Download, Link2, Users } from 'lucide-react';
+import { Download, Link2, Network, Users } from 'lucide-react';
 
 import { RecentThreadMenu } from '../components/RecentThreadMenu';
 import {
@@ -382,6 +383,8 @@ export function ThreadDetailPage() {
   activeThreadIdRef.current = id;
   const location = useLocation();
   const relayRouteDeviceId = relayDeviceIdFromPath(location.pathname);
+  const [portsOpen, setPortsOpen] = useState(false);
+  useEffect(() => setPortsOpen(false), [relayRouteDeviceId]);
   const routeKey = `${relayRouteDeviceId ?? 'local'}:${id}`;
   const activeRouteRef = useRef(routeKey);
   activeRouteRef.current = routeKey;
@@ -3294,6 +3297,7 @@ export function ThreadDetailPage() {
     [relayAccess],
   );
   const threadActionsButton = <div>
+    {relayThreadIsOwner && relayRouteDeviceId && <button aria-label="Port mappings" title="Port mappings" onClick={() => setPortsOpen(true)}><Network /></button>}
     <button aria-label="Share as link" title="Create and copy read-only link" onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>
     <button aria-label="Sharing permissions" title="Sharing permissions" onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>
     <button aria-label="Download transcript" title="Download transcript" disabled={!detail} onClick={() => { setActionMode('html'); setExportDialogOpen(true); }}><Download /></button>
@@ -3644,6 +3648,8 @@ export function ThreadDetailPage() {
   );
 
   return (
+    <>
+    {relayThreadIsOwner && relayRouteDeviceId && <PortMappingsControl key={relayRouteDeviceId} deviceId={relayRouteDeviceId} open={portsOpen} onOpenChange={setPortsOpen} />}
     <ThreadDetailSurface
       deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
       workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true) }}
@@ -3702,5 +3708,6 @@ export function ThreadDetailPage() {
       {...(chatComposerProps ? { composerProps: chatComposerProps } : {})}
       {...(shellComposerProps ? { shellComposerProps } : {})}
     />
+    </>
   );
 }

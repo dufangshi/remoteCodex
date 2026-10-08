@@ -1,109 +1,126 @@
-# Device web previews through the relay (proposal)
+# Device web previews through the relay
 
-Status: design discussion only; no port-forwarding endpoint is implemented by this change.
+## Usage
 
-## Goal
+The thread toolbar’s **Port mappings** button is next to sharing. Enter an HTTP
+port and optional label, then enable and open it in a new tab. Clicking a chat
+link to `http://localhost:4013/...` or `http://127.0.0.1:4013/...` offers a
+confirmation before enabling and opening that port. Cancelling makes no change.
+Mappings belong to the device, persist across Supervisor restarts, and are
+private to its account owner. Shared-thread control does not grant port access.
 
-Open a web application listening on a device's `127.0.0.1:4013` from the
-Remote Codex browser UI, without exposing an inbound port on that device.
-The first version should support private, owner-only HTTP(S) applications,
-including Vite/Next.js WebSocket hot reload and streamed responses.
+**Open** signs the current browser in to that preview. **Copy address** copies
+the stable private address, without a login ticket; a different browser must use
+Open from its own signed-in device page first. **Stop** revokes the mapping and
+closes its connections; the local service keeps running. Re-enabling a stopped
+port creates a new address. Supervisors predating this feature must be updated.
 
-## Existing foundation and missing pieces
+## Deployment: DNS, proxy and TLS
 
-The Supervisor already initiates a persistent outbound relay connection.
-However, `forward_device` in `crates/relay/src/lib.rs` is an API request/response
-bridge with a default 30-second response deadline; it buffers a completed
-JSON response. `forward_local` in `crates/supervisor/src/tunnel.rs` dispatches
-approved Supervisor API paths and enforces the encrypted transport boundary.
-Neither is a generic HTTP reverse proxy or a WebSocket upgrade tunnel.
+Example configuration for the existing site:
 
-Reuse the device registration, authentication and connection lifecycle. Add
-a separate, bounded data channel for previews, rather than sending large asset
-bodies through the existing chat/control queue. Each request needs a stream ID,
-headers, binary chunks, completion/cancellation, backpressure and limits.
-WebSocket upgrades need bidirectional frames; SSE and other streamed HTTP
-responses need streaming rather than the ordinary API's completion deadline.
-
-## Recommended address and flow
-
-```text
-Browser: https://p-<random-mapping-id>.preview.example.net/path?query
-  -> Relay: authenticate owner and resolve explicitly enabled mapping
-  -> Outbound device preview channel
-  -> Supervisor: http://127.0.0.1:4013/path?query
+```ini
+REMOTE_CODEX_PORT_PREVIEW_BASE_URL=https://lnz-study.com
 ```
 
-Use one origin per mapping. A separately registered preview domain offers the
-strongest separation from the control-plane login; a wildcard subdomain under
-the existing site is simpler but requires strict host-only control-plane
-cookies and protection against parent-domain cookies. Configure wildcard DNS
-and TLS when implementing this feature.
+This produces `https://p-<32-hex-mapping-id>.lnz-study.com`. Each mapping has its
+own origin, so root-relative assets, client routing, application cookies and
+WebSocket paths do not need a device/path prefix. The random ID is a route,
+not an access credential; the Relay authenticates the owner separately.
 
-A mapping-specific origin preserves root-relative assets, client-side routes,
-cookies and WebSockets more reliably than `/devices/.../ports/4013/...` path
-prefixes. Keep the browser's original path/query; forward method, content type,
-body, response status and the necessary headers. Strip hop-by-hop headers and
-control-plane credentials; handle upstream `Location`, cookie domains and
-WebSocket `Host`/`Origin` consistently.
+Before setting that environment variable on the Relay:
 
-This cannot transparently repair JavaScript which hardcodes `localhost`, or an
-application's origin/host allowlist. Vite-style servers may need an allowed
-preview hostname and public HMR URL. Do not disable origin checks globally.
+1. Add a wildcard DNS record, `*.lnz-study.com`, pointing to the same ingress as
+   the Relay. An existing exact record such as `remote.lnz-study.com` takes
+   precedence. Cloudflare can proxy the wildcard. Do not add records per port.
+2. Configure the ingress/reverse proxy to route `p-*.lnz-study.com` to the
+   **same Rust Relay HTTP listener** as `remote.lnz-study.com`. Preserve the
+   original Host, allow WebSocket upgrades, disable response buffering for
+   streaming, and choose long-lived connection timeouts. DNS alone does not
+   install this proxy route. The preview Host must not be rewritten to `remote`.
+3. Provide TLS for these first-level subdomains on the public edge and, when
+   using Full (strict), on the origin. Cloudflare Universal SSL ordinarily covers
+   the root and first-level wildcard; `p-id.preview.lnz-study.com` is deeper and
+   needs a different certificate arrangement. A dedicated preview domain is also
+   supported by choosing it as the base URL.
+4. Add the variable to the Relay service environment (on the current server,
+   `/opt/remote-codex-rust-relay/relay.env`) and restart that Relay service. This
+   configures the Relay, not device Supervisors. Check `/relay/port-mappings/config`
+   while signed in, then open a real mapping and test a WebSocket application.
 
-Open in a new tab by default. Optional embedding must respect the target app's
-`X-Frame-Options` and CSP `frame-ancestors` restrictions.
+Unset configuration disables opening/enabling from the Web UI and explains the
+missing setup. Existing mappings can still be stopped. Mapping/session routing
+lives in Relay memory and is restored from Supervisor heartbeats after a Relay
+restart; preview tabs may need **Open** again to obtain a fresh gateway session.
 
-## Access and lifecycle
+For isolated local tests, use `http://preview.localhost:<relay-port>`; Chromium
+resolves its subdomains to loopback. Plain HTTP is for local development only.
 
-- Explicitly enable a mapping for a validated loopback port; arbitrary network
-  destinations and public sharing are outside the initial scope.
-- Keep mappings private to the device owner. An unpredictable ID is a routing
-  identifier, not authentication.
-- Exchange a short-lived, single-use launch code for a mapping-scoped, secure,
-  HttpOnly session on the preview origin. Do not put durable device/account
-  credentials in the URL or forward relay cookies to the local application.
-- Validate authorization on HTTP requests and WebSocket upgrades. Stop/revoke
-  must close active streams; an offline device returns a clear unavailable
-  response. Bound concurrent streams, body sizes and idle times without breaking
-  legitimate SSE/WebSocket connections.
-- Keep local application cookies separate from preview gateway authentication.
-  Prevent the app from setting or overwriting gateway session cookies.
+## Data path and authentication
 
-## Platform behavior
+```text
+Browser -- HTTPS --> p-ID.example.com (Relay)
+                       |
+                       | dedicated binary WebSocket, initiated by Supervisor
+                       v
+                 Supervisor -- HTTP --> 127.0.0.1:4013
+```
 
-The same Rust loopback client works on native macOS, Windows and Linux. In WSL
-and containers, loopback means the Supervisor's own network namespace; a
-service on the Windows host or another container may require a separately
-configured, explicit destination in a later version.
+The implementation is an ordinary HTTPS reverse proxy; preview content is not
+end-to-end encrypted and the Relay can read it. The existing encrypted chat/API
+transport stays in use for mapping management. The device requires no inbound
+port, and only its explicitly enabled loopback ports can be connected.
 
-## Encryption decision
+The main account session stays at the Relay. **Open** exchanges a one-use,
+60-second launch ticket for a mapping-scoped, HttpOnly, Secure, host-only cookie
+on the preview origin. The ticket is removed with a redirect before requesting
+the application. The preview gateway checks the original account session and
+device ownership on every HTTP request and WebSocket upgrade. Main account and
+gateway cookies are filtered out of requests to the local application; the
+application cannot set gateway cookies through its HTTP responses. Cross-origin
+Origin headers are rejected. Stop, device disconnect and connection replacement
+cancel active tunnels. A copied address does not grant another user access.
+Long-lived connections recheck session validity every 15 seconds and close after
+logout, account disablement, session expiry or ownership revocation.
 
-A conventional reverse proxy terminates HTTPS at the relay, so the relay can
-read the forwarded web traffic. This is a different trust boundary from the
-existing browser-to-Supervisor encrypted API transport and must be explicit.
-TLS still protects browser-to-relay and device-to-relay traffic.
+Each HTTP connection uses a separate bounded binary WebSocket; HTTP bodies are
+streamed with backpressure rather than buffered onto the chat control channel.
+WebSocket upgrades and SSE are supported. There are at most 32 enabled mappings
+per device, 32 simultaneous preview connections per device and 256 per Relay.
+Connecting a data channel has a 10-second deadline; response headers have a
+30-second deadline. A successful streaming body/WebSocket can continue beyond
+the ordinary JSON API response deadline.
 
-Keeping preview traffic opaque to the relay would require a browser-side
-encrypted transport gateway (and special handling for ordinary subresource,
-navigation and WebSocket requests). It is a larger design, not something the
-current encrypted JSON API provides automatically. Decide this before building
-the data path.
+## Compatibility and limits
 
-## Suggested UI and validation
+The same Rust loopback transport works on macOS, Windows and Linux. On WSL or
+containers, loopback means the Supervisor’s own network namespace. Start the
+web service there; forwarding arbitrary LAN/Windows-host addresses is outside
+this version. IPv6-only loopback services are tried when IPv4 connection fails.
 
-A device-level Ports panel: port, optional label, status, Open, Copy address,
-Stop. The local service continues running independently when its mapping stops.
+The local upstream must use **HTTP**, not a self-signed HTTPS server or arbitrary
+TCP service. Browser-to-Relay and Supervisor-to-Relay use TLS in a public setup.
+Absolute localhost HTTP redirects are rewritten to the preview origin, and
+application cookie Domain attributes are removed so cookies belong to that
+mapping. Application CSP and frame restrictions are preserved.
 
-Before enabling a public deployment, cover owner isolation and revocation;
-binary GET/POST bodies; root-relative assets, SPA routes, redirects and cookies;
-WebSocket hot reload; SSE and disconnect cancellation; reconnect/offline states;
-and bounded load alongside ongoing chat traffic. These are future implementation
-gates, not additional checks for the draw.io viewer change.
+A web application that hardcodes localhost in JavaScript, checks its public
+origin, or uses a second port for hot reload may need application configuration.
+Use same-origin WebSocket URLs or explicitly configure the app’s public HMR URL.
+Do not disable its host/origin checks globally. Previews open in new tabs.
+
+## Validation
+
+`e2e/port-preview.spec.ts` starts isolated, real Rust Relay and Supervisor
+processes plus a local HTTP/WebSocket service. It covers encrypted management,
+owner isolation, binary POST/GET, redirects, cookie filtering, streamed responses,
+WebSocket echo and stopping a live socket, plus confirmation/cancellation of
+chat-localhost links. `preview::tests` covers origin/config validation, header
+rewrites, reconnect cancellation and failed-upgrade resource cleanup. Web unit
+tests cover local link parsing, confirmation and unavailable configuration.
 
 ## References
 
-- [Browser same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Same-origin_policy)
-- [WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+- [Cloudflare Universal SSL limitations](https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/)
 - [Set-Cookie semantics](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
 - [Vite host and WebSocket configuration](https://vite.dev/config/server-options.html)

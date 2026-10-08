@@ -2523,7 +2523,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-codex"
-version = "0.12.67"
+version = "0.12.68"
 dependencies = [
  "anyhow",
  "clap",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-protocol"
-version = "0.12.67"
+version = "0.12.68"
 dependencies = [
  "chrono",
  "serde",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-relay"
-version = "0.12.67"
+version = "0.12.68"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -2563,6 +2563,8 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "hyper",
+ "hyper-util",
  "openssl",
  "qrcodegen",
  "rand 0.8.8",
@@ -2576,6 +2578,7 @@ dependencies = [
  "subtle",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "tokio-util",
  "totp-rs",
  "tracing",
  "url",
@@ -2586,7 +2589,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-runtime"
-version = "0.12.67"
+version = "0.12.68"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2623,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "remote-codex-supervisor"
-version = "0.12.67"
+version = "0.12.68"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
