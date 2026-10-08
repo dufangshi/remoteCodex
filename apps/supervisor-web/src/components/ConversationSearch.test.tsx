@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { setLocale } from '@remote-codex/thread-ui/i18n';
 import type { ThreadTurnDto } from '@remote-codex/shared';
 import { ConversationSearch } from './ConversationSearch';
 import { fetchThreadConversationPage, fetchThreadTurnDetail, searchThreadMessages, searchConversations } from '../lib/api';
@@ -9,7 +10,7 @@ vi.mock('../lib/api', () => ({
   searchConversations: vi.fn(), searchThreadMessages: vi.fn(), fetchThreadConversationPage: vi.fn(), fetchThreadTurnDetail: vi.fn(),
   ApiError: class extends Error { constructor(public statusCode: number) { super('not found'); } },
 }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); setLocale('en'); vi.resetAllMocks(); });
 const current = { id: 'live', hasDeferredItems: false, items: [{ id: 'live-msg', kind: 'agentMessage', text: 'Current cobalt reply' }] } as ThreadTurnDto;
 const older = { id: 'old', hasDeferredItems: false, items: [{ id: 'old-msg', kind: 'agentMessage', text: 'Older cobalt decision' }] } as ThreadTurnDto;
 function Harness({ onSelect = vi.fn(), onNavigate = vi.fn(), allowGlobal = false, turns = [current] }: {
@@ -129,4 +130,49 @@ it('never offers global scopes for a thread-only share and closes an in-flight q
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Search messages' }), { key: 'Escape' });
   expect(signal.aborted).toBe(true);
   expect(searchConversations).not.toHaveBeenCalled();
+});
+
+it.each([
+  { scope: 'device', locale: 'en', trigger: 'Search conversation', input: 'Search messages', scopeLabel: 'Search scope',
+    hint: 'This search scope is currently unavailable on this device. Update the device runtime, verify the workspace still exists, or choose Current conversation search.' },
+  { scope: 'workspace', locale: 'zh-CN', trigger: '搜索会话', input: '搜索消息', scopeLabel: '搜索范围',
+    hint: '此设备上的搜索范围暂不可用。请更新设备运行时、检查工作区是否仍存在，或选择当前会话搜索。' },
+])('explains $scope 404 in $locale and waits for an explicit switch before using thread fallback', async ({ scope, locale, trigger, input, scopeLabel, hint }) => {
+  const { ApiError } = await import('../lib/api');
+  vi.mocked(searchConversations).mockRejectedValue(new ApiError(404, {} as never));
+  vi.mocked(searchThreadMessages).mockRejectedValue(new ApiError(404, {} as never));
+  vi.mocked(fetchThreadConversationPage).mockResolvedValue({ turns: [older], totalTurnCount: 1 } as never);
+  setLocale(locale);
+  render(<Harness allowGlobal turns={[]} />);
+  fireEvent.click(screen.getByRole('button', { name: trigger }));
+  const picker = screen.getByRole('combobox', { name: scopeLabel });
+  fireEvent.change(picker, { target: { value: scope } });
+  fireEvent.change(screen.getByRole('combobox', { name: input }), { target: { value: 'cobalt' } });
+  expect(await screen.findByRole('alert')).toHaveTextContent(hint);
+  expect(picker).toHaveValue(scope);
+  expect(searchConversations).toHaveBeenCalledTimes(1);
+  expect(searchThreadMessages).not.toHaveBeenCalled();
+  expect(fetchThreadConversationPage).not.toHaveBeenCalled();
+  expect(fetchThreadTurnDetail).not.toHaveBeenCalled();
+  fireEvent.change(picker, { target: { value: 'thread' } });
+  await screen.findByRole('option', { name: /Older cobalt decision/ });
+  expect(picker).toHaveValue('thread');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(searchThreadMessages).toHaveBeenCalledExactlyOnceWith('thread-1', 'cobalt', expect.any(AbortSignal));
+  expect(fetchThreadConversationPage).toHaveBeenCalledTimes(1);
+  expect(searchConversations).toHaveBeenCalledTimes(1);
+});
+it('keeps a global permission denial separate from an unavailable endpoint', async () => {
+  const { ApiError } = await import('../lib/api');
+  const denied = new ApiError(403, {} as never);
+  denied.message = 'Access denied';
+  vi.mocked(searchConversations).mockRejectedValue(denied);
+  render(<Harness allowGlobal turns={[]} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Search conversation' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Search scope' }), { target: { value: 'device' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Search messages' }), { target: { value: 'cobalt' } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
+  expect(screen.getByRole('alert')).not.toHaveTextContent('Update the device runtime');
+  expect(fetchThreadConversationPage).not.toHaveBeenCalled();
+  expect(searchThreadMessages).not.toHaveBeenCalled();
 });

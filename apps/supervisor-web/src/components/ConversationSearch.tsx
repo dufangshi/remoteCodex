@@ -52,6 +52,7 @@ export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGl
   const [loading, setLoading] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [error, setError] = useState('');
+  const [scopeUnavailable, setScopeUnavailable] = useState(false);
   const [active, setActive] = useState(0);
   const legacy = useRef(false);
   const cache = useRef(new Map<string, { result: SearchResult; at: number }>());
@@ -74,6 +75,7 @@ export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGl
   useEffect(() => {
     setActive(0);
     setError('');
+    setScopeUnavailable(false);
     if (!open || !normalized) { setLoading(false); return; }
     const cached = cache.current.get(searchKey);
     if (cached && Date.now() - cached.at < 30_000) {
@@ -121,7 +123,13 @@ export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGl
         cache.current.set(searchKey, { result, at: Date.now() });
         setRemote({ query: searchKey, result });
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : labels.failed);
+        if (!controller.signal.aborted) {
+          // A 404 can mean an older runtime or a removed workspace. Keep the
+          // selected scope and never broaden it or scan histories on its behalf.
+          if (effectiveScope !== 'thread' && e instanceof ApiError && e.statusCode === 404) {
+            setScopeUnavailable(true);
+          } else setError(e instanceof Error ? e.message : labels.failed);
+        }
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -183,10 +191,11 @@ export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGl
           }} />
         <button type="button" aria-label={labels.close} onClick={close}><X size={16} /></button>
       </div>
-      {(normalized || error) && <div className="workbench-search-dropdown" aria-label={labels.results}>
+      {(normalized || error || scopeUnavailable) && <div className="workbench-search-dropdown" aria-label={labels.results}>
         <p role="status">{selecting ? labels.opening : loading ? labels.searching
           : labels.count(matches.length, remote?.query === searchKey && remote.result.hasMore)}</p>
         {effectiveScope !== 'thread' && <p>{labels.localScope} · {deviceLabel}</p>}
+        {scopeUnavailable && <p role="alert">{labels.scopeUnavailable}</p>}
         {error && <p role="alert">{error}</p>}
         <div id={listId} className="workbench-search-results" role="listbox" aria-label={labels.matches}>
           {matches.map((match, index) => {
@@ -200,7 +209,7 @@ export function ConversationSearch({ threadId, workspaceId, deviceLabel, allowGl
             </button>;
           })}
         </div>
-        {!loading && !error && !matches.length && <p>{labels.empty}</p>}
+        {!loading && !error && !scopeUnavailable && !matches.length && <p>{labels.empty}</p>}
         {effectiveScope === 'thread' && remote?.query === searchKey && remote.result.hasMore && <p>{labels.refine}</p>}
         {effectiveScope !== 'thread' && <div className="workbench-search-pagination">
           {offset > 0 && <button type="button" disabled={loading} onClick={() => setOffset(Math.max(0, offset - 50))}>{labels.previous}</button>}

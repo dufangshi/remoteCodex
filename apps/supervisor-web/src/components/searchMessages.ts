@@ -19,6 +19,7 @@ export function useSearchMessages() {
     searching: t('search.searching'),
     empty: t('search.empty'),
     failed: t('search.failed'),
+    scopeUnavailable: t('search.scopeUnavailable'),
     openFailed: t('search.openFailed'),
     more: t('search.more'),
     previous: t('search.previous'),
