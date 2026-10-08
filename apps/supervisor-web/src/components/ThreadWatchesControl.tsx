@@ -78,23 +78,35 @@ export function NativeWatchCard({ watch: w }: { watch: NativeWatch }) {
       })
     : translate('workbench.sumOfCostsReportedByTheRecorded');
   return (
-    <article className="min-w-0 rounded-lg border border-[var(--theme-border)] p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <strong className="block break-words text-sm">{w.schedule}</strong>
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {statusLabel[w.status]}
-          </p>
-          {w.status === 'unconfirmed' && (
-            <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-              {translate('workbench.thisRecordedWatchMayHaveEndedIts')}
-            </p>
-          )}
-        </div>
-        <div
-          className="shrink-0 text-sm"
-          aria-label={translate('workbench.watchTotalCost')}
-        >
+    <article className="automation-rule">
+      <div className="automation-rule-heading">
+        <strong>{w.schedule}</strong>
+        <span className={`automation-state is-${w.status}`}>
+          <i />
+          {statusLabel[w.status]}
+        </span>
+      </div>
+      <p className="automation-native-prompt">{w.prompt}</p>
+      <div className="automation-rule-meta">
+        <span>
+          {translate('workbench.triggers')}:{' '}
+          {count?.toLocaleString(getLocale()) ?? '—'}
+        </span>
+        {w.lastTriggeredAt && (
+          <span>
+            {translate('workbench.lastTriggered')}:{' '}
+            <time dateTime={w.lastTriggeredAt}>
+              {dateLabel(w.lastTriggeredAt)}
+            </time>
+          </span>
+        )}
+      </div>
+      <div className="automation-rule-usage">
+        <span>
+          {t('automation.tokenMetric')}:{' '}
+          {w.tokenUsage?.totalTokens.toLocaleString(getLocale()) ?? '—'}
+        </span>
+        <span aria-label={translate('workbench.watchTotalCost')}>
           {w.priceEstimate || w.tokenUsage ? (
             <TokenUsageCost
               usage={w.tokenUsage ?? null}
@@ -104,91 +116,23 @@ export function NativeWatchCard({ watch: w }: { watch: NativeWatch }) {
               tooltipZIndex={120}
             />
           ) : (
-            <span className="text-xs text-[var(--theme-fg-muted)]">
-              {translate('workbench.costUnavailable')}
-            </span>
+            '—'
           )}
-        </div>
+        </span>
+        {(partial || ambiguous > 0) && (
+          <span className="automation-inline-quality">
+            {t('automation.partial')}
+          </span>
+        )}
       </div>
-      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-[var(--theme-fg-muted)]">
-          {translate('workbench.created')}
-        </dt>
-        <dd>
-          {w.createdAt ? (
-            <time dateTime={w.createdAt}>{dateLabel(w.createdAt)}</time>
-          ) : (
-            translate('workbench.unavailable')
-          )}
-        </dd>
-        <dt className="text-[var(--theme-fg-muted)]">
-          {translate('workbench.triggers')}
-        </dt>
-        <dd>
-          {count == null
-            ? translate('workbench.unavailable')
-            : count.toLocaleString(getLocale())}
-        </dd>
-        {w.lastTriggeredAt && (
-          <>
-            <dt className="text-[var(--theme-fg-muted)]">
-              {translate('workbench.lastTriggered')}
-            </dt>
-            <dd>
-              <time dateTime={w.lastTriggeredAt}>
-                {dateLabel(w.lastTriggeredAt)}
-              </time>
-            </dd>
-          </>
-        )}
-        {w.statusCheckedAt && (
-          <>
-            <dt className="text-[var(--theme-fg-muted)]">
-              {translate('workbench.statusChecked')}
-            </dt>
-            <dd>
-              <time dateTime={w.statusCheckedAt}>
-                {dateLabel(w.statusCheckedAt)}
-              </time>
-            </dd>
-          </>
-        )}
-      </dl>
-      <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-        {t('automation.tokens')}:{' '}
-        {w.tokenUsage?.totalTokens.toLocaleString(getLocale()) ??
-          t('automation.unknown')}
-        {count != null && (
-          <>
-            {' '}
-            ·{' '}
-            {t('automation.nativeTokenCoverage', {
-              value1: w.usageTriggerCount ?? 0,
-              value2: count,
-            })}
-          </>
-        )}
-      </p>
-      {ambiguous > 0 && (
-        <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-          {ambiguous} {translate('workbench.additional')}{' '}
-          {ambiguous === 1
-            ? translate('workbench.runMatches')
-            : translate('workbench.runsMatch')}{' '}
-          {translate('workbench.multipleWatchesExcludedFromThisTotal')}
-        </p>
-      )}
-      {partial && (
-        <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">{coverage}</p>
-      )}
       <button
         type="button"
-        className="mt-3 flex items-center gap-1 text-xs text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)]"
+        className="automation-native-details"
         aria-expanded={expanded}
         aria-controls={detailsId}
         onClick={() => setExpanded(!expanded)}
       >
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         {expanded
           ? translate('workbench.hideDetails')
           : translate('workbench.showDetails')}
@@ -196,22 +140,49 @@ export function NativeWatchCard({ watch: w }: { watch: NativeWatch }) {
       {expanded && (
         <div
           id={detailsId}
-          className="mt-3 min-w-0 space-y-2 border-t border-[var(--theme-border)] pt-3"
+          className="mt-3 min-w-0 space-y-2 border-t border-[var(--theme-border)] pt-3 text-xs text-[var(--theme-fg-muted)]"
         >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-            <dt className="text-[var(--theme-fg-muted)]">ID</dt>
+          {w.status === 'unconfirmed' && (
+            <p>{translate('workbench.thisRecordedWatchMayHaveEndedIts')}</p>
+          )}
+          {partial && <p>{coverage}</p>}
+          {count != null && (
+            <p>
+              {t('automation.nativeTokenCoverage', {
+                value1: w.usageTriggerCount ?? 0,
+                value2: count,
+              })}
+            </p>
+          )}
+          {ambiguous > 0 && (
+            <p>
+              {ambiguous} {translate('workbench.additional')}{' '}
+              {ambiguous === 1
+                ? translate('workbench.runMatches')
+                : translate('workbench.runsMatch')}{' '}
+              {translate('workbench.multipleWatchesExcludedFromThisTotal')}
+            </p>
+          )}
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt>ID</dt>
             <dd className="break-all">
               <code>{w.id}</code>
             </dd>
-            <dt className="text-[var(--theme-fg-muted)]">Cron</dt>
+            <dt>Cron</dt>
             <dd className="break-all">
               <code>{w.cron}</code>
             </dd>
+            <dt>{translate('workbench.created')}</dt>
+            <dd>{dateLabel(w.createdAt)}</dd>
+            {w.statusCheckedAt && (
+              <>
+                <dt>{translate('workbench.statusChecked')}</dt>
+                <dd>{dateLabel(w.statusCheckedAt)}</dd>
+              </>
+            )}
             {w.expiresAt && (
               <>
-                <dt className="text-[var(--theme-fg-muted)]">
-                  {translate('workbench.expires')}
-                </dt>
+                <dt>{translate('workbench.expires')}</dt>
                 <dd>{dateLabel(w.expiresAt)}</dd>
               </>
             )}

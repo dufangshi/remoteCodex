@@ -121,17 +121,19 @@ with sqlite3.connect(sys.argv[1]) as conn:
   const dialog = page.getByRole('dialog', { name: 'Automation', exact: true });
   const card = dialog.locator('article').first();
   await expect(dialog).toBeVisible();
-  await expect(card.getByText('Created', { exact: true })).toBeVisible();
-  await expect(card.locator(`time[datetime="${createdAt}"]`)).toBeVisible();
-  await expect(card.getByText('Triggers', { exact: true })).toBeVisible();
-  await expect(card.locator('dd').filter({ hasText: /^2$/ })).toBeVisible();
+  await expect(card.getByText('Created', { exact: true })).toHaveCount(0);
+  await expect(card.locator('.automation-rule-meta')).toContainText(
+    'Triggers: 2',
+  );
   const cost = dialog.getByRole('button', {
     name: `Watch total cost ${usd}. Show token details`,
     exact: true,
   });
   await expect(cost).toBeVisible();
   await expect(page.locator('[data-slot="tooltip-content"]')).not.toBeVisible();
-  await expect(dialog.getByText(prompt, { exact: true })).toHaveCount(0);
+  await expect(
+    dialog.locator('.automation-native-prompt').filter({ hasText: prompt }),
+  ).toBeVisible();
   await expect(
     dialog.getByText('Old watch details', { exact: true }),
   ).not.toBeVisible();
@@ -163,7 +165,10 @@ with sqlite3.connect(sys.argv[1]) as conn:
     .getByRole('button', { name: 'Show details', exact: true })
     .first()
     .click();
-  await expect(dialog.getByText(prompt, { exact: true })).toBeVisible();
+  await expect(card.getByText('Created', { exact: true })).toBeVisible();
+  await expect(
+    card.locator('.whitespace-pre-wrap').getByText(prompt, { exact: true }),
+  ).toBeVisible();
   expect(
     await dialog.evaluate((el) => el.scrollWidth - el.clientWidth),
   ).toBeLessThanOrEqual(1);
@@ -184,7 +189,7 @@ with sqlite3.connect(sys.argv[1]) as conn:
   await expect(dialog.getByText('Cancelled', { exact: true })).toBeVisible();
   await expect(
     dialog.getByText('Old watch details', { exact: true }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   await expect(toggle).toBeFocused();
@@ -204,13 +209,15 @@ with sqlite3.connect(sys.argv[1]) as conn:
     await route.fulfill({ json: { watches: [legacy] } });
   });
   await toggle.click();
+  await expect(card.locator('.automation-rule-meta')).toContainText(
+    'Triggers: —',
+  );
+  await expect(card.getByLabel('Watch total cost', { exact: true })).toHaveText(
+    '—',
+  );
   await expect(
-    dialog.getByText('Cost unavailable', { exact: true }),
+    dialog.locator('.automation-native-prompt').filter({ hasText: prompt }),
   ).toBeVisible();
-  await expect(
-    dialog.locator('dd').filter({ hasText: /^Unavailable$/ }),
-  ).toBeVisible();
-  await expect(dialog.getByText(prompt, { exact: true })).toHaveCount(0);
 });
 
 test('watch polling moves legacy cancellations and empty scheduler snapshots into past watches', async ({
@@ -298,6 +305,10 @@ with sqlite3.connect(sys.argv[1]) as c:
   await expect(
     dialog.getByText('Status unconfirmed', { exact: true }),
   ).toBeVisible();
+  await dialog
+    .getByRole('button', { name: 'Show details', exact: true })
+    .first()
+    .click();
   await expect(
     dialog.getByText(
       'This recorded watch may have ended. Its live schedule has not been confirmed.',
@@ -320,6 +331,16 @@ with sqlite3.connect(sys.argv[1]) as c:
     'aria-label',
     'Automation',
   );
+  await expect(
+    dialog.getByRole('button', { name: 'Show details', exact: true }),
+  ).toHaveCount(2);
+  await dialog
+    .getByRole('button', { name: 'Show details', exact: true })
+    .first()
+    .click();
+  await dialog
+    .getByRole('button', { name: 'Show details', exact: true })
+    .click();
   await expect(dialog.getByText('Status checked', { exact: true })).toHaveCount(
     2,
   );

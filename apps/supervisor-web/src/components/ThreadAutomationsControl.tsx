@@ -1,5 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { Workflow } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Workflow,
+  RefreshCw,
+  Clock3,
+  ChevronRight,
+  Info,
+  MessageSquare,
+  Inbox,
+  Terminal,
+  CircleSlash,
+  ArrowUpRight,
+} from 'lucide-react';
+import './automation-panel.css';
 import {
   Dialog,
   DialogContent,
@@ -122,7 +134,7 @@ function Usage({
 }) {
   const { t, locale } = useI18n();
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+    <div className="automation-rule-usage">
       <span>
         {t('automation.tokens')}:{' '}
         {usage?.totalTokens.toLocaleString(locale) ?? t('automation.unknown')}
@@ -164,12 +176,26 @@ function AutomationCard({
     knownStates.has(v) ? t(`automation.${v}` as TranslationKey) : v;
   const triggerLabel = (v: AutomationTrigger) =>
     v.kind === 'interval'
-      ? t('automation.intervalSummary', { value1: v.everySeconds })
+      ? t(
+          v.everySeconds % 3600 === 0
+            ? 'automation.hourly'
+            : v.everySeconds % 60 === 0
+              ? 'automation.minutely'
+              : 'automation.intervalSummary',
+          {
+            value1:
+              v.everySeconds % 3600 === 0
+                ? v.everySeconds / 3600
+                : v.everySeconds % 60 === 0
+                  ? v.everySeconds / 60
+                  : v.everySeconds,
+          },
+        )
       : v.kind === 'at'
         ? date(v.at)
         : v.kind === 'threadEnded'
-          ? `${t('automation.threadEnded')} · ${v.sourceThreadId}`
-          : `${t(`automation.${v.kind}`)} · ${v.kind === 'turnEnded' ? v.turnId : v.kind === 'taskEnded' ? `#${v.taskNumber}` : (v.commandKey ?? v.commandId)}`;
+          ? t('automation.threadEnded')
+          : t(`automation.${v.kind}`);
   useEffect(() => {
     if (!expanded) return;
     const controller = new AbortController();
@@ -209,69 +235,104 @@ function AutomationCard({
       })
     : t('automation.unknownStatistics');
   return (
-    <article className="min-w-0 space-y-2 rounded-lg border border-[var(--theme-border)] p-3">
-      <div className="flex justify-between gap-3">
+    <article className="automation-rule">
+      <div className="automation-rule-heading">
         <strong className="break-words">{a.definition.name}</strong>
-        <span className="shrink-0 text-xs">{state(a.state)}</span>
+        <span className={`automation-state is-${a.state}`}>
+          <i />
+          {state(a.state)}
+        </span>
       </div>
-      <p className="break-words text-sm">
-        {triggerLabel(a.definition.trigger)} →{' '}
+      <div className="automation-rule-schedule">
+        <Clock3 size={13} />
+        {triggerLabel(a.definition.trigger)}
+        <span>·</span>
+        {a.definition.action.kind === 'prompt' ? (
+          <MessageSquare size={13} />
+        ) : a.definition.action.kind === 'notifyInbox' ? (
+          <Inbox size={13} />
+        ) : (
+          <Terminal size={13} />
+        )}
         {t(`automation.${a.definition.action.kind}`)}
-      </p>
-      <p className="text-xs text-[var(--theme-fg-muted)]">
-        {t('automation.device')} · {t('automation.next')}: {date(a.nextRunAt)}
-      </p>
-      <p className="text-xs">
-        {t('automation.triggers')}:{' '}
-        {s?.triggerCount.toLocaleString(locale) ?? t('automation.unknown')} ·{' '}
-        {t('automation.pending')}: {a.pendingCount} · {t('automation.merged')}:{' '}
-        {a.missedCount}
-      </p>
+      </div>
+      <div className="automation-rule-meta">
+        <span>
+          {t('automation.triggers')}:{' '}
+          {s?.triggerCount.toLocaleString(locale) ?? '—'}
+        </span>
+        {a.pendingCount > 0 && (
+          <span>
+            {t('automation.pendingShort', { value1: a.pendingCount })}
+          </span>
+        )}
+        {a.nextRunAt && (
+          <span title={date(a.nextRunAt)}>
+            {t('automation.next')}: {date(a.nextRunAt)}
+          </span>
+        )}
+      </div>
       <Usage usage={s?.tokenUsage} price={s?.priceEstimate} note={coverage} />
-      {a.definition.action.kind === 'prompt' ? (
-        <>
-          <p className="text-xs text-[var(--theme-fg-muted)]">{coverage}</p>
-          {s &&
-            s.ambiguousTurnCount + s.missingTurnCount + s.unattributedRunCount >
-              0 && (
-              <p className="text-xs text-[var(--theme-fg-muted)]">
-                {t('automation.incomplete', {
-                  value1: s.ambiguousTurnCount,
-                  value2: s.missingTurnCount,
-                  value3: s.unattributedRunCount,
-                })}
-              </p>
-            )}
-        </>
-      ) : (
-        <p className="text-xs text-[var(--theme-fg-muted)]">
-          {t(
-            a.definition.action.kind === 'runScript'
-              ? 'automation.scriptCharge'
-              : 'automation.inboxCharge',
-          )}
-        </p>
-      )}
-      {a.error && (
-        <p className="break-words text-xs" role="status">
-          {t('automation.error')}: {a.error}
-        </p>
-      )}
-      <details>
-        <summary className="cursor-pointer text-xs">
-          {t('automation.definition')}
+      <details className="automation-rule-details">
+        <summary>
+          <ChevronRight size={13} />
+          {t('automation.ruleDetails')}
         </summary>
-        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all text-xs">
-          {JSON.stringify(a.definition, null, 2)}
-        </pre>
+        <div>
+          {a.definition.action.kind === 'prompt' ? (
+            <>
+              <p className="text-xs text-[var(--theme-fg-muted)]">{coverage}</p>
+              {s &&
+                s.ambiguousTurnCount +
+                  s.missingTurnCount +
+                  s.unattributedRunCount >
+                  0 && (
+                  <p className="text-xs text-[var(--theme-fg-muted)]">
+                    {t('automation.incomplete', {
+                      value1: s.ambiguousTurnCount,
+                      value2: s.missingTurnCount,
+                      value3: s.unattributedRunCount,
+                    })}
+                  </p>
+                )}
+            </>
+          ) : (
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              {t(
+                a.definition.action.kind === 'runScript'
+                  ? 'automation.scriptCharge'
+                  : 'automation.inboxCharge',
+              )}
+            </p>
+          )}
+          {a.error && (
+            <p className="break-words text-xs" role="status">
+              {t('automation.error')}: {a.error}
+            </p>
+          )}
+          {a.missedCount > 0 && (
+            <p className="text-xs">
+              {t('automation.mergedShort', { value1: a.missedCount })}
+            </p>
+          )}
+          <details>
+            <summary className="cursor-pointer text-xs">
+              {t('automation.definition')}
+            </summary>
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all text-xs">
+              {JSON.stringify(a.definition, null, 2)}
+            </pre>
+          </details>
+        </div>
       </details>
       <button
         type="button"
-        className={button}
+        className="automation-history-button"
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
         {t('automation.history')}
+        <ArrowUpRight size={12} />
       </button>
       {expanded && (
         <div className="space-y-2 border-t border-[var(--theme-border)] pt-2">
@@ -348,6 +409,8 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
   const [items, setItems] = useState<AutomationDto[]>([]);
   const [watches, setWatches] = useState<NativeWatch[]>([]);
   const [error, setError] = useState('');
+  const [unsupported, setUnsupported] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nativeUnavailable, setNativeUnavailable] = useState(false);
   const [timezone, setTimezone] = useState('');
@@ -360,6 +423,7 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
     setItems([]);
     setWatches([]);
     setError('');
+    setUnsupported(false);
     setTimezone('');
     setLoading(true);
     setNativeUnavailable(false);
@@ -367,10 +431,11 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    let refreshing = false;
+    let inFlight = false;
     const update = async () => {
-      if (document.visibilityState === 'hidden' || refreshing) return;
-      refreshing = true;
+      if (document.visibilityState === 'hidden' || inFlight) return;
+      inFlight = true;
+      setRefreshing(true);
       const results = await Promise.allSettled([
         request<{ automations: AutomationDto[] }>(
           `/api/threads/${encodeURIComponent(thread.id)}/automations`,
@@ -390,8 +455,17 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
         if (rules.status === 'fulfilled' && 'automations' in rules.value) {
           setItems(rules.value.automations);
           setError('');
-        } else if (rules.status === 'rejected')
-          setError(String(rules.reason?.message ?? rules.reason));
+          setUnsupported(false);
+        } else if (rules.status === 'rejected') {
+          const message = String(rules.reason?.message ?? rules.reason);
+          setError(message);
+          setUnsupported(
+            rules.reason?.statusCode === 404 ||
+              /^Route not found$/i.test(message),
+          );
+        } else {
+          setError(t('automation.unavailable'));
+        }
         const native = results[1];
         if (native?.status === 'fulfilled' && 'watches' in native.value) {
           setWatches(native.value.watches);
@@ -399,8 +473,9 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
           setNativeUnavailable(false);
         } else if (native?.status === 'rejected') setNativeUnavailable(true);
         setLoading(false);
+        setRefreshing(false);
       }
-      refreshing = false;
+      inFlight = false;
     };
     refreshRef.current = () => void update();
     void update();
@@ -412,14 +487,52 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', update);
     };
-  }, [open, thread.id, isClaude]);
+  }, [open, thread.id, isClaude, t]);
+  const { locale } = useI18n();
   const totals = automationTotals(items, watches);
-  const unknownEmpty =
-    !items.length && !watches.length && Boolean(error || nativeUnavailable);
+  const unavailable = Boolean(error || nativeUnavailable);
+  const unknownEmpty = !items.length && !watches.length && unavailable;
   const active = items.filter(currentAutomation);
   const historical = items.filter((a) => !currentAutomation(a));
   const currentWatches = watches.filter(isCurrentWatch);
   const pastWatches = watches.filter((w) => !isCurrentWatch(w));
+  const incompleteCounts = totals.unknownCounts > 0 || unavailable;
+  const partialUsage =
+    unavailable ||
+    items.some(
+      (a) =>
+        !a.statistics ||
+        !a.statistics.tokenUsage ||
+        a.statistics.usageTurnCount < a.statistics.promptTurnCount ||
+        a.statistics.ambiguousTurnCount +
+          a.statistics.missingTurnCount +
+          a.statistics.unattributedRunCount >
+          0,
+    ) ||
+    watches.some(
+      (w) =>
+        !w.tokenUsage ||
+        (w.usageTriggerCount ?? 0) < (w.triggerCount ?? 0) ||
+        (w.ambiguousTriggerCount ?? 0) > 0,
+    );
+  const partialPrice =
+    partialUsage ||
+    items.some(
+      (a) =>
+        !a.statistics?.priceEstimate ||
+        a.statistics.pricedTurnCount < a.statistics.promptTurnCount,
+    ) ||
+    watches.some(
+      (w) =>
+        !w.priceEstimate || (w.pricedTriggerCount ?? 0) < (w.triggerCount ?? 0),
+    );
+  const dash = loading || unknownEmpty;
+  const compactNumber = (value: number) =>
+    new Intl.NumberFormat(locale, {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value);
+  const coverage = `${t('automation.totalCoverage')} ${t('automation.triggerSemantics')}`;
   return (
     <>
       <button
@@ -435,7 +548,7 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="z-[100] max-h-[calc(100dvh-2rem)] overflow-y-auto border-[var(--theme-border)] bg-[var(--theme-panel)] text-[var(--theme-fg)] sm:max-w-2xl"
+          className="automation-panel z-[100]"
           overlayClassName="z-[95] bg-[var(--overlay-scrim)]"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
@@ -446,115 +559,230 @@ export function ThreadAutomationsControl({ thread }: { thread: ThreadDto }) {
             trigger.current?.focus();
           }}
         >
-          <DialogHeader>
-            <DialogTitle ref={title} tabIndex={-1} className="outline-none">
-              {t('automation.title')}
-            </DialogTitle>
-            <DialogDescription>{t('automation.description')}</DialogDescription>
-          </DialogHeader>
-          {error && (
-            <p
-              role="alert"
-              className="break-words rounded border border-red-500 p-2 text-sm"
+          <DialogHeader className="automation-heading">
+            <div className="automation-heading-icon">
+              <Workflow size={20} strokeWidth={1.6} />
+            </div>
+            <div className="automation-heading-copy">
+              <DialogTitle ref={title} tabIndex={-1} className="outline-none">
+                {t('automation.title')}
+              </DialogTitle>
+              <DialogDescription>{t('automation.overview')}</DialogDescription>
+            </div>
+            <button
+              type="button"
+              className="automation-refresh"
+              aria-label={t('automation.refresh')}
+              title={t('automation.refresh')}
+              disabled={refreshing}
+              onClick={() => refreshRef.current()}
             >
-              {error}
-            </p>
-          )}
-          {nativeUnavailable && (
-            <p role="status" className="text-xs">
-              {t('automation.nativeUnavailable')}
-            </p>
-          )}
-          <button
-            type="button"
-            className={button}
-            onClick={() => refreshRef.current()}
-          >
-            {t('automation.refresh')}
-          </button>
-          {loading ? (
-            <p className="text-sm">{t('automation.loading')}</p>
-          ) : (
-            <>
-              <section
-                aria-label={t('automation.totals')}
-                className="space-y-2 rounded-lg border border-[var(--theme-border)] p-3"
-              >
-                <strong className="text-sm">{t('automation.totals')}</strong>
-                <p className="text-sm">
-                  {t('automation.triggers')}: {totals.triggers.toLocaleString()}
-                  {totals.unknownCounts || error || nativeUnavailable
-                    ? ` + ${t('automation.unknown')}`
-                    : ''}
-                </p>
-                <Usage
-                  usage={unknownEmpty ? null : totals.usage}
-                  price={unknownEmpty ? null : totals.price}
-                  note={t('automation.totalCoverage')}
-                />
-                <p className="text-xs text-[var(--theme-fg-muted)]">
-                  {t('automation.totalCoverage')}{' '}
-                  {t('automation.triggerSemantics')}
-                </p>
-              </section>
-              {!items.length &&
-                !watches.length &&
-                !error &&
-                !nativeUnavailable && (
-                  <p className="text-sm">{t('automation.empty')}</p>
-                )}
-              {(active.length > 0 || currentWatches.length > 0) && (
-                <section
-                  className="min-w-0 space-y-3"
-                  aria-label={t('automation.active')}
-                >
-                  <h3 className="text-sm font-semibold">
-                    {t('automation.active')}
-                  </h3>
-                  {active.map((a) => (
-                    <AutomationCard
-                      key={a.id}
-                      automation={a}
-                      threadId={thread.id}
+              <RefreshCw
+                size={16}
+                className={refreshing ? 'animate-spin' : ''}
+              />
+            </button>
+          </DialogHeader>
+          <div className="automation-body" aria-busy={loading}>
+            <section
+              className="automation-metrics"
+              aria-label={t('automation.totals')}
+            >
+              <Metric
+                label={t('automation.activeCount')}
+                value={
+                  dash ? '—' : String(active.length + currentWatches.length)
+                }
+                accent={!dash && active.length + currentWatches.length > 0}
+                partial={!dash && unavailable}
+              />
+              <Metric
+                label={t('automation.triggerMetric')}
+                value={
+                  dash || (totals.triggers === 0 && incompleteCounts)
+                    ? '—'
+                    : totals.triggers.toLocaleString(locale)
+                }
+                partial={!dash && incompleteCounts}
+              />
+              <Metric
+                label={t('automation.tokenMetric')}
+                value={
+                  dash || !totals.usage
+                    ? '—'
+                    : compactNumber(totals.usage.totalTokens)
+                }
+                title={totals.usage?.totalTokens.toLocaleString(locale)}
+                partial={!dash && partialUsage}
+              />
+              <Metric
+                label={t('automation.costMetric')}
+                value={
+                  dash || !totals.price ? (
+                    '—'
+                  ) : (
+                    <TokenUsageCost
+                      usage={totals.usage}
+                      price={totals.price}
+                      costLabel={t('automation.costMetric')}
+                      detailsNote={coverage}
+                      tooltipZIndex={120}
                     />
-                  ))}
-                  {currentWatches.map((w) => (
-                    <NativeWatchCard key={`${w.id}:${w.createdAt}`} watch={w} />
-                  ))}
-                </section>
-              )}
-              {(historical.length > 0 || pastWatches.length > 0) && (
-                <details className="min-w-0">
-                  <summary className="cursor-pointer text-sm">
-                    {t('automation.historical')} (
-                    {historical.length + pastWatches.length})
+                  )
+                }
+                partial={!dash && partialPrice}
+              />
+            </section>
+            {unavailable && (
+              <div
+                className="automation-availability"
+                role={error && !unsupported ? 'alert' : 'status'}
+              >
+                <CircleSlash size={16} />
+                <span>
+                  {t(
+                    unsupported
+                      ? 'automation.unsupported'
+                      : 'automation.unavailable',
+                  )}
+                </span>
+                <details>
+                  <summary
+                    aria-label={t('automation.diagnostics')}
+                    title={t('automation.diagnostics')}
+                  >
+                    <Info size={14} />
                   </summary>
-                  <div className="mt-3 space-y-3">
-                    {historical.map((a) => (
+                  <div>
+                    {error && <p>{error}</p>}
+                    {nativeUnavailable && (
+                      <p>{t('automation.nativeUnavailable')}</p>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
+            {loading ? (
+              <div className="automation-empty" role="status">
+                <RefreshCw size={20} className="animate-spin" />
+                <p>{t('automation.loading')}</p>
+              </div>
+            ) : (
+              <>
+                {!items.length && !watches.length && !unavailable && (
+                  <div className="automation-empty">
+                    <div className="automation-empty-icon">
+                      <Workflow size={26} strokeWidth={1.3} />
+                    </div>
+                    <h3>{t('automation.emptyTitle')}</h3>
+                    <p>{t('automation.emptyHint')}</p>
+                  </div>
+                )}
+                {(active.length > 0 || currentWatches.length > 0) && (
+                  <section
+                    className="automation-list"
+                    aria-label={t('automation.active')}
+                  >
+                    <div className="automation-section-heading">
+                      <h3>{t('automation.active')}</h3>
+                      <span>{active.length + currentWatches.length}</span>
+                    </div>
+                    {active.map((a) => (
                       <AutomationCard
                         key={a.id}
                         automation={a}
                         threadId={thread.id}
                       />
                     ))}
-                    {pastWatches.map((w) => (
+                    {currentWatches.map((w) => (
                       <NativeWatchCard
                         key={`${w.id}:${w.createdAt}`}
                         watch={w}
                       />
                     ))}
-                  </div>
-                </details>
-              )}
-              {watches.length > 0 && (
-                <p className="text-xs text-[var(--theme-fg-muted)]">
-                  {t('automation.native')} {timezone}
-                </p>
-              )}
-            </>
-          )}
+                  </section>
+                )}
+                {(historical.length > 0 || pastWatches.length > 0) && (
+                  <details className="automation-archive">
+                    <summary>
+                      <ChevronRight size={14} />
+                      {t('automation.historical')} (
+                      {historical.length + pastWatches.length})
+                    </summary>
+                    <div className="automation-list">
+                      {historical.map((a) => (
+                        <AutomationCard
+                          key={a.id}
+                          automation={a}
+                          threadId={thread.id}
+                        />
+                      ))}
+                      {pastWatches.map((w) => (
+                        <NativeWatchCard
+                          key={`${w.id}:${w.createdAt}`}
+                          watch={w}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            )}
+          </div>
+          <footer className="automation-footer">
+            <span>
+              <Workflow size={12} />
+              {t('automation.managed')}
+            </span>
+            <details className="automation-stat-notes">
+              <summary>
+                <Info size={13} />
+                {t('automation.details')}
+              </summary>
+              <div>
+                <p>{t('automation.totalCoverage')}</p>
+                <p>{t('automation.triggerSemantics')}</p>
+                {watches.length > 0 && (
+                  <p>
+                    {t('automation.native')} {timezone}
+                  </p>
+                )}
+              </div>
+            </details>
+          </footer>
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  title,
+  partial,
+  accent,
+}: {
+  label: string;
+  value: ReactNode;
+  title?: string | undefined;
+  partial?: boolean;
+  accent?: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="automation-metric" role="group" aria-label={label}>
+      <span className="automation-metric-label">{label}</span>
+      <strong className={accent ? 'is-accent' : ''} title={title}>
+        {value}
+      </strong>
+      <span className="automation-metric-quality">
+        {partial && (
+          <span title={t('automation.totalCoverage')}>
+            {t('automation.partial')}
+          </span>
+        )}
+      </span>
+    </div>
   );
 }

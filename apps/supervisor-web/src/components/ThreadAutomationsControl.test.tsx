@@ -105,9 +105,16 @@ it('consolidates native watches and lifetime supervisor statistics into one read
   const totals = within(dialog).getByRole('region', {
     name: 'Lifetime totals',
   });
-  expect(totals).toHaveTextContent('Triggers: 512');
-  expect(totals).toHaveTextContent('Attributed tokens: 24,690');
+  expect(
+    within(totals).getByRole('group', { name: 'Triggers' }),
+  ).toHaveTextContent('512');
+  expect(
+    within(totals)
+      .getByRole('group', { name: 'Tokens' })
+      .querySelector('strong'),
+  ).toHaveAttribute('title', '24,690');
   expect(totals).toHaveTextContent('$2.5');
+  fireEvent.click(within(dialog).getByText('Details', { exact: true }));
   expect(dialog).toHaveTextContent(
     'Tokens available for 497 of 500 associated turns; USD priced for 490 of 500.',
   );
@@ -134,7 +141,9 @@ it('consolidates native watches and lifetime supervisor statistics into one read
   expect(dialog).toHaveTextContent(
     'Latest 100 execution records. Totals above include all historical runs.',
   );
-  expect(totals).toHaveTextContent('Triggers: 512');
+  expect(
+    within(totals).getByRole('group', { name: 'Triggers' }),
+  ).toHaveTextContent('512');
   expect(
     vi
       .mocked(request)
@@ -166,9 +175,18 @@ it('shows inactive history and distinguishes free inbox delivery from unmeasured
   fireEvent.click(screen.getByRole('button', { name: '自动化' }));
   const dialog = await screen.findByRole('dialog', { name: '自动化' });
   await within(dialog).findByText('Inbox delivery');
+  const inboxCard = within(dialog)
+    .getByText('Inbox delivery')
+    .closest('article')!;
+  fireEvent.click(within(inboxCard).getByText('详情', { exact: true }));
   expect(dialog).toHaveTextContent('被动收件箱投递不产生模型 token 费用。');
   fireEvent.click(within(dialog).getByText('历史与非活跃自动化 (1)'));
   expect(within(dialog).getByText('Script history')).toBeVisible();
+  fireEvent.click(
+    within(
+      within(dialog).getByText('Script history').closest('article')!,
+    ).getByText('详情', { exact: true }),
+  );
   expect(dialog).toHaveTextContent('脚本独立调用模型的消耗不在此统计');
   expect(dialog).not.toHaveTextContent('automation.');
 });
@@ -189,17 +207,23 @@ it('reports legacy and unavailable native coverage as unknown rather than a comp
   );
   expect(
     within(dialog).getByRole('region', { name: 'Lifetime totals' }),
-  ).toHaveTextContent('Triggers: 0 + Unknown');
-  expect(dialog).toHaveTextContent('Attributed tokens: Unknown');
-  expect(dialog).toHaveTextContent('Cost unavailable');
+  ).toHaveTextContent('Partial');
+  expect(
+    within(dialog)
+      .getByRole('group', { name: 'Tokens' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
+  expect(
+    within(dialog)
+      .getByRole('group', { name: 'Est. cost · USD' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
   vi.mocked(request).mockImplementation(async (url) => {
     if (String(url).endsWith('/watches')) throw Error('Offline');
     return { automations: [legacy] };
   });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh' }));
-  await within(dialog).findByText(
-    'Native watch history is unavailable; totals may omit native watches.',
-  );
+  await within(dialog).findByText('Automation data is temporarily unavailable');
 });
 
 it('discards late snapshots when switching threads', async () => {
@@ -225,7 +249,7 @@ it('discards late snapshots when switching threads', async () => {
     resolve({ automations: [rule()] });
   });
   fireEvent.click(screen.getByRole('button', { name: 'Automation' }));
-  await screen.findByText('No recorded automations.');
+  await screen.findByText('No automations yet');
   expect(screen.queryByText('Hourly prompt')).not.toBeInTheDocument();
 });
 
@@ -273,10 +297,41 @@ it('does not display known zero tokens or USD when both history endpoints fail',
   const totals = within(dialog).getByRole('region', {
     name: 'Lifetime totals',
   });
-  expect(totals).toHaveTextContent('Triggers: 0 + Unknown');
-  expect(totals).toHaveTextContent('Attributed tokens: Unknown');
-  expect(totals).toHaveTextContent('Attributed cost (USD): Unknown');
+  expect(
+    within(totals)
+      .getByRole('group', { name: 'Triggers' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
+  expect(
+    within(totals)
+      .getByRole('group', { name: 'Tokens' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
+  expect(
+    within(totals)
+      .getByRole('group', { name: 'Est. cost · USD' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
   expect(
     within(dialog).queryByText('No recorded automations.'),
   ).not.toBeInTheDocument();
+});
+
+it('presents an unsupported endpoint as a quiet device status and keeps raw diagnostics collapsed', async () => {
+  vi.mocked(request).mockRejectedValue(
+    Object.assign(new Error('Route not found'), { statusCode: 404 }),
+  );
+  render(<ThreadWatchesControl thread={{ ...thread, provider: 'codex' }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Automation' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Automation' });
+  await within(dialog).findByText('Update this device to view automations');
+  expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+  expect(within(dialog).getByText('Route not found')).not.toBeVisible();
+  expect(
+    within(dialog)
+      .getByRole('group', { name: 'Triggers' })
+      .querySelector('strong'),
+  ).toHaveTextContent('—');
+  fireEvent.click(within(dialog).getByLabelText('Connection details'));
+  expect(within(dialog).getByText('Route not found')).toBeVisible();
 });
