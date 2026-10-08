@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-08T17:51:45.441904+00:00",
+  "capturedAt": "2026-10-08T18:33:45.576858+00:00",
   "source": "e2e/composer-compact.spec.ts",
   "environment": "isolated Rust Supervisor with fake harness; actual workbench pages; fixture conversation prose",
   "apiPort": 18216,
@@ -8,37 +8,37 @@
   "screenshots": [
     {
       "file": "desktop-collapsed.png",
-      "sha256": "223162bfa71b7799486cfb75045b6a8334bea6182cc9971b8ff7e60d1bf85e31",
+      "sha256": "4d86f54223127bf542edd876479bec41fa3cb96671402ea7d87b36d1781db253",
       "width": 1440,
       "height": 1000,
-      "bytes": 191209,
+      "bytes": 186271,
       "state": "collapsed",
       "project": "desktop-chromium"
     },
     {
       "file": "desktop-expanded.png",
-      "sha256": "c7793d6c542de9ae78093ef18ebf325b901e9fca8f35dea97b36e44aaab4bed4",
+      "sha256": "0b1602648a7c6d944704c0822950a9ec1063e25389ef71c0429a88413267bae5",
       "width": 1440,
       "height": 1000,
-      "bytes": 242478,
+      "bytes": 238390,
       "state": "expanded",
       "project": "desktop-chromium"
     },
     {
       "file": "mobile-collapsed.png",
-      "sha256": "f5ac3f9d09b4a3580e70c5a40447a91f5fa3e6995cc8363b7be874afa196798c",
+      "sha256": "1664be5d4b122c5b8f417d31485f6ced324e3a6042d93511a792a63472d17abb",
       "width": 390,
       "height": 844,
-      "bytes": 73460,
+      "bytes": 73607,
       "state": "collapsed",
       "project": "mobile-chromium"
     },
     {
       "file": "mobile-expanded.png",
-      "sha256": "ec883a79f73e84270b9262c510a20d82531d5e4946b08853f53e4330a0d94b57",
+      "sha256": "9444f6be88e764394537f882a9693014f04aa61ca032f609874b5f1d2ead51ab",
       "width": 390,
       "height": 844,
-      "bytes": 111742,
+      "bytes": 111815,
       "state": "expanded",
       "project": "mobile-chromium"
     }
@@ -53,7 +53,7 @@
         1440,
         1000
       ],
-      "sha256": "28274a938d1044ae2ad5eb1d78e9da78d7c0aa7afe7ee49557cda41dc2c6a070"
+      "sha256": "27e8fcda63ae664c94beceb49770dd32f71fa3c6d2cd7675b66e38a8a682ffb5"
     },
     {
       "file": "desktop-expanded-detail.png",
@@ -64,7 +64,8 @@
         1440,
         1000
       ],
-      "sha256": "bbdcc7ddac4b53ece18a5a8e24c2843a53c927db802b8656ee75ad8e9a611ada"
+      "sha256": "eb772fde72344797a5f866cf8a263d4433db8c5e89511c0bcd127d2338c83935"
     }
-  ]
+  ],
+  "revision": "Remove reference reply label and advanced tools hint"
 }

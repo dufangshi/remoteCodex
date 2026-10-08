@@ -78,6 +78,7 @@ test('compact layout follows actual focus and rendered width in both conversatio
   await expect(left).toBeVisible();
   await page.getByRole('combobox', { name: '对照此设备的会话' }).selectOption(b.id);
   await expect(right).toBeVisible();
+  await expect(reference.locator('.workbench-composer-target')).toHaveCount(0);
   const views = page.getByRole('navigation', { name: '工作台视图' });
   const show = async (title: string) => { if (mobile) await views.getByRole('button', { name: title, exact: true }).click(); };
   for (const [input, title] of [[right, b.title], [left, a.title]] as const) {

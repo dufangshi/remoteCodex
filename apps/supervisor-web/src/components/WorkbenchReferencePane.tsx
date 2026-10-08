@@ -71,10 +71,6 @@ export function WorkbenchReferencePane({
             adapter={adapter}
             className="thread-timeline-surface min-h-0 flex-1"
           />
-          <div className="workbench-composer-target" title={detail.thread.id}>
-            {t('workbench.replyToSession', { title: detail.thread.title })}
-            <span>{t('workbench.secondaryToolsHint')}</span>
-          </div>
           <ThreadComposer
             key={detail.thread.id}
             activeView="chat"

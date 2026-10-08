@@ -25,3 +25,5 @@
 浏览器采用 Chromium 桌面及手机仿真；IME 回归验证浏览器 composition 事件边界，未代替真实手机系统键盘或所有操作系统输入法的人工验收。长正文收起时只显示首行视口，完整内容在重新聚焦后恢复；收起不会改写正文。未发布、推送或部署本次预览。
 
 桌面输入区细节裁剪：[收起](assets/narrafork-preview/composer/desktop-collapsed-detail.png)、[展开](assets/narrafork-preview/composer/desktop-expanded-detail.png)。来自上述实页截图，裁剪坐标与哈希在 manifest 的 detailCrops 中。
+
+后续简化：参考会话输入区上方的“回复：会话名”和“高级工具可设为主会话使用”已去掉，桌面与手机布局专项各 1 项通过，四张截图已重新生成。会话标题仍显示在面板标题处。
