@@ -1,0 +1,28 @@
+{
+  "sourceMainCommit": "b5523194c416498c10be7d7be540e32eed91bc28",
+  "sourceUiCommit": "f5d7c5a3cce94ef9428979ef9f347bdb110766bc",
+  "spec": "e2e/automations.spec.ts",
+  "fixture": "isolated fake Supervisor with real local script execution; intentionally exits 7",
+  "images": [
+    {
+      "file": "automations-en.png",
+      "project": "desktop-chromium",
+      "sha256": "0db8ad53b640046a7fa912a54fa27e11b3f00cb4edcc218e7f81f0d0bbc22da4"
+    },
+    {
+      "file": "automations-mobile-en.png",
+      "project": "mobile-chromium",
+      "sha256": "bebf455daeffb7fd5bbf70f53134d9d91bf1b4957fd21154419a7c4baaa8c2ee"
+    },
+    {
+      "file": "automations-mobile-zh.png",
+      "project": "mobile-chromium",
+      "sha256": "e5972a8d2205cabf0fb6cd207ab15164b93ddee557fa8564de1a1305619c3d5f"
+    },
+    {
+      "file": "automations-zh.png",
+      "project": "desktop-chromium",
+      "sha256": "ca158f813377cc7b8f4edb779ecaa39b4ac5362893ca89c4b06a2b9bdf5cc58b"
+    }
+  ]
+}
